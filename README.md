@@ -69,8 +69,20 @@ curl -X POST http://127.0.0.1:18080/internal/push \
 `body` is base64-encoded in the HTTP JSON request because the gateway treats it
 as opaque bytes.
 
+Run the development client in another terminal:
+
+```bash
+go run ./cmd/devclient
+```
+
+The client sends one upstream bind packet with `dev-token` and `device-1`, then
+prints ACK and downlink packets. With both gateway and devclient running, the
+`curl` command above should make the client print a `MsgID = 2001` packet whose
+body is `hello`.
+
 ## Project Structure
 - `cmd/gateway`: Gateway entry point
+- `cmd/devclient`: Development client for manual end-to-end testing
 - `conf`: Zinx runtime configuration
 - `docs`: Design and operation documents
 - `internal/auth`: Token verification interfaces and development verifier
