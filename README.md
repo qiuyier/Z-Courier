@@ -50,15 +50,31 @@ dev-token -> client_id: dev-client
 treated as a claimed identity only; the gateway binds the session using the
 identity returned by token verification.
 
+The internal downlink API listens on `127.0.0.1:18080` by default:
+
+```bash
+curl -X POST http://127.0.0.1:18080/internal/push \
+  -H 'Content-Type: application/json' \
+  -H 'X-ZCourier-Internal-Token: dev-internal-token' \
+  -d '{
+    "client_id": "dev-client",
+    "device_id": "device-1",
+    "msg_id": 2001,
+    "message_id": "message-1",
+    "trace_id": "trace-1",
+    "body": "aGVsbG8="
+  }'
+```
+
+`body` is base64-encoded in the HTTP JSON request because the gateway treats it
+as opaque bytes.
+
 ## Project Structure
 - `cmd/gateway`: Gateway entry point
 - `conf`: Zinx runtime configuration
-- `configs`: Sample configuration files
-- `internal/server`: Zinx server bootstrap
-- `internal/protocol`: Packet codec and protocol types
-- `internal/session`: Connection binding and online state
-- `internal/pipeline`: Gateway middleware chain
-- `internal/router`: Route matching and dispatch
-- `internal/adapter`: Built-in forwarding adapters
-- `internal/downlink`: Internal push APIs and delivery flow
 - `docs`: Design and operation documents
+- `internal/auth`: Token verification interfaces and development verifier
+- `internal/downlink`: Internal push API and online delivery service
+- `internal/protocol`: Packet codec and protocol types
+- `internal/server`: Zinx server bootstrap
+- `internal/session`: Connection binding and online state

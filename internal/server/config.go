@@ -6,10 +6,14 @@ import (
 )
 
 type Config struct {
-	RouteMsgIDs []uint32
-	Verifier    auth.Verifier
-	Sessions    *session.Manager
-	GatewayNode string
+	RouteMsgIDs                []uint32
+	Verifier                   auth.Verifier
+	Sessions                   *session.Manager
+	GatewayNode                string
+	DisableInternalHTTP        bool
+	InternalHTTPAddr           string
+	InternalToken              string
+	InternalMaxRequestBodySize int64
 }
 
 func DefaultConfig() Config {
@@ -22,8 +26,11 @@ func DefaultConfig() Config {
 				Scopes:   []string{"gateway:dev"},
 			},
 		}),
-		Sessions:    session.NewManager(),
-		GatewayNode: "local",
+		Sessions:                   session.NewManager(),
+		GatewayNode:                "local",
+		InternalHTTPAddr:           "127.0.0.1:18080",
+		InternalToken:              "dev-internal-token",
+		InternalMaxRequestBodySize: 10 << 20,
 	}
 }
 
@@ -41,6 +48,15 @@ func normalizeConfig(config Config) Config {
 	}
 	if config.GatewayNode == "" {
 		config.GatewayNode = defaults.GatewayNode
+	}
+	if config.InternalHTTPAddr == "" {
+		config.InternalHTTPAddr = defaults.InternalHTTPAddr
+	}
+	if config.InternalToken == "" {
+		config.InternalToken = defaults.InternalToken
+	}
+	if config.InternalMaxRequestBodySize == 0 {
+		config.InternalMaxRequestBodySize = defaults.InternalMaxRequestBodySize
 	}
 
 	return config
