@@ -33,8 +33,7 @@ func (v *StaticTokenVerifier) Verify(_ context.Context, token string) (*Principa
 		return nil, fmt.Errorf("%w: missing client id", ErrInvalidToken)
 	}
 
-	copied := copyPrincipal(principal)
-	return &copied, nil
+	return new(copyPrincipal(principal)), nil
 }
 
 func copyPrincipal(principal Principal) Principal {
