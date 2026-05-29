@@ -2,11 +2,13 @@ package server
 
 import (
 	"context"
+	"errors"
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/aceld/zinx/znet"
 	"github.com/qiuyier/Z-Courier/internal/auth"
 	"github.com/qiuyier/Z-Courier/internal/protocol"
+	"github.com/qiuyier/Z-Courier/internal/router"
 	"github.com/qiuyier/Z-Courier/internal/session"
 	"go.uber.org/zap"
 )
@@ -19,6 +21,7 @@ type IngressRouter struct {
 	sessions    *session.Manager
 	connManager ziface.IConnManager
 	gatewayNode string
+	upstream    *router.Engine
 }
 
 const sessionIDProperty = "z-courier.session_id"
@@ -29,6 +32,7 @@ func NewIngressRouter(
 	sessions *session.Manager,
 	connManager ziface.IConnManager,
 	gatewayNode string,
+	upstream *router.Engine,
 ) *IngressRouter {
 	if logger == nil {
 		logger = defaultLogger()
@@ -40,6 +44,7 @@ func NewIngressRouter(
 		sessions:    sessions,
 		connManager: connManager,
 		gatewayNode: gatewayNode,
+		upstream:    upstream,
 	}
 }
 
@@ -129,7 +134,57 @@ func (r *IngressRouter) Handle(request ziface.IRequest) {
 		zap.Int("body_size", len(packet.Body)),
 	)
 
+	if !r.forwardUpstream(request, packet) {
+		return
+	}
+
 	r.sendAck(request, packet, protocol.AckAccepted, "")
+}
+
+func (r *IngressRouter) forwardUpstream(request ziface.IRequest, packet *protocol.Packet) bool {
+	if r.upstream == nil {
+		return true
+	}
+
+	result, err := r.upstream.Forward(connectionContext(request.GetConnection()), packet)
+	if errors.Is(err, router.ErrRouteNotFound) {
+		r.logger.Debug(
+			"no upstream route matched",
+			zap.Uint32("msg_id", packet.MsgID),
+			zap.String("client_id", packet.ClientID),
+			zap.String("device_id", packet.DeviceID),
+			zap.String("message_id", packet.MessageID),
+			zap.String("trace_id", packet.TraceID),
+		)
+		return true
+	}
+	if err != nil {
+		r.logger.Warn(
+			"failed to forward upstream packet",
+			zap.Uint32("msg_id", packet.MsgID),
+			zap.String("client_id", packet.ClientID),
+			zap.String("device_id", packet.DeviceID),
+			zap.String("message_id", packet.MessageID),
+			zap.String("trace_id", packet.TraceID),
+			zap.Error(err),
+		)
+		r.sendAck(request, packet, protocol.AckRejected, err.Error())
+		return false
+	}
+
+	r.logger.Info(
+		"forwarded upstream packet",
+		zap.Uint32("msg_id", packet.MsgID),
+		zap.String("route", result.RouteName),
+		zap.String("target_type", result.TargetType),
+		zap.String("status", result.Status),
+		zap.Int("status_code", result.StatusCode),
+		zap.String("client_id", packet.ClientID),
+		zap.String("device_id", packet.DeviceID),
+		zap.String("message_id", packet.MessageID),
+		zap.String("trace_id", packet.TraceID),
+	)
+	return true
 }
 
 func (r *IngressRouter) stopReplacedConnection(currentConnID uint64, replaced *session.Session) {

@@ -44,6 +44,7 @@ func New(config Config, logger *zap.Logger) *Gateway {
 		config.Sessions,
 		zServer.GetConnMgr(),
 		config.GatewayNode,
+		newUpstreamEngine(config),
 	)
 
 	for _, msgID := range config.RouteMsgIDs {

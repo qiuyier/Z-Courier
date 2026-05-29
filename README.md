@@ -80,13 +80,32 @@ prints ACK and downlink packets. With both gateway and devclient running, the
 `curl` command above should make the client print a `MsgID = 2001` packet whose
 body is `hello`.
 
+To test upstream forwarding, start the development backend:
+
+```bash
+go run ./cmd/devbackend
+```
+
+Then start the gateway with an HTTP upstream route:
+
+```bash
+ZCOURIER_UPSTREAM_HTTP_URL=http://127.0.0.1:18081/gateway/upstream go run ./cmd/gateway
+```
+
+When `devclient` sends its bind packet with `MsgID = 1000`, the gateway will
+forward it to the development backend because the development route matches
+`MsgID = 1000-1999`.
+
 ## Project Structure
 - `cmd/gateway`: Gateway entry point
 - `cmd/devclient`: Development client for manual end-to-end testing
+- `cmd/devbackend`: Development backend for upstream forwarding tests
 - `conf`: Zinx runtime configuration
 - `docs`: Design and operation documents
+- `internal/adapter`: Upstream target adapters
 - `internal/auth`: Token verification interfaces and development verifier
 - `internal/downlink`: Internal push API and online delivery service
 - `internal/protocol`: Packet codec and protocol types
+- `internal/router`: MsgID route engine
 - `internal/server`: Zinx server bootstrap
 - `internal/session`: Connection binding and online state

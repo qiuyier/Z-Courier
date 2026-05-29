@@ -1,6 +1,8 @@
 package server
 
 import (
+	"time"
+
 	"github.com/qiuyier/Z-Courier/internal/auth"
 	"github.com/qiuyier/Z-Courier/internal/session"
 )
@@ -14,6 +16,20 @@ type Config struct {
 	InternalHTTPAddr           string
 	InternalToken              string
 	InternalMaxRequestBodySize int64
+	UpstreamRoutes             []UpstreamRouteConfig
+}
+
+type UpstreamRouteConfig struct {
+	Name     string
+	MsgIDMin uint32
+	MsgIDMax uint32
+	HTTP     *HTTPUpstreamConfig
+}
+
+type HTTPUpstreamConfig struct {
+	URL     string
+	Token   string
+	Timeout time.Duration
 }
 
 func DefaultConfig() Config {
