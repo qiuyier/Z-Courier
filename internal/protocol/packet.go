@@ -1,5 +1,7 @@
 package protocol
 
+import "bytes"
+
 const (
 	Magic           uint16 = 0x5A43
 	Version         uint8  = 1
@@ -50,11 +52,5 @@ func NewPacket(msgID uint32, body []byte) *Packet {
 }
 
 func cloneBytes(in []byte) []byte {
-	if len(in) == 0 {
-		return nil
-	}
-
-	out := make([]byte, len(in))
-	copy(out, in)
-	return out
+	return bytes.Clone(in)
 }

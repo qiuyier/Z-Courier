@@ -165,17 +165,17 @@ func readPacket(reader io.Reader, maxBodySize uint32) (*Packet, int, error) {
 func writeUint16(writer io.Writer, value uint16) {
 	var buf [2]byte
 	binary.BigEndian.PutUint16(buf[:], value)
-	writer.Write(buf[:])
+	_, _ = writer.Write(buf[:])
 }
 
 func writeUint32(writer io.Writer, value uint32) {
 	var buf [4]byte
 	binary.BigEndian.PutUint32(buf[:], value)
-	writer.Write(buf[:])
+	_, _ = writer.Write(buf[:])
 }
 
 func writeUint64(writer io.Writer, value uint64) {
 	var buf [8]byte
 	binary.BigEndian.PutUint64(buf[:], value)
-	writer.Write(buf[:])
+	_, _ = writer.Write(buf[:])
 }

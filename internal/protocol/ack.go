@@ -1,8 +1,9 @@
 package protocol
 
 import (
-	"encoding/json"
 	"time"
+
+	"github.com/bytedance/sonic"
 )
 
 type AckCode string
@@ -10,6 +11,7 @@ type AckCode string
 const (
 	AckAccepted     AckCode = "accepted"
 	AckDecodeFailed AckCode = "decode_failed"
+	AckUnauthorized AckCode = "unauthorized"
 	AckRejected     AckCode = "rejected"
 )
 
@@ -40,7 +42,7 @@ func NewAckPacket(origin *Packet, code AckCode, reason string) (*Packet, error) 
 		packet.Seq = origin.Seq
 	}
 
-	body, err := json.Marshal(ack)
+	body, err := sonic.Marshal(ack)
 	if err != nil {
 		return nil, err
 	}

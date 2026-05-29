@@ -1,0 +1,17 @@
+{
+  "Name": "Z-Courier Gateway",
+  "Host": "0.0.0.0",
+  "TCPPort": 8999,
+  "Mode": "tcp",
+  "MaxConn": 12000,
+  "MaxPacketSize": 8388608,
+  "WorkerPoolSize": 10,
+  "MaxWorkerTaskLen": 1024,
+  "MaxMsgChanLen": 1024,
+  "IOReadBuffSize": 8192,
+  "HeartbeatMax": 30,
+  "LogDir": "./log",
+  "LogFile": "zinx.log",
+  "LogCons": true,
+  "LogIsolationLevel": 0
+}
