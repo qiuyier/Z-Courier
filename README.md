@@ -29,11 +29,14 @@ go test ./...
 Start the gateway:
 
 ```bash
-go run ./cmd/gateway
+go run ./cmd/gateway -config configs/z-courier.yaml
 ```
 
 Zinx loads its framework config from `conf/zinx.json` by default. To use another
 file, set `ZINX_CONFIG_FILE_PATH` before starting the gateway.
+
+Z-Courier loads its gateway config from `configs/z-courier.yaml` by default. You
+can override it with `-config` or the `ZCOURIER_CONFIG` environment variable.
 
 The current MVP registers a Zinx route for `MsgID = 1000`. The router decodes
 the Z-Courier protocol packet from the Zinx request body, verifies the token,
@@ -86,10 +89,11 @@ To test upstream forwarding, start the development backend:
 go run ./cmd/devbackend
 ```
 
-Then start the gateway with an HTTP upstream route:
+Then set the `dev-http-upstream` route in `configs/z-courier.yaml` to
+`enabled: true` and start the gateway:
 
 ```bash
-ZCOURIER_UPSTREAM_HTTP_URL=http://127.0.0.1:18081/gateway/upstream go run ./cmd/gateway
+go run ./cmd/gateway -config configs/z-courier.yaml
 ```
 
 When `devclient` sends its bind packet with `MsgID = 1000`, the gateway will
@@ -100,10 +104,12 @@ forward it to the development backend because the development route matches
 - `cmd/gateway`: Gateway entry point
 - `cmd/devclient`: Development client for manual end-to-end testing
 - `cmd/devbackend`: Development backend for upstream forwarding tests
+- `configs`: Z-Courier gateway configuration
 - `conf`: Zinx runtime configuration
 - `docs`: Design and operation documents
 - `internal/adapter`: Upstream target adapters
 - `internal/auth`: Token verification interfaces and development verifier
+- `internal/config`: Z-Courier config loading and conversion
 - `internal/downlink`: Internal push API and online delivery service
 - `internal/protocol`: Packet codec and protocol types
 - `internal/router`: MsgID route engine

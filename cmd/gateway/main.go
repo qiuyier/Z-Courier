@@ -1,14 +1,17 @@
 package main
 
 import (
-	"os"
-	"time"
+	"flag"
 
+	appconfig "github.com/qiuyier/Z-Courier/internal/config"
 	"github.com/qiuyier/Z-Courier/internal/server"
 	"go.uber.org/zap"
 )
 
 func main() {
+	configPathFlag := flag.String("config", "", "path to z-courier config file")
+	flag.Parse()
+
 	logger, err := zap.NewProduction()
 	if err != nil {
 		panic(err)
@@ -17,31 +20,14 @@ func main() {
 		_ = logger.Sync()
 	}()
 
-	config := server.DefaultConfig()
-	configureDevUpstreamRoute(&config)
+	configPath := appconfig.ResolvePath(*configPathFlag)
+	config, err := appconfig.LoadServerConfig(configPath)
+	if err != nil {
+		logger.Fatal("failed to load z-courier config", zap.String("path", configPath), zap.Error(err))
+	}
 
 	gateway := server.New(config, logger)
 
-	logger.Info("starting z-courier gateway")
+	logger.Info("starting z-courier gateway", zap.String("config", configPath))
 	gateway.Serve()
-}
-
-func configureDevUpstreamRoute(config *server.Config) {
-	upstreamURL := os.Getenv("ZCOURIER_UPSTREAM_HTTP_URL")
-	if upstreamURL == "" {
-		return
-	}
-
-	config.UpstreamRoutes = []server.UpstreamRouteConfig{
-		{
-			Name:     "dev-http-upstream",
-			MsgIDMin: 1000,
-			MsgIDMax: 1999,
-			HTTP: &server.HTTPUpstreamConfig{
-				URL:     upstreamURL,
-				Token:   os.Getenv("ZCOURIER_UPSTREAM_TOKEN"),
-				Timeout: 5 * time.Second,
-			},
-		},
-	}
 }

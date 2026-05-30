@@ -6,6 +6,7 @@ require (
 	github.com/aceld/zinx v1.2.7
 	github.com/bytedance/sonic v1.15.1
 	go.uber.org/zap v1.28.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
