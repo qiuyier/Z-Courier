@@ -24,12 +24,22 @@ type UpstreamRouteConfig struct {
 	MsgIDMin uint32
 	MsgIDMax uint32
 	HTTP     *HTTPUpstreamConfig
+	NSQ      *NSQUpstreamConfig
 }
 
 type HTTPUpstreamConfig struct {
 	URL     string
 	Token   string
 	Timeout time.Duration
+}
+
+type NSQUpstreamConfig struct {
+	Address      string
+	Topic        string
+	AuthSecret   string
+	DialTimeout  time.Duration
+	ReadTimeout  time.Duration
+	WriteTimeout time.Duration
 }
 
 func DefaultConfig() Config {

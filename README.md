@@ -38,10 +38,11 @@ file, set `ZINX_CONFIG_FILE_PATH` before starting the gateway.
 Z-Courier loads its gateway config from `configs/z-courier.yaml` by default. You
 can override it with `-config` or the `ZCOURIER_CONFIG` environment variable.
 
-The current MVP registers a Zinx route for `MsgID = 1000`. The router decodes
-the Z-Courier protocol packet from the Zinx request body, verifies the token,
-binds the connection to a session, logs the metadata, and returns an ACK packet
-with `MsgID = 1`.
+The gateway registers Zinx routes from `route_msg_ids` and enabled upstream
+route ranges. The router decodes the Z-Courier protocol packet from the Zinx
+request body, verifies the token, binds the connection to a session, logs the
+metadata, forwards the packet when an upstream route matches, and returns an ACK
+packet with `MsgID = 1`.
 
 The default development token is:
 
@@ -99,6 +100,26 @@ go run ./cmd/gateway -config configs/z-courier.yaml
 When `devclient` sends its bind packet with `MsgID = 1000`, the gateway will
 forward it to the development backend because the development route matches
 `MsgID = 1000-1999`.
+
+To publish upstream packets into NSQ, enable or add an NSQ route:
+
+```yaml
+upstream:
+  routes:
+    - name: dev-nsq-upstream
+      enabled: true
+      msg_id_min: 2000
+      msg_id_max: 2999
+      target:
+        type: nsq
+        addr: 127.0.0.1:4150
+        topic: message_events
+        write_timeout: 1s
+```
+
+The NSQ message body is the same JSON envelope used by the HTTP upstream
+adapter. Its `body` field is base64-encoded by JSON because the gateway treats
+payload bytes as opaque data.
 
 ## Project Structure
 - `cmd/gateway`: Gateway entry point

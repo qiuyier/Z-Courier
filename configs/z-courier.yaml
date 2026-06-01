@@ -27,3 +27,15 @@ upstream:
         url: http://127.0.0.1:18081/gateway/upstream
         token: ""
         timeout: 5s
+    - name: dev-nsq-upstream
+      enabled: false
+      msg_id_min: 2000
+      msg_id_max: 2999
+      target:
+        type: nsq
+        addr: 127.0.0.1:4150
+        topic: message_events
+        auth_secret: ""
+        dial_timeout: 1s
+        read_timeout: 60s
+        write_timeout: 1s

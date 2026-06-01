@@ -26,7 +26,10 @@ func main() {
 		logger.Fatal("failed to load z-courier config", zap.String("path", configPath), zap.Error(err))
 	}
 
-	gateway := server.New(config, logger)
+	gateway, err := server.New(config, logger)
+	if err != nil {
+		logger.Fatal("failed to create z-courier gateway", zap.Error(err))
+	}
 
 	logger.Info("starting z-courier gateway", zap.String("config", configPath))
 	gateway.Serve()

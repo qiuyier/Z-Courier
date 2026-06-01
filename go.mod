@@ -5,6 +5,7 @@ go 1.26.0
 require (
 	github.com/aceld/zinx v1.2.7
 	github.com/bytedance/sonic v1.15.1
+	github.com/nsqio/go-nsq v1.1.0
 	go.uber.org/zap v1.28.0
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -13,6 +14,7 @@ require (
 	github.com/bytedance/gopkg v0.1.3 // indirect
 	github.com/bytedance/sonic/loader v0.5.1 // indirect
 	github.com/cloudwego/base64x v0.1.6 // indirect
+	github.com/golang/snappy v0.0.1 // indirect
 	github.com/gorilla/websocket v1.5.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.9 // indirect
 	github.com/klauspost/reedsolomon v1.11.8 // indirect

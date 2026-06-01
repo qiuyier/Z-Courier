@@ -2,12 +2,17 @@ package router
 
 import (
 	"context"
+	"errors"
 
 	"github.com/qiuyier/Z-Courier/internal/protocol"
 )
 
 type Forwarder interface {
 	Forward(ctx context.Context, packet *protocol.Packet) (*ForwardResult, error)
+}
+
+type closeForwarder interface {
+	Close() error
 }
 
 type ForwardResult struct {
@@ -65,4 +70,22 @@ func (e *Engine) Forward(ctx context.Context, packet *protocol.Packet) (*Forward
 	}
 
 	return nil, ErrRouteNotFound
+}
+
+func (e *Engine) Close() error {
+	if e == nil {
+		return nil
+	}
+
+	var joined error
+	for _, route := range e.routes {
+		closer, ok := route.Forwarder.(closeForwarder)
+		if !ok {
+			continue
+		}
+
+		joined = errors.Join(joined, closer.Close())
+	}
+
+	return joined
 }

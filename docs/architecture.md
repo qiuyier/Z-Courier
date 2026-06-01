@@ -162,7 +162,9 @@ routes:
       msg_id_range: [2000, 2999]
     target:
       type: nsq
+      addr: nsqd:4150
       topic: message_events
+      write_timeout: 1s
       ack_mode: queued
 
   - name: grpc-business
@@ -386,8 +388,8 @@ internal/protocol/           packet codec and protocol types
 internal/session/            connection binding and online state
 internal/pipeline/           middleware chain
 internal/router/             route matching and dispatch
-internal/adapter/http/       HTTP forwarder
-internal/adapter/nsq/        NSQ forwarder
+internal/adapter/httpforwarder/ HTTP forwarder
+internal/adapter/nsqforwarder/  NSQ forwarder
 internal/downlink/           internal push APIs and delivery queue
 internal/auth/               token verification interfaces
 internal/ratelimit/          rate limiting implementations

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/bytedance/sonic"
+	"github.com/qiuyier/Z-Courier/internal/adapter/upstream"
 	"github.com/qiuyier/Z-Courier/internal/protocol"
 	"github.com/qiuyier/Z-Courier/internal/router"
 )
@@ -32,20 +33,7 @@ type Forwarder struct {
 	client *http.Client
 }
 
-type UpstreamRequest struct {
-	Version   uint8          `json:"version"`
-	Flags     protocol.Flags `json:"flags"`
-	MsgID     uint32         `json:"msg_id"`
-	Seq       uint64         `json:"seq"`
-	Timestamp int64          `json:"timestamp"`
-
-	ClientID  string `json:"client_id"`
-	DeviceID  string `json:"device_id"`
-	SessionID string `json:"session_id"`
-	MessageID string `json:"message_id"`
-	TraceID   string `json:"trace_id"`
-	Body      []byte `json:"body"`
-}
+type UpstreamRequest = upstream.Message
 
 func New(config Config) *Forwarder {
 	client := config.Client
@@ -109,17 +97,5 @@ func (f *Forwarder) Forward(ctx context.Context, packet *protocol.Packet) (*rout
 }
 
 func newUpstreamRequest(packet *protocol.Packet) UpstreamRequest {
-	return UpstreamRequest{
-		Version:   packet.Version,
-		Flags:     packet.Flags,
-		MsgID:     packet.MsgID,
-		Seq:       packet.Seq,
-		Timestamp: packet.Timestamp,
-		ClientID:  packet.ClientID,
-		DeviceID:  packet.DeviceID,
-		SessionID: packet.SessionID,
-		MessageID: packet.MessageID,
-		TraceID:   packet.TraceID,
-		Body:      packet.Body,
-	}
+	return upstream.NewMessage(packet)
 }

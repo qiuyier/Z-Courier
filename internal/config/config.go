@@ -56,10 +56,16 @@ type UpstreamRouteConfig struct {
 }
 
 type TargetConfig struct {
-	Type    string `yaml:"type"`
-	URL     string `yaml:"url"`
-	Token   string `yaml:"token"`
-	Timeout string `yaml:"timeout"`
+	Type         string `yaml:"type"`
+	URL          string `yaml:"url"`
+	Token        string `yaml:"token"`
+	Timeout      string `yaml:"timeout"`
+	Addr         string `yaml:"addr"`
+	Topic        string `yaml:"topic"`
+	AuthSecret   string `yaml:"auth_secret"`
+	DialTimeout  string `yaml:"dial_timeout"`
+	ReadTimeout  string `yaml:"read_timeout"`
+	WriteTimeout string `yaml:"write_timeout"`
 }
 
 func ResolvePath(flagValue string) string {
@@ -162,33 +168,108 @@ func toUpstreamRoutes(routes []UpstreamRouteConfig) ([]server.UpstreamRouteConfi
 		if route.Enabled != nil && !*route.Enabled {
 			continue
 		}
+		if err := validateMsgIDRange(route); err != nil {
+			return nil, err
+		}
 
 		targetType := route.Target.Type
 		if targetType == "" {
 			targetType = "http"
 		}
-		if targetType != "http" {
+
+		switch targetType {
+		case "http":
+			httpConfig, err := toHTTPUpstreamConfig(route)
+			if err != nil {
+				return nil, err
+			}
+
+			out = append(out, server.UpstreamRouteConfig{
+				Name:     route.Name,
+				MsgIDMin: route.MsgIDMin,
+				MsgIDMax: route.MsgIDMax,
+				HTTP:     httpConfig,
+			})
+		case "nsq":
+			nsqConfig, err := toNSQUpstreamConfig(route)
+			if err != nil {
+				return nil, err
+			}
+
+			out = append(out, server.UpstreamRouteConfig{
+				Name:     route.Name,
+				MsgIDMin: route.MsgIDMin,
+				MsgIDMax: route.MsgIDMax,
+				NSQ:      nsqConfig,
+			})
+		default:
 			return nil, fmt.Errorf("config: unsupported upstream target type %q for route %q", targetType, route.Name)
 		}
-
-		timeout, err := parseOptionalDuration(route.Target.Timeout)
-		if err != nil {
-			return nil, fmt.Errorf("config: route %q target timeout: %w", route.Name, err)
-		}
-
-		out = append(out, server.UpstreamRouteConfig{
-			Name:     route.Name,
-			MsgIDMin: route.MsgIDMin,
-			MsgIDMax: route.MsgIDMax,
-			HTTP: &server.HTTPUpstreamConfig{
-				URL:     route.Target.URL,
-				Token:   route.Target.Token,
-				Timeout: timeout,
-			},
-		})
 	}
 
 	return out, nil
+}
+
+func validateMsgIDRange(route UpstreamRouteConfig) error {
+	if route.MsgIDMin == 0 {
+		return fmt.Errorf("config: route %q msg_id_min must be greater than 0", route.Name)
+	}
+	if route.MsgIDMax != 0 && route.MsgIDMax < route.MsgIDMin {
+		return fmt.Errorf("config: route %q msg_id_max must be greater than or equal to msg_id_min", route.Name)
+	}
+
+	return nil
+}
+
+func toHTTPUpstreamConfig(route UpstreamRouteConfig) (*server.HTTPUpstreamConfig, error) {
+	if route.Target.URL == "" {
+		return nil, fmt.Errorf("config: route %q http target url is required", route.Name)
+	}
+
+	timeout, err := parseOptionalDuration(route.Target.Timeout)
+	if err != nil {
+		return nil, fmt.Errorf("config: route %q target timeout: %w", route.Name, err)
+	}
+
+	return &server.HTTPUpstreamConfig{
+		URL:     route.Target.URL,
+		Token:   route.Target.Token,
+		Timeout: timeout,
+	}, nil
+}
+
+func toNSQUpstreamConfig(route UpstreamRouteConfig) (*server.NSQUpstreamConfig, error) {
+	if route.Target.Addr == "" {
+		return nil, fmt.Errorf("config: route %q nsq target addr is required", route.Name)
+	}
+	if route.Target.Topic == "" {
+		return nil, fmt.Errorf("config: route %q nsq target topic is required", route.Name)
+	}
+	if route.Target.Timeout != "" {
+		return nil, fmt.Errorf("config: route %q nsq target uses write_timeout/read_timeout/dial_timeout instead of timeout", route.Name)
+	}
+
+	dialTimeout, err := parseOptionalDuration(route.Target.DialTimeout)
+	if err != nil {
+		return nil, fmt.Errorf("config: route %q target dial_timeout: %w", route.Name, err)
+	}
+	readTimeout, err := parseOptionalDuration(route.Target.ReadTimeout)
+	if err != nil {
+		return nil, fmt.Errorf("config: route %q target read_timeout: %w", route.Name, err)
+	}
+	writeTimeout, err := parseOptionalDuration(route.Target.WriteTimeout)
+	if err != nil {
+		return nil, fmt.Errorf("config: route %q target write_timeout: %w", route.Name, err)
+	}
+
+	return &server.NSQUpstreamConfig{
+		Address:      route.Target.Addr,
+		Topic:        route.Target.Topic,
+		AuthSecret:   route.Target.AuthSecret,
+		DialTimeout:  dialTimeout,
+		ReadTimeout:  readTimeout,
+		WriteTimeout: writeTimeout,
+	}, nil
 }
 
 func parseOptionalDuration(raw string) (time.Duration, error) {

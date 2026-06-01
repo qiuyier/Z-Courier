@@ -3,11 +3,14 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
+	"sort"
 	"time"
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/aceld/zinx/znet"
+	"github.com/qiuyier/Z-Courier/internal/router"
 	"github.com/qiuyier/Z-Courier/internal/session"
 	"go.uber.org/zap"
 )
@@ -18,14 +21,23 @@ type Gateway struct {
 	logger   *zap.Logger
 
 	internalHTTP *http.Server
+	upstream     *router.Engine
 }
 
-func New(config Config, logger *zap.Logger) *Gateway {
+func New(config Config, logger *zap.Logger) (*Gateway, error) {
 	if logger == nil {
 		logger = defaultLogger()
 	}
 
 	config = normalizeConfig(config)
+	msgIDs, err := registeredMsgIDs(config)
+	if err != nil {
+		return nil, err
+	}
+	upstream, err := newUpstreamEngine(config)
+	if err != nil {
+		return nil, err
+	}
 
 	zServer := znet.NewServer()
 	gateway := &Gateway{
@@ -33,6 +45,7 @@ func New(config Config, logger *zap.Logger) *Gateway {
 		sessions:     config.Sessions,
 		logger:       logger,
 		internalHTTP: newInternalHTTPServer(config, logger, zServer.GetConnMgr()),
+		upstream:     upstream,
 	}
 
 	zServer.SetOnConnStart(gateway.onConnStart)
@@ -44,19 +57,20 @@ func New(config Config, logger *zap.Logger) *Gateway {
 		config.Sessions,
 		zServer.GetConnMgr(),
 		config.GatewayNode,
-		newUpstreamEngine(config),
+		upstream,
 	)
 
-	for _, msgID := range config.RouteMsgIDs {
+	for _, msgID := range msgIDs {
 		zServer.AddRouter(msgID, router)
 	}
 
-	return gateway
+	return gateway, nil
 }
 
 func (g *Gateway) Serve() {
 	g.startInternalHTTP()
 	defer g.shutdownInternalHTTP()
+	defer g.shutdownUpstream()
 
 	g.server.Serve()
 }
@@ -90,6 +104,53 @@ func (g *Gateway) shutdownInternalHTTP() {
 	if err := g.internalHTTP.Shutdown(ctx); err != nil {
 		g.logger.Warn("failed to shutdown internal HTTP API cleanly", zap.Error(err))
 	}
+}
+
+func (g *Gateway) shutdownUpstream() {
+	if g.upstream == nil {
+		return
+	}
+
+	if err := g.upstream.Close(); err != nil {
+		g.logger.Warn("failed to shutdown upstream routes cleanly", zap.Error(err))
+	}
+}
+
+func registeredMsgIDs(config Config) ([]uint32, error) {
+	seen := make(map[uint32]struct{})
+	for _, msgID := range config.RouteMsgIDs {
+		seen[msgID] = struct{}{}
+	}
+
+	for _, route := range config.UpstreamRoutes {
+		max := route.MsgIDMax
+		if max == 0 {
+			max = route.MsgIDMin
+		}
+		if route.MsgIDMin == 0 || max < route.MsgIDMin {
+			return nil, fmt.Errorf("upstream route %q has invalid msg id range %d-%d", route.Name, route.MsgIDMin, route.MsgIDMax)
+		}
+		if max-route.MsgIDMin > 10000 {
+			return nil, fmt.Errorf("upstream route %q msg id range is too large: %d-%d", route.Name, route.MsgIDMin, max)
+		}
+
+		for msgID := route.MsgIDMin; ; msgID++ {
+			seen[msgID] = struct{}{}
+			if msgID == max {
+				break
+			}
+		}
+	}
+
+	msgIDs := make([]uint32, 0, len(seen))
+	for msgID := range seen {
+		msgIDs = append(msgIDs, msgID)
+	}
+	sort.Slice(msgIDs, func(i, j int) bool {
+		return msgIDs[i] < msgIDs[j]
+	})
+
+	return msgIDs, nil
 }
 
 func (g *Gateway) onConnStart(conn ziface.IConnection) {

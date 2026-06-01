@@ -60,6 +60,18 @@ upstream:
         url: http://backend.local/gateway/upstream
         token: upstream-a
         timeout: 3s
+    - name: nsq
+      enabled: true
+      msg_id_min: 3000
+      msg_id_max: 3999
+      target:
+        type: nsq
+        addr: 127.0.0.1:4150
+        topic: message_events
+        auth_secret: nsq-secret
+        dial_timeout: 1s
+        read_timeout: 60s
+        write_timeout: 2s
 `)
 
 	config, err := LoadServerConfig(path)
@@ -85,8 +97,8 @@ upstream:
 	if config.InternalMaxRequestBodySize != 12345 {
 		t.Fatalf("InternalMaxRequestBodySize = %d, want 12345", config.InternalMaxRequestBodySize)
 	}
-	if len(config.UpstreamRoutes) != 1 {
-		t.Fatalf("UpstreamRoutes length = %d, want 1", len(config.UpstreamRoutes))
+	if len(config.UpstreamRoutes) != 2 {
+		t.Fatalf("UpstreamRoutes length = %d, want 2", len(config.UpstreamRoutes))
 	}
 	route := config.UpstreamRoutes[0]
 	if route.Name != "enabled" || route.HTTP == nil {
@@ -101,6 +113,29 @@ upstream:
 	if route.HTTP.Timeout != 3*time.Second {
 		t.Fatalf("route HTTP Timeout = %v, want 3s", route.HTTP.Timeout)
 	}
+
+	nsqRoute := config.UpstreamRoutes[1]
+	if nsqRoute.Name != "nsq" || nsqRoute.NSQ == nil {
+		t.Fatalf("nsq route = %+v, want NSQ route", nsqRoute)
+	}
+	if nsqRoute.NSQ.Address != "127.0.0.1:4150" {
+		t.Fatalf("NSQ Address = %q", nsqRoute.NSQ.Address)
+	}
+	if nsqRoute.NSQ.Topic != "message_events" {
+		t.Fatalf("NSQ Topic = %q", nsqRoute.NSQ.Topic)
+	}
+	if nsqRoute.NSQ.AuthSecret != "nsq-secret" {
+		t.Fatalf("NSQ AuthSecret = %q", nsqRoute.NSQ.AuthSecret)
+	}
+	if nsqRoute.NSQ.DialTimeout != time.Second {
+		t.Fatalf("NSQ DialTimeout = %v, want 1s", nsqRoute.NSQ.DialTimeout)
+	}
+	if nsqRoute.NSQ.ReadTimeout != time.Minute {
+		t.Fatalf("NSQ ReadTimeout = %v, want 60s", nsqRoute.NSQ.ReadTimeout)
+	}
+	if nsqRoute.NSQ.WriteTimeout != 2*time.Second {
+		t.Fatalf("NSQ WriteTimeout = %v, want 2s", nsqRoute.NSQ.WriteTimeout)
+	}
 }
 
 func TestLoadServerConfigInvalidDuration(t *testing.T) {
@@ -113,6 +148,41 @@ upstream:
         type: http
         url: http://backend.local
         timeout: nope
+`)
+
+	_, err := LoadServerConfig(path)
+	if err == nil {
+		t.Fatal("LoadServerConfig() error = nil, want error")
+	}
+}
+
+func TestLoadServerConfigInvalidMsgIDRange(t *testing.T) {
+	path := writeConfig(t, `
+upstream:
+  routes:
+    - name: broken
+      msg_id_min: 2000
+      msg_id_max: 1000
+      target:
+        type: http
+        url: http://backend.local
+`)
+
+	_, err := LoadServerConfig(path)
+	if err == nil {
+		t.Fatal("LoadServerConfig() error = nil, want error")
+	}
+}
+
+func TestLoadServerConfigNSQRequiresTopic(t *testing.T) {
+	path := writeConfig(t, `
+upstream:
+  routes:
+    - name: broken
+      msg_id_min: 2000
+      target:
+        type: nsq
+        addr: 127.0.0.1:4150
 `)
 
 	_, err := LoadServerConfig(path)
