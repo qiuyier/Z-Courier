@@ -34,12 +34,15 @@ type HTTPUpstreamConfig struct {
 }
 
 type NSQUpstreamConfig struct {
-	Address      string
-	Topic        string
-	AuthSecret   string
-	DialTimeout  time.Duration
-	ReadTimeout  time.Duration
-	WriteTimeout time.Duration
+	Address       string
+	Addresses     []string
+	Topic         string
+	AuthSecret    string
+	DialTimeout   time.Duration
+	ReadTimeout   time.Duration
+	WriteTimeout  time.Duration
+	PublishMode   string
+	RetryAttempts int
 }
 
 func DefaultConfig() Config {

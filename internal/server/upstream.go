@@ -49,12 +49,15 @@ func newRouteForwarder(routeConfig UpstreamRouteConfig) (router.Forwarder, error
 
 	if routeConfig.NSQ != nil {
 		forwarder, err := nsqforwarder.New(nsqforwarder.Config{
-			Address:      routeConfig.NSQ.Address,
-			Topic:        routeConfig.NSQ.Topic,
-			AuthSecret:   routeConfig.NSQ.AuthSecret,
-			DialTimeout:  routeConfig.NSQ.DialTimeout,
-			ReadTimeout:  routeConfig.NSQ.ReadTimeout,
-			WriteTimeout: routeConfig.NSQ.WriteTimeout,
+			Address:       routeConfig.NSQ.Address,
+			Addresses:     routeConfig.NSQ.Addresses,
+			Topic:         routeConfig.NSQ.Topic,
+			AuthSecret:    routeConfig.NSQ.AuthSecret,
+			DialTimeout:   routeConfig.NSQ.DialTimeout,
+			ReadTimeout:   routeConfig.NSQ.ReadTimeout,
+			WriteTimeout:  routeConfig.NSQ.WriteTimeout,
+			PublishMode:   routeConfig.NSQ.PublishMode,
+			RetryAttempts: routeConfig.NSQ.RetryAttempts,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("upstream route %q: %w", routeConfig.Name, err)

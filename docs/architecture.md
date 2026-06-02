@@ -162,9 +162,13 @@ routes:
       msg_id_range: [2000, 2999]
     target:
       type: nsq
-      addr: nsqd:4150
+      nsqd_addrs:
+        - nsqd-a:4150
+        - nsqd-b:4150
       topic: message_events
       write_timeout: 1s
+      publish_mode: round_robin
+      retry_attempts: 1
       ack_mode: queued
 
   - name: grpc-business

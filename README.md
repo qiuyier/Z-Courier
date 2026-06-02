@@ -112,14 +112,22 @@ upstream:
       msg_id_max: 2999
       target:
         type: nsq
-        addr: 127.0.0.1:4150
+        nsqd_addrs:
+          - 127.0.0.1:4150
+          - 127.0.0.1:4151
         topic: message_events
         write_timeout: 1s
+        publish_mode: round_robin
+        retry_attempts: 1
 ```
 
 The NSQ message body is the same JSON envelope used by the HTTP upstream
 adapter. Its `body` field is base64-encoded by JSON because the gateway treats
 payload bytes as opaque data.
+
+`addr` is still supported for a single `nsqd` node. Use `nsqd_addrs` for
+multi-node producer publishing; `retry_attempts` makes the adapter try the next
+configured `nsqd` when the first publish attempt fails.
 
 ## Project Structure
 - `cmd/gateway`: Gateway entry point

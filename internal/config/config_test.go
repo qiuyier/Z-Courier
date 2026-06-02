@@ -66,12 +66,16 @@ upstream:
       msg_id_max: 3999
       target:
         type: nsq
-        addr: 127.0.0.1:4150
+        nsqd_addrs:
+          - 127.0.0.1:4150
+          - 127.0.0.1:4151
         topic: message_events
         auth_secret: nsq-secret
         dial_timeout: 1s
         read_timeout: 60s
         write_timeout: 2s
+        publish_mode: round_robin
+        retry_attempts: 1
 `)
 
 	config, err := LoadServerConfig(path)
@@ -121,6 +125,9 @@ upstream:
 	if nsqRoute.NSQ.Address != "127.0.0.1:4150" {
 		t.Fatalf("NSQ Address = %q", nsqRoute.NSQ.Address)
 	}
+	if len(nsqRoute.NSQ.Addresses) != 2 || nsqRoute.NSQ.Addresses[1] != "127.0.0.1:4151" {
+		t.Fatalf("NSQ Addresses = %v, want [127.0.0.1:4150 127.0.0.1:4151]", nsqRoute.NSQ.Addresses)
+	}
 	if nsqRoute.NSQ.Topic != "message_events" {
 		t.Fatalf("NSQ Topic = %q", nsqRoute.NSQ.Topic)
 	}
@@ -135,6 +142,12 @@ upstream:
 	}
 	if nsqRoute.NSQ.WriteTimeout != 2*time.Second {
 		t.Fatalf("NSQ WriteTimeout = %v, want 2s", nsqRoute.NSQ.WriteTimeout)
+	}
+	if nsqRoute.NSQ.PublishMode != "round_robin" {
+		t.Fatalf("NSQ PublishMode = %q, want round_robin", nsqRoute.NSQ.PublishMode)
+	}
+	if nsqRoute.NSQ.RetryAttempts != 1 {
+		t.Fatalf("NSQ RetryAttempts = %d, want 1", nsqRoute.NSQ.RetryAttempts)
 	}
 }
 
@@ -183,6 +196,66 @@ upstream:
       target:
         type: nsq
         addr: 127.0.0.1:4150
+`)
+
+	_, err := LoadServerConfig(path)
+	if err == nil {
+		t.Fatal("LoadServerConfig() error = nil, want error")
+	}
+}
+
+func TestLoadServerConfigNSQSupportsLegacyAddr(t *testing.T) {
+	path := writeConfig(t, `
+upstream:
+  routes:
+    - name: nsq
+      msg_id_min: 2000
+      target:
+        type: nsq
+        addr: 127.0.0.1:4150
+        topic: message_events
+`)
+
+	config, err := LoadServerConfig(path)
+	if err != nil {
+		t.Fatalf("LoadServerConfig() error = %v", err)
+	}
+	if len(config.UpstreamRoutes) != 1 || config.UpstreamRoutes[0].NSQ == nil {
+		t.Fatalf("UpstreamRoutes = %+v, want one NSQ route", config.UpstreamRoutes)
+	}
+	if len(config.UpstreamRoutes[0].NSQ.Addresses) != 1 || config.UpstreamRoutes[0].NSQ.Addresses[0] != "127.0.0.1:4150" {
+		t.Fatalf("NSQ Addresses = %v", config.UpstreamRoutes[0].NSQ.Addresses)
+	}
+}
+
+func TestLoadServerConfigNSQRequiresAddress(t *testing.T) {
+	path := writeConfig(t, `
+upstream:
+  routes:
+    - name: broken
+      msg_id_min: 2000
+      target:
+        type: nsq
+        topic: message_events
+`)
+
+	_, err := LoadServerConfig(path)
+	if err == nil {
+		t.Fatal("LoadServerConfig() error = nil, want error")
+	}
+}
+
+func TestLoadServerConfigNSQRejectsInvalidRetryAttempts(t *testing.T) {
+	path := writeConfig(t, `
+upstream:
+  routes:
+    - name: broken
+      msg_id_min: 2000
+      target:
+        type: nsq
+        addr: 127.0.0.1:4150
+        topic: message_events
+        retry_attempts: -1
 `)
 
 	_, err := LoadServerConfig(path)

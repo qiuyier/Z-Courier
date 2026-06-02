@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/qiuyier/Z-Courier/internal/auth"
@@ -56,16 +57,19 @@ type UpstreamRouteConfig struct {
 }
 
 type TargetConfig struct {
-	Type         string `yaml:"type"`
-	URL          string `yaml:"url"`
-	Token        string `yaml:"token"`
-	Timeout      string `yaml:"timeout"`
-	Addr         string `yaml:"addr"`
-	Topic        string `yaml:"topic"`
-	AuthSecret   string `yaml:"auth_secret"`
-	DialTimeout  string `yaml:"dial_timeout"`
-	ReadTimeout  string `yaml:"read_timeout"`
-	WriteTimeout string `yaml:"write_timeout"`
+	Type          string   `yaml:"type"`
+	URL           string   `yaml:"url"`
+	Token         string   `yaml:"token"`
+	Timeout       string   `yaml:"timeout"`
+	Addr          string   `yaml:"addr"`
+	NSQDAddrs     []string `yaml:"nsqd_addrs"`
+	Topic         string   `yaml:"topic"`
+	AuthSecret    string   `yaml:"auth_secret"`
+	DialTimeout   string   `yaml:"dial_timeout"`
+	ReadTimeout   string   `yaml:"read_timeout"`
+	WriteTimeout  string   `yaml:"write_timeout"`
+	PublishMode   string   `yaml:"publish_mode"`
+	RetryAttempts int      `yaml:"retry_attempts"`
 }
 
 func ResolvePath(flagValue string) string {
@@ -239,11 +243,18 @@ func toHTTPUpstreamConfig(route UpstreamRouteConfig) (*server.HTTPUpstreamConfig
 }
 
 func toNSQUpstreamConfig(route UpstreamRouteConfig) (*server.NSQUpstreamConfig, error) {
-	if route.Target.Addr == "" {
-		return nil, fmt.Errorf("config: route %q nsq target addr is required", route.Name)
+	addresses, err := normalizeNSQDAddrs(route.Target)
+	if err != nil {
+		return nil, fmt.Errorf("config: route %q nsq target: %w", route.Name, err)
 	}
 	if route.Target.Topic == "" {
 		return nil, fmt.Errorf("config: route %q nsq target topic is required", route.Name)
+	}
+	if route.Target.PublishMode != "" && route.Target.PublishMode != "round_robin" {
+		return nil, fmt.Errorf("config: route %q nsq target unsupported publish_mode %q", route.Name, route.Target.PublishMode)
+	}
+	if route.Target.RetryAttempts < 0 {
+		return nil, fmt.Errorf("config: route %q nsq target retry_attempts must be greater than or equal to 0", route.Name)
 	}
 	if route.Target.Timeout != "" {
 		return nil, fmt.Errorf("config: route %q nsq target uses write_timeout/read_timeout/dial_timeout instead of timeout", route.Name)
@@ -263,13 +274,50 @@ func toNSQUpstreamConfig(route UpstreamRouteConfig) (*server.NSQUpstreamConfig, 
 	}
 
 	return &server.NSQUpstreamConfig{
-		Address:      route.Target.Addr,
-		Topic:        route.Target.Topic,
-		AuthSecret:   route.Target.AuthSecret,
-		DialTimeout:  dialTimeout,
-		ReadTimeout:  readTimeout,
-		WriteTimeout: writeTimeout,
+		Address:       firstAddress(addresses),
+		Addresses:     addresses,
+		Topic:         route.Target.Topic,
+		AuthSecret:    route.Target.AuthSecret,
+		DialTimeout:   dialTimeout,
+		ReadTimeout:   readTimeout,
+		WriteTimeout:  writeTimeout,
+		PublishMode:   route.Target.PublishMode,
+		RetryAttempts: route.Target.RetryAttempts,
 	}, nil
+}
+
+func normalizeNSQDAddrs(target TargetConfig) ([]string, error) {
+	raw := target.NSQDAddrs
+	if len(raw) == 0 && target.Addr != "" {
+		raw = []string{target.Addr}
+	}
+
+	seen := make(map[string]struct{}, len(raw))
+	addresses := make([]string, 0, len(raw))
+	for _, address := range raw {
+		address = strings.TrimSpace(address)
+		if address == "" {
+			continue
+		}
+		if _, ok := seen[address]; ok {
+			continue
+		}
+		seen[address] = struct{}{}
+		addresses = append(addresses, address)
+	}
+	if len(addresses) == 0 {
+		return nil, fmt.Errorf("addr or nsqd_addrs is required")
+	}
+
+	return addresses, nil
+}
+
+func firstAddress(addresses []string) string {
+	if len(addresses) == 0 {
+		return ""
+	}
+
+	return addresses[0]
 }
 
 func parseOptionalDuration(raw string) (time.Duration, error) {
