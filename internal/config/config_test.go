@@ -42,6 +42,21 @@ internal_http:
   addr: 127.0.0.1:19080
   token: internal-a
   max_request_body_size: 12345
+pipeline:
+  allowlist:
+    client_ids:
+      - client-a
+    msg_ids:
+      - 1000
+  blocklist:
+    client_ids:
+      - blocked-client
+    msg_ids:
+      - 9999
+  rate_limit:
+    enabled: true
+    max_requests: 3
+    window: 2s
 upstream:
   routes:
     - name: disabled
@@ -100,6 +115,27 @@ upstream:
 	}
 	if config.InternalMaxRequestBodySize != 12345 {
 		t.Fatalf("InternalMaxRequestBodySize = %d, want 12345", config.InternalMaxRequestBodySize)
+	}
+	if len(config.Pipeline.Policy.AllowClientIDs) != 1 || config.Pipeline.Policy.AllowClientIDs[0] != "client-a" {
+		t.Fatalf("Pipeline AllowClientIDs = %v, want [client-a]", config.Pipeline.Policy.AllowClientIDs)
+	}
+	if len(config.Pipeline.Policy.BlockClientIDs) != 1 || config.Pipeline.Policy.BlockClientIDs[0] != "blocked-client" {
+		t.Fatalf("Pipeline BlockClientIDs = %v, want [blocked-client]", config.Pipeline.Policy.BlockClientIDs)
+	}
+	if len(config.Pipeline.Policy.AllowMsgIDs) != 1 || config.Pipeline.Policy.AllowMsgIDs[0] != 1000 {
+		t.Fatalf("Pipeline AllowMsgIDs = %v, want [1000]", config.Pipeline.Policy.AllowMsgIDs)
+	}
+	if len(config.Pipeline.Policy.BlockMsgIDs) != 1 || config.Pipeline.Policy.BlockMsgIDs[0] != 9999 {
+		t.Fatalf("Pipeline BlockMsgIDs = %v, want [9999]", config.Pipeline.Policy.BlockMsgIDs)
+	}
+	if !config.Pipeline.RateLimit.Enabled {
+		t.Fatal("Pipeline RateLimit Enabled = false, want true")
+	}
+	if config.Pipeline.RateLimit.MaxRequests != 3 {
+		t.Fatalf("Pipeline RateLimit MaxRequests = %d, want 3", config.Pipeline.RateLimit.MaxRequests)
+	}
+	if config.Pipeline.RateLimit.Window != 2*time.Second {
+		t.Fatalf("Pipeline RateLimit Window = %v, want 2s", config.Pipeline.RateLimit.Window)
 	}
 	if len(config.UpstreamRoutes) != 2 {
 		t.Fatalf("UpstreamRoutes length = %d, want 2", len(config.UpstreamRoutes))
@@ -161,6 +197,36 @@ upstream:
         type: http
         url: http://backend.local
         timeout: nope
+`)
+
+	_, err := LoadServerConfig(path)
+	if err == nil {
+		t.Fatal("LoadServerConfig() error = nil, want error")
+	}
+}
+
+func TestLoadServerConfigInvalidRateLimit(t *testing.T) {
+	path := writeConfig(t, `
+pipeline:
+  rate_limit:
+    enabled: true
+    max_requests: 0
+    window: 1s
+`)
+
+	_, err := LoadServerConfig(path)
+	if err == nil {
+		t.Fatal("LoadServerConfig() error = nil, want error")
+	}
+}
+
+func TestLoadServerConfigInvalidRateLimitWindow(t *testing.T) {
+	path := writeConfig(t, `
+pipeline:
+  rate_limit:
+    enabled: true
+    max_requests: 1
+    window: nope
 `)
 
 	_, err := LoadServerConfig(path)

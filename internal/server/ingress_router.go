@@ -6,7 +6,7 @@ import (
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/aceld/zinx/znet"
-	"github.com/qiuyier/Z-Courier/internal/auth"
+	"github.com/qiuyier/Z-Courier/internal/pipeline"
 	"github.com/qiuyier/Z-Courier/internal/protocol"
 	"github.com/qiuyier/Z-Courier/internal/router"
 	"github.com/qiuyier/Z-Courier/internal/session"
@@ -17,10 +17,8 @@ type IngressRouter struct {
 	znet.BaseRouter
 
 	logger      *zap.Logger
-	verifier    auth.Verifier
-	sessions    *session.Manager
 	connManager ziface.IConnManager
-	gatewayNode string
+	chain       *pipeline.Chain
 	upstream    *router.Engine
 }
 
@@ -28,10 +26,8 @@ const sessionIDProperty = "z-courier.session_id"
 
 func NewIngressRouter(
 	logger *zap.Logger,
-	verifier auth.Verifier,
-	sessions *session.Manager,
 	connManager ziface.IConnManager,
-	gatewayNode string,
+	chain *pipeline.Chain,
 	upstream *router.Engine,
 ) *IngressRouter {
 	if logger == nil {
@@ -40,10 +36,8 @@ func NewIngressRouter(
 
 	return &IngressRouter{
 		logger:      logger,
-		verifier:    verifier,
-		sessions:    sessions,
 		connManager: connManager,
-		gatewayNode: gatewayNode,
+		chain:       chain,
 		upstream:    upstream,
 	}
 }
@@ -71,68 +65,16 @@ func (r *IngressRouter) Handle(request ziface.IRequest) {
 		)
 	}
 
-	principal, err := r.verifier.Verify(connectionContext(request.GetConnection()), packet.Token)
-	if err != nil {
-		r.logger.Warn(
-			"failed to verify upstream token",
-			zap.Uint32("msg_id", packet.MsgID),
-			zap.String("claimed_client_id", packet.ClientID),
-			zap.String("device_id", packet.DeviceID),
-			zap.String("message_id", packet.MessageID),
-			zap.String("trace_id", packet.TraceID),
-			zap.Error(err),
-		)
-		r.sendAck(request, packet, protocol.AckUnauthorized, err.Error())
+	pipelineContext := pipeline.NewContext(request, packet, r.logger)
+	if err := r.chain.Run(pipelineContext); err != nil {
+		code, reason := pipeline.AckError(err)
+		r.sendAck(request, packet, code, reason)
 		return
 	}
 
-	if packet.ClientID != "" && packet.ClientID != principal.ClientID {
-		r.logger.Warn(
-			"packet client id differs from token principal",
-			zap.String("claimed_client_id", packet.ClientID),
-			zap.String("principal_client_id", principal.ClientID),
-			zap.String("device_id", packet.DeviceID),
-			zap.String("message_id", packet.MessageID),
-			zap.String("trace_id", packet.TraceID),
-		)
+	if pipelineContext.BindResult != nil {
+		r.stopReplacedConnection(request.GetConnection().GetConnID(), pipelineContext.BindResult.Replaced)
 	}
-
-	bindResult, err := r.sessions.Bind(session.BindInput{
-		ConnID:      request.GetConnection().GetConnID(),
-		ClientID:    principal.ClientID,
-		DeviceID:    packet.DeviceID,
-		TokenID:     principal.TokenID,
-		GatewayNode: r.gatewayNode,
-	})
-	if err != nil {
-		r.logger.Warn(
-			"failed to bind session",
-			zap.Uint32("msg_id", packet.MsgID),
-			zap.String("client_id", principal.ClientID),
-			zap.String("device_id", packet.DeviceID),
-			zap.String("message_id", packet.MessageID),
-			zap.String("trace_id", packet.TraceID),
-			zap.Error(err),
-		)
-		r.sendAck(request, packet, protocol.AckRejected, err.Error())
-		return
-	}
-
-	packet.ClientID = bindResult.Session.ClientID
-	packet.SessionID = bindResult.Session.SessionID
-	request.GetConnection().SetProperty(sessionIDProperty, bindResult.Session.SessionID)
-	r.stopReplacedConnection(request.GetConnection().GetConnID(), bindResult.Replaced)
-
-	r.logger.Info(
-		"accepted upstream packet",
-		zap.Uint32("msg_id", packet.MsgID),
-		zap.String("client_id", packet.ClientID),
-		zap.String("device_id", packet.DeviceID),
-		zap.String("session_id", packet.SessionID),
-		zap.String("message_id", packet.MessageID),
-		zap.String("trace_id", packet.TraceID),
-		zap.Int("body_size", len(packet.Body)),
-	)
 
 	if !r.forwardUpstream(request, packet) {
 		return

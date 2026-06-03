@@ -114,7 +114,7 @@ upstream:
         type: nsq
         nsqd_addrs:
           - 127.0.0.1:4150
-          - 127.0.0.1:4151
+          - 127.0.0.1:4250
         topic: message_events
         write_timeout: 1s
         publish_mode: round_robin
@@ -129,6 +129,23 @@ payload bytes as opaque data.
 multi-node producer publishing; `retry_attempts` makes the adapter try the next
 configured `nsqd` when the first publish attempt fails.
 
+The upstream gateway pipeline can be configured with client/MsgID allowlists,
+blocklists, and a fixed-window per-client rate limit:
+
+```yaml
+pipeline:
+  allowlist:
+    client_ids: []
+    msg_ids: []
+  blocklist:
+    client_ids: []
+    msg_ids: []
+  rate_limit:
+    enabled: false
+    max_requests: 100
+    window: 1s
+```
+
 ## Project Structure
 - `cmd/gateway`: Gateway entry point
 - `cmd/devclient`: Development client for manual end-to-end testing
@@ -140,6 +157,7 @@ configured `nsqd` when the first publish attempt fails.
 - `internal/auth`: Token verification interfaces and development verifier
 - `internal/config`: Z-Courier config loading and conversion
 - `internal/downlink`: Internal push API and online delivery service
+- `internal/pipeline`: Ingress gateway middleware chain
 - `internal/protocol`: Packet codec and protocol types
 - `internal/router`: MsgID route engine
 - `internal/server`: Zinx server bootstrap

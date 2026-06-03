@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/qiuyier/Z-Courier/internal/auth"
+	"github.com/qiuyier/Z-Courier/internal/pipeline"
 	"github.com/qiuyier/Z-Courier/internal/session"
 )
 
@@ -17,6 +18,7 @@ type Config struct {
 	InternalToken              string
 	InternalMaxRequestBodySize int64
 	UpstreamRoutes             []UpstreamRouteConfig
+	Pipeline                   pipeline.Config
 }
 
 type UpstreamRouteConfig struct {

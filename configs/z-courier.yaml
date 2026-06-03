@@ -16,6 +16,18 @@ internal_http:
   token: dev-internal-token
   max_request_body_size: 10485760
 
+pipeline:
+  allowlist:
+    client_ids: []
+    msg_ids: []
+  blocklist:
+    client_ids: []
+    msg_ids: []
+  rate_limit:
+    enabled: false
+    max_requests: 100
+    window: 1s
+
 upstream:
   routes:
     - name: dev-http-upstream

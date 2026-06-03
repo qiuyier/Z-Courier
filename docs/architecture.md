@@ -118,9 +118,9 @@ Suggested order:
 Decode
 -> Protocol validation
 -> Authentication
--> Session binding
 -> Blacklist / whitelist
 -> Rate limiting
+-> Session binding
 -> Replay and idempotency check
 -> Logging / tracing / metrics
 -> Route selection

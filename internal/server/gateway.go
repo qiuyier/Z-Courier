@@ -10,6 +10,7 @@ import (
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/aceld/zinx/znet"
+	"github.com/qiuyier/Z-Courier/internal/pipeline"
 	"github.com/qiuyier/Z-Courier/internal/router"
 	"github.com/qiuyier/Z-Courier/internal/session"
 	"go.uber.org/zap"
@@ -34,7 +35,8 @@ func New(config Config, logger *zap.Logger) (*Gateway, error) {
 	if err != nil {
 		return nil, err
 	}
-	upstream, err := newUpstreamEngine(config)
+	upstream, err :=
+		newUpstreamEngine(config)
 	if err != nil {
 		return nil, err
 	}
@@ -53,10 +55,8 @@ func New(config Config, logger *zap.Logger) (*Gateway, error) {
 
 	router := NewIngressRouter(
 		logger,
-		config.Verifier,
-		config.Sessions,
 		zServer.GetConnMgr(),
-		config.GatewayNode,
+		newIngressPipeline(config, logger),
 		upstream,
 	)
 
@@ -65,6 +65,16 @@ func New(config Config, logger *zap.Logger) (*Gateway, error) {
 	}
 
 	return gateway, nil
+}
+
+func newIngressPipeline(config Config, logger *zap.Logger) *pipeline.Chain {
+	return pipeline.NewChain(
+		pipeline.NewAuthHandler(config.Verifier, logger),
+		pipeline.NewPolicyHandler(config.Pipeline.Policy),
+		pipeline.NewRateLimitHandler(config.Pipeline.RateLimit),
+		pipeline.NewSessionBindHandler(config.Sessions, config.GatewayNode, sessionIDProperty, logger),
+		pipeline.NewAccessLogHandler(logger),
+	)
 }
 
 func (g *Gateway) Serve() {
@@ -123,20 +133,20 @@ func registeredMsgIDs(config Config) ([]uint32, error) {
 	}
 
 	for _, route := range config.UpstreamRoutes {
-		max := route.MsgIDMax
-		if max == 0 {
-			max = route.MsgIDMin
+		msgIDMax := route.MsgIDMax
+		if msgIDMax == 0 {
+			msgIDMax = route.MsgIDMin
 		}
-		if route.MsgIDMin == 0 || max < route.MsgIDMin {
+		if route.MsgIDMin == 0 || msgIDMax < route.MsgIDMin {
 			return nil, fmt.Errorf("upstream route %q has invalid msg id range %d-%d", route.Name, route.MsgIDMin, route.MsgIDMax)
 		}
-		if max-route.MsgIDMin > 10000 {
-			return nil, fmt.Errorf("upstream route %q msg id range is too large: %d-%d", route.Name, route.MsgIDMin, max)
+		if msgIDMax-route.MsgIDMin > 10000 {
+			return nil, fmt.Errorf("upstream route %q msg id range is too large: %d-%d", route.Name, route.MsgIDMin, msgIDMax)
 		}
 
 		for msgID := route.MsgIDMin; ; msgID++ {
 			seen[msgID] = struct{}{}
-			if msgID == max {
+			if msgID == msgIDMax {
 				break
 			}
 		}

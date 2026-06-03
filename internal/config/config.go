@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/qiuyier/Z-Courier/internal/auth"
+	"github.com/qiuyier/Z-Courier/internal/pipeline"
 	"github.com/qiuyier/Z-Courier/internal/server"
 	"gopkg.in/yaml.v3"
 )
@@ -24,6 +25,7 @@ type File struct {
 	Auth         AuthConfig         `yaml:"auth"`
 	InternalHTTP InternalHTTPConfig `yaml:"internal_http"`
 	Upstream     UpstreamConfig     `yaml:"upstream"`
+	Pipeline     PipelineConfig     `yaml:"pipeline"`
 }
 
 type AuthConfig struct {
@@ -46,6 +48,23 @@ type InternalHTTPConfig struct {
 
 type UpstreamConfig struct {
 	Routes []UpstreamRouteConfig `yaml:"routes"`
+}
+
+type PipelineConfig struct {
+	Allowlist PolicyListConfig `yaml:"allowlist"`
+	Blocklist PolicyListConfig `yaml:"blocklist"`
+	RateLimit RateLimitConfig  `yaml:"rate_limit"`
+}
+
+type PolicyListConfig struct {
+	ClientIDs []string `yaml:"client_ids"`
+	MsgIDs    []uint32 `yaml:"msg_ids"`
+}
+
+type RateLimitConfig struct {
+	Enabled     bool   `yaml:"enabled"`
+	MaxRequests int    `yaml:"max_requests"`
+	Window      string `yaml:"window"`
 }
 
 type UpstreamRouteConfig struct {
@@ -122,6 +141,11 @@ func (c *File) ToServerConfig() (server.Config, error) {
 	}
 
 	applyInternalHTTPConfig(&out, c.InternalHTTP)
+	pipelineConfig, err := toPipelineConfig(c.Pipeline)
+	if err != nil {
+		return server.Config{}, err
+	}
+	out.Pipeline = pipelineConfig
 
 	routes, err := toUpstreamRoutes(c.Upstream.Routes)
 	if err != nil {
@@ -223,6 +247,35 @@ func validateMsgIDRange(route UpstreamRouteConfig) error {
 	}
 
 	return nil
+}
+
+func toPipelineConfig(config PipelineConfig) (pipeline.Config, error) {
+	window, err := parseOptionalDuration(config.RateLimit.Window)
+	if err != nil {
+		return pipeline.Config{}, fmt.Errorf("config: pipeline rate_limit window: %w", err)
+	}
+	if config.RateLimit.Enabled {
+		if config.RateLimit.MaxRequests <= 0 {
+			return pipeline.Config{}, fmt.Errorf("config: pipeline rate_limit max_requests must be greater than 0")
+		}
+		if window <= 0 {
+			return pipeline.Config{}, fmt.Errorf("config: pipeline rate_limit window must be greater than 0")
+		}
+	}
+
+	return pipeline.Config{
+		Policy: pipeline.PolicyConfig{
+			AllowClientIDs: append([]string(nil), config.Allowlist.ClientIDs...),
+			BlockClientIDs: append([]string(nil), config.Blocklist.ClientIDs...),
+			AllowMsgIDs:    append([]uint32(nil), config.Allowlist.MsgIDs...),
+			BlockMsgIDs:    append([]uint32(nil), config.Blocklist.MsgIDs...),
+		},
+		RateLimit: pipeline.RateLimitConfig{
+			Enabled:     config.RateLimit.Enabled,
+			MaxRequests: config.RateLimit.MaxRequests,
+			Window:      window,
+		},
+	}, nil
 }
 
 func toHTTPUpstreamConfig(route UpstreamRouteConfig) (*server.HTTPUpstreamConfig, error) {
