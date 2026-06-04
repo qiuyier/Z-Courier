@@ -3,6 +3,7 @@ package pipeline
 import (
 	"fmt"
 
+	"github.com/qiuyier/Z-Courier/internal/metrics"
 	"github.com/qiuyier/Z-Courier/internal/protocol"
 	"github.com/qiuyier/Z-Courier/internal/session"
 	"go.uber.org/zap"
@@ -59,6 +60,7 @@ func (h *SessionBindHandler) Handle(ctx *Context) error {
 	ctx.Packet.ClientID = bindResult.Session.ClientID
 	ctx.Packet.SessionID = bindResult.Session.SessionID
 	ctx.BindResult = bindResult
+	metrics.SetSessionsOnline(h.Sessions.Len())
 	if conn := ctx.Conn(); conn != nil && h.SessionProperty != "" {
 		conn.SetProperty(h.SessionProperty, bindResult.Session.SessionID)
 	}

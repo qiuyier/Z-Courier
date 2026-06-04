@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/qiuyier/Z-Courier/internal/metrics"
 	"github.com/qiuyier/Z-Courier/internal/protocol"
 )
 
@@ -55,6 +56,9 @@ func (h *RateLimitHandler) Handle(ctx *Context) error {
 	h.buckets[key] = bucket
 
 	if bucket.count > h.maxRequests {
+		if ctx.Packet != nil {
+			metrics.RecordRateLimitRejected(ctx.Packet.MsgID)
+		}
 		return Reject(protocol.AckRejected, fmt.Errorf("rate limit exceeded for %s", key))
 	}
 

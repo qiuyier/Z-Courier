@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/bytedance/sonic"
+	"github.com/qiuyier/Z-Courier/internal/metrics"
 	"go.uber.org/zap"
 )
 
@@ -35,11 +36,13 @@ type handler struct {
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
+		metrics.RecordDownlinkPush(0, "method_not_allowed")
 		writeJSON(w, http.StatusMethodNotAllowed, PushResponse{Code: "method_not_allowed"})
 		return
 	}
 
 	if h.config.InternalToken != "" && r.Header.Get(InternalTokenHeader) != h.config.InternalToken {
+		metrics.RecordDownlinkPush(0, "unauthorized")
 		writeJSON(w, http.StatusUnauthorized, PushResponse{Code: "unauthorized"})
 		return
 	}
@@ -47,12 +50,14 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, h.config.MaxRequestBodySize))
 	if err != nil {
+		metrics.RecordDownlinkPush(0, "request_too_large")
 		writeJSON(w, http.StatusRequestEntityTooLarge, PushResponse{Code: "request_too_large", Reason: err.Error()})
 		return
 	}
 
 	var req PushRequest
 	if err := sonic.Unmarshal(body, &req); err != nil {
+		metrics.RecordDownlinkPush(0, "bad_request")
 		writeJSON(w, http.StatusBadRequest, PushResponse{Code: "bad_request", Reason: err.Error()})
 		return
 	}
@@ -60,6 +65,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	resp, err := h.config.Service.Push(r.Context(), req)
 	if err != nil {
 		status := statusFromError(err)
+		metrics.RecordDownlinkPush(req.MsgID, codeFromStatus(status))
 		h.config.Logger.Warn(
 			"downlink push failed",
 			zap.String("client_id", req.ClientID),
@@ -80,6 +86,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	metrics.RecordDownlinkPush(req.MsgID, "success")
 	h.config.Logger.Info(
 		"downlink push accepted",
 		zap.String("client_id", resp.ClientID),

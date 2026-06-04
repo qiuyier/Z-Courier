@@ -10,6 +10,7 @@ import (
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/aceld/zinx/znet"
+	"github.com/qiuyier/Z-Courier/internal/metrics"
 	"github.com/qiuyier/Z-Courier/internal/pipeline"
 	"github.com/qiuyier/Z-Courier/internal/router"
 	"github.com/qiuyier/Z-Courier/internal/session"
@@ -173,6 +174,7 @@ func (g *Gateway) onConnStart(conn ziface.IConnection) {
 
 func (g *Gateway) onConnStop(conn ziface.IConnection) {
 	removed, ok := g.sessions.UnbindByConnID(conn.GetConnID())
+	metrics.SetSessionsOnline(g.sessions.Len())
 	conn.RemoveProperty(sessionIDProperty)
 
 	if !ok {

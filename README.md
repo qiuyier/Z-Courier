@@ -146,6 +146,16 @@ pipeline:
     window: 1s
 ```
 
+Prometheus metrics are exposed from the internal HTTP server:
+
+```bash
+curl http://127.0.0.1:18080/metrics
+```
+
+The first metrics include ingress packet totals, rejected ingress packets,
+upstream forwarding totals and latency, online sessions, downlink push totals,
+and rate-limit rejects.
+
 ## Project Structure
 - `cmd/gateway`: Gateway entry point
 - `cmd/devclient`: Development client for manual end-to-end testing

@@ -3,9 +3,11 @@ package server
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/aceld/zinx/znet"
+	"github.com/qiuyier/Z-Courier/internal/metrics"
 	"github.com/qiuyier/Z-Courier/internal/pipeline"
 	"github.com/qiuyier/Z-Courier/internal/protocol"
 	"github.com/qiuyier/Z-Courier/internal/router"
@@ -50,6 +52,8 @@ func (r *IngressRouter) Handle(request ziface.IRequest) {
 			zap.Uint32("msg_id", request.GetMsgID()),
 			zap.Error(err),
 		)
+		metrics.RecordIngressPacket(request.GetMsgID(), "rejected")
+		metrics.RecordIngressRejected(request.GetMsgID(), protocol.AckDecodeFailed)
 		r.sendAck(request, nil, protocol.AckDecodeFailed, err.Error())
 		return
 	}
@@ -68,6 +72,8 @@ func (r *IngressRouter) Handle(request ziface.IRequest) {
 	pipelineContext := pipeline.NewContext(request, packet, r.logger)
 	if err := r.chain.Run(pipelineContext); err != nil {
 		code, reason := pipeline.AckError(err)
+		metrics.RecordIngressPacket(packet.MsgID, "rejected")
+		metrics.RecordIngressRejected(packet.MsgID, code)
 		r.sendAck(request, packet, code, reason)
 		return
 	}
@@ -80,6 +86,7 @@ func (r *IngressRouter) Handle(request ziface.IRequest) {
 		return
 	}
 
+	metrics.RecordIngressPacket(packet.MsgID, "accepted")
 	r.sendAck(request, packet, protocol.AckAccepted, "")
 }
 
@@ -88,7 +95,9 @@ func (r *IngressRouter) forwardUpstream(request ziface.IRequest, packet *protoco
 		return true
 	}
 
+	startedAt := time.Now()
 	result, err := r.upstream.Forward(connectionContext(request.GetConnection()), packet)
+	duration := time.Since(startedAt)
 	if errors.Is(err, router.ErrRouteNotFound) {
 		r.logger.Debug(
 			"no upstream route matched",
@@ -101,6 +110,9 @@ func (r *IngressRouter) forwardUpstream(request ziface.IRequest, packet *protoco
 		return true
 	}
 	if err != nil {
+		metrics.RecordUpstreamForward(resultRouteName(result), resultTargetType(result), "failure", duration)
+		metrics.RecordIngressPacket(packet.MsgID, "rejected")
+		metrics.RecordIngressRejected(packet.MsgID, protocol.AckRejected)
 		r.logger.Warn(
 			"failed to forward upstream packet",
 			zap.Uint32("msg_id", packet.MsgID),
@@ -114,6 +126,7 @@ func (r *IngressRouter) forwardUpstream(request ziface.IRequest, packet *protoco
 		return false
 	}
 
+	metrics.RecordUpstreamForward(result.RouteName, result.TargetType, "success", duration)
 	r.logger.Info(
 		"forwarded upstream packet",
 		zap.Uint32("msg_id", packet.MsgID),
@@ -127,6 +140,22 @@ func (r *IngressRouter) forwardUpstream(request ziface.IRequest, packet *protoco
 		zap.String("trace_id", packet.TraceID),
 	)
 	return true
+}
+
+func resultRouteName(result *router.ForwardResult) string {
+	if result == nil {
+		return ""
+	}
+
+	return result.RouteName
+}
+
+func resultTargetType(result *router.ForwardResult) string {
+	if result == nil {
+		return ""
+	}
+
+	return result.TargetType
 }
 
 func (r *IngressRouter) stopReplacedConnection(currentConnID uint64, replaced *session.Session) {

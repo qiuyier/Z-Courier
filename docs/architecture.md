@@ -364,20 +364,17 @@ The gateway should emit structured logs, metrics, and traces.
 Core metrics:
 
 ```text
-active_connections
-connection_bind_total
-packet_in_total
-packet_out_total
-packet_decode_error_total
-auth_fail_total
-rate_limited_total
-route_forward_total
-route_forward_error_total
-downlink_push_total
-client_ack_total
-retry_total
-delivery_latency_seconds
+z_courier_ingress_packets_total
+z_courier_ingress_rejected_total
+z_courier_upstream_forward_total
+z_courier_upstream_forward_duration_seconds
+z_courier_sessions_online
+z_courier_downlink_push_total
+z_courier_rate_limit_rejected_total
 ```
+
+The first Prometheus scrape endpoint is exposed on the internal HTTP server at
+`/metrics`.
 
 Every packet should carry or receive a `TraceID`. Forwarded HTTP/gRPC/MQ
 requests should preserve that trace id.

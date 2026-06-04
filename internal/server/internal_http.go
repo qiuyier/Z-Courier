@@ -7,6 +7,7 @@ import (
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/qiuyier/Z-Courier/internal/downlink"
+	"github.com/qiuyier/Z-Courier/internal/metrics"
 	"go.uber.org/zap"
 )
 
@@ -23,6 +24,7 @@ func newInternalHTTPServer(config Config, logger *zap.Logger, connManager ziface
 		MaxRequestBodySize: config.InternalMaxRequestBodySize,
 		Logger:             logger,
 	}))
+	mux.Handle("/metrics", metrics.Handler())
 
 	return &http.Server{
 		Addr:              config.InternalHTTPAddr,
