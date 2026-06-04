@@ -156,12 +156,24 @@ The first metrics include ingress packet totals, rejected ingress packets,
 upstream forwarding totals and latency, online sessions, downlink push totals,
 and rate-limit rejects.
 
+Start a local Prometheus + Grafana monitoring stack:
+
+```bash
+docker compose -f deploy/monitoring/docker-compose.yml up -d
+```
+
+Prometheus is available at `http://127.0.0.1:9090`, and Grafana is available at
+`http://127.0.0.1:3000` with the default local credentials `admin` / `admin`.
+See [deploy/monitoring/README.md](deploy/monitoring/README.md) for dashboard and
+scrape-target details.
+
 ## Project Structure
 - `cmd/gateway`: Gateway entry point
 - `cmd/devclient`: Development client for manual end-to-end testing
 - `cmd/devbackend`: Development backend for upstream forwarding tests
 - `configs`: Z-Courier gateway configuration
 - `conf`: Zinx runtime configuration
+- `deploy`: Local deployment examples such as monitoring
 - `docs`: Design and operation documents
 - `internal/adapter`: Upstream target adapters
 - `internal/auth`: Token verification interfaces and development verifier
