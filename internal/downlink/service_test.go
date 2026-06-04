@@ -63,6 +63,98 @@ func TestServicePushSendsEncodedPacket(t *testing.T) {
 	}
 }
 
+func TestServiceReliablePushStoresAndSendsOnlineMessage(t *testing.T) {
+	sessions := fakeSessions{
+		session: &session.Session{
+			SessionID: "session-1",
+			ConnID:    7,
+			ClientID:  "client-1",
+			DeviceID:  "device-1",
+		},
+	}
+	conn := &fakeConnection{}
+	store := NewMemoryStore()
+	service := NewService(sessions, fakeConnections{conn: conn}, WithStore(store))
+	service.now = func() time.Time { return time.UnixMilli(1760000000000) }
+	store.now = service.now
+
+	resp, err := service.Push(context.Background(), PushRequest{
+		ClientID:  "client-1",
+		DeviceID:  "device-1",
+		MsgID:     2001,
+		MessageID: "message-1",
+		TraceID:   "trace-1",
+		Body:      []byte("hello"),
+	})
+	if err != nil {
+		t.Fatalf("Push() error = %v", err)
+	}
+	if resp.DeliveryState != DeliveryStateSent {
+		t.Fatalf("DeliveryState = %q, want %q", resp.DeliveryState, DeliveryStateSent)
+	}
+	if len(conn.data) == 0 {
+		t.Fatal("connection did not receive data")
+	}
+
+	stored, ok, err := store.Get(context.Background(), "message-1")
+	if err != nil {
+		t.Fatalf("store.Get() error = %v", err)
+	}
+	if !ok {
+		t.Fatal("stored message not found")
+	}
+	if stored.Status != MessageStatusSent {
+		t.Fatalf("stored Status = %q, want %q", stored.Status, MessageStatusSent)
+	}
+	if stored.Attempts != 1 {
+		t.Fatalf("stored Attempts = %d, want 1", stored.Attempts)
+	}
+	if stored.SessionID != "session-1" {
+		t.Fatalf("stored SessionID = %q, want session-1", stored.SessionID)
+	}
+}
+
+func TestServiceReliablePushQueuesOfflineMessage(t *testing.T) {
+	store := NewMemoryStore()
+	service := NewService(fakeSessions{}, fakeConnections{}, WithStore(store))
+	service.now = func() time.Time { return time.UnixMilli(1760000000000) }
+	store.now = service.now
+
+	resp, err := service.Push(context.Background(), PushRequest{
+		ClientID:  "client-1",
+		DeviceID:  "device-1",
+		MsgID:     2001,
+		MessageID: "message-1",
+		Body:      []byte("hello"),
+	})
+	if err != nil {
+		t.Fatalf("Push() error = %v", err)
+	}
+	if resp.DeliveryState != DeliveryStateQueued {
+		t.Fatalf("DeliveryState = %q, want %q", resp.DeliveryState, DeliveryStateQueued)
+	}
+
+	stored, ok, err := store.Get(context.Background(), "message-1")
+	if err != nil {
+		t.Fatalf("store.Get() error = %v", err)
+	}
+	if !ok {
+		t.Fatal("stored message not found")
+	}
+	if stored.Status != MessageStatusPending {
+		t.Fatalf("stored Status = %q, want %q", stored.Status, MessageStatusPending)
+	}
+	if stored.Attempts != 1 {
+		t.Fatalf("stored Attempts = %d, want 1", stored.Attempts)
+	}
+	if stored.LastError == "" {
+		t.Fatal("stored LastError is empty")
+	}
+	if !stored.NextRetryAt.Equal(time.UnixMilli(1760000000000).Add(30 * time.Second)) {
+		t.Fatalf("stored NextRetryAt = %v", stored.NextRetryAt)
+	}
+}
+
 func TestServicePushValidation(t *testing.T) {
 	service := NewService(fakeSessions{}, fakeConnections{})
 

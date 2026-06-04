@@ -11,12 +11,11 @@ import (
 	"go.uber.org/zap"
 )
 
-func newInternalHTTPServer(config Config, logger *zap.Logger, connManager ziface.IConnManager) *http.Server {
-	if config.DisableInternalHTTP || config.InternalHTTPAddr == "" {
+func newInternalHTTPServer(config Config, logger *zap.Logger, service *downlink.Service) *http.Server {
+	if config.DisableInternalHTTP || config.InternalHTTPAddr == "" || service == nil {
 		return nil
 	}
 
-	service := downlink.NewService(config.Sessions, zinxConnectionFinder{connManager: connManager})
 	mux := http.NewServeMux()
 	mux.Handle("/internal/push", downlink.NewHandler(downlink.HandlerConfig{
 		Service:            service,

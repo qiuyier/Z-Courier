@@ -24,6 +24,7 @@ type File struct {
 
 	Auth         AuthConfig         `yaml:"auth"`
 	InternalHTTP InternalHTTPConfig `yaml:"internal_http"`
+	Downlink     DownlinkConfig     `yaml:"downlink"`
 	Upstream     UpstreamConfig     `yaml:"upstream"`
 	Pipeline     PipelineConfig     `yaml:"pipeline"`
 }
@@ -48,6 +49,23 @@ type InternalHTTPConfig struct {
 
 type UpstreamConfig struct {
 	Routes []UpstreamRouteConfig `yaml:"routes"`
+}
+
+type DownlinkConfig struct {
+	Storage DownlinkStorageConfig `yaml:"storage"`
+}
+
+type DownlinkStorageConfig struct {
+	Type     string                 `yaml:"type"`
+	Postgres DownlinkPostgresConfig `yaml:"postgres"`
+}
+
+type DownlinkPostgresConfig struct {
+	DSN             string `yaml:"dsn"`
+	AutoMigrate     *bool  `yaml:"auto_migrate"`
+	MaxOpenConns    int    `yaml:"max_open_conns"`
+	MaxIdleConns    int    `yaml:"max_idle_conns"`
+	ConnMaxLifetime string `yaml:"conn_max_lifetime"`
 }
 
 type PipelineConfig struct {
@@ -141,6 +159,9 @@ func (c *File) ToServerConfig() (server.Config, error) {
 	}
 
 	applyInternalHTTPConfig(&out, c.InternalHTTP)
+	if err := applyDownlinkConfig(&out, c.Downlink); err != nil {
+		return server.Config{}, err
+	}
 	pipelineConfig, err := toPipelineConfig(c.Pipeline)
 	if err != nil {
 		return server.Config{}, err
@@ -188,6 +209,47 @@ func applyInternalHTTPConfig(out *server.Config, config InternalHTTPConfig) {
 	if config.MaxRequestBodySize != nil {
 		out.InternalMaxRequestBodySize = *config.MaxRequestBodySize
 	}
+}
+
+func applyDownlinkConfig(out *server.Config, config DownlinkConfig) error {
+	if config.Storage.Type != "" {
+		storageType := strings.ToLower(strings.TrimSpace(config.Storage.Type))
+		switch storageType {
+		case "memory", "postgres", "none", "disabled":
+			out.DownlinkStorage.Type = storageType
+		default:
+			return fmt.Errorf("config: unsupported downlink storage type %q", config.Storage.Type)
+		}
+	}
+
+	postgres := config.Storage.Postgres
+	if postgres.DSN != "" {
+		out.DownlinkStorage.Postgres.DSN = postgres.DSN
+	}
+	if postgres.AutoMigrate != nil {
+		out.DownlinkStorage.Postgres.AutoMigrate = *postgres.AutoMigrate
+		out.DownlinkStorage.Postgres.AutoMigrateSet = true
+	}
+	if postgres.MaxOpenConns < 0 {
+		return fmt.Errorf("config: downlink postgres max_open_conns must be greater than or equal to 0")
+	}
+	if postgres.MaxIdleConns < 0 {
+		return fmt.Errorf("config: downlink postgres max_idle_conns must be greater than or equal to 0")
+	}
+	out.DownlinkStorage.Postgres.MaxOpenConns = postgres.MaxOpenConns
+	out.DownlinkStorage.Postgres.MaxIdleConns = postgres.MaxIdleConns
+
+	connMaxLifetime, err := parseOptionalDuration(postgres.ConnMaxLifetime)
+	if err != nil {
+		return fmt.Errorf("config: downlink postgres conn_max_lifetime: %w", err)
+	}
+	out.DownlinkStorage.Postgres.ConnMaxLifetime = connMaxLifetime
+
+	if out.DownlinkStorage.Type == "postgres" && out.DownlinkStorage.Postgres.DSN == "" {
+		return fmt.Errorf("config: downlink postgres dsn is required")
+	}
+
+	return nil
 }
 
 func toUpstreamRoutes(routes []UpstreamRouteConfig) ([]server.UpstreamRouteConfig, error) {

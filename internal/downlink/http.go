@@ -86,9 +86,15 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	metrics.RecordDownlinkPush(req.MsgID, "success")
+	status := http.StatusOK
+	if resp.DeliveryState == DeliveryStateQueued {
+		status = http.StatusAccepted
+	}
+
+	metrics.RecordDownlinkPush(req.MsgID, nonEmpty(resp.DeliveryState, "success"))
 	h.config.Logger.Info(
 		"downlink push accepted",
+		zap.String("delivery_state", resp.DeliveryState),
 		zap.String("client_id", resp.ClientID),
 		zap.String("device_id", resp.DeviceID),
 		zap.String("session_id", resp.SessionID),
@@ -97,7 +103,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		zap.String("trace_id", resp.TraceID),
 	)
 
-	writeJSON(w, http.StatusOK, *resp)
+	writeJSON(w, status, *resp)
 }
 
 func statusFromError(err error) int {
@@ -124,6 +130,14 @@ func codeFromStatus(status int) string {
 	default:
 		return "push_failed"
 	}
+}
+
+func nonEmpty(value, fallback string) string {
+	if value == "" {
+		return fallback
+	}
+
+	return value
 }
 
 func writeJSON(w http.ResponseWriter, status int, resp PushResponse) {

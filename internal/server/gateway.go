@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"sort"
 	"time"
@@ -24,6 +25,7 @@ type Gateway struct {
 
 	internalHTTP *http.Server
 	upstream     *router.Engine
+	downlink     io.Closer
 }
 
 func New(config Config, logger *zap.Logger) (*Gateway, error) {
@@ -41,14 +43,22 @@ func New(config Config, logger *zap.Logger) (*Gateway, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	zServer := znet.NewServer()
+	downlinkService, downlinkCloser, err := newDownlinkService(config, zServer.GetConnMgr())
+	if err != nil {
+		if upstream != nil {
+			_ = upstream.Close()
+		}
+		return nil, err
+	}
+
 	gateway := &Gateway{
 		server:       zServer,
 		sessions:     config.Sessions,
 		logger:       logger,
-		internalHTTP: newInternalHTTPServer(config, logger, zServer.GetConnMgr()),
+		internalHTTP: newInternalHTTPServer(config, logger, downlinkService),
 		upstream:     upstream,
+		downlink:     downlinkCloser,
 	}
 
 	zServer.SetOnConnStart(gateway.onConnStart)
@@ -80,8 +90,9 @@ func newIngressPipeline(config Config, logger *zap.Logger) *pipeline.Chain {
 
 func (g *Gateway) Serve() {
 	g.startInternalHTTP()
-	defer g.shutdownInternalHTTP()
+	defer g.shutdownDownlink()
 	defer g.shutdownUpstream()
+	defer g.shutdownInternalHTTP()
 
 	g.server.Serve()
 }
@@ -124,6 +135,16 @@ func (g *Gateway) shutdownUpstream() {
 
 	if err := g.upstream.Close(); err != nil {
 		g.logger.Warn("failed to shutdown upstream routes cleanly", zap.Error(err))
+	}
+}
+
+func (g *Gateway) shutdownDownlink() {
+	if g.downlink == nil {
+		return
+	}
+
+	if err := g.downlink.Close(); err != nil {
+		g.logger.Warn("failed to shutdown downlink store cleanly", zap.Error(err))
 	}
 }
 

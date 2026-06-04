@@ -8,4 +8,6 @@ var (
 	ErrInvalidMsgID       = errors.New("downlink: invalid msg_id")
 	ErrSessionNotFound    = errors.New("downlink: session not found")
 	ErrConnectionNotFound = errors.New("downlink: connection not found")
+	ErrStore              = errors.New("downlink: store error")
+	ErrMessageNotFound    = errors.New("downlink: message not found")
 )

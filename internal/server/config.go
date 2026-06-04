@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/qiuyier/Z-Courier/internal/auth"
+	"github.com/qiuyier/Z-Courier/internal/downlink"
 	"github.com/qiuyier/Z-Courier/internal/pipeline"
 	"github.com/qiuyier/Z-Courier/internal/session"
 )
@@ -19,6 +20,8 @@ type Config struct {
 	InternalMaxRequestBodySize int64
 	UpstreamRoutes             []UpstreamRouteConfig
 	Pipeline                   pipeline.Config
+	DownlinkStore              downlink.Store
+	DownlinkStorage            DownlinkStorageConfig
 }
 
 type UpstreamRouteConfig struct {
@@ -47,6 +50,20 @@ type NSQUpstreamConfig struct {
 	RetryAttempts int
 }
 
+type DownlinkStorageConfig struct {
+	Type     string
+	Postgres DownlinkPostgresConfig
+}
+
+type DownlinkPostgresConfig struct {
+	DSN             string
+	AutoMigrate     bool
+	AutoMigrateSet  bool
+	MaxOpenConns    int
+	MaxIdleConns    int
+	ConnMaxLifetime time.Duration
+}
+
 func DefaultConfig() Config {
 	return Config{
 		RouteMsgIDs: []uint32{1000},
@@ -62,6 +79,13 @@ func DefaultConfig() Config {
 		InternalHTTPAddr:           "127.0.0.1:18080",
 		InternalToken:              "dev-internal-token",
 		InternalMaxRequestBodySize: 10 << 20,
+		DownlinkStorage: DownlinkStorageConfig{
+			Type: "memory",
+			Postgres: DownlinkPostgresConfig{
+				AutoMigrate:    true,
+				AutoMigrateSet: true,
+			},
+		},
 	}
 }
 
@@ -88,6 +112,13 @@ func normalizeConfig(config Config) Config {
 	}
 	if config.InternalMaxRequestBodySize == 0 {
 		config.InternalMaxRequestBodySize = defaults.InternalMaxRequestBodySize
+	}
+	if config.DownlinkStorage.Type == "" {
+		config.DownlinkStorage.Type = defaults.DownlinkStorage.Type
+	}
+	if !config.DownlinkStorage.Postgres.AutoMigrateSet {
+		config.DownlinkStorage.Postgres.AutoMigrate = defaults.DownlinkStorage.Postgres.AutoMigrate
+		config.DownlinkStorage.Postgres.AutoMigrateSet = defaults.DownlinkStorage.Postgres.AutoMigrateSet
 	}
 
 	return config

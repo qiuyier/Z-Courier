@@ -57,3 +57,30 @@ func TestHandlerPushOK(t *testing.T) {
 		t.Fatal("connection did not receive data")
 	}
 }
+
+func TestHandlerReliablePushQueued(t *testing.T) {
+	handler := NewHandler(HandlerConfig{
+		Service:       NewService(fakeSessions{}, fakeConnections{}, WithStore(NewMemoryStore())),
+		InternalToken: "secret",
+		Logger:        zap.NewNop(),
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/internal/push", strings.NewReader(`{
+		"client_id":"c1",
+		"device_id":"d1",
+		"msg_id":2001,
+		"message_id":"m1",
+		"body":"aGVsbG8="
+	}`))
+	req.Header.Set(InternalTokenHeader, "secret")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusAccepted, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"delivery_state":"queued"`) {
+		t.Fatalf("body = %s, want queued delivery_state", rec.Body.String())
+	}
+}

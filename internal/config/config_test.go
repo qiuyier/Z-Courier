@@ -42,6 +42,15 @@ internal_http:
   addr: 127.0.0.1:19080
   token: internal-a
   max_request_body_size: 12345
+downlink:
+  storage:
+    type: postgres
+    postgres:
+      dsn: postgres://user:pass@127.0.0.1:5432/z_courier?sslmode=disable
+      auto_migrate: false
+      max_open_conns: 9
+      max_idle_conns: 4
+      conn_max_lifetime: 30m
 pipeline:
   allowlist:
     client_ids:
@@ -115,6 +124,27 @@ upstream:
 	}
 	if config.InternalMaxRequestBodySize != 12345 {
 		t.Fatalf("InternalMaxRequestBodySize = %d, want 12345", config.InternalMaxRequestBodySize)
+	}
+	if config.DownlinkStorage.Type != "postgres" {
+		t.Fatalf("DownlinkStorage Type = %q, want postgres", config.DownlinkStorage.Type)
+	}
+	if config.DownlinkStorage.Postgres.DSN != "postgres://user:pass@127.0.0.1:5432/z_courier?sslmode=disable" {
+		t.Fatalf("DownlinkStorage Postgres DSN = %q", config.DownlinkStorage.Postgres.DSN)
+	}
+	if config.DownlinkStorage.Postgres.AutoMigrate {
+		t.Fatal("DownlinkStorage Postgres AutoMigrate = true, want false")
+	}
+	if !config.DownlinkStorage.Postgres.AutoMigrateSet {
+		t.Fatal("DownlinkStorage Postgres AutoMigrateSet = false, want true")
+	}
+	if config.DownlinkStorage.Postgres.MaxOpenConns != 9 {
+		t.Fatalf("DownlinkStorage Postgres MaxOpenConns = %d, want 9", config.DownlinkStorage.Postgres.MaxOpenConns)
+	}
+	if config.DownlinkStorage.Postgres.MaxIdleConns != 4 {
+		t.Fatalf("DownlinkStorage Postgres MaxIdleConns = %d, want 4", config.DownlinkStorage.Postgres.MaxIdleConns)
+	}
+	if config.DownlinkStorage.Postgres.ConnMaxLifetime != 30*time.Minute {
+		t.Fatalf("DownlinkStorage Postgres ConnMaxLifetime = %v, want 30m", config.DownlinkStorage.Postgres.ConnMaxLifetime)
 	}
 	if len(config.Pipeline.Policy.AllowClientIDs) != 1 || config.Pipeline.Policy.AllowClientIDs[0] != "client-a" {
 		t.Fatalf("Pipeline AllowClientIDs = %v, want [client-a]", config.Pipeline.Policy.AllowClientIDs)
@@ -227,6 +257,47 @@ pipeline:
     enabled: true
     max_requests: 1
     window: nope
+`)
+
+	_, err := LoadServerConfig(path)
+	if err == nil {
+		t.Fatal("LoadServerConfig() error = nil, want error")
+	}
+}
+
+func TestLoadServerConfigInvalidDownlinkStorage(t *testing.T) {
+	path := writeConfig(t, `
+downlink:
+  storage:
+    type: redis
+`)
+
+	_, err := LoadServerConfig(path)
+	if err == nil {
+		t.Fatal("LoadServerConfig() error = nil, want error")
+	}
+}
+
+func TestLoadServerConfigPostgresRequiresDSN(t *testing.T) {
+	path := writeConfig(t, `
+downlink:
+  storage:
+    type: postgres
+`)
+
+	_, err := LoadServerConfig(path)
+	if err == nil {
+		t.Fatal("LoadServerConfig() error = nil, want error")
+	}
+}
+
+func TestLoadServerConfigInvalidPostgresConnLifetime(t *testing.T) {
+	path := writeConfig(t, `
+downlink:
+  storage:
+    type: memory
+    postgres:
+      conn_max_lifetime: nope
 `)
 
 	_, err := LoadServerConfig(path)

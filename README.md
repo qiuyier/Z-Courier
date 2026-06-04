@@ -73,6 +73,35 @@ curl -X POST http://127.0.0.1:18080/internal/push \
 `body` is base64-encoded in the HTTP JSON request because the gateway treats it
 as opaque bytes.
 
+Downlink push requests are accepted into the configured downlink store before
+the gateway tries to deliver them to an online client. The default development
+store is in-memory:
+
+```yaml
+downlink:
+  storage:
+    type: memory
+```
+
+Use PostgreSQL for durable downlink messages:
+
+```yaml
+downlink:
+  storage:
+    type: postgres
+    postgres:
+      dsn: postgres://user:pass@postgres:5432/z_courier?sslmode=disable
+      auto_migrate: true
+      max_open_conns: 10
+      max_idle_conns: 5
+      conn_max_lifetime: 30m
+```
+
+When the target client is online, `/internal/push` returns `200` with
+`delivery_state = sent`. When the message is stored but the client is offline,
+it returns `202` with `delivery_state = queued`. The `memory` store is useful
+for local development, but queued messages are lost on gateway restart.
+
 Run the development client in another terminal:
 
 ```bash

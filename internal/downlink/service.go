@@ -24,22 +24,83 @@ type ConnectionFinder interface {
 type Service struct {
 	sessions    SessionFinder
 	connections ConnectionFinder
+	store       Store
 	now         func() time.Time
+	retryDelay  time.Duration
 }
 
-func NewService(sessions SessionFinder, connections ConnectionFinder) *Service {
-	return &Service{
-		sessions:    sessions,
-		connections: connections,
-		now:         time.Now,
+type ServiceOption func(*Service)
+
+func WithStore(store Store) ServiceOption {
+	return func(s *Service) {
+		s.store = store
 	}
 }
 
-func (s *Service) Push(_ context.Context, req PushRequest) (*PushResponse, error) {
+func WithRetryDelay(delay time.Duration) ServiceOption {
+	return func(s *Service) {
+		if delay > 0 {
+			s.retryDelay = delay
+		}
+	}
+}
+
+func NewService(sessions SessionFinder, connections ConnectionFinder, options ...ServiceOption) *Service {
+	service := &Service{
+		sessions:    sessions,
+		connections: connections,
+		now:         time.Now,
+		retryDelay:  30 * time.Second,
+	}
+	for _, option := range options {
+		option(service)
+	}
+
+	return service
+}
+
+func (s *Service) Push(ctx context.Context, req PushRequest) (*PushResponse, error) {
 	if err := validatePushRequest(req); err != nil {
 		return nil, err
 	}
 
+	if s.store != nil {
+		return s.pushReliable(ctx, req)
+	}
+
+	return s.pushOnline(req)
+}
+
+func (s *Service) pushReliable(ctx context.Context, req PushRequest) (*PushResponse, error) {
+	message, err := s.store.Save(ctx, messageFromPushRequest(req, s.now()))
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrStore, err)
+	}
+
+	resp := &PushResponse{
+		Code:          "ok",
+		DeliveryState: DeliveryStateQueued,
+		ClientID:      message.ClientID,
+		DeviceID:      message.DeviceID,
+		MessageID:     message.MessageID,
+		TraceID:       message.TraceID,
+	}
+
+	sentResp, err := s.pushOnline(pushRequestFromMessage(message))
+	if err != nil {
+		_ = s.store.MarkAttemptFailed(ctx, message.MessageID, err.Error(), s.now().Add(s.retryDelay))
+		return resp, nil
+	}
+
+	if err := s.store.MarkSent(ctx, message.MessageID, sentResp.SessionID, s.now()); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrStore, err)
+	}
+
+	sentResp.DeliveryState = DeliveryStateSent
+	return sentResp, nil
+}
+
+func (s *Service) pushOnline(req PushRequest) (*PushResponse, error) {
 	found, ok := s.sessions.GetByClientDevice(req.ClientID, req.DeviceID)
 	if !ok {
 		return nil, ErrSessionNotFound
@@ -71,13 +132,14 @@ func (s *Service) Push(_ context.Context, req PushRequest) (*PushResponse, error
 	}
 
 	return &PushResponse{
-		Code:      "ok",
-		ClientID:  found.ClientID,
-		DeviceID:  found.DeviceID,
-		SessionID: found.SessionID,
-		ConnID:    found.ConnID,
-		MessageID: req.MessageID,
-		TraceID:   req.TraceID,
+		Code:          "ok",
+		DeliveryState: DeliveryStateSent,
+		ClientID:      found.ClientID,
+		DeviceID:      found.DeviceID,
+		SessionID:     found.SessionID,
+		ConnID:        found.ConnID,
+		MessageID:     req.MessageID,
+		TraceID:       req.TraceID,
 	}, nil
 }
 
