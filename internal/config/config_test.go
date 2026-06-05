@@ -51,6 +51,12 @@ downlink:
       max_open_conns: 9
       max_idle_conns: 4
       conn_max_lifetime: 30m
+  delivery:
+    retry_interval: 7s
+    retry_delay: 11s
+    max_attempts: 6
+    scan_limit: 77
+    bind_flush_limit: 88
 pipeline:
   allowlist:
     client_ids:
@@ -145,6 +151,21 @@ upstream:
 	}
 	if config.DownlinkStorage.Postgres.ConnMaxLifetime != 30*time.Minute {
 		t.Fatalf("DownlinkStorage Postgres ConnMaxLifetime = %v, want 30m", config.DownlinkStorage.Postgres.ConnMaxLifetime)
+	}
+	if config.DownlinkDelivery.RetryInterval != 7*time.Second {
+		t.Fatalf("DownlinkDelivery RetryInterval = %v, want 7s", config.DownlinkDelivery.RetryInterval)
+	}
+	if config.DownlinkDelivery.RetryDelay != 11*time.Second {
+		t.Fatalf("DownlinkDelivery RetryDelay = %v, want 11s", config.DownlinkDelivery.RetryDelay)
+	}
+	if config.DownlinkDelivery.MaxAttempts != 6 {
+		t.Fatalf("DownlinkDelivery MaxAttempts = %d, want 6", config.DownlinkDelivery.MaxAttempts)
+	}
+	if config.DownlinkDelivery.ScanLimit != 77 {
+		t.Fatalf("DownlinkDelivery ScanLimit = %d, want 77", config.DownlinkDelivery.ScanLimit)
+	}
+	if config.DownlinkDelivery.BindFlushLimit != 88 {
+		t.Fatalf("DownlinkDelivery BindFlushLimit = %d, want 88", config.DownlinkDelivery.BindFlushLimit)
 	}
 	if len(config.Pipeline.Policy.AllowClientIDs) != 1 || config.Pipeline.Policy.AllowClientIDs[0] != "client-a" {
 		t.Fatalf("Pipeline AllowClientIDs = %v, want [client-a]", config.Pipeline.Policy.AllowClientIDs)
@@ -298,6 +319,32 @@ downlink:
     type: memory
     postgres:
       conn_max_lifetime: nope
+`)
+
+	_, err := LoadServerConfig(path)
+	if err == nil {
+		t.Fatal("LoadServerConfig() error = nil, want error")
+	}
+}
+
+func TestLoadServerConfigInvalidDownlinkRetryInterval(t *testing.T) {
+	path := writeConfig(t, `
+downlink:
+  delivery:
+    retry_interval: nope
+`)
+
+	_, err := LoadServerConfig(path)
+	if err == nil {
+		t.Fatal("LoadServerConfig() error = nil, want error")
+	}
+}
+
+func TestLoadServerConfigInvalidDownlinkDeliveryLimit(t *testing.T) {
+	path := writeConfig(t, `
+downlink:
+  delivery:
+    scan_limit: -1
 `)
 
 	_, err := LoadServerConfig(path)

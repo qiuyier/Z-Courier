@@ -28,6 +28,9 @@ func TestManagerBindAndLookup(t *testing.T) {
 	if result.Replaced != nil {
 		t.Fatalf("Replaced = %v, want nil", result.Replaced)
 	}
+	if !result.Created {
+		t.Fatal("Created = false, want true")
+	}
 
 	byConn, ok := manager.GetByConnID(1)
 	if !ok {
@@ -63,6 +66,9 @@ func TestManagerReplacesSameClientDevice(t *testing.T) {
 	}
 	if result.Replaced.ConnID != 1 {
 		t.Fatalf("Replaced ConnID = %d, want 1", result.Replaced.ConnID)
+	}
+	if !result.Created {
+		t.Fatal("Created = false, want true")
 	}
 
 	if _, ok := manager.GetByConnID(1); ok {
@@ -109,6 +115,9 @@ func TestManagerKeepsSessionForSameConnection(t *testing.T) {
 
 	if second.Replaced != nil {
 		t.Fatalf("Replaced = %v, want nil", second.Replaced)
+	}
+	if second.Created {
+		t.Fatal("Created = true, want false")
 	}
 	if second.Session.SessionID != first.Session.SessionID {
 		t.Fatalf("SessionID = %q, want %q", second.Session.SessionID, first.Session.SessionID)

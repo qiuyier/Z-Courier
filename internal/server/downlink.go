@@ -21,10 +21,14 @@ func newDownlinkService(config Config, connManager ziface.IConnManager) (*downli
 		return nil, nil, err
 	}
 
-	options := make([]downlink.ServiceOption, 0, 1)
+	options := make([]downlink.ServiceOption, 0, 3)
 	if store != nil {
 		options = append(options, downlink.WithStore(store))
 	}
+	options = append(options,
+		downlink.WithRetryDelay(config.DownlinkDelivery.RetryDelay),
+		downlink.WithMaxAttempts(config.DownlinkDelivery.MaxAttempts),
+	)
 
 	return downlink.NewService(config.Sessions, zinxConnectionFinder{connManager: connManager}, options...), closer, nil
 }

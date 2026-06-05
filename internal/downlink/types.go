@@ -21,3 +21,10 @@ type PushResponse struct {
 	MessageID     string `json:"message_id,omitempty"`
 	TraceID       string `json:"trace_id,omitempty"`
 }
+
+type ClientAckRequest struct {
+	MessageID string `json:"message_id"`
+	Code      string `json:"code"`
+}
+
+const ClientAckCodeDelivered = "delivered"

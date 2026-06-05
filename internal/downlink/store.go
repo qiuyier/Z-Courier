@@ -11,6 +11,13 @@ const (
 	DeliveryStateQueued = "queued"
 )
 
+type RetryResult struct {
+	Scanned int
+	Sent    int
+	Queued  int
+	Failed  int
+}
+
 type MessageStatus string
 
 const (
@@ -47,8 +54,12 @@ func (m Message) Clone() Message {
 type Store interface {
 	Save(context.Context, Message) (Message, error)
 	Get(context.Context, string) (Message, bool, error)
+	ListDuePending(context.Context, time.Time, int) ([]Message, error)
+	ListPendingByClientDevice(context.Context, string, string, int) ([]Message, error)
 	MarkSent(context.Context, string, string, time.Time) error
+	MarkDelivered(context.Context, string, string, string, time.Time) error
 	MarkAttemptFailed(context.Context, string, string, time.Time) error
+	MarkFailed(context.Context, string, string, time.Time) error
 }
 
 func messageFromPushRequest(req PushRequest, now time.Time) Message {

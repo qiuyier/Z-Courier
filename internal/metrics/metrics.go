@@ -60,6 +60,23 @@ var (
 		[]string{"msg_id", "result"},
 	)
 
+	downlinkAck = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "z_courier_downlink_ack_total",
+			Help: "Total number of downlink ACK packets handled by the gateway.",
+		},
+		[]string{"msg_id", "result"},
+	)
+
+	downlinkAckLatency = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "z_courier_downlink_ack_latency_seconds",
+			Help:    "Latency from downlink send time to client ACK time in seconds.",
+			Buckets: []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60},
+		},
+		[]string{"msg_id"},
+	)
+
 	rateLimitRejected = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "z_courier_rate_limit_rejected_total",
@@ -93,6 +110,18 @@ func SetSessionsOnline(count int) {
 
 func RecordDownlinkPush(msgID uint32, result string) {
 	downlinkPush.WithLabelValues(formatMsgID(msgID), nonEmpty(result, "unknown")).Inc()
+}
+
+func RecordDownlinkAck(msgID uint32, result string) {
+	downlinkAck.WithLabelValues(formatMsgID(msgID), nonEmpty(result, "unknown")).Inc()
+}
+
+func ObserveDownlinkAckLatency(msgID uint32, duration time.Duration) {
+	if duration < 0 {
+		return
+	}
+
+	downlinkAckLatency.WithLabelValues(formatMsgID(msgID)).Observe(duration.Seconds())
 }
 
 func RecordRateLimitRejected(msgID uint32) {

@@ -155,6 +155,257 @@ func TestServiceReliablePushQueuesOfflineMessage(t *testing.T) {
 	}
 }
 
+func TestServiceRetryDueSendsPendingMessage(t *testing.T) {
+	now := time.UnixMilli(1760000000000)
+	store := NewMemoryStore()
+	store.now = func() time.Time { return now }
+	if _, err := store.Save(context.Background(), Message{
+		MessageID:   "message-1",
+		ClientID:    "client-1",
+		DeviceID:    "device-1",
+		MsgID:       2001,
+		Body:        []byte("hello"),
+		Status:      MessageStatusPending,
+		NextRetryAt: now,
+		CreatedAt:   now,
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	conn := &fakeConnection{}
+	service := NewService(
+		fakeSessions{session: &session.Session{SessionID: "session-1", ConnID: 7, ClientID: "client-1", DeviceID: "device-1"}},
+		fakeConnections{conn: conn},
+		WithStore(store),
+	)
+	service.now = func() time.Time { return now }
+
+	result, err := service.RetryDue(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("RetryDue() error = %v", err)
+	}
+	if result.Scanned != 1 || result.Sent != 1 || result.Queued != 0 || result.Failed != 0 {
+		t.Fatalf("RetryDue() result = %+v, want one sent", result)
+	}
+	if len(conn.data) == 0 {
+		t.Fatal("connection did not receive data")
+	}
+
+	stored, ok, err := store.Get(context.Background(), "message-1")
+	if err != nil {
+		t.Fatalf("store.Get() error = %v", err)
+	}
+	if !ok {
+		t.Fatal("stored message not found")
+	}
+	if stored.Status != MessageStatusSent {
+		t.Fatalf("stored Status = %q, want sent", stored.Status)
+	}
+}
+
+func TestServiceRetryDueKeepsOfflineMessageQueued(t *testing.T) {
+	now := time.UnixMilli(1760000000000)
+	store := NewMemoryStore()
+	store.now = func() time.Time { return now }
+	if _, err := store.Save(context.Background(), Message{
+		MessageID:   "message-1",
+		ClientID:    "client-1",
+		DeviceID:    "device-1",
+		MsgID:       2001,
+		Status:      MessageStatusPending,
+		Attempts:    1,
+		NextRetryAt: now,
+		CreatedAt:   now,
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	service := NewService(fakeSessions{}, fakeConnections{}, WithStore(store), WithMaxAttempts(3))
+	service.now = func() time.Time { return now }
+
+	result, err := service.RetryDue(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("RetryDue() error = %v", err)
+	}
+	if result.Scanned != 1 || result.Sent != 0 || result.Queued != 1 || result.Failed != 0 {
+		t.Fatalf("RetryDue() result = %+v, want one queued", result)
+	}
+
+	stored, _, err := store.Get(context.Background(), "message-1")
+	if err != nil {
+		t.Fatalf("store.Get() error = %v", err)
+	}
+	if stored.Status != MessageStatusPending {
+		t.Fatalf("stored Status = %q, want pending", stored.Status)
+	}
+	if stored.Attempts != 2 {
+		t.Fatalf("stored Attempts = %d, want 2", stored.Attempts)
+	}
+}
+
+func TestServiceRetryDueMarksFailedAfterMaxAttempts(t *testing.T) {
+	now := time.UnixMilli(1760000000000)
+	store := NewMemoryStore()
+	store.now = func() time.Time { return now }
+	if _, err := store.Save(context.Background(), Message{
+		MessageID:   "message-1",
+		ClientID:    "client-1",
+		DeviceID:    "device-1",
+		MsgID:       2001,
+		Status:      MessageStatusPending,
+		Attempts:    1,
+		NextRetryAt: now,
+		CreatedAt:   now,
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	service := NewService(fakeSessions{}, fakeConnections{}, WithStore(store), WithMaxAttempts(2))
+	service.now = func() time.Time { return now }
+
+	result, err := service.RetryDue(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("RetryDue() error = %v", err)
+	}
+	if result.Scanned != 1 || result.Failed != 1 {
+		t.Fatalf("RetryDue() result = %+v, want one failed", result)
+	}
+
+	stored, _, err := store.Get(context.Background(), "message-1")
+	if err != nil {
+		t.Fatalf("store.Get() error = %v", err)
+	}
+	if stored.Status != MessageStatusFailed {
+		t.Fatalf("stored Status = %q, want failed", stored.Status)
+	}
+	if stored.Attempts != 2 {
+		t.Fatalf("stored Attempts = %d, want 2", stored.Attempts)
+	}
+}
+
+func TestServiceFlushClientDeviceSendsPendingMessageBeforeRetryTime(t *testing.T) {
+	now := time.UnixMilli(1760000000000)
+	store := NewMemoryStore()
+	store.now = func() time.Time { return now }
+	if _, err := store.Save(context.Background(), Message{
+		MessageID:   "message-1",
+		ClientID:    "client-1",
+		DeviceID:    "device-1",
+		MsgID:       2001,
+		Body:        []byte("hello"),
+		Status:      MessageStatusPending,
+		NextRetryAt: now.Add(time.Minute),
+		CreatedAt:   now,
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	conn := &fakeConnection{}
+	service := NewService(
+		fakeSessions{session: &session.Session{SessionID: "session-1", ConnID: 7, ClientID: "client-1", DeviceID: "device-1"}},
+		fakeConnections{conn: conn},
+		WithStore(store),
+	)
+	service.now = func() time.Time { return now }
+
+	result, err := service.FlushClientDevice(context.Background(), "client-1", "device-1", 10)
+	if err != nil {
+		t.Fatalf("FlushClientDevice() error = %v", err)
+	}
+	if result.Scanned != 1 || result.Sent != 1 {
+		t.Fatalf("FlushClientDevice() result = %+v, want one sent", result)
+	}
+	if len(conn.data) == 0 {
+		t.Fatal("connection did not receive data")
+	}
+}
+
+func TestServiceAckMarksMessageDelivered(t *testing.T) {
+	now := time.UnixMilli(1760000000000)
+	store := NewMemoryStore()
+	store.now = func() time.Time { return now }
+	if _, err := store.Save(context.Background(), Message{
+		MessageID: "message-1",
+		ClientID:  "client-1",
+		DeviceID:  "device-1",
+		MsgID:     2001,
+		Status:    MessageStatusSent,
+		SentAt:    now,
+		CreatedAt: now,
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	service := NewService(fakeSessions{}, fakeConnections{}, WithStore(store))
+	service.now = func() time.Time { return now.Add(time.Second) }
+
+	message, err := service.Ack(context.Background(), "client-1", "device-1", ClientAckRequest{
+		MessageID: "message-1",
+		Code:      ClientAckCodeDelivered,
+	})
+	if err != nil {
+		t.Fatalf("Ack() error = %v", err)
+	}
+	if message.Status != MessageStatusDelivered {
+		t.Fatalf("message Status = %q, want delivered", message.Status)
+	}
+	if !message.DeliveredAt.Equal(now.Add(time.Second)) {
+		t.Fatalf("DeliveredAt = %v", message.DeliveredAt)
+	}
+
+	stored, _, err := store.Get(context.Background(), "message-1")
+	if err != nil {
+		t.Fatalf("store.Get() error = %v", err)
+	}
+	if stored.Status != MessageStatusDelivered {
+		t.Fatalf("stored Status = %q, want delivered", stored.Status)
+	}
+}
+
+func TestServiceAckRejectsWrongClientDevice(t *testing.T) {
+	store := NewMemoryStore()
+	if _, err := store.Save(context.Background(), Message{
+		MessageID: "message-1",
+		ClientID:  "client-1",
+		DeviceID:  "device-1",
+		MsgID:     2001,
+		Status:    MessageStatusSent,
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	service := NewService(fakeSessions{}, fakeConnections{}, WithStore(store))
+	_, err := service.Ack(context.Background(), "client-1", "other-device", ClientAckRequest{
+		MessageID: "message-1",
+		Code:      ClientAckCodeDelivered,
+	})
+	if !errors.Is(err, ErrMessageNotFound) {
+		t.Fatalf("Ack() error = %v, want %v", err, ErrMessageNotFound)
+	}
+}
+
+func TestServiceAckValidation(t *testing.T) {
+	service := NewService(fakeSessions{}, fakeConnections{}, WithStore(NewMemoryStore()))
+
+	tests := []struct {
+		name string
+		req  ClientAckRequest
+		want error
+	}{
+		{name: "missing message id", req: ClientAckRequest{Code: ClientAckCodeDelivered}, want: ErrMissingMessageID},
+		{name: "invalid code", req: ClientAckRequest{MessageID: "m1", Code: "failed"}, want: ErrInvalidAckCode},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := service.Ack(context.Background(), "client-1", "device-1", tt.req)
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("Ack() error = %v, want %v", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestServicePushValidation(t *testing.T) {
 	service := NewService(fakeSessions{}, fakeConnections{})
 

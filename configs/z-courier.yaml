@@ -25,6 +25,12 @@ downlink:
       max_open_conns: 10
       max_idle_conns: 5
       conn_max_lifetime: 30m
+  delivery:
+    retry_interval: 5s
+    retry_delay: 30s
+    max_attempts: 5
+    scan_limit: 100
+    bind_flush_limit: 100
 
 pipeline:
   allowlist:

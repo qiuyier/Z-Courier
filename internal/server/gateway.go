@@ -11,8 +11,10 @@ import (
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/aceld/zinx/znet"
+	"github.com/qiuyier/Z-Courier/internal/downlink"
 	"github.com/qiuyier/Z-Courier/internal/metrics"
 	"github.com/qiuyier/Z-Courier/internal/pipeline"
+	"github.com/qiuyier/Z-Courier/internal/protocol"
 	"github.com/qiuyier/Z-Courier/internal/router"
 	"github.com/qiuyier/Z-Courier/internal/session"
 	"go.uber.org/zap"
@@ -23,9 +25,14 @@ type Gateway struct {
 	sessions *session.Manager
 	logger   *zap.Logger
 
-	internalHTTP *http.Server
-	upstream     *router.Engine
-	downlink     io.Closer
+	internalHTTP            *http.Server
+	upstream                *router.Engine
+	downlink                *downlink.Service
+	downlinkCloser          io.Closer
+	downlinkRetryInterval   time.Duration
+	downlinkRetryScanLimit  int
+	downlinkWorkerCancel    context.CancelFunc
+	downlinkWorkerCompleted chan struct{}
 }
 
 func New(config Config, logger *zap.Logger) (*Gateway, error) {
@@ -53,12 +60,15 @@ func New(config Config, logger *zap.Logger) (*Gateway, error) {
 	}
 
 	gateway := &Gateway{
-		server:       zServer,
-		sessions:     config.Sessions,
-		logger:       logger,
-		internalHTTP: newInternalHTTPServer(config, logger, downlinkService),
-		upstream:     upstream,
-		downlink:     downlinkCloser,
+		server:                 zServer,
+		sessions:               config.Sessions,
+		logger:                 logger,
+		internalHTTP:           newInternalHTTPServer(config, logger, downlinkService),
+		upstream:               upstream,
+		downlink:               downlinkService,
+		downlinkCloser:         downlinkCloser,
+		downlinkRetryInterval:  config.DownlinkDelivery.RetryInterval,
+		downlinkRetryScanLimit: config.DownlinkDelivery.ScanLimit,
 	}
 
 	zServer.SetOnConnStart(gateway.onConnStart)
@@ -69,6 +79,8 @@ func New(config Config, logger *zap.Logger) (*Gateway, error) {
 		zServer.GetConnMgr(),
 		newIngressPipeline(config, logger),
 		upstream,
+		downlinkService,
+		config.DownlinkDelivery.BindFlushLimit,
 	)
 
 	for _, msgID := range msgIDs {
@@ -90,8 +102,10 @@ func newIngressPipeline(config Config, logger *zap.Logger) *pipeline.Chain {
 
 func (g *Gateway) Serve() {
 	g.startInternalHTTP()
+	g.startDownlinkRetryWorker()
 	defer g.shutdownDownlink()
 	defer g.shutdownUpstream()
+	defer g.shutdownDownlinkRetryWorker()
 	defer g.shutdownInternalHTTP()
 
 	g.server.Serve()
@@ -139,17 +153,87 @@ func (g *Gateway) shutdownUpstream() {
 }
 
 func (g *Gateway) shutdownDownlink() {
-	if g.downlink == nil {
+	if g.downlinkCloser == nil {
 		return
 	}
 
-	if err := g.downlink.Close(); err != nil {
+	if err := g.downlinkCloser.Close(); err != nil {
 		g.logger.Warn("failed to shutdown downlink store cleanly", zap.Error(err))
+	}
+}
+
+func (g *Gateway) startDownlinkRetryWorker() {
+	if g.downlink == nil || !g.downlink.HasStore() {
+		return
+	}
+
+	interval := g.downlinkRetryInterval
+	if interval <= 0 {
+		interval = 5 * time.Second
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	g.downlinkWorkerCancel = cancel
+	g.downlinkWorkerCompleted = make(chan struct{})
+
+	g.logger.Info(
+		"starting downlink retry worker",
+		zap.Duration("interval", interval),
+		zap.Int("scan_limit", g.downlinkRetryScanLimit),
+	)
+
+	go func() {
+		defer close(g.downlinkWorkerCompleted)
+
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				g.retryDownlinkDue(ctx)
+			}
+		}
+	}()
+}
+
+func (g *Gateway) retryDownlinkDue(ctx context.Context) {
+	startedAt := time.Now()
+	result, err := g.downlink.RetryDue(ctx, g.downlinkRetryScanLimit)
+	if err != nil {
+		g.logger.Warn("downlink retry worker failed", zap.Error(err))
+		return
+	}
+	if result.Scanned == 0 {
+		return
+	}
+
+	g.logger.Info(
+		"downlink retry worker completed",
+		zap.Int("scanned", result.Scanned),
+		zap.Int("sent", result.Sent),
+		zap.Int("queued", result.Queued),
+		zap.Int("failed", result.Failed),
+		zap.Duration("duration", time.Since(startedAt)),
+	)
+}
+
+func (g *Gateway) shutdownDownlinkRetryWorker() {
+	if g.downlinkWorkerCancel == nil {
+		return
+	}
+
+	g.downlinkWorkerCancel()
+	if g.downlinkWorkerCompleted != nil {
+		<-g.downlinkWorkerCompleted
 	}
 }
 
 func registeredMsgIDs(config Config) ([]uint32, error) {
 	seen := make(map[uint32]struct{})
+	seen[protocol.MsgIDDownlinkAck] = struct{}{}
 	for _, msgID := range config.RouteMsgIDs {
 		seen[msgID] = struct{}{}
 	}

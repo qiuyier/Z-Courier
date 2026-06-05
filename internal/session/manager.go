@@ -18,6 +18,7 @@ type BindInput struct {
 type BindResult struct {
 	Session  *Session
 	Replaced *Session
+	Created  bool
 }
 
 type Manager struct {
@@ -101,6 +102,7 @@ func (m *Manager) Bind(input BindInput) (*BindResult, error) {
 	return &BindResult{
 		Session:  session.Clone(),
 		Replaced: cloneSession(replaced),
+		Created:  true,
 	}, nil
 }
 

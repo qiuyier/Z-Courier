@@ -22,6 +22,7 @@ type Config struct {
 	Pipeline                   pipeline.Config
 	DownlinkStore              downlink.Store
 	DownlinkStorage            DownlinkStorageConfig
+	DownlinkDelivery           DownlinkDeliveryConfig
 }
 
 type UpstreamRouteConfig struct {
@@ -64,6 +65,14 @@ type DownlinkPostgresConfig struct {
 	ConnMaxLifetime time.Duration
 }
 
+type DownlinkDeliveryConfig struct {
+	RetryInterval  time.Duration
+	RetryDelay     time.Duration
+	MaxAttempts    int
+	ScanLimit      int
+	BindFlushLimit int
+}
+
 func DefaultConfig() Config {
 	return Config{
 		RouteMsgIDs: []uint32{1000},
@@ -85,6 +94,13 @@ func DefaultConfig() Config {
 				AutoMigrate:    true,
 				AutoMigrateSet: true,
 			},
+		},
+		DownlinkDelivery: DownlinkDeliveryConfig{
+			RetryInterval:  5 * time.Second,
+			RetryDelay:     30 * time.Second,
+			MaxAttempts:    5,
+			ScanLimit:      100,
+			BindFlushLimit: 100,
 		},
 	}
 }
@@ -119,6 +135,21 @@ func normalizeConfig(config Config) Config {
 	if !config.DownlinkStorage.Postgres.AutoMigrateSet {
 		config.DownlinkStorage.Postgres.AutoMigrate = defaults.DownlinkStorage.Postgres.AutoMigrate
 		config.DownlinkStorage.Postgres.AutoMigrateSet = defaults.DownlinkStorage.Postgres.AutoMigrateSet
+	}
+	if config.DownlinkDelivery.RetryInterval <= 0 {
+		config.DownlinkDelivery.RetryInterval = defaults.DownlinkDelivery.RetryInterval
+	}
+	if config.DownlinkDelivery.RetryDelay <= 0 {
+		config.DownlinkDelivery.RetryDelay = defaults.DownlinkDelivery.RetryDelay
+	}
+	if config.DownlinkDelivery.MaxAttempts <= 0 {
+		config.DownlinkDelivery.MaxAttempts = defaults.DownlinkDelivery.MaxAttempts
+	}
+	if config.DownlinkDelivery.ScanLimit <= 0 {
+		config.DownlinkDelivery.ScanLimit = defaults.DownlinkDelivery.ScanLimit
+	}
+	if config.DownlinkDelivery.BindFlushLimit <= 0 {
+		config.DownlinkDelivery.BindFlushLimit = defaults.DownlinkDelivery.BindFlushLimit
 	}
 
 	return config

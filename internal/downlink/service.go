@@ -27,6 +27,7 @@ type Service struct {
 	store       Store
 	now         func() time.Time
 	retryDelay  time.Duration
+	maxAttempts int
 }
 
 type ServiceOption func(*Service)
@@ -45,18 +46,31 @@ func WithRetryDelay(delay time.Duration) ServiceOption {
 	}
 }
 
+func WithMaxAttempts(maxAttempts int) ServiceOption {
+	return func(s *Service) {
+		if maxAttempts > 0 {
+			s.maxAttempts = maxAttempts
+		}
+	}
+}
+
 func NewService(sessions SessionFinder, connections ConnectionFinder, options ...ServiceOption) *Service {
 	service := &Service{
 		sessions:    sessions,
 		connections: connections,
 		now:         time.Now,
 		retryDelay:  30 * time.Second,
+		maxAttempts: 5,
 	}
 	for _, option := range options {
 		option(service)
 	}
 
 	return service
+}
+
+func (s *Service) HasStore() bool {
+	return s.store != nil
 }
 
 func (s *Service) Push(ctx context.Context, req PushRequest) (*PushResponse, error) {
@@ -88,7 +102,9 @@ func (s *Service) pushReliable(ctx context.Context, req PushRequest) (*PushRespo
 
 	sentResp, err := s.pushOnline(pushRequestFromMessage(message))
 	if err != nil {
-		_ = s.store.MarkAttemptFailed(ctx, message.MessageID, err.Error(), s.now().Add(s.retryDelay))
+		if err := s.store.MarkAttemptFailed(ctx, message.MessageID, err.Error(), s.now().Add(s.retryDelay)); err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrStore, err)
+		}
 		return resp, nil
 	}
 
@@ -98,6 +114,124 @@ func (s *Service) pushReliable(ctx context.Context, req PushRequest) (*PushRespo
 
 	sentResp.DeliveryState = DeliveryStateSent
 	return sentResp, nil
+}
+
+func (s *Service) RetryDue(ctx context.Context, limit int) (RetryResult, error) {
+	if s.store == nil {
+		return RetryResult{}, nil
+	}
+
+	messages, err := s.store.ListDuePending(ctx, s.now(), limit)
+	if err != nil {
+		return RetryResult{}, fmt.Errorf("%w: %v", ErrStore, err)
+	}
+
+	return s.retryMessages(ctx, messages)
+}
+
+func (s *Service) FlushClientDevice(ctx context.Context, clientID, deviceID string, limit int) (RetryResult, error) {
+	if s.store == nil {
+		return RetryResult{}, nil
+	}
+	if clientID == "" {
+		return RetryResult{}, ErrMissingClientID
+	}
+	if deviceID == "" {
+		return RetryResult{}, ErrMissingDeviceID
+	}
+
+	messages, err := s.store.ListPendingByClientDevice(ctx, clientID, deviceID, limit)
+	if err != nil {
+		return RetryResult{}, fmt.Errorf("%w: %v", ErrStore, err)
+	}
+
+	return s.retryMessages(ctx, messages)
+}
+
+func (s *Service) Ack(ctx context.Context, clientID, deviceID string, req ClientAckRequest) (Message, error) {
+	if s.store == nil {
+		return Message{}, ErrStoreNotConfigured
+	}
+	if clientID == "" {
+		return Message{}, ErrMissingClientID
+	}
+	if deviceID == "" {
+		return Message{}, ErrMissingDeviceID
+	}
+	if req.MessageID == "" {
+		return Message{}, ErrMissingMessageID
+	}
+	if req.Code != ClientAckCodeDelivered {
+		return Message{}, ErrInvalidAckCode
+	}
+
+	message, ok, err := s.store.Get(ctx, req.MessageID)
+	if err != nil {
+		return Message{}, fmt.Errorf("%w: %v", ErrStore, err)
+	}
+	if !ok || message.ClientID != clientID || message.DeviceID != deviceID {
+		return Message{}, ErrMessageNotFound
+	}
+
+	deliveredAt := s.now()
+	if err := s.store.MarkDelivered(ctx, req.MessageID, clientID, deviceID, deliveredAt); err != nil {
+		return Message{}, fmt.Errorf("%w: %v", ErrStore, err)
+	}
+
+	message.Status = MessageStatusDelivered
+	message.LastError = ""
+	message.NextRetryAt = time.Time{}
+	message.DeliveredAt = deliveredAt
+	message.UpdatedAt = deliveredAt
+	return message, nil
+}
+
+func (s *Service) retryMessages(ctx context.Context, messages []Message) (RetryResult, error) {
+	var result RetryResult
+	for _, message := range messages {
+		if err := ctx.Err(); err != nil {
+			return result, err
+		}
+
+		result.Scanned++
+		status, err := s.retryMessage(ctx, message)
+		if err != nil {
+			return result, err
+		}
+		switch status {
+		case MessageStatusSent:
+			result.Sent++
+		case MessageStatusFailed:
+			result.Failed++
+		default:
+			result.Queued++
+		}
+	}
+
+	return result, nil
+}
+
+func (s *Service) retryMessage(ctx context.Context, message Message) (MessageStatus, error) {
+	sentResp, err := s.pushOnline(pushRequestFromMessage(message))
+	if err != nil {
+		if s.maxAttempts > 0 && message.Attempts+1 >= s.maxAttempts {
+			if err := s.store.MarkFailed(ctx, message.MessageID, err.Error(), s.now()); err != nil {
+				return "", fmt.Errorf("%w: %v", ErrStore, err)
+			}
+			return MessageStatusFailed, nil
+		}
+
+		if err := s.store.MarkAttemptFailed(ctx, message.MessageID, err.Error(), s.now().Add(s.retryDelay)); err != nil {
+			return "", fmt.Errorf("%w: %v", ErrStore, err)
+		}
+		return MessageStatusPending, nil
+	}
+
+	if err := s.store.MarkSent(ctx, message.MessageID, sentResp.SessionID, s.now()); err != nil {
+		return "", fmt.Errorf("%w: %v", ErrStore, err)
+	}
+
+	return MessageStatusSent, nil
 }
 
 func (s *Service) pushOnline(req PushRequest) (*PushResponse, error) {

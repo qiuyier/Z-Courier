@@ -165,6 +165,56 @@ WHERE message_id = $1
 	return message, true, nil
 }
 
+func (s *PostgresStore) ListDuePending(ctx context.Context, now time.Time, limit int) ([]Message, error) {
+	if now.IsZero() {
+		now = time.Now()
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+
+	rows, err := s.db.QueryContext(ctx, `
+SELECT message_id, client_id, device_id, msg_id, body, ack_required, trace_id,
+       session_id, status, attempts, next_retry_at, last_error, created_at,
+       updated_at, sent_at, delivered_at
+FROM z_courier_downlink_messages
+WHERE status = $1
+  AND (next_retry_at IS NULL OR next_retry_at <= $2)
+ORDER BY created_at ASC, message_id ASC
+LIMIT $3
+`, string(MessageStatusPending), now, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return scanMessages(rows)
+}
+
+func (s *PostgresStore) ListPendingByClientDevice(ctx context.Context, clientID, deviceID string, limit int) ([]Message, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+
+	rows, err := s.db.QueryContext(ctx, `
+SELECT message_id, client_id, device_id, msg_id, body, ack_required, trace_id,
+       session_id, status, attempts, next_retry_at, last_error, created_at,
+       updated_at, sent_at, delivered_at
+FROM z_courier_downlink_messages
+WHERE status = $1
+  AND client_id = $2
+  AND device_id = $3
+ORDER BY created_at ASC, message_id ASC
+LIMIT $4
+`, string(MessageStatusPending), clientID, deviceID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return scanMessages(rows)
+}
+
 func (s *PostgresStore) MarkSent(ctx context.Context, messageID, sessionID string, sentAt time.Time) error {
 	if sentAt.IsZero() {
 		sentAt = time.Now()
@@ -188,6 +238,29 @@ WHERE message_id = $1
 	return requireAffected(result)
 }
 
+func (s *PostgresStore) MarkDelivered(ctx context.Context, messageID, clientID, deviceID string, deliveredAt time.Time) error {
+	if deliveredAt.IsZero() {
+		deliveredAt = time.Now()
+	}
+
+	result, err := s.db.ExecContext(ctx, `
+UPDATE z_courier_downlink_messages
+SET status = $4,
+    last_error = '',
+    next_retry_at = NULL,
+    delivered_at = $5,
+    updated_at = $5
+WHERE message_id = $1
+  AND client_id = $2
+  AND device_id = $3
+`, messageID, clientID, deviceID, string(MessageStatusDelivered), deliveredAt)
+	if err != nil {
+		return err
+	}
+
+	return requireAffected(result)
+}
+
 func (s *PostgresStore) MarkAttemptFailed(ctx context.Context, messageID, reason string, nextRetryAt time.Time) error {
 	result, err := s.db.ExecContext(ctx, `
 UPDATE z_courier_downlink_messages
@@ -198,6 +271,27 @@ SET status = $2,
     updated_at = $5
 WHERE message_id = $1
 `, messageID, string(MessageStatusPending), reason, nullTime(nextRetryAt), time.Now())
+	if err != nil {
+		return err
+	}
+
+	return requireAffected(result)
+}
+
+func (s *PostgresStore) MarkFailed(ctx context.Context, messageID, reason string, failedAt time.Time) error {
+	if failedAt.IsZero() {
+		failedAt = time.Now()
+	}
+
+	result, err := s.db.ExecContext(ctx, `
+UPDATE z_courier_downlink_messages
+SET status = $2,
+    attempts = attempts + 1,
+    last_error = $3,
+    next_retry_at = NULL,
+    updated_at = $4
+WHERE message_id = $1
+`, messageID, string(MessageStatusFailed), reason, failedAt)
 	if err != nil {
 		return err
 	}
@@ -256,6 +350,22 @@ func scanMessage(row rowScanner) (Message, error) {
 	message.Body = bytes.Clone(message.Body)
 
 	return message, nil
+}
+
+func scanMessages(rows *sql.Rows) ([]Message, error) {
+	messages := make([]Message, 0)
+	for rows.Next() {
+		message, err := scanMessage(rows)
+		if err != nil {
+			return nil, err
+		}
+		messages = append(messages, message)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return messages, nil
 }
 
 func nullTime(value time.Time) any {

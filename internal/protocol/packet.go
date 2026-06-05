@@ -11,7 +11,8 @@ const (
 )
 
 const (
-	MsgIDAck uint32 = 1
+	MsgIDAck         uint32 = 1
+	MsgIDDownlinkAck uint32 = 2
 )
 
 type Flags uint16

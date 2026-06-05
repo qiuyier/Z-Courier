@@ -11,6 +11,7 @@ import (
 	"github.com/aceld/zinx/ziface"
 	"github.com/aceld/zinx/znet"
 	"github.com/bytedance/sonic"
+	"github.com/qiuyier/Z-Courier/internal/downlink"
 	"github.com/qiuyier/Z-Courier/internal/protocol"
 )
 
@@ -25,7 +26,7 @@ func main() {
 
 	client := znet.NewClient(*host, *port)
 	client.AddRouter(protocol.MsgIDAck, &packetRouter{name: "ack"})
-	client.AddRouter(2001, &packetRouter{name: "downlink"})
+	client.AddRouter(2001, &packetRouter{name: "downlink", token: *token})
 	client.SetOnConnStart(func(conn ziface.IConnection) {
 		fmt.Printf("connected: local=%s remote=%s conn_id=%d\n", conn.LocalAddrString(), conn.RemoteAddrString(), conn.GetConnID())
 		if err := sendBindPacket(conn, uint32(*msgID), *clientID, *deviceID, *token); err != nil {
@@ -63,7 +64,8 @@ func sendBindPacket(conn ziface.IConnection, msgID uint32, clientID, deviceID, t
 type packetRouter struct {
 	znet.BaseRouter
 
-	name string
+	name  string
+	token string
 }
 
 func (r packetRouter) Handle(request ziface.IRequest) {
@@ -86,6 +88,38 @@ func (r packetRouter) Handle(request ziface.IRequest) {
 		packet.Flags,
 		formatBody(packet.Body),
 	)
+
+	if r.name == "downlink" && packet.Flags&protocol.FlagAckRequired != 0 && packet.MessageID != "" {
+		if err := sendDownlinkAck(request.GetConnection(), packet, r.token); err != nil {
+			fmt.Printf("[downlink] send ack failed: message_id=%s error=%v\n", packet.MessageID, err)
+		}
+	}
+}
+
+func sendDownlinkAck(conn ziface.IConnection, origin *protocol.Packet, token string) error {
+	body, err := sonic.Marshal(downlink.ClientAckRequest{
+		MessageID: origin.MessageID,
+		Code:      downlink.ClientAckCodeDelivered,
+	})
+	if err != nil {
+		return err
+	}
+
+	packet := protocol.NewPacket(protocol.MsgIDDownlinkAck, body)
+	packet.ClientID = origin.ClientID
+	packet.DeviceID = origin.DeviceID
+	packet.SessionID = origin.SessionID
+	packet.MessageID = origin.MessageID
+	packet.TraceID = origin.TraceID
+	packet.Token = token
+	packet.Timestamp = time.Now().UnixMilli()
+
+	data, err := protocol.Encode(packet)
+	if err != nil {
+		return err
+	}
+
+	return conn.SendMsg(packet.MsgID, data)
 }
 
 func formatBody(body []byte) string {

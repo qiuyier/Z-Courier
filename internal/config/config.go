@@ -52,7 +52,8 @@ type UpstreamConfig struct {
 }
 
 type DownlinkConfig struct {
-	Storage DownlinkStorageConfig `yaml:"storage"`
+	Storage  DownlinkStorageConfig  `yaml:"storage"`
+	Delivery DownlinkDeliveryConfig `yaml:"delivery"`
 }
 
 type DownlinkStorageConfig struct {
@@ -66,6 +67,14 @@ type DownlinkPostgresConfig struct {
 	MaxOpenConns    int    `yaml:"max_open_conns"`
 	MaxIdleConns    int    `yaml:"max_idle_conns"`
 	ConnMaxLifetime string `yaml:"conn_max_lifetime"`
+}
+
+type DownlinkDeliveryConfig struct {
+	RetryInterval  string `yaml:"retry_interval"`
+	RetryDelay     string `yaml:"retry_delay"`
+	MaxAttempts    int    `yaml:"max_attempts"`
+	ScanLimit      int    `yaml:"scan_limit"`
+	BindFlushLimit int    `yaml:"bind_flush_limit"`
 }
 
 type PipelineConfig struct {
@@ -247,6 +256,40 @@ func applyDownlinkConfig(out *server.Config, config DownlinkConfig) error {
 
 	if out.DownlinkStorage.Type == "postgres" && out.DownlinkStorage.Postgres.DSN == "" {
 		return fmt.Errorf("config: downlink postgres dsn is required")
+	}
+
+	delivery := config.Delivery
+	retryInterval, err := parseOptionalDuration(delivery.RetryInterval)
+	if err != nil {
+		return fmt.Errorf("config: downlink delivery retry_interval: %w", err)
+	}
+	retryDelay, err := parseOptionalDuration(delivery.RetryDelay)
+	if err != nil {
+		return fmt.Errorf("config: downlink delivery retry_delay: %w", err)
+	}
+	if retryInterval > 0 {
+		out.DownlinkDelivery.RetryInterval = retryInterval
+	}
+	if retryDelay > 0 {
+		out.DownlinkDelivery.RetryDelay = retryDelay
+	}
+	if delivery.MaxAttempts < 0 {
+		return fmt.Errorf("config: downlink delivery max_attempts must be greater than or equal to 0")
+	}
+	if delivery.ScanLimit < 0 {
+		return fmt.Errorf("config: downlink delivery scan_limit must be greater than or equal to 0")
+	}
+	if delivery.BindFlushLimit < 0 {
+		return fmt.Errorf("config: downlink delivery bind_flush_limit must be greater than or equal to 0")
+	}
+	if delivery.MaxAttempts > 0 {
+		out.DownlinkDelivery.MaxAttempts = delivery.MaxAttempts
+	}
+	if delivery.ScanLimit > 0 {
+		out.DownlinkDelivery.ScanLimit = delivery.ScanLimit
+	}
+	if delivery.BindFlushLimit > 0 {
+		out.DownlinkDelivery.BindFlushLimit = delivery.BindFlushLimit
 	}
 
 	return nil
