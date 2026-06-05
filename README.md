@@ -26,6 +26,17 @@ Run tests:
 go test ./...
 ```
 
+Run the local V1 integration verifier:
+
+```bash
+bash scripts/e2e.sh
+```
+
+It starts PostgreSQL, NSQ, Prometheus, Grafana, the gateway, and validates the
+reliable downlink path with PostgreSQL storage. See
+[deploy/local/README.md](deploy/local/README.md) for the manual workflow and
+local URLs.
+
 Start the gateway:
 
 ```bash
