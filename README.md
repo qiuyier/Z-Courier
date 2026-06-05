@@ -16,6 +16,8 @@ A high-performance message push gateway based on the `zinx` network framework.
 See [docs/architecture.md](docs/architecture.md) for the initial open-source
 middleware architecture.
 
+Release history is tracked in [CHANGELOG.md](CHANGELOG.md).
+
 ## Quick Start
 
 Run the V1 local integration verifier from the repository root:
