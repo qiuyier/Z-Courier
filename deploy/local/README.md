@@ -14,6 +14,11 @@ bash scripts/e2e.sh
 The script starts the local Docker Compose services, starts the gateway with
 `configs/z-courier.integration.yaml`, then runs `cmd/e2e`.
 
+The integration config is intentionally isolated from the default development
+ports and tokens. See [../../docs/configuration.md](../../docs/configuration.md)
+and [../../docs/protocol.md](../../docs/protocol.md) for the config and packet
+contracts used by the verifier.
+
 ## Manual Run
 
 Start local dependencies:

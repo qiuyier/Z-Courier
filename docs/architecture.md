@@ -370,6 +370,8 @@ z_courier_upstream_forward_total
 z_courier_upstream_forward_duration_seconds
 z_courier_sessions_online
 z_courier_downlink_push_total
+z_courier_downlink_ack_total
+z_courier_downlink_ack_latency_seconds
 z_courier_rate_limit_rejected_total
 ```
 

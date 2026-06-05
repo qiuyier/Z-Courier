@@ -50,6 +50,9 @@ z_courier_sessions_online
 sum by (result) (rate(z_courier_ingress_packets_total[1m]))
 sum by (route, target_type, result) (rate(z_courier_upstream_forward_total[1m]))
 histogram_quantile(0.95, sum by (le, route, target_type) (rate(z_courier_upstream_forward_duration_seconds_bucket[5m])))
+sum by (result) (rate(z_courier_downlink_push_total[1m]))
+sum by (result) (rate(z_courier_downlink_ack_total[1m]))
+histogram_quantile(0.95, sum by (le, msg_id) (rate(z_courier_downlink_ack_latency_seconds_bucket[5m])))
 ```
 
 Open Grafana:

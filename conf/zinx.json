@@ -13,5 +13,5 @@
   "LogDir": "./log",
   "LogFile": "zinx.log",
   "LogCons": true,
-  "LogIsolationLevel": 0
+  "LogIsolationLevel": 2
 }

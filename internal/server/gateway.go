@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/aceld/zinx/ziface"
@@ -86,6 +87,11 @@ func New(config Config, logger *zap.Logger) (*Gateway, error) {
 	for _, msgID := range msgIDs {
 		zServer.AddRouter(msgID, router)
 	}
+	logger.Info(
+		"registered zinx routes",
+		zap.Int("count", len(msgIDs)),
+		zap.Strings("msg_id_ranges", compactMsgIDRanges(msgIDs)),
+	)
 
 	return gateway, nil
 }
@@ -267,6 +273,37 @@ func registeredMsgIDs(config Config) ([]uint32, error) {
 	})
 
 	return msgIDs, nil
+}
+
+func compactMsgIDRanges(msgIDs []uint32) []string {
+	if len(msgIDs) == 0 {
+		return nil
+	}
+
+	ranges := make([]string, 0, len(msgIDs))
+	start := msgIDs[0]
+	previous := msgIDs[0]
+	for _, msgID := range msgIDs[1:] {
+		if msgID == previous+1 {
+			previous = msgID
+			continue
+		}
+
+		ranges = append(ranges, formatMsgIDRange(start, previous))
+		start = msgID
+		previous = msgID
+	}
+
+	ranges = append(ranges, formatMsgIDRange(start, previous))
+	return ranges
+}
+
+func formatMsgIDRange(start, end uint32) string {
+	if start == end {
+		return strconv.FormatUint(uint64(start), 10)
+	}
+
+	return strconv.FormatUint(uint64(start), 10) + "-" + strconv.FormatUint(uint64(end), 10)
 }
 
 func (g *Gateway) onConnStart(conn ziface.IConnection) {

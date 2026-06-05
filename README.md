@@ -16,6 +16,26 @@ A high-performance message push gateway based on the `zinx` network framework.
 See [docs/architecture.md](docs/architecture.md) for the initial open-source
 middleware architecture.
 
+## Quick Start
+
+Run the V1 local integration verifier from the repository root:
+
+```bash
+bash scripts/e2e.sh
+```
+
+The script starts PostgreSQL, NSQ, Prometheus, Grafana, and the gateway, then
+validates:
+
+- offline downlink queueing with PostgreSQL
+- client bind and offline message flush
+- online push and client delivery ACK
+- upstream forwarding to NSQ
+- Prometheus metrics exposure
+
+Local service URLs and the manual workflow are documented in
+[deploy/local/README.md](deploy/local/README.md).
+
 ## Development
 
 Z-Courier targets Go 1.26.
@@ -48,6 +68,11 @@ file, set `ZINX_CONFIG_FILE_PATH` before starting the gateway.
 
 Z-Courier loads its gateway config from `configs/z-courier.yaml` by default. You
 can override it with `-config` or the `ZCOURIER_CONFIG` environment variable.
+See [docs/configuration.md](docs/configuration.md) for all current V1 config
+fields.
+
+The current binary packet format is documented in
+[docs/protocol.md](docs/protocol.md).
 
 The gateway registers Zinx routes from `route_msg_ids` and enabled upstream
 route ranges. The router decodes the Z-Courier protocol packet from the Zinx
