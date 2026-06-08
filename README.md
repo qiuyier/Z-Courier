@@ -16,6 +16,9 @@ A high-performance message push gateway based on the `zinx` network framework.
 See [docs/architecture.md](docs/architecture.md) for the initial open-source
 middleware architecture.
 
+V2 cluster design is tracked in
+[docs/v2-cluster-architecture.md](docs/v2-cluster-architecture.md).
+
 Release history is tracked in [CHANGELOG.md](CHANGELOG.md).
 
 ## Quick Start
