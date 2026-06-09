@@ -42,6 +42,24 @@ internal_http:
   addr: 127.0.0.1:19080
   token: internal-a
   max_request_body_size: 12345
+cluster:
+  enabled: true
+  internal_addr: http://gateway-a:18082
+  registry:
+    type: redis
+    ttl: 45s
+    redis:
+      addr: 127.0.0.1:6379
+      username: redis-user
+      password: redis-pass
+      db: 2
+      key_prefix: test-zcourier
+      dial_timeout: 500ms
+      read_timeout: 700ms
+      write_timeout: 900ms
+  peer:
+    token: cluster-token
+    timeout: 1500ms
 downlink:
   storage:
     type: postgres
@@ -130,6 +148,48 @@ upstream:
 	}
 	if config.InternalMaxRequestBodySize != 12345 {
 		t.Fatalf("InternalMaxRequestBodySize = %d, want 12345", config.InternalMaxRequestBodySize)
+	}
+	if !config.Cluster.Enabled {
+		t.Fatal("Cluster Enabled = false, want true")
+	}
+	if config.Cluster.InternalAddr != "http://gateway-a:18082" {
+		t.Fatalf("Cluster InternalAddr = %q, want http://gateway-a:18082", config.Cluster.InternalAddr)
+	}
+	if config.Cluster.Registry.Type != "redis" {
+		t.Fatalf("Cluster Registry Type = %q, want redis", config.Cluster.Registry.Type)
+	}
+	if config.Cluster.Registry.TTL != 45*time.Second {
+		t.Fatalf("Cluster Registry TTL = %v, want 45s", config.Cluster.Registry.TTL)
+	}
+	if config.Cluster.Registry.Redis.Addr != "127.0.0.1:6379" {
+		t.Fatalf("Cluster Redis Addr = %q", config.Cluster.Registry.Redis.Addr)
+	}
+	if config.Cluster.Registry.Redis.Username != "redis-user" {
+		t.Fatalf("Cluster Redis Username = %q", config.Cluster.Registry.Redis.Username)
+	}
+	if config.Cluster.Registry.Redis.Password != "redis-pass" {
+		t.Fatalf("Cluster Redis Password = %q", config.Cluster.Registry.Redis.Password)
+	}
+	if config.Cluster.Registry.Redis.DB != 2 {
+		t.Fatalf("Cluster Redis DB = %d, want 2", config.Cluster.Registry.Redis.DB)
+	}
+	if config.Cluster.Registry.Redis.KeyPrefix != "test-zcourier" {
+		t.Fatalf("Cluster Redis KeyPrefix = %q", config.Cluster.Registry.Redis.KeyPrefix)
+	}
+	if config.Cluster.Registry.Redis.DialTimeout != 500*time.Millisecond {
+		t.Fatalf("Cluster Redis DialTimeout = %v, want 500ms", config.Cluster.Registry.Redis.DialTimeout)
+	}
+	if config.Cluster.Registry.Redis.ReadTimeout != 700*time.Millisecond {
+		t.Fatalf("Cluster Redis ReadTimeout = %v, want 700ms", config.Cluster.Registry.Redis.ReadTimeout)
+	}
+	if config.Cluster.Registry.Redis.WriteTimeout != 900*time.Millisecond {
+		t.Fatalf("Cluster Redis WriteTimeout = %v, want 900ms", config.Cluster.Registry.Redis.WriteTimeout)
+	}
+	if config.Cluster.Peer.Token != "cluster-token" {
+		t.Fatalf("Cluster Peer Token = %q", config.Cluster.Peer.Token)
+	}
+	if config.Cluster.Peer.Timeout != 1500*time.Millisecond {
+		t.Fatalf("Cluster Peer Timeout = %v, want 1500ms", config.Cluster.Peer.Timeout)
 	}
 	if config.DownlinkStorage.Type != "postgres" {
 		t.Fatalf("DownlinkStorage Type = %q, want postgres", config.DownlinkStorage.Type)
@@ -235,6 +295,100 @@ upstream:
 	}
 	if nsqRoute.NSQ.RetryAttempts != 1 {
 		t.Fatalf("NSQ RetryAttempts = %d, want 1", nsqRoute.NSQ.RetryAttempts)
+	}
+}
+
+func TestLoadServerConfigClusterDefaults(t *testing.T) {
+	path := writeConfig(t, `{}`)
+
+	config, err := LoadServerConfig(path)
+	if err != nil {
+		t.Fatalf("LoadServerConfig() error = %v", err)
+	}
+	if config.Cluster.Enabled {
+		t.Fatal("Cluster Enabled = true, want false")
+	}
+	if config.Cluster.Registry.Type != "memory" {
+		t.Fatalf("Cluster Registry Type = %q, want memory", config.Cluster.Registry.Type)
+	}
+	if config.Cluster.Registry.TTL != 30*time.Second {
+		t.Fatalf("Cluster Registry TTL = %v, want 30s", config.Cluster.Registry.TTL)
+	}
+	if config.Cluster.Registry.Redis.KeyPrefix != "zcourier" {
+		t.Fatalf("Cluster Redis KeyPrefix = %q, want zcourier", config.Cluster.Registry.Redis.KeyPrefix)
+	}
+	if config.Cluster.Registry.Redis.DialTimeout != time.Second {
+		t.Fatalf("Cluster Redis DialTimeout = %v, want 1s", config.Cluster.Registry.Redis.DialTimeout)
+	}
+	if config.Cluster.Peer.Timeout != 2*time.Second {
+		t.Fatalf("Cluster Peer Timeout = %v, want 2s", config.Cluster.Peer.Timeout)
+	}
+}
+
+func TestLoadServerConfigClusterRequiresInternalAddrWhenEnabled(t *testing.T) {
+	path := writeConfig(t, `
+cluster:
+  enabled: true
+`)
+
+	_, err := LoadServerConfig(path)
+	if err == nil {
+		t.Fatal("LoadServerConfig() error = nil, want error")
+	}
+}
+
+func TestLoadServerConfigClusterRejectsInvalidRegistryType(t *testing.T) {
+	path := writeConfig(t, `
+cluster:
+  registry:
+    type: consul
+`)
+
+	_, err := LoadServerConfig(path)
+	if err == nil {
+		t.Fatal("LoadServerConfig() error = nil, want error")
+	}
+}
+
+func TestLoadServerConfigClusterRedisRequiresAddrWhenEnabled(t *testing.T) {
+	path := writeConfig(t, `
+cluster:
+  enabled: true
+  internal_addr: http://gateway-a:18082
+  registry:
+    type: redis
+`)
+
+	_, err := LoadServerConfig(path)
+	if err == nil {
+		t.Fatal("LoadServerConfig() error = nil, want error")
+	}
+}
+
+func TestLoadServerConfigClusterRejectsInvalidTTL(t *testing.T) {
+	path := writeConfig(t, `
+cluster:
+  registry:
+    ttl: 0s
+`)
+
+	_, err := LoadServerConfig(path)
+	if err == nil {
+		t.Fatal("LoadServerConfig() error = nil, want error")
+	}
+}
+
+func TestLoadServerConfigClusterRejectsInvalidRedisDB(t *testing.T) {
+	path := writeConfig(t, `
+cluster:
+  registry:
+    redis:
+      db: -1
+`)
+
+	_, err := LoadServerConfig(path)
+	if err == nil {
+		t.Fatal("LoadServerConfig() error = nil, want error")
 	}
 }
 

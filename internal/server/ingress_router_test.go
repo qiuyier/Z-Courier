@@ -163,6 +163,12 @@ func (c *testZinxConnection) SendMsg(msgID uint32, data []byte) error {
 
 func (c *testZinxConnection) SetProperty(string, interface{}) {}
 
+func (c *testZinxConnection) RemoveProperty(string) {}
+
+func (c *testZinxConnection) RemoteAddrString() string {
+	return ""
+}
+
 func (c *testZinxConnection) RemoteAddr() net.Addr {
 	return nil
 }

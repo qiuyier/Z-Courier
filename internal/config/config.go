@@ -23,6 +23,7 @@ type File struct {
 	RouteMsgIDs []uint32 `yaml:"route_msg_ids"`
 
 	Auth         AuthConfig         `yaml:"auth"`
+	Cluster      ClusterConfig      `yaml:"cluster"`
 	InternalHTTP InternalHTTPConfig `yaml:"internal_http"`
 	Downlink     DownlinkConfig     `yaml:"downlink"`
 	Upstream     UpstreamConfig     `yaml:"upstream"`
@@ -45,6 +46,35 @@ type InternalHTTPConfig struct {
 	Addr               *string `yaml:"addr"`
 	Token              *string `yaml:"token"`
 	MaxRequestBodySize *int64  `yaml:"max_request_body_size"`
+}
+
+type ClusterConfig struct {
+	Enabled      bool                  `yaml:"enabled"`
+	InternalAddr string                `yaml:"internal_addr"`
+	Registry     ClusterRegistryConfig `yaml:"registry"`
+	Peer         ClusterPeerConfig     `yaml:"peer"`
+}
+
+type ClusterRegistryConfig struct {
+	Type  string             `yaml:"type"`
+	TTL   string             `yaml:"ttl"`
+	Redis ClusterRedisConfig `yaml:"redis"`
+}
+
+type ClusterRedisConfig struct {
+	Addr         string `yaml:"addr"`
+	Username     string `yaml:"username"`
+	Password     string `yaml:"password"`
+	DB           int    `yaml:"db"`
+	KeyPrefix    string `yaml:"key_prefix"`
+	DialTimeout  string `yaml:"dial_timeout"`
+	ReadTimeout  string `yaml:"read_timeout"`
+	WriteTimeout string `yaml:"write_timeout"`
+}
+
+type ClusterPeerConfig struct {
+	Token   string `yaml:"token"`
+	Timeout string `yaml:"timeout"`
 }
 
 type UpstreamConfig struct {
@@ -168,6 +198,9 @@ func (c *File) ToServerConfig() (server.Config, error) {
 	}
 
 	applyInternalHTTPConfig(&out, c.InternalHTTP)
+	if err := applyClusterConfig(&out, c.Cluster); err != nil {
+		return server.Config{}, err
+	}
 	if err := applyDownlinkConfig(&out, c.Downlink); err != nil {
 		return server.Config{}, err
 	}
@@ -218,6 +251,91 @@ func applyInternalHTTPConfig(out *server.Config, config InternalHTTPConfig) {
 	if config.MaxRequestBodySize != nil {
 		out.InternalMaxRequestBodySize = *config.MaxRequestBodySize
 	}
+}
+
+func applyClusterConfig(out *server.Config, config ClusterConfig) error {
+	out.Cluster.Enabled = config.Enabled
+	if config.InternalAddr != "" {
+		out.Cluster.InternalAddr = config.InternalAddr
+	}
+
+	registryType := strings.ToLower(strings.TrimSpace(config.Registry.Type))
+	if registryType != "" {
+		switch registryType {
+		case "memory", "redis":
+			out.Cluster.Registry.Type = registryType
+		default:
+			return fmt.Errorf("config: unsupported cluster registry type %q", config.Registry.Type)
+		}
+	}
+
+	ttl, err := parseOptionalPositiveDuration(config.Registry.TTL)
+	if err != nil {
+		return fmt.Errorf("config: cluster registry ttl: %w", err)
+	}
+	if ttl > 0 {
+		out.Cluster.Registry.TTL = ttl
+	}
+
+	redis := config.Registry.Redis
+	if redis.DB < 0 {
+		return fmt.Errorf("config: cluster registry redis db must be greater than or equal to 0")
+	}
+	if redis.Addr != "" {
+		out.Cluster.Registry.Redis.Addr = redis.Addr
+	}
+	if redis.Username != "" {
+		out.Cluster.Registry.Redis.Username = redis.Username
+	}
+	if redis.Password != "" {
+		out.Cluster.Registry.Redis.Password = redis.Password
+	}
+	if redis.KeyPrefix != "" {
+		out.Cluster.Registry.Redis.KeyPrefix = redis.KeyPrefix
+	}
+	out.Cluster.Registry.Redis.DB = redis.DB
+
+	dialTimeout, err := parseOptionalPositiveDuration(redis.DialTimeout)
+	if err != nil {
+		return fmt.Errorf("config: cluster registry redis dial_timeout: %w", err)
+	}
+	readTimeout, err := parseOptionalPositiveDuration(redis.ReadTimeout)
+	if err != nil {
+		return fmt.Errorf("config: cluster registry redis read_timeout: %w", err)
+	}
+	writeTimeout, err := parseOptionalPositiveDuration(redis.WriteTimeout)
+	if err != nil {
+		return fmt.Errorf("config: cluster registry redis write_timeout: %w", err)
+	}
+	if dialTimeout > 0 {
+		out.Cluster.Registry.Redis.DialTimeout = dialTimeout
+	}
+	if readTimeout > 0 {
+		out.Cluster.Registry.Redis.ReadTimeout = readTimeout
+	}
+	if writeTimeout > 0 {
+		out.Cluster.Registry.Redis.WriteTimeout = writeTimeout
+	}
+
+	if config.Peer.Token != "" {
+		out.Cluster.Peer.Token = config.Peer.Token
+	}
+	peerTimeout, err := parseOptionalPositiveDuration(config.Peer.Timeout)
+	if err != nil {
+		return fmt.Errorf("config: cluster peer timeout: %w", err)
+	}
+	if peerTimeout > 0 {
+		out.Cluster.Peer.Timeout = peerTimeout
+	}
+
+	if out.Cluster.Enabled && out.Cluster.InternalAddr == "" {
+		return fmt.Errorf("config: cluster internal_addr is required when cluster is enabled")
+	}
+	if out.Cluster.Enabled && out.Cluster.Registry.Type == "redis" && out.Cluster.Registry.Redis.Addr == "" {
+		return fmt.Errorf("config: cluster redis addr is required when redis registry is enabled")
+	}
+
+	return nil
 }
 
 func applyDownlinkConfig(out *server.Config, config DownlinkConfig) error {
@@ -484,4 +602,15 @@ func parseOptionalDuration(raw string) (time.Duration, error) {
 	}
 
 	return time.ParseDuration(raw)
+}
+
+func parseOptionalPositiveDuration(raw string) (time.Duration, error) {
+	duration, err := parseOptionalDuration(raw)
+	if err != nil {
+		return 0, err
+	}
+	if raw != "" && duration <= 0 {
+		return 0, fmt.Errorf("must be greater than 0")
+	}
+	return duration, nil
 }

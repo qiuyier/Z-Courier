@@ -446,6 +446,20 @@ If the message exists and client/device match, delivered wins over sent.
 
 ## Implementation Plan
 
+Current implementation status:
+
+```text
+Phase 1 is implemented: OnlineRegistry interface, in-memory registry, and
+cluster config parsing.
+
+Phase 2 bind/unbind hooks are implemented for cluster.enabled=true: session
+bind writes the current route, and connection close removes the route only when
+session_id still matches.
+
+Redis registry, peer dispatch, and cluster-aware downlink resolution are still
+future phases.
+```
+
 ### Phase 1: Interfaces And Config
 
 - Add `internal/cluster` package.

@@ -93,6 +93,46 @@ internal_http:
 - `token`: value required in the `X-ZCourier-Internal-Token` header.
 - `max_request_body_size`: maximum JSON request size in bytes.
 
+## Cluster
+
+```yaml
+cluster:
+  enabled: false
+  internal_addr: http://127.0.0.1:18080
+  registry:
+    type: memory
+    ttl: 30s
+    redis:
+      addr: ""
+      username: ""
+      password: ""
+      db: 0
+      key_prefix: zcourier
+      dial_timeout: 1s
+      read_timeout: 1s
+      write_timeout: 1s
+  peer:
+    token: dev-cluster-token
+    timeout: 2s
+```
+
+- `enabled`: enables V2 online route registration. `false` keeps V1 local-only
+  behavior.
+- `internal_addr`: address other gateway nodes will use to call this node.
+  It is required when cluster mode is enabled.
+- `registry.type`: online route registry implementation. The current runtime
+  implementation supports `memory`; `redis` config parsing is reserved for the
+  upcoming shared registry implementation.
+- `registry.ttl`: online route TTL. Each authenticated client packet refreshes
+  the route by rebinding the current session.
+- `registry.redis`: planned Redis registry connection settings.
+- `peer.token` and `peer.timeout`: planned gateway-to-gateway push settings.
+
+When cluster mode is enabled, Z-Courier writes `client_id + device_id` online
+routes after session binding and removes them on connection close only when the
+stored `session_id` still matches. This prevents an old disconnected session
+from deleting a newer route for the same client device.
+
 ## Downlink Storage
 
 ```yaml

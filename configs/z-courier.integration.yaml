@@ -16,6 +16,25 @@ internal_http:
   token: dev-internal-token
   max_request_body_size: 10485760
 
+cluster:
+  enabled: false
+  internal_addr: http://127.0.0.1:18082
+  registry:
+    type: memory
+    ttl: 30s
+    redis:
+      addr: ""
+      username: ""
+      password: ""
+      db: 0
+      key_prefix: zcourier
+      dial_timeout: 1s
+      read_timeout: 1s
+      write_timeout: 1s
+  peer:
+    token: dev-cluster-token
+    timeout: 2s
+
 downlink:
   storage:
     type: postgres

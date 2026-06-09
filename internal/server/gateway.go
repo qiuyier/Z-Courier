@@ -12,6 +12,7 @@ import (
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/aceld/zinx/znet"
+	"github.com/qiuyier/Z-Courier/internal/cluster"
 	"github.com/qiuyier/Z-Courier/internal/downlink"
 	"github.com/qiuyier/Z-Courier/internal/metrics"
 	"github.com/qiuyier/Z-Courier/internal/pipeline"
@@ -26,6 +27,8 @@ type Gateway struct {
 	sessions *session.Manager
 	logger   *zap.Logger
 
+	clusterRegistry         cluster.OnlineRegistry
+	clusterRegistryCloser   io.Closer
 	internalHTTP            *http.Server
 	upstream                *router.Engine
 	downlink                *downlink.Service
@@ -51,11 +54,21 @@ func New(config Config, logger *zap.Logger) (*Gateway, error) {
 	if err != nil {
 		return nil, err
 	}
+	clusterRegistry, clusterRegistryCloser, err := newClusterRegistry(config)
+	if err != nil {
+		if upstream != nil {
+			_ = upstream.Close()
+		}
+		return nil, err
+	}
 	zServer := znet.NewServer()
 	downlinkService, downlinkCloser, err := newDownlinkService(config, zServer.GetConnMgr())
 	if err != nil {
 		if upstream != nil {
 			_ = upstream.Close()
+		}
+		if clusterRegistryCloser != nil {
+			_ = clusterRegistryCloser.Close()
 		}
 		return nil, err
 	}
@@ -64,6 +77,8 @@ func New(config Config, logger *zap.Logger) (*Gateway, error) {
 		server:                 zServer,
 		sessions:               config.Sessions,
 		logger:                 logger,
+		clusterRegistry:        clusterRegistry,
+		clusterRegistryCloser:  clusterRegistryCloser,
 		internalHTTP:           newInternalHTTPServer(config, logger, downlinkService),
 		upstream:               upstream,
 		downlink:               downlinkService,
@@ -78,7 +93,7 @@ func New(config Config, logger *zap.Logger) (*Gateway, error) {
 	router := NewIngressRouter(
 		logger,
 		zServer.GetConnMgr(),
-		newIngressPipeline(config, logger),
+		newIngressPipeline(config, logger, clusterRegistry),
 		upstream,
 		downlinkService,
 		config.DownlinkDelivery.BindFlushLimit,
@@ -96,12 +111,13 @@ func New(config Config, logger *zap.Logger) (*Gateway, error) {
 	return gateway, nil
 }
 
-func newIngressPipeline(config Config, logger *zap.Logger) *pipeline.Chain {
+func newIngressPipeline(config Config, logger *zap.Logger, registry cluster.OnlineRegistry) *pipeline.Chain {
 	return pipeline.NewChain(
 		pipeline.NewAuthHandler(config.Verifier, logger),
 		pipeline.NewPolicyHandler(config.Pipeline.Policy),
 		pipeline.NewRateLimitHandler(config.Pipeline.RateLimit),
 		pipeline.NewSessionBindHandler(config.Sessions, config.GatewayNode, sessionIDProperty, logger),
+		newClusterBindHandler(config, registry, logger),
 		pipeline.NewAccessLogHandler(logger),
 	)
 }
@@ -109,6 +125,7 @@ func newIngressPipeline(config Config, logger *zap.Logger) *pipeline.Chain {
 func (g *Gateway) Serve() {
 	g.startInternalHTTP()
 	g.startDownlinkRetryWorker()
+	defer g.shutdownClusterRegistry()
 	defer g.shutdownDownlink()
 	defer g.shutdownUpstream()
 	defer g.shutdownDownlinkRetryWorker()
@@ -165,6 +182,16 @@ func (g *Gateway) shutdownDownlink() {
 
 	if err := g.downlinkCloser.Close(); err != nil {
 		g.logger.Warn("failed to shutdown downlink store cleanly", zap.Error(err))
+	}
+}
+
+func (g *Gateway) shutdownClusterRegistry() {
+	if g.clusterRegistryCloser == nil {
+		return
+	}
+
+	if err := g.clusterRegistryCloser.Close(); err != nil {
+		g.logger.Warn("failed to shutdown cluster registry cleanly", zap.Error(err))
 	}
 }
 
@@ -328,6 +355,7 @@ func (g *Gateway) onConnStop(conn ziface.IConnection) {
 		return
 	}
 
+	unbindClusterRoute(context.Background(), g.clusterRegistry, removed, g.logger)
 	g.logger.Info(
 		"session unbound on connection close",
 		zap.Uint64("conn_id", conn.GetConnID()),
