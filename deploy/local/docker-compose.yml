@@ -17,6 +17,16 @@ services:
       retries: 20
     restart: unless-stopped
 
+  redis:
+    image: redis:8-alpine
+    container_name: z-courier-local-redis
+    command: redis-server --appendonly yes
+    ports:
+      - "16379:6379"
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+
   nsqlookupd:
     image: nsqio/nsq:latest
     container_name: z-courier-local-nsqlookupd
@@ -82,5 +92,6 @@ services:
 
 volumes:
   postgres-data:
+  redis-data:
   prometheus-data:
   grafana-data:

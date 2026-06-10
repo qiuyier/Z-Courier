@@ -23,7 +23,7 @@ cluster:
     type: memory
     ttl: 30s
     redis:
-      addr: ""
+      addr: 127.0.0.1:16379
       username: ""
       password: ""
       db: 0

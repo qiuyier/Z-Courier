@@ -103,7 +103,7 @@ cluster:
     type: memory
     ttl: 30s
     redis:
-      addr: ""
+      addr: 127.0.0.1:16379
       username: ""
       password: ""
       db: 0
@@ -120,12 +120,13 @@ cluster:
   behavior.
 - `internal_addr`: address other gateway nodes will use to call this node.
   It is required when cluster mode is enabled.
-- `registry.type`: online route registry implementation. The current runtime
-  implementation supports `memory`; `redis` config parsing is reserved for the
-  upcoming shared registry implementation.
+- `registry.type`: online route registry implementation. Supported values are
+  `memory` and `redis`. Use `memory` for single-process development and `redis`
+  when multiple gateway nodes must share online routes.
 - `registry.ttl`: online route TTL. Each authenticated client packet refreshes
   the route by rebinding the current session.
-- `registry.redis`: planned Redis registry connection settings.
+- `registry.redis`: Redis registry connection settings. `addr` should point to
+  the Redis TCP address reachable from the gateway process.
 - `peer.token` and `peer.timeout`: planned gateway-to-gateway push settings.
 
 When cluster mode is enabled, Z-Courier writes `client_id + device_id` online

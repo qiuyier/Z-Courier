@@ -39,7 +39,33 @@ func newClusterRegistry(config Config) (cluster.OnlineRegistry, io.Closer, error
 		})
 		return registry, registry, nil
 	case "redis":
-		return nil, nil, fmt.Errorf("cluster redis registry is not implemented yet")
+		registry, err := cluster.NewRedisRegistry(cluster.RedisRegistryConfig{
+			Addr:         config.Cluster.Registry.Redis.Addr,
+			Username:     config.Cluster.Registry.Redis.Username,
+			Password:     config.Cluster.Registry.Redis.Password,
+			DB:           config.Cluster.Registry.Redis.DB,
+			KeyPrefix:    config.Cluster.Registry.Redis.KeyPrefix,
+			TTL:          config.Cluster.Registry.TTL,
+			DialTimeout:  config.Cluster.Registry.Redis.DialTimeout,
+			ReadTimeout:  config.Cluster.Registry.Redis.ReadTimeout,
+			WriteTimeout: config.Cluster.Registry.Redis.WriteTimeout,
+		})
+		if err != nil {
+			return nil, nil, err
+		}
+
+		pingTimeout := config.Cluster.Registry.Redis.DialTimeout
+		if pingTimeout <= 0 {
+			pingTimeout = time.Second
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), pingTimeout)
+		defer cancel()
+		if err := registry.Ping(ctx); err != nil {
+			_ = registry.Close()
+			return nil, nil, fmt.Errorf("cluster redis registry ping: %w", err)
+		}
+
+		return registry, registry, nil
 	default:
 		return nil, nil, fmt.Errorf("unsupported cluster registry type %q", config.Cluster.Registry.Type)
 	}

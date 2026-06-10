@@ -1,7 +1,7 @@
 # Local Integration Stack
 
-This stack is for validating the Z-Courier V1 reliable downlink path with
-PostgreSQL storage, NSQ, Prometheus, and Grafana.
+This stack is for validating the Z-Courier reliable downlink path with
+PostgreSQL storage, Redis, NSQ, Prometheus, and Grafana.
 
 ## One Command
 
@@ -56,6 +56,7 @@ go run ./cmd/e2e
 - Prometheus: `http://127.0.0.1:19090`
 - Grafana: `http://127.0.0.1:13000` (`admin` / `admin`)
 - NSQ Admin: `http://127.0.0.1:14171`
+- Redis: `127.0.0.1:16379`
 - Gateway metrics: `http://127.0.0.1:18082/metrics`
 
 ## Stop

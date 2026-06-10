@@ -18,7 +18,7 @@ trap cleanup EXIT
 
 cd "$ROOT_DIR"
 
-docker compose -f "$COMPOSE_FILE" up -d postgres nsqlookupd nsqd nsqadmin prometheus grafana
+docker compose -f "$COMPOSE_FILE" up -d postgres redis nsqlookupd nsqd nsqadmin prometheus grafana
 
 echo "waiting for postgres..."
 for attempt in $(seq 1 60); do

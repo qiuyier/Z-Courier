@@ -3,10 +3,10 @@ package server
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/qiuyier/Z-Courier/internal/cluster"
 	"github.com/qiuyier/Z-Courier/internal/pipeline"
 	"github.com/qiuyier/Z-Courier/internal/protocol"
@@ -40,23 +40,33 @@ func TestNewClusterRegistryCreatesMemoryRegistry(t *testing.T) {
 	}
 }
 
-func TestNewClusterRegistryRejectsRedisUntilImplemented(t *testing.T) {
+func TestNewClusterRegistryCreatesRedisRegistry(t *testing.T) {
+	redisServer := miniredis.RunT(t)
 	config := normalizeConfig(Config{
 		Cluster: ClusterConfig{
 			Enabled:      true,
 			InternalAddr: "http://gateway-a:18080",
 			Registry: ClusterRegistryConfig{
 				Type: "redis",
+				Redis: ClusterRedisConfig{
+					Addr: redisServer.Addr(),
+				},
 			},
 		},
 	})
 
-	_, _, err := newClusterRegistry(config)
-	if err == nil {
-		t.Fatal("newClusterRegistry() error = nil, want error")
+	registry, closer, err := newClusterRegistry(config)
+	if err != nil {
+		t.Fatalf("newClusterRegistry() error = %v", err)
 	}
-	if !strings.Contains(err.Error(), "not implemented") {
-		t.Fatalf("newClusterRegistry() error = %v, want not implemented", err)
+	if registry == nil {
+		t.Fatal("newClusterRegistry() registry = nil, want redis registry")
+	}
+	if closer == nil {
+		t.Fatal("newClusterRegistry() closer = nil, want closer")
+	}
+	if err := closer.Close(); err != nil {
+		t.Fatalf("closer.Close() error = %v", err)
 	}
 }
 
