@@ -406,6 +406,76 @@ func TestServiceAckValidation(t *testing.T) {
 	}
 }
 
+func TestServicePushPeerRequiresMatchingSession(t *testing.T) {
+	conn := &fakeConnection{}
+	service := NewService(
+		fakeSessions{session: &session.Session{SessionID: "session-1", ConnID: 7, ClientID: "client-1", DeviceID: "device-1"}},
+		fakeConnections{conn: conn},
+	)
+	service.now = func() time.Time { return time.UnixMilli(1760000000000) }
+
+	resp, err := service.PushPeer(context.Background(), PeerPushRequest{
+		OriginNode: "gateway-b",
+		ClientID:   "client-1",
+		DeviceID:   "device-1",
+		SessionID:  "session-1",
+		MsgID:      2001,
+		MessageID:  "message-1",
+		TraceID:    "trace-1",
+		Body:       []byte("hello"),
+	}, "gateway-a")
+	if err != nil {
+		t.Fatalf("PushPeer() error = %v", err)
+	}
+	if resp.GatewayNode != "gateway-a" || resp.SessionID != "session-1" {
+		t.Fatalf("PushPeer() response = %+v", resp)
+	}
+	if conn.msgID != 2001 || len(conn.data) == 0 {
+		t.Fatalf("connection send = msgID:%d data:%d", conn.msgID, len(conn.data))
+	}
+}
+
+func TestServicePushPeerRejectsSessionMismatch(t *testing.T) {
+	service := NewService(
+		fakeSessions{session: &session.Session{SessionID: "session-new", ConnID: 7, ClientID: "client-1", DeviceID: "device-1"}},
+		fakeConnections{conn: &fakeConnection{}},
+	)
+
+	_, err := service.PushPeer(context.Background(), PeerPushRequest{
+		ClientID:  "client-1",
+		DeviceID:  "device-1",
+		SessionID: "session-old",
+		MsgID:     2001,
+	}, "gateway-a")
+	if !errors.Is(err, ErrSessionMismatch) {
+		t.Fatalf("PushPeer() error = %v, want %v", err, ErrSessionMismatch)
+	}
+}
+
+func TestServicePushPeerValidation(t *testing.T) {
+	service := NewService(fakeSessions{}, fakeConnections{})
+
+	tests := []struct {
+		name string
+		req  PeerPushRequest
+		want error
+	}{
+		{name: "missing client", req: PeerPushRequest{DeviceID: "d1", SessionID: "s1", MsgID: 1}, want: ErrMissingClientID},
+		{name: "missing device", req: PeerPushRequest{ClientID: "c1", SessionID: "s1", MsgID: 1}, want: ErrMissingDeviceID},
+		{name: "missing session", req: PeerPushRequest{ClientID: "c1", DeviceID: "d1", MsgID: 1}, want: ErrMissingSessionID},
+		{name: "missing msg id", req: PeerPushRequest{ClientID: "c1", DeviceID: "d1", SessionID: "s1"}, want: ErrInvalidMsgID},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := service.PushPeer(context.Background(), tt.req, "gateway-a")
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("PushPeer() error = %v, want %v", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestServicePushValidation(t *testing.T) {
 	service := NewService(fakeSessions{}, fakeConnections{})
 

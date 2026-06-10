@@ -160,8 +160,8 @@ It calls the target gateway internal API:
 POST /internal/cluster/push
 ```
 
-This API is for gateway peers only. It should require the same internal trust
-model as `/internal/push`, or a stronger one later.
+This API is for gateway peers only. The current implementation protects it with
+`cluster.peer.token` in the `X-ZCourier-Internal-Token` header.
 
 ### Downlink Resolver
 
@@ -457,7 +457,9 @@ supports both memory and Redis online registries: session bind writes the
 current route, and connection close removes the route only when session_id still
 matches.
 
-Peer dispatch and cluster-aware downlink resolution are still future phases.
+Peer Push API and the HTTP peer dispatcher are implemented as standalone
+building blocks. Cluster-aware downlink resolution is still a future phase, so
+`/internal/push` does not yet look up Redis and call remote peers.
 ```
 
 ### Phase 1: Interfaces And Config
@@ -506,7 +508,8 @@ route TTL expires after disconnect or missed refresh
 - Add `POST /internal/cluster/push`.
 - Add peer HTTP client.
 - Add internal peer auth token.
-- Add stale route cleanup.
+- Return `session_not_found` or `session_mismatch` so the caller can clean up a
+  stale route if the registry entry still matches.
 
 Acceptance:
 

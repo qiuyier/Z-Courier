@@ -108,9 +108,9 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func statusFromError(err error) int {
 	switch {
-	case errors.Is(err, ErrMissingClientID), errors.Is(err, ErrMissingDeviceID), errors.Is(err, ErrInvalidMsgID):
+	case errors.Is(err, ErrMissingClientID), errors.Is(err, ErrMissingDeviceID), errors.Is(err, ErrMissingSessionID), errors.Is(err, ErrInvalidMsgID):
 		return http.StatusBadRequest
-	case errors.Is(err, ErrSessionNotFound):
+	case errors.Is(err, ErrSessionNotFound), errors.Is(err, ErrSessionMismatch):
 		return http.StatusNotFound
 	case errors.Is(err, ErrConnectionNotFound):
 		return http.StatusConflict
@@ -140,7 +140,7 @@ func nonEmpty(value, fallback string) string {
 	return value
 }
 
-func writeJSON(w http.ResponseWriter, status int, resp PushResponse) {
+func writeJSON(w http.ResponseWriter, status int, resp any) {
 	data, err := sonic.Marshal(resp)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

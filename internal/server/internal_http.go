@@ -23,6 +23,15 @@ func newInternalHTTPServer(config Config, logger *zap.Logger, service *downlink.
 		MaxRequestBodySize: config.InternalMaxRequestBodySize,
 		Logger:             logger,
 	}))
+	if config.Cluster.Enabled {
+		mux.Handle(downlink.PeerPushPath, downlink.NewPeerHandler(downlink.PeerHandlerConfig{
+			Service:            service,
+			GatewayNode:        config.GatewayNode,
+			PeerToken:          config.Cluster.Peer.Token,
+			MaxRequestBodySize: config.InternalMaxRequestBodySize,
+			Logger:             logger,
+		}))
+	}
 	mux.Handle("/metrics", metrics.Handler())
 
 	return &http.Server{

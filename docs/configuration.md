@@ -127,12 +127,17 @@ cluster:
   the route by rebinding the current session.
 - `registry.redis`: Redis registry connection settings. `addr` should point to
   the Redis TCP address reachable from the gateway process.
-- `peer.token` and `peer.timeout`: planned gateway-to-gateway push settings.
+- `peer.token`: token required by `POST /internal/cluster/push`.
+- `peer.timeout`: gateway-to-gateway HTTP push timeout used by the peer
+  dispatcher.
 
 When cluster mode is enabled, Z-Courier writes `client_id + device_id` online
 routes after session binding and removes them on connection close only when the
 stored `session_id` still matches. This prevents an old disconnected session
-from deleting a newer route for the same client device.
+from deleting a newer route for the same client device. Cluster mode also
+registers `POST /internal/cluster/push` for gateway-to-gateway local TCP
+delivery. The public `/internal/push` downlink resolver does not call remote
+peers yet.
 
 ## Downlink Storage
 

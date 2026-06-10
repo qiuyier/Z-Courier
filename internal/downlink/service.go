@@ -85,6 +85,35 @@ func (s *Service) Push(ctx context.Context, req PushRequest) (*PushResponse, err
 	return s.pushOnline(req)
 }
 
+func (s *Service) PushPeer(ctx context.Context, req PeerPushRequest, gatewayNode string) (*PeerPushResponse, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := validatePeerPushRequest(req); err != nil {
+		return nil, err
+	}
+
+	resp, err := s.pushOnlineWithSession(pushRequestFromPeerPushRequest(req), req.SessionID)
+	if err != nil {
+		return nil, err
+	}
+
+	return &PeerPushResponse{
+		Code:          "ok",
+		DeliveryState: DeliveryStateSent,
+		GatewayNode:   gatewayNode,
+		ClientID:      resp.ClientID,
+		DeviceID:      resp.DeviceID,
+		SessionID:     resp.SessionID,
+		ConnID:        resp.ConnID,
+		MessageID:     resp.MessageID,
+		TraceID:       resp.TraceID,
+	}, nil
+}
+
 func (s *Service) pushReliable(ctx context.Context, req PushRequest) (*PushResponse, error) {
 	message, err := s.store.Save(ctx, messageFromPushRequest(req, s.now()))
 	if err != nil {
@@ -235,9 +264,16 @@ func (s *Service) retryMessage(ctx context.Context, message Message) (MessageSta
 }
 
 func (s *Service) pushOnline(req PushRequest) (*PushResponse, error) {
+	return s.pushOnlineWithSession(req, "")
+}
+
+func (s *Service) pushOnlineWithSession(req PushRequest, expectedSessionID string) (*PushResponse, error) {
 	found, ok := s.sessions.GetByClientDevice(req.ClientID, req.DeviceID)
 	if !ok {
 		return nil, ErrSessionNotFound
+	}
+	if expectedSessionID != "" && found.SessionID != expectedSessionID {
+		return nil, ErrSessionMismatch
 	}
 
 	conn, err := s.connections.Get(found.ConnID)
@@ -277,6 +313,18 @@ func (s *Service) pushOnline(req PushRequest) (*PushResponse, error) {
 	}, nil
 }
 
+func pushRequestFromPeerPushRequest(req PeerPushRequest) PushRequest {
+	return PushRequest{
+		ClientID:    req.ClientID,
+		DeviceID:    req.DeviceID,
+		MsgID:       req.MsgID,
+		MessageID:   req.MessageID,
+		TraceID:     req.TraceID,
+		AckRequired: req.AckRequired,
+		Body:        append([]byte(nil), req.Body...),
+	}
+}
+
 func validatePushRequest(req PushRequest) error {
 	if req.ClientID == "" {
 		return ErrMissingClientID
@@ -286,6 +334,17 @@ func validatePushRequest(req PushRequest) error {
 	}
 	if req.MsgID == 0 {
 		return ErrInvalidMsgID
+	}
+
+	return nil
+}
+
+func validatePeerPushRequest(req PeerPushRequest) error {
+	if err := validatePushRequest(pushRequestFromPeerPushRequest(req)); err != nil {
+		return err
+	}
+	if req.SessionID == "" {
+		return ErrMissingSessionID
 	}
 
 	return nil
