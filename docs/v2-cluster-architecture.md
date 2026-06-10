@@ -460,8 +460,13 @@ matches.
 Peer Push API, the HTTP peer dispatcher, and cluster-aware downlink resolution
 are implemented. `/internal/push` now tries local delivery first, then looks up
 the online registry and calls the target gateway peer when the route points to a
-remote node. Multi-node E2E and store-level retry claiming are still future
-phases.
+remote node.
+
+Multi-node E2E is implemented in scripts/e2e_cluster.sh. It starts gateway-a and
+gateway-b with shared PostgreSQL and Redis, connects the test client to
+gateway-b, sends /internal/push to gateway-a, and verifies cross-node delivery.
+
+Store-level retry claiming is still a future phase.
 ```
 
 ### Phase 1: Interfaces And Config
@@ -547,8 +552,8 @@ client ACK marks shared message delivered
 Acceptance:
 
 ```text
-bash scripts/e2e-cluster.sh
-GitHub Actions runs cluster e2e or a reduced version
+bash scripts/e2e_cluster.sh
+GitHub Actions runs cluster e2e
 ```
 
 ## First Code Change Recommendation

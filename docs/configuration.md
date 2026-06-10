@@ -140,6 +140,14 @@ delivery. The public `/internal/push` downlink resolver first tries the local
 session manager, then looks up the online registry and calls a remote gateway
 peer when the client is connected elsewhere.
 
+The local cluster verifier uses `configs/z-courier.cluster-a.yaml` and
+`configs/z-courier.cluster-b.yaml` with the same Redis key prefix and
+PostgreSQL DSN:
+
+```bash
+bash scripts/e2e_cluster.sh
+```
+
 ## Downlink Storage
 
 ```yaml

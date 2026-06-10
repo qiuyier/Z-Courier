@@ -19,6 +19,21 @@ ports and tokens. See [../../docs/configuration.md](../../docs/configuration.md)
 and [../../docs/protocol.md](../../docs/protocol.md) for the config and packet
 contracts used by the verifier.
 
+Run the two-node cluster verifier:
+
+```bash
+bash scripts/e2e_cluster.sh
+```
+
+It starts two gateway processes:
+
+- `gateway-a`: TCP `9901`, internal HTTP `18182`
+- `gateway-b`: TCP `9902`, internal HTTP `18183`
+
+The verifier connects the client to `gateway-b`, sends `/internal/push` to
+`gateway-a`, and checks that Redis route lookup plus peer push delivers the
+message to the client on `gateway-b`.
+
 ## Manual Run
 
 Start local dependencies:
@@ -40,6 +55,21 @@ Run the E2E verifier:
 go run ./cmd/e2e
 ```
 
+Run the same verifier against two local gateway nodes:
+
+```bash
+ZINX_CONFIG_FILE_PATH=conf/zinx.cluster-a.json \
+  go run ./cmd/gateway -config configs/z-courier.cluster-a.yaml
+
+ZINX_CONFIG_FILE_PATH=conf/zinx.cluster-b.json \
+  go run ./cmd/gateway -config configs/z-courier.cluster-b.yaml
+
+go run ./cmd/e2e \
+  -gateway-port 9902 \
+  -internal-url http://127.0.0.1:18182 \
+  -metrics-url http://127.0.0.1:18182/metrics,http://127.0.0.1:18183/metrics
+```
+
 ## What E2E Checks
 
 - Offline downlink push returns `queued` and is stored in PostgreSQL.
@@ -50,6 +80,8 @@ go run ./cmd/e2e
 - A `MsgID = 2001` upstream packet is accepted by the NSQ route.
 - Gateway metrics include downlink push, downlink ACK, and online session
   metrics.
+- The cluster verifier additionally checks cross-node downlink dispatch through
+  Redis online routes and `POST /internal/cluster/push`.
 
 ## Local URLs
 
@@ -58,6 +90,8 @@ go run ./cmd/e2e
 - NSQ Admin: `http://127.0.0.1:14171`
 - Redis: `127.0.0.1:16379`
 - Gateway metrics: `http://127.0.0.1:18082/metrics`
+- Cluster gateway A metrics: `http://127.0.0.1:18182/metrics`
+- Cluster gateway B metrics: `http://127.0.0.1:18183/metrics`
 
 ## Stop
 

@@ -33,6 +33,7 @@ type config struct {
 	GatewayHost   string
 	GatewayPort   int
 	InternalURL   string
+	MetricsURLs   []string
 	InternalToken string
 	PostgresDSN   string
 	ClientID      string
@@ -56,9 +57,11 @@ func main() {
 
 func parseFlags() config {
 	var cfg config
+	var metricsURLRaw string
 	flag.StringVar(&cfg.GatewayHost, "gateway-host", defaultGatewayHost, "gateway TCP host")
 	flag.IntVar(&cfg.GatewayPort, "gateway-port", defaultGatewayPort, "gateway TCP port")
 	flag.StringVar(&cfg.InternalURL, "internal-url", defaultInternalURL, "gateway internal HTTP base URL")
+	flag.StringVar(&metricsURLRaw, "metrics-url", "", "comma-separated gateway metrics URLs; defaults to internal-url/metrics")
 	flag.StringVar(&cfg.InternalToken, "internal-token", "dev-internal-token", "gateway internal HTTP token")
 	flag.StringVar(&cfg.PostgresDSN, "postgres-dsn", defaultPostgresDSN, "PostgreSQL DSN")
 	flag.StringVar(&cfg.ClientID, "client-id", "e2e-client", "client id")
@@ -68,7 +71,29 @@ func parseFlags() config {
 	flag.Parse()
 
 	cfg.InternalURL = strings.TrimRight(cfg.InternalURL, "/")
+	cfg.MetricsURLs = parseMetricsURLs(metricsURLRaw, cfg.InternalURL+"/metrics")
 	return cfg
+}
+
+func parseMetricsURLs(raw, fallback string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return []string{fallback}
+	}
+
+	parts := strings.Split(raw, ",")
+	urls := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		urls = append(urls, part)
+	}
+	if len(urls) == 0 {
+		return []string{fallback}
+	}
+
+	return urls
 }
 
 func run(ctx context.Context, cfg config) error {
@@ -138,7 +163,7 @@ func run(ctx context.Context, cfg config) error {
 	}
 	fmt.Println("nsq upstream accepted")
 
-	if err := checkMetrics(ctx, cfg.InternalURL+"/metrics"); err != nil {
+	if err := checkMetrics(ctx, cfg.MetricsURLs); err != nil {
 		return err
 	}
 	fmt.Println("metrics exposed")
@@ -236,21 +261,31 @@ WHERE message_id = $1
 	})
 }
 
-func checkMetrics(ctx context.Context, url string) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return err
+func checkMetrics(ctx context.Context, urls []string) error {
+	var body []byte
+	for _, url := range urls {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return err
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return err
+		}
+		respBody, readErr := io.ReadAll(resp.Body)
+		closeErr := resp.Body.Close()
+		if readErr != nil {
+			return readErr
+		}
+		if closeErr != nil {
+			return closeErr
+		}
+		if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+			return fmt.Errorf("metrics url %s status = %d", url, resp.StatusCode)
+		}
+		body = append(body, respBody...)
 	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return err
-	}
 	for _, name := range []string{
 		"z_courier_downlink_push_total",
 		"z_courier_downlink_ack_total",

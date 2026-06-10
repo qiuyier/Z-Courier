@@ -1,0 +1,81 @@
+gateway_node: gateway-b
+route_msg_ids:
+  - 1000
+
+auth:
+  static_tokens:
+    e2e-token:
+      client_id: e2e-client
+      token_id: e2e-token
+      scopes:
+        - gateway:dev
+
+internal_http:
+  enabled: true
+  addr: 127.0.0.1:18183
+  token: dev-internal-token
+  max_request_body_size: 10485760
+
+cluster:
+  enabled: true
+  internal_addr: http://127.0.0.1:18183
+  registry:
+    type: redis
+    ttl: 30s
+    redis:
+      addr: 127.0.0.1:16379
+      username: ""
+      password: ""
+      db: 0
+      key_prefix: zcourier:e2e-cluster
+      dial_timeout: 1s
+      read_timeout: 1s
+      write_timeout: 1s
+  peer:
+    token: dev-cluster-token
+    timeout: 2s
+
+downlink:
+  storage:
+    type: postgres
+    postgres:
+      dsn: postgres://zcourier:zcourier@127.0.0.1:15432/zcourier?sslmode=disable
+      auto_migrate: true
+      max_open_conns: 10
+      max_idle_conns: 5
+      conn_max_lifetime: 30m
+  delivery:
+    retry_interval: 1s
+    retry_delay: 1s
+    max_attempts: 5
+    scan_limit: 100
+    bind_flush_limit: 100
+
+pipeline:
+  allowlist:
+    client_ids: []
+    msg_ids: []
+  blocklist:
+    client_ids: []
+    msg_ids: []
+  rate_limit:
+    enabled: false
+    max_requests: 100
+    window: 1s
+
+upstream:
+  routes:
+    - name: cluster-b-nsq-upstream
+      enabled: true
+      msg_id_min: 2000
+      msg_id_max: 2999
+      target:
+        type: nsq
+        nsqd_addrs:
+          - 127.0.0.1:14150
+        topic: message_events
+        dial_timeout: 1s
+        read_timeout: 60s
+        write_timeout: 1s
+        publish_mode: round_robin
+        retry_attempts: 1

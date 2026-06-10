@@ -38,6 +38,16 @@ validates:
 - upstream forwarding to NSQ
 - Prometheus metrics exposure
 
+Run the V2 two-node cluster verifier:
+
+```bash
+bash scripts/e2e_cluster.sh
+```
+
+It starts two local gateway processes sharing PostgreSQL and Redis, connects the
+test client to `gateway-b`, sends `/internal/push` to `gateway-a`, and verifies
+that peer push delivers the message across nodes.
+
 Local service URLs and the manual workflow are documented in
 [deploy/local/README.md](deploy/local/README.md).
 
@@ -61,6 +71,12 @@ It starts PostgreSQL, NSQ, Prometheus, Grafana, the gateway, and validates the
 reliable downlink path with PostgreSQL storage. See
 [deploy/local/README.md](deploy/local/README.md) for the manual workflow and
 local URLs.
+
+Run the local V2 cluster integration verifier:
+
+```bash
+bash scripts/e2e_cluster.sh
+```
 
 Start the gateway:
 

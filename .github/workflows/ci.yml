@@ -44,7 +44,7 @@ jobs:
   e2e:
     name: E2E
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     needs:
       - validate
 
@@ -60,6 +60,9 @@ jobs:
 
       - name: Run local integration verifier
         run: bash scripts/e2e.sh
+
+      - name: Run local cluster integration verifier
+        run: bash scripts/e2e_cluster.sh
 
       - name: Dump Docker logs on failure
         if: failure()
