@@ -3,9 +3,11 @@ package downlink
 import (
 	"context"
 	"errors"
+	"net/http"
 	"testing"
 	"time"
 
+	"github.com/qiuyier/Z-Courier/internal/cluster"
 	"github.com/qiuyier/Z-Courier/internal/protocol"
 	"github.com/qiuyier/Z-Courier/internal/session"
 )
@@ -155,6 +157,224 @@ func TestServiceReliablePushQueuesOfflineMessage(t *testing.T) {
 	}
 }
 
+func TestServiceReliablePushSendsRemoteClusterMessage(t *testing.T) {
+	now := time.UnixMilli(1760000000000)
+	store := NewMemoryStore()
+	store.now = func() time.Time { return now }
+	registry := cluster.NewMemoryRegistry(cluster.MemoryRegistryConfig{})
+	route := testClusterRoute("remote-session", "gateway-a")
+	if err := registry.Bind(context.Background(), route); err != nil {
+		t.Fatalf("registry.Bind() error = %v", err)
+	}
+
+	dispatcher := &fakePeerDispatcher{resp: &PeerPushResponse{
+		Code:          "ok",
+		DeliveryState: DeliveryStateSent,
+		GatewayNode:   "gateway-a",
+		SessionID:     "remote-session",
+		ConnID:        99,
+	}}
+	service := NewService(
+		fakeSessions{},
+		fakeConnections{},
+		WithStore(store),
+		WithClusterDelivery(ClusterDeliveryConfig{
+			GatewayNode:    "gateway-b",
+			Registry:       registry,
+			PeerDispatcher: dispatcher,
+		}),
+	)
+	service.now = func() time.Time { return now }
+
+	resp, err := service.Push(context.Background(), PushRequest{
+		ClientID:  "client-1",
+		DeviceID:  "device-1",
+		MsgID:     2001,
+		MessageID: "message-1",
+		TraceID:   "trace-1",
+		Body:      []byte("hello"),
+	})
+	if err != nil {
+		t.Fatalf("Push() error = %v", err)
+	}
+	if resp.DeliveryState != DeliveryStateSent || resp.SessionID != "remote-session" {
+		t.Fatalf("response = %+v, want remote sent", resp)
+	}
+	if dispatcher.calls != 1 {
+		t.Fatalf("dispatcher calls = %d, want 1", dispatcher.calls)
+	}
+	if dispatcher.req.OriginNode != "gateway-b" || dispatcher.req.SessionID != "remote-session" {
+		t.Fatalf("dispatcher request = %+v", dispatcher.req)
+	}
+
+	stored, ok, err := store.Get(context.Background(), "message-1")
+	if err != nil {
+		t.Fatalf("store.Get() error = %v", err)
+	}
+	if !ok {
+		t.Fatal("stored message not found")
+	}
+	if stored.Status != MessageStatusSent || stored.SessionID != "remote-session" {
+		t.Fatalf("stored message = %+v, want sent remote-session", stored)
+	}
+}
+
+func TestServiceReliablePushKeepsQueuedWhenClusterRouteMissing(t *testing.T) {
+	now := time.UnixMilli(1760000000000)
+	store := NewMemoryStore()
+	store.now = func() time.Time { return now }
+	registry := cluster.NewMemoryRegistry(cluster.MemoryRegistryConfig{})
+	dispatcher := &fakePeerDispatcher{}
+	service := NewService(
+		fakeSessions{},
+		fakeConnections{},
+		WithStore(store),
+		WithClusterDelivery(ClusterDeliveryConfig{
+			GatewayNode:    "gateway-b",
+			Registry:       registry,
+			PeerDispatcher: dispatcher,
+		}),
+	)
+	service.now = func() time.Time { return now }
+
+	resp, err := service.Push(context.Background(), PushRequest{
+		ClientID:  "client-1",
+		DeviceID:  "device-1",
+		MsgID:     2001,
+		MessageID: "message-1",
+	})
+	if err != nil {
+		t.Fatalf("Push() error = %v", err)
+	}
+	if resp.DeliveryState != DeliveryStateQueued {
+		t.Fatalf("DeliveryState = %q, want queued", resp.DeliveryState)
+	}
+	if dispatcher.calls != 0 {
+		t.Fatalf("dispatcher calls = %d, want 0", dispatcher.calls)
+	}
+}
+
+func TestServiceReliablePushUnbindsStaleRemoteClusterRoute(t *testing.T) {
+	now := time.UnixMilli(1760000000000)
+	store := NewMemoryStore()
+	store.now = func() time.Time { return now }
+	registry := cluster.NewMemoryRegistry(cluster.MemoryRegistryConfig{})
+	route := testClusterRoute("stale-session", "gateway-a")
+	if err := registry.Bind(context.Background(), route); err != nil {
+		t.Fatalf("registry.Bind() error = %v", err)
+	}
+
+	service := NewService(
+		fakeSessions{},
+		fakeConnections{},
+		WithStore(store),
+		WithClusterDelivery(ClusterDeliveryConfig{
+			GatewayNode: "gateway-b",
+			Registry:    registry,
+			PeerDispatcher: &fakePeerDispatcher{err: &PeerPushHTTPError{
+				StatusCode: http.StatusNotFound,
+				Code:       "session_mismatch",
+				Reason:     ErrSessionMismatch.Error(),
+			}},
+		}),
+	)
+	service.now = func() time.Time { return now }
+
+	resp, err := service.Push(context.Background(), PushRequest{
+		ClientID:  "client-1",
+		DeviceID:  "device-1",
+		MsgID:     2001,
+		MessageID: "message-1",
+	})
+	if err != nil {
+		t.Fatalf("Push() error = %v", err)
+	}
+	if resp.DeliveryState != DeliveryStateQueued {
+		t.Fatalf("DeliveryState = %q, want queued", resp.DeliveryState)
+	}
+	if _, ok, err := registry.Lookup(context.Background(), route.Key()); err != nil || ok {
+		t.Fatalf("registry.Lookup() after stale peer error = ok:%v err:%v, want not found", ok, err)
+	}
+}
+
+func TestServiceReliablePushKeepsRemoteRouteOnPeerFailure(t *testing.T) {
+	now := time.UnixMilli(1760000000000)
+	store := NewMemoryStore()
+	store.now = func() time.Time { return now }
+	registry := cluster.NewMemoryRegistry(cluster.MemoryRegistryConfig{})
+	route := testClusterRoute("remote-session", "gateway-a")
+	if err := registry.Bind(context.Background(), route); err != nil {
+		t.Fatalf("registry.Bind() error = %v", err)
+	}
+
+	service := NewService(
+		fakeSessions{},
+		fakeConnections{},
+		WithStore(store),
+		WithClusterDelivery(ClusterDeliveryConfig{
+			GatewayNode:    "gateway-b",
+			Registry:       registry,
+			PeerDispatcher: &fakePeerDispatcher{err: errors.New("network down")},
+		}),
+	)
+	service.now = func() time.Time { return now }
+
+	resp, err := service.Push(context.Background(), PushRequest{
+		ClientID:  "client-1",
+		DeviceID:  "device-1",
+		MsgID:     2001,
+		MessageID: "message-1",
+	})
+	if err != nil {
+		t.Fatalf("Push() error = %v", err)
+	}
+	if resp.DeliveryState != DeliveryStateQueued {
+		t.Fatalf("DeliveryState = %q, want queued", resp.DeliveryState)
+	}
+	if _, ok, err := registry.Lookup(context.Background(), route.Key()); err != nil || !ok {
+		t.Fatalf("registry.Lookup() after retryable peer error = ok:%v err:%v, want still bound", ok, err)
+	}
+}
+
+func TestServiceReliablePushUnbindsStaleLocalClusterRoute(t *testing.T) {
+	now := time.UnixMilli(1760000000000)
+	store := NewMemoryStore()
+	store.now = func() time.Time { return now }
+	registry := cluster.NewMemoryRegistry(cluster.MemoryRegistryConfig{})
+	route := testClusterRoute("local-stale-session", "gateway-a")
+	if err := registry.Bind(context.Background(), route); err != nil {
+		t.Fatalf("registry.Bind() error = %v", err)
+	}
+
+	service := NewService(
+		fakeSessions{},
+		fakeConnections{},
+		WithStore(store),
+		WithClusterDelivery(ClusterDeliveryConfig{
+			GatewayNode:    "gateway-a",
+			Registry:       registry,
+			PeerDispatcher: &fakePeerDispatcher{},
+		}),
+	)
+	service.now = func() time.Time { return now }
+
+	resp, err := service.Push(context.Background(), PushRequest{
+		ClientID:  "client-1",
+		DeviceID:  "device-1",
+		MsgID:     2001,
+		MessageID: "message-1",
+	})
+	if err != nil {
+		t.Fatalf("Push() error = %v", err)
+	}
+	if resp.DeliveryState != DeliveryStateQueued {
+		t.Fatalf("DeliveryState = %q, want queued", resp.DeliveryState)
+	}
+	if _, ok, err := registry.Lookup(context.Background(), route.Key()); err != nil || ok {
+		t.Fatalf("registry.Lookup() after local stale route = ok:%v err:%v, want not found", ok, err)
+	}
+}
+
 func TestServiceRetryDueSendsPendingMessage(t *testing.T) {
 	now := time.UnixMilli(1760000000000)
 	store := NewMemoryStore()
@@ -200,6 +420,61 @@ func TestServiceRetryDueSendsPendingMessage(t *testing.T) {
 	}
 	if stored.Status != MessageStatusSent {
 		t.Fatalf("stored Status = %q, want sent", stored.Status)
+	}
+}
+
+func TestServiceRetryDueSendsRemoteClusterMessage(t *testing.T) {
+	now := time.UnixMilli(1760000000000)
+	store := NewMemoryStore()
+	store.now = func() time.Time { return now }
+	if _, err := store.Save(context.Background(), Message{
+		MessageID:   "message-1",
+		ClientID:    "client-1",
+		DeviceID:    "device-1",
+		MsgID:       2001,
+		Body:        []byte("hello"),
+		Status:      MessageStatusPending,
+		NextRetryAt: now,
+		CreatedAt:   now,
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	registry := cluster.NewMemoryRegistry(cluster.MemoryRegistryConfig{})
+	route := testClusterRoute("remote-session", "gateway-a")
+	if err := registry.Bind(context.Background(), route); err != nil {
+		t.Fatalf("registry.Bind() error = %v", err)
+	}
+	dispatcher := &fakePeerDispatcher{}
+	service := NewService(
+		fakeSessions{},
+		fakeConnections{},
+		WithStore(store),
+		WithClusterDelivery(ClusterDeliveryConfig{
+			GatewayNode:    "gateway-b",
+			Registry:       registry,
+			PeerDispatcher: dispatcher,
+		}),
+	)
+	service.now = func() time.Time { return now }
+
+	result, err := service.RetryDue(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("RetryDue() error = %v", err)
+	}
+	if result.Scanned != 1 || result.Sent != 1 {
+		t.Fatalf("RetryDue() result = %+v, want one sent", result)
+	}
+	if dispatcher.calls != 1 {
+		t.Fatalf("dispatcher calls = %d, want 1", dispatcher.calls)
+	}
+
+	stored, _, err := store.Get(context.Background(), "message-1")
+	if err != nil {
+		t.Fatalf("store.Get() error = %v", err)
+	}
+	if stored.Status != MessageStatusSent || stored.SessionID != "remote-session" {
+		t.Fatalf("stored message = %+v, want sent remote-session", stored)
 	}
 }
 
@@ -562,4 +837,46 @@ func (f *fakeConnection) SendMsg(msgID uint32, data []byte) error {
 	f.msgID = msgID
 	f.data = append([]byte(nil), data...)
 	return nil
+}
+
+type fakePeerDispatcher struct {
+	resp   *PeerPushResponse
+	err    error
+	calls  int
+	target cluster.RouteEntry
+	req    PeerPushRequest
+}
+
+func (f *fakePeerDispatcher) Push(_ context.Context, target cluster.RouteEntry, req PeerPushRequest) (*PeerPushResponse, error) {
+	f.calls++
+	f.target = target
+	f.req = req
+	if f.err != nil {
+		return f.resp, f.err
+	}
+	if f.resp != nil {
+		return f.resp, nil
+	}
+
+	return &PeerPushResponse{
+		Code:          "ok",
+		DeliveryState: DeliveryStateSent,
+		GatewayNode:   target.GatewayNode,
+		ClientID:      req.ClientID,
+		DeviceID:      req.DeviceID,
+		SessionID:     req.SessionID,
+		MessageID:     req.MessageID,
+		TraceID:       req.TraceID,
+	}, nil
+}
+
+func testClusterRoute(sessionID, gatewayNode string) cluster.RouteEntry {
+	return cluster.RouteEntry{
+		ClientID:     "client-1",
+		DeviceID:     "device-1",
+		SessionID:    sessionID,
+		GatewayNode:  gatewayNode,
+		InternalAddr: "http://" + gatewayNode + ":18080",
+		TokenID:      "token-1",
+	}
 }

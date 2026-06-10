@@ -136,8 +136,9 @@ routes after session binding and removes them on connection close only when the
 stored `session_id` still matches. This prevents an old disconnected session
 from deleting a newer route for the same client device. Cluster mode also
 registers `POST /internal/cluster/push` for gateway-to-gateway local TCP
-delivery. The public `/internal/push` downlink resolver does not call remote
-peers yet.
+delivery. The public `/internal/push` downlink resolver first tries the local
+session manager, then looks up the online registry and calls a remote gateway
+peer when the client is connected elsewhere.
 
 ## Downlink Storage
 

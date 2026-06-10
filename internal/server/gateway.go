@@ -62,7 +62,7 @@ func New(config Config, logger *zap.Logger) (*Gateway, error) {
 		return nil, err
 	}
 	zServer := znet.NewServer()
-	downlinkService, downlinkCloser, err := newDownlinkService(config, zServer.GetConnMgr())
+	downlinkService, downlinkCloser, err := newDownlinkService(config, zServer.GetConnMgr(), clusterRegistry)
 	if err != nil {
 		if upstream != nil {
 			_ = upstream.Close()

@@ -2,9 +2,12 @@ package downlink
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"time"
 
+	"github.com/qiuyier/Z-Courier/internal/cluster"
 	"github.com/qiuyier/Z-Courier/internal/protocol"
 	"github.com/qiuyier/Z-Courier/internal/session"
 )
@@ -28,9 +31,19 @@ type Service struct {
 	now         func() time.Time
 	retryDelay  time.Duration
 	maxAttempts int
+
+	gatewayNode    string
+	onlineRegistry cluster.OnlineRegistry
+	peerDispatcher PeerDispatcher
 }
 
 type ServiceOption func(*Service)
+
+type ClusterDeliveryConfig struct {
+	GatewayNode    string
+	Registry       cluster.OnlineRegistry
+	PeerDispatcher PeerDispatcher
+}
 
 func WithStore(store Store) ServiceOption {
 	return func(s *Service) {
@@ -51,6 +64,14 @@ func WithMaxAttempts(maxAttempts int) ServiceOption {
 		if maxAttempts > 0 {
 			s.maxAttempts = maxAttempts
 		}
+	}
+}
+
+func WithClusterDelivery(config ClusterDeliveryConfig) ServiceOption {
+	return func(s *Service) {
+		s.gatewayNode = config.GatewayNode
+		s.onlineRegistry = config.Registry
+		s.peerDispatcher = config.PeerDispatcher
 	}
 }
 
@@ -82,7 +103,7 @@ func (s *Service) Push(ctx context.Context, req PushRequest) (*PushResponse, err
 		return s.pushReliable(ctx, req)
 	}
 
-	return s.pushOnline(req)
+	return s.deliverOnline(ctx, req)
 }
 
 func (s *Service) PushPeer(ctx context.Context, req PeerPushRequest, gatewayNode string) (*PeerPushResponse, error) {
@@ -129,7 +150,7 @@ func (s *Service) pushReliable(ctx context.Context, req PushRequest) (*PushRespo
 		TraceID:       message.TraceID,
 	}
 
-	sentResp, err := s.pushOnline(pushRequestFromMessage(message))
+	sentResp, err := s.deliverOnline(ctx, pushRequestFromMessage(message))
 	if err != nil {
 		if err := s.store.MarkAttemptFailed(ctx, message.MessageID, err.Error(), s.now().Add(s.retryDelay)); err != nil {
 			return nil, fmt.Errorf("%w: %v", ErrStore, err)
@@ -241,7 +262,7 @@ func (s *Service) retryMessages(ctx context.Context, messages []Message) (RetryR
 }
 
 func (s *Service) retryMessage(ctx context.Context, message Message) (MessageStatus, error) {
-	sentResp, err := s.pushOnline(pushRequestFromMessage(message))
+	sentResp, err := s.deliverOnline(ctx, pushRequestFromMessage(message))
 	if err != nil {
 		if s.maxAttempts > 0 && message.Attempts+1 >= s.maxAttempts {
 			if err := s.store.MarkFailed(ctx, message.MessageID, err.Error(), s.now()); err != nil {
@@ -265,6 +286,72 @@ func (s *Service) retryMessage(ctx context.Context, message Message) (MessageSta
 
 func (s *Service) pushOnline(req PushRequest) (*PushResponse, error) {
 	return s.pushOnlineWithSession(req, "")
+}
+
+func (s *Service) deliverOnline(ctx context.Context, req PushRequest) (*PushResponse, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	resp, err := s.pushOnline(req)
+	if err == nil {
+		return resp, nil
+	}
+	if !errors.Is(err, ErrSessionNotFound) {
+		return nil, err
+	}
+
+	return s.pushCluster(ctx, req)
+}
+
+func (s *Service) pushCluster(ctx context.Context, req PushRequest) (*PushResponse, error) {
+	if s.onlineRegistry == nil {
+		return nil, ErrSessionNotFound
+	}
+
+	key := cluster.RouteKey{
+		ClientID: req.ClientID,
+		DeviceID: req.DeviceID,
+	}
+	entry, ok, err := s.onlineRegistry.Lookup(ctx, key)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrRegistry, err)
+	}
+	if !ok {
+		return nil, ErrSessionNotFound
+	}
+
+	if entry.GatewayNode == s.gatewayNode || entry.InternalAddr == "" {
+		_ = s.onlineRegistry.Unbind(ctx, key, entry.SessionID)
+		return nil, ErrSessionNotFound
+	}
+	if s.peerDispatcher == nil {
+		return nil, ErrPeerNotConfigured
+	}
+
+	peerResp, err := s.peerDispatcher.Push(ctx, entry, peerPushRequestFromPushRequest(req, s.gatewayNode, entry.SessionID))
+	if err != nil {
+		if isStalePeerRouteError(err) {
+			_ = s.onlineRegistry.Unbind(ctx, key, entry.SessionID)
+		}
+		return nil, fmt.Errorf("%w: %w", ErrPeerDispatch, err)
+	}
+
+	sessionID := peerResp.SessionID
+	if sessionID == "" {
+		sessionID = entry.SessionID
+	}
+
+	return &PushResponse{
+		Code:          nonEmpty(peerResp.Code, "ok"),
+		DeliveryState: DeliveryStateSent,
+		ClientID:      nonEmpty(peerResp.ClientID, req.ClientID),
+		DeviceID:      nonEmpty(peerResp.DeviceID, req.DeviceID),
+		SessionID:     sessionID,
+		ConnID:        peerResp.ConnID,
+		MessageID:     req.MessageID,
+		TraceID:       req.TraceID,
+	}, nil
 }
 
 func (s *Service) pushOnlineWithSession(req PushRequest, expectedSessionID string) (*PushResponse, error) {
@@ -325,6 +412,20 @@ func pushRequestFromPeerPushRequest(req PeerPushRequest) PushRequest {
 	}
 }
 
+func peerPushRequestFromPushRequest(req PushRequest, originNode, sessionID string) PeerPushRequest {
+	return PeerPushRequest{
+		OriginNode:  originNode,
+		ClientID:    req.ClientID,
+		DeviceID:    req.DeviceID,
+		SessionID:   sessionID,
+		MsgID:       req.MsgID,
+		MessageID:   req.MessageID,
+		TraceID:     req.TraceID,
+		AckRequired: req.AckRequired,
+		Body:        append([]byte(nil), req.Body...),
+	}
+}
+
 func validatePushRequest(req PushRequest) error {
 	if req.ClientID == "" {
 		return ErrMissingClientID
@@ -337,6 +438,22 @@ func validatePushRequest(req PushRequest) error {
 	}
 
 	return nil
+}
+
+func isStalePeerRouteError(err error) bool {
+	if errors.Is(err, ErrSessionNotFound) || errors.Is(err, ErrSessionMismatch) {
+		return true
+	}
+
+	var httpErr *PeerPushHTTPError
+	if !errors.As(err, &httpErr) {
+		return false
+	}
+	if httpErr.StatusCode != http.StatusNotFound {
+		return false
+	}
+
+	return httpErr.Code == "session_not_found" || httpErr.Code == "session_mismatch"
 }
 
 func validatePeerPushRequest(req PeerPushRequest) error {

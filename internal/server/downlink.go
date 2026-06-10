@@ -8,10 +8,11 @@ import (
 	"time"
 
 	"github.com/aceld/zinx/ziface"
+	"github.com/qiuyier/Z-Courier/internal/cluster"
 	"github.com/qiuyier/Z-Courier/internal/downlink"
 )
 
-func newDownlinkService(config Config, connManager ziface.IConnManager) (*downlink.Service, io.Closer, error) {
+func newDownlinkService(config Config, connManager ziface.IConnManager, registry cluster.OnlineRegistry) (*downlink.Service, io.Closer, error) {
 	if config.DisableInternalHTTP || config.InternalHTTPAddr == "" {
 		return nil, nil, nil
 	}
@@ -29,6 +30,17 @@ func newDownlinkService(config Config, connManager ziface.IConnManager) (*downli
 		downlink.WithRetryDelay(config.DownlinkDelivery.RetryDelay),
 		downlink.WithMaxAttempts(config.DownlinkDelivery.MaxAttempts),
 	)
+	if registry != nil {
+		options = append(options, downlink.WithClusterDelivery(downlink.ClusterDeliveryConfig{
+			GatewayNode: config.GatewayNode,
+			Registry:    registry,
+			PeerDispatcher: downlink.NewHTTPPeerDispatcher(downlink.HTTPPeerDispatcherConfig{
+				Token:               config.Cluster.Peer.Token,
+				Timeout:             config.Cluster.Peer.Timeout,
+				MaxResponseBodySize: config.InternalMaxRequestBodySize,
+			}),
+		}))
+	}
 
 	return downlink.NewService(config.Sessions, zinxConnectionFinder{connManager: connManager}, options...), closer, nil
 }

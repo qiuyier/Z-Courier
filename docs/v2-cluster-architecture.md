@@ -457,9 +457,11 @@ supports both memory and Redis online registries: session bind writes the
 current route, and connection close removes the route only when session_id still
 matches.
 
-Peer Push API and the HTTP peer dispatcher are implemented as standalone
-building blocks. Cluster-aware downlink resolution is still a future phase, so
-`/internal/push` does not yet look up Redis and call remote peers.
+Peer Push API, the HTTP peer dispatcher, and cluster-aware downlink resolution
+are implemented. `/internal/push` now tries local delivery first, then looks up
+the online registry and calls the target gateway peer when the route points to a
+remote node. Multi-node E2E and store-level retry claiming are still future
+phases.
 ```
 
 ### Phase 1: Interfaces And Config
