@@ -68,7 +68,7 @@ upstream:
   routes:
     - name: integration-http-upstream
       enabled: false
-      msg_id_min: 1000
+      msg_id_min: 1001
       msg_id_max: 1999
       target:
         type: http

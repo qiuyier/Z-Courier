@@ -7,6 +7,7 @@ import (
 	"github.com/qiuyier/Z-Courier/internal/cluster"
 	"github.com/qiuyier/Z-Courier/internal/downlink"
 	"github.com/qiuyier/Z-Courier/internal/pipeline"
+	"github.com/qiuyier/Z-Courier/internal/protocol"
 	"github.com/qiuyier/Z-Courier/internal/session"
 )
 
@@ -108,7 +109,7 @@ type ClusterPeerConfig struct {
 
 func DefaultConfig() Config {
 	return Config{
-		RouteMsgIDs: []uint32{1000},
+		RouteMsgIDs: []uint32{protocol.MsgIDBind},
 		Verifier: auth.NewStaticTokenVerifier(map[string]auth.Principal{
 			"dev-token": {
 				ClientID: "dev-client",

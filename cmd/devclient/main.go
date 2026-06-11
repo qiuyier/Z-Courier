@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -21,15 +22,33 @@ func main() {
 	clientID := flag.String("client-id", "dev-client", "claimed client id")
 	deviceID := flag.String("device-id", "device-1", "device id")
 	token := flag.String("token", "dev-token", "auth token")
-	msgID := flag.Uint("msg-id", 1000, "upstream bind message id")
+	msgID := flag.Uint("msg-id", uint(protocol.MsgIDBind), "AUTH/BIND message id")
+	upstreamMsgID := flag.Uint("upstream-msg-id", 0, "optional business upstream message id sent after AUTH/BIND succeeds")
+	upstreamBody := flag.String("upstream-body", "devclient-upstream", "optional business upstream body")
 	flag.Parse()
 
+	bindMessageID := fmt.Sprintf("devclient-bind-%d", time.Now().UnixNano())
 	client := znet.NewClient(*host, *port)
-	client.AddRouter(protocol.MsgIDAck, &packetRouter{name: "ack"})
+	client.AddRouter(protocol.MsgIDAck, &packetRouter{
+		name:          "ack",
+		token:         *token,
+		clientID:      *clientID,
+		deviceID:      *deviceID,
+		bindMessageID: bindMessageID,
+		upstreamMsgID: uint32(*upstreamMsgID),
+		upstreamBody:  []byte(*upstreamBody),
+	})
 	client.AddRouter(2001, &packetRouter{name: "downlink", token: *token})
 	client.SetOnConnStart(func(conn ziface.IConnection) {
 		fmt.Printf("connected: local=%s remote=%s conn_id=%d\n", conn.LocalAddrString(), conn.RemoteAddrString(), conn.GetConnID())
-		if err := sendBindPacket(conn, uint32(*msgID), *clientID, *deviceID, *token); err != nil {
+		if err := sendPacket(conn, packetInput{
+			msgID:     uint32(*msgID),
+			clientID:  *clientID,
+			deviceID:  *deviceID,
+			token:     *token,
+			messageID: bindMessageID,
+			body:      []byte("devclient-bind"),
+		}); err != nil {
 			fmt.Printf("send bind packet failed: %v\n", err)
 			conn.Stop()
 		}
@@ -43,12 +62,24 @@ func main() {
 	waitForExit(client)
 }
 
-func sendBindPacket(conn ziface.IConnection, msgID uint32, clientID, deviceID, token string) error {
-	packet := protocol.NewPacket(msgID, []byte("devclient-bind"))
-	packet.ClientID = clientID
-	packet.DeviceID = deviceID
-	packet.Token = token
-	packet.MessageID = fmt.Sprintf("devclient-%d", time.Now().UnixNano())
+type packetInput struct {
+	msgID     uint32
+	clientID  string
+	deviceID  string
+	token     string
+	messageID string
+	body      []byte
+}
+
+func sendPacket(conn ziface.IConnection, input packetInput) error {
+	packet := protocol.NewPacket(input.msgID, input.body)
+	packet.ClientID = input.clientID
+	packet.DeviceID = input.deviceID
+	packet.Token = input.token
+	packet.MessageID = input.messageID
+	if packet.MessageID == "" {
+		packet.MessageID = fmt.Sprintf("devclient-%d", time.Now().UnixNano())
+	}
 	packet.TraceID = packet.MessageID
 	packet.Timestamp = time.Now().UnixMilli()
 	packet.Flags = protocol.FlagAckRequired
@@ -64,11 +95,17 @@ func sendBindPacket(conn ziface.IConnection, msgID uint32, clientID, deviceID, t
 type packetRouter struct {
 	znet.BaseRouter
 
-	name  string
-	token string
+	name             string
+	token            string
+	clientID         string
+	deviceID         string
+	bindMessageID    string
+	upstreamMsgID    uint32
+	upstreamBody     []byte
+	sendUpstreamOnce sync.Once
 }
 
-func (r packetRouter) Handle(request ziface.IRequest) {
+func (r *packetRouter) Handle(request ziface.IRequest) {
 	packet, err := protocol.Decode(request.GetData())
 	if err != nil {
 		fmt.Printf("[%s] decode failed: outer_msg_id=%d error=%v\n", r.name, request.GetMsgID(), err)
@@ -94,6 +131,36 @@ func (r packetRouter) Handle(request ziface.IRequest) {
 			fmt.Printf("[downlink] send ack failed: message_id=%s error=%v\n", packet.MessageID, err)
 		}
 	}
+	if r.name == "ack" && r.upstreamMsgID != 0 {
+		r.maybeSendUpstreamAfterBindAck(request.GetConnection(), packet.Body)
+	}
+}
+
+func (r *packetRouter) maybeSendUpstreamAfterBindAck(conn ziface.IConnection, body []byte) {
+	var ack protocol.Ack
+	if err := sonic.Unmarshal(body, &ack); err != nil {
+		fmt.Printf("[ack] unmarshal failed: %v\n", err)
+		return
+	}
+	if ack.MessageID != r.bindMessageID || ack.Code != protocol.AckAccepted {
+		return
+	}
+
+	r.sendUpstreamOnce.Do(func() {
+		messageID := fmt.Sprintf("devclient-upstream-%d", time.Now().UnixNano())
+		if err := sendPacket(conn, packetInput{
+			msgID:     r.upstreamMsgID,
+			clientID:  r.clientID,
+			deviceID:  r.deviceID,
+			token:     r.token,
+			messageID: messageID,
+			body:      r.upstreamBody,
+		}); err != nil {
+			fmt.Printf("[upstream] send failed: msg_id=%d error=%v\n", r.upstreamMsgID, err)
+			return
+		}
+		fmt.Printf("[upstream] sent msg_id=%d message_id=%s\n", r.upstreamMsgID, messageID)
+	})
 }
 
 func sendDownlinkAck(conn ziface.IConnection, origin *protocol.Packet, token string) error {

@@ -18,6 +18,7 @@ type Context struct {
 
 	Principal  *auth.Principal
 	BindResult *session.BindResult
+	Session    *session.Session
 }
 
 func NewContext(request ziface.IRequest, packet *protocol.Packet, logger *zap.Logger) *Context {

@@ -100,6 +100,57 @@ func TestIngressRouterHandlesDownlinkAckWithoutForwarding(t *testing.T) {
 	}
 }
 
+func TestIngressRouterHandlesBindWithoutForwarding(t *testing.T) {
+	forwarder := &testForwarder{}
+	upstream := router.NewEngine([]router.Route{{
+		Name:      "should-not-see-bind",
+		MsgIDMin:  protocol.MsgIDBind,
+		Forwarder: forwarder,
+	}})
+
+	chain := pipeline.NewChain(pipeline.HandlerFunc(func(ctx *pipeline.Context) error {
+		ctx.BindResult = &session.BindResult{
+			Session: &session.Session{
+				SessionID: "session-1",
+				ConnID:    ctx.ConnID(),
+				ClientID:  "client-1",
+				DeviceID:  "device-1",
+			},
+			Created: true,
+		}
+		ctx.Session = ctx.BindResult.Session
+		ctx.Packet.ClientID = "client-1"
+		ctx.Packet.DeviceID = "device-1"
+		ctx.Packet.SessionID = "session-1"
+		return nil
+	}))
+	ingress := NewIngressRouter(zap.NewNop(), nil, chain, upstream, nil, 100)
+
+	packet := protocol.NewPacket(protocol.MsgIDBind, []byte("bind"))
+	packet.Token = "token"
+	packet.DeviceID = "device-1"
+	encoded, err := protocol.Encode(packet)
+	if err != nil {
+		t.Fatalf("Encode packet error = %v", err)
+	}
+
+	conn := &testZinxConnection{connID: 7}
+	request := &testZinxRequest{
+		conn:  conn,
+		msgID: protocol.MsgIDBind,
+		data:  encoded,
+	}
+
+	ingress.Handle(request)
+
+	if forwarder.packet != nil {
+		t.Fatalf("bind packet was forwarded upstream: %+v", forwarder.packet)
+	}
+	if conn.sentMsgID != protocol.MsgIDAck {
+		t.Fatalf("sent msg id = %d, want gateway ack %d", conn.sentMsgID, protocol.MsgIDAck)
+	}
+}
+
 type testSessionFinder struct{}
 
 func (testSessionFinder) GetByClientDevice(string, string) (*session.Session, bool) {

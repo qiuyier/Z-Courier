@@ -151,7 +151,7 @@ Example:
 routes:
   - name: chat-upstream
     match:
-      msg_id_range: [1000, 1999]
+      msg_id_range: [1001, 1999]
     target:
       type: http
       url: http://backend:8080/gateway/upstream

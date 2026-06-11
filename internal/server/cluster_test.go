@@ -82,9 +82,9 @@ func TestClusterBindHandlerBindsRoute(t *testing.T) {
 
 	request := &testZinxRequest{
 		conn:  &testZinxConnection{connID: 7},
-		msgID: 1000,
+		msgID: protocol.MsgIDBind,
 	}
-	ctx := pipeline.NewContext(request, protocol.NewPacket(1000, []byte("hello")), zap.NewNop())
+	ctx := pipeline.NewContext(request, protocol.NewPacket(protocol.MsgIDBind, []byte("hello")), zap.NewNop())
 	ctx.BindResult = &session.BindResult{
 		Session: &session.Session{
 			SessionID:   "session-1",
@@ -126,9 +126,9 @@ func TestClusterBindHandlerRejectsBindFailure(t *testing.T) {
 
 	request := &testZinxRequest{
 		conn:  &testZinxConnection{connID: 7},
-		msgID: 1000,
+		msgID: protocol.MsgIDBind,
 	}
-	ctx := pipeline.NewContext(request, protocol.NewPacket(1000, []byte("hello")), zap.NewNop())
+	ctx := pipeline.NewContext(request, protocol.NewPacket(protocol.MsgIDBind, []byte("hello")), zap.NewNop())
 	ctx.BindResult = &session.BindResult{
 		Session: &session.Session{
 			SessionID:   "session-1",

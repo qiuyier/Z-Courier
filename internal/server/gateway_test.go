@@ -1,6 +1,10 @@
 package server
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/qiuyier/Z-Courier/internal/protocol"
+)
 
 func TestRegisteredMsgIDsIncludesUpstreamRanges(t *testing.T) {
 	msgIDs, err := registeredMsgIDs(Config{
@@ -15,6 +19,23 @@ func TestRegisteredMsgIDsIncludesUpstreamRanges(t *testing.T) {
 	}
 
 	want := []uint32{2, 1000, 1001, 1002, 2000, 2001}
+	if len(msgIDs) != len(want) {
+		t.Fatalf("registered msg IDs = %v, want %v", msgIDs, want)
+	}
+	for i := range want {
+		if msgIDs[i] != want[i] {
+			t.Fatalf("registered msg IDs = %v, want %v", msgIDs, want)
+		}
+	}
+}
+
+func TestRegisteredMsgIDsAlwaysIncludesControlMessages(t *testing.T) {
+	msgIDs, err := registeredMsgIDs(Config{})
+	if err != nil {
+		t.Fatalf("registeredMsgIDs() error = %v", err)
+	}
+
+	want := []uint32{protocol.MsgIDDownlinkAck, protocol.MsgIDBind}
 	if len(msgIDs) != len(want) {
 		t.Fatalf("registered msg IDs = %v, want %v", msgIDs, want)
 	}

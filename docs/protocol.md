@@ -54,27 +54,33 @@ The fixed header is 36 bytes before variable-length strings and body bytes.
 ```text
 1  gateway ACK
 2  client downlink delivery ACK
+1000  AUTH/BIND
 ```
 
 Application MsgIDs should avoid the reserved range. The sample configs use:
 
 ```text
-1000-1999  HTTP upstream examples
+1001-1999  HTTP upstream examples
 2000-2999  NSQ upstream examples
 ```
 
 These ranges are only examples. Real deployments should assign ranges based on
 their own business modules.
 
-## Client Bind
+## AUTH/BIND
 
-The gateway binds a connection after a packet passes authentication. The packet
-must include:
+The gateway binds a connection only after it receives an explicit AUTH/BIND
+packet:
+
+```text
+MsgID = 1000
+```
+
+The packet must include:
 
 ```text
 Token
 DeviceID
-MsgID
 ```
 
 The packet may include `ClientID`, but the gateway uses the verified token
@@ -88,6 +94,10 @@ client_id + device_id -> connection
 
 If durable downlink storage is enabled, binding also triggers a flush of pending
 messages for that `client_id` and `device_id`.
+
+AUTH/BIND is a gateway control message. It is ACKed by the gateway and is not
+forwarded to upstream backends. Business upstream packets and downlink delivery
+ACKs must be sent after AUTH/BIND succeeds.
 
 ## Gateway ACK
 

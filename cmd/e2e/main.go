@@ -361,7 +361,7 @@ func (c *e2eClient) Start(ctx context.Context) error {
 		c.mu.Lock()
 		c.conn = conn
 		c.mu.Unlock()
-		if err := c.SendUpstream(c.bindMessageID, 1000, []byte("e2e-bind")); err != nil {
+		if err := c.SendUpstream(c.bindMessageID, protocol.MsgIDBind, []byte("e2e-bind")); err != nil {
 			fmt.Fprintf(os.Stderr, "send bind failed: %v\n", err)
 			conn.Stop()
 		}

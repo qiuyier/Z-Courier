@@ -304,6 +304,7 @@ func (g *Gateway) shutdownDownlinkRetryWorker() {
 
 func registeredMsgIDs(config Config) ([]uint32, error) {
 	seen := make(map[uint32]struct{})
+	seen[protocol.MsgIDBind] = struct{}{}
 	seen[protocol.MsgIDDownlinkAck] = struct{}{}
 	for _, msgID := range config.RouteMsgIDs {
 		seen[msgID] = struct{}{}

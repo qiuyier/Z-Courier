@@ -91,6 +91,12 @@ func (r *IngressRouter) Handle(request ziface.IRequest) {
 		r.flushDownlinkPending(pipelineContext.BindResult)
 	}
 
+	if packet.MsgID == protocol.MsgIDBind {
+		metrics.RecordIngressPacket(packet.MsgID, "accepted")
+		r.sendAck(request, packet, protocol.AckAccepted, "")
+		return
+	}
+
 	if packet.MsgID == protocol.MsgIDDownlinkAck {
 		r.handleDownlinkAck(request, packet, pipelineContext)
 		return
@@ -110,7 +116,8 @@ func (r *IngressRouter) handleDownlinkAck(request ziface.IRequest, packet *proto
 		r.sendAck(request, packet, protocol.AckRejected, downlink.ErrStoreNotConfigured.Error())
 		return
 	}
-	if pipelineContext == nil || pipelineContext.BindResult == nil || pipelineContext.BindResult.Session == nil {
+	bound := contextSession(pipelineContext)
+	if bound == nil {
 		metrics.RecordDownlinkAck(0, "session_not_bound")
 		r.sendAck(request, packet, protocol.AckRejected, "session is not bound")
 		return
@@ -134,7 +141,6 @@ func (r *IngressRouter) handleDownlinkAck(request ziface.IRequest, packet *proto
 		ack.MessageID = packet.MessageID
 	}
 
-	bound := pipelineContext.BindResult.Session
 	message, err := r.downlink.Ack(connectionContext(request.GetConnection()), bound.ClientID, bound.DeviceID, ack)
 	if err != nil {
 		metrics.RecordDownlinkAck(0, "rejected")
@@ -164,6 +170,20 @@ func (r *IngressRouter) handleDownlinkAck(request ziface.IRequest, packet *proto
 		zap.String("trace_id", packet.TraceID),
 	)
 	r.sendAck(request, packet, protocol.AckAccepted, "")
+}
+
+func contextSession(ctx *pipeline.Context) *session.Session {
+	if ctx == nil {
+		return nil
+	}
+	if ctx.Session != nil {
+		return ctx.Session
+	}
+	if ctx.BindResult != nil {
+		return ctx.BindResult.Session
+	}
+
+	return nil
 }
 
 func (r *IngressRouter) flushDownlinkPending(bindResult *session.BindResult) {

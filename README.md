@@ -95,11 +95,12 @@ fields.
 The current binary packet format is documented in
 [docs/protocol.md](docs/protocol.md).
 
-The gateway registers Zinx routes from `route_msg_ids` and enabled upstream
-route ranges. The router decodes the Z-Courier protocol packet from the Zinx
-request body, verifies the token, binds the connection to a session, logs the
-metadata, forwards the packet when an upstream route matches, and returns an ACK
-packet with `MsgID = 1`.
+The gateway always registers `MsgID = 1000` for AUTH/BIND and `MsgID = 2` for
+downlink delivery ACKs, then registers additional Zinx routes from
+`route_msg_ids` and enabled upstream route ranges. The router decodes the
+Z-Courier protocol packet from the Zinx request body, verifies the token, binds
+the connection on AUTH/BIND, logs the metadata, forwards business packets when
+an upstream route matches, and returns an ACK packet with `MsgID = 1`.
 
 The default development token is:
 
@@ -192,11 +193,12 @@ Run the development client in another terminal:
 go run ./cmd/devclient
 ```
 
-The client sends one upstream bind packet with `dev-token` and `device-1`, then
-prints ACK and downlink packets. With both gateway and devclient running, the
-`curl` command above should make the client print a `MsgID = 2001` packet whose
-body is `hello`. Because the request sets `ack_required: true`, the development
-client also sends a `MsgID = 2` delivery ACK back to the gateway.
+The client sends one `MsgID = 1000` AUTH/BIND packet with `dev-token` and
+`device-1`, then prints ACK and downlink packets. With both gateway and
+devclient running, the `curl` command above should make the client print a
+`MsgID = 2001` packet whose body is `hello`. Because the request sets
+`ack_required: true`, the development client also sends a `MsgID = 2` delivery
+ACK back to the gateway.
 
 To test upstream forwarding, start the development backend:
 
@@ -212,8 +214,13 @@ go run ./cmd/gateway -config configs/z-courier.yaml
 ```
 
 When `devclient` sends its bind packet with `MsgID = 1000`, the gateway will
-forward it to the development backend because the development route matches
-`MsgID = 1000-1999`.
+bind the connection and ACK it locally. It will not forward the bind packet
+upstream. Send a separate business packet in the route range, for example
+`MsgID = 1001-1999`, to verify HTTP upstream forwarding:
+
+```bash
+go run ./cmd/devclient -upstream-msg-id 1001
+```
 
 To publish upstream packets into NSQ, enable or add an NSQ route:
 

@@ -68,7 +68,7 @@ upstream:
   routes:
     - name: dev-http-upstream
       enabled: true
-      msg_id_min: 1000
+      msg_id_min: 1001
       msg_id_max: 1999
       target:
         type: http

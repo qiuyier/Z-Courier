@@ -56,9 +56,12 @@ route_msg_ids:
 
 - `gateway_node`: logical node name recorded in session state.
 - `route_msg_ids`: explicit MsgIDs registered on Zinx in addition to enabled
-  upstream route ranges. Keep command MsgIDs such as bind commands here.
+  upstream route ranges. `MsgID = 1000` AUTH/BIND and `MsgID = 2` downlink ACK
+  are always registered by the gateway.
 
-Z-Courier also always registers `MsgID = 2` for downlink delivery ACK packets.
+`MsgID = 1000` is a gateway control message. It authenticates and binds the TCP
+connection to `client_id + device_id`, returns a gateway ACK, and is not
+forwarded upstream.
 
 ## Auth
 
@@ -234,7 +237,7 @@ upstream:
   routes:
     - name: dev-http-upstream
       enabled: true
-      msg_id_min: 1000
+      msg_id_min: 1001
       msg_id_max: 1999
       target:
         type: http
