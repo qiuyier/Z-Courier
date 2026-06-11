@@ -32,7 +32,9 @@ It starts two gateway processes:
 
 The verifier connects the client to `gateway-b`, sends `/internal/push` to
 `gateway-a`, and checks that Redis route lookup plus peer push delivers the
-message to the client on `gateway-b`.
+message to the client on `gateway-b`. The cluster config uses a short Redis
+route TTL and waits before the online push, so the test also verifies the
+gateway-side route refresher keeps quiet clients discoverable.
 
 ## Manual Run
 

@@ -19,9 +19,10 @@ internal_http:
 cluster:
   enabled: true
   internal_addr: http://127.0.0.1:18183
+  route_refresh_interval: 1s
   registry:
     type: redis
-    ttl: 30s
+    ttl: 3s
     redis:
       addr: 127.0.0.1:16379
       username: ""

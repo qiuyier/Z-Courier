@@ -152,6 +152,33 @@ func TestManagerAllowsMultipleDevices(t *testing.T) {
 	}
 }
 
+func TestManagerSnapshotReturnsClones(t *testing.T) {
+	manager := NewManager()
+
+	if _, err := manager.Bind(BindInput{ConnID: 1, ClientID: "client-1", DeviceID: "phone"}); err != nil {
+		t.Fatalf("Bind phone error = %v", err)
+	}
+	if _, err := manager.Bind(BindInput{ConnID: 2, ClientID: "client-2", DeviceID: "tablet"}); err != nil {
+		t.Fatalf("Bind tablet error = %v", err)
+	}
+
+	snapshot := manager.Snapshot()
+	if len(snapshot) != 2 {
+		t.Fatalf("Snapshot() length = %d, want 2", len(snapshot))
+	}
+
+	changedConnID := snapshot[0].ConnID
+	snapshot[0].ClientID = "changed"
+
+	stored, ok := manager.GetByConnID(changedConnID)
+	if !ok {
+		t.Fatalf("GetByConnID(%d) ok = false, want true", changedConnID)
+	}
+	if stored.ClientID == "changed" {
+		t.Fatal("Snapshot() returned mutable stored session")
+	}
+}
+
 func TestManagerUnbindRemovesIndexes(t *testing.T) {
 	manager := NewManager()
 

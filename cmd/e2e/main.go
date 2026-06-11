@@ -30,16 +30,17 @@ const (
 )
 
 type config struct {
-	GatewayHost   string
-	GatewayPort   int
-	InternalURL   string
-	MetricsURLs   []string
-	InternalToken string
-	PostgresDSN   string
-	ClientID      string
-	DeviceID      string
-	Token         string
-	Timeout       time.Duration
+	GatewayHost     string
+	GatewayPort     int
+	InternalURL     string
+	MetricsURLs     []string
+	InternalToken   string
+	PostgresDSN     string
+	ClientID        string
+	DeviceID        string
+	Token           string
+	Timeout         time.Duration
+	OnlinePushDelay time.Duration
 }
 
 func main() {
@@ -68,6 +69,7 @@ func parseFlags() config {
 	flag.StringVar(&cfg.DeviceID, "device-id", "e2e-device", "device id")
 	flag.StringVar(&cfg.Token, "token", "e2e-token", "client auth token")
 	flag.DurationVar(&cfg.Timeout, "timeout", 30*time.Second, "overall timeout")
+	flag.DurationVar(&cfg.OnlinePushDelay, "online-push-delay", 0, "delay before online downlink push after client bind")
 	flag.Parse()
 
 	cfg.InternalURL = strings.TrimRight(cfg.InternalURL, "/")
@@ -141,6 +143,15 @@ func run(ctx context.Context, cfg config) error {
 		return err
 	}
 	fmt.Println("offline message delivered")
+
+	if cfg.OnlinePushDelay > 0 {
+		fmt.Printf("waiting before online push: %s\n", cfg.OnlinePushDelay)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(cfg.OnlinePushDelay):
+		}
+	}
 
 	fmt.Println("checking online push path")
 	if err := pushDownlink(ctx, cfg, onlineMessageID, []byte("online-after-client"), http.StatusOK); err != nil {

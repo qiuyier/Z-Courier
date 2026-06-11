@@ -191,6 +191,20 @@ func (m *Manager) ListByClientID(clientID string) []*Session {
 	return sessions
 }
 
+func (m *Manager) Snapshot() []*Session {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	sessions := make([]*Session, 0, len(m.byConnID))
+	for _, found := range m.byConnID {
+		if found != nil {
+			sessions = append(sessions, found.Clone())
+		}
+	}
+
+	return sessions
+}
+
 func (m *Manager) Len() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

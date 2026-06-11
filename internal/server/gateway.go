@@ -37,6 +37,9 @@ type Gateway struct {
 	downlinkRetryScanLimit  int
 	downlinkWorkerCancel    context.CancelFunc
 	downlinkWorkerCompleted chan struct{}
+	clusterRouteRefresher   *clusterRouteRefresher
+	clusterRefreshCancel    context.CancelFunc
+	clusterRefreshCompleted chan struct{}
 }
 
 func New(config Config, logger *zap.Logger) (*Gateway, error) {
@@ -85,6 +88,7 @@ func New(config Config, logger *zap.Logger) (*Gateway, error) {
 		downlinkCloser:         downlinkCloser,
 		downlinkRetryInterval:  config.DownlinkDelivery.RetryInterval,
 		downlinkRetryScanLimit: config.DownlinkDelivery.ScanLimit,
+		clusterRouteRefresher:  newClusterRouteRefresher(config, clusterRegistry, config.Sessions, logger),
 	}
 
 	zServer.SetOnConnStart(gateway.onConnStart)
@@ -125,13 +129,47 @@ func newIngressPipeline(config Config, logger *zap.Logger, registry cluster.Onli
 func (g *Gateway) Serve() {
 	g.startInternalHTTP()
 	g.startDownlinkRetryWorker()
+	g.startClusterRouteRefresher()
 	defer g.shutdownClusterRegistry()
+	defer g.shutdownClusterRouteRefresher()
 	defer g.shutdownDownlink()
 	defer g.shutdownUpstream()
 	defer g.shutdownDownlinkRetryWorker()
 	defer g.shutdownInternalHTTP()
 
 	g.server.Serve()
+}
+
+func (g *Gateway) startClusterRouteRefresher() {
+	if g.clusterRouteRefresher == nil {
+		return
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	g.clusterRefreshCancel = cancel
+	g.clusterRefreshCompleted = make(chan struct{})
+
+	g.logger.Info(
+		"starting cluster route refresher",
+		zap.Duration("interval", g.clusterRouteRefresher.interval),
+		zap.Duration("timeout", g.clusterRouteRefresher.timeout),
+	)
+
+	go func() {
+		defer close(g.clusterRefreshCompleted)
+		g.clusterRouteRefresher.run(ctx)
+	}()
+}
+
+func (g *Gateway) shutdownClusterRouteRefresher() {
+	if g.clusterRefreshCancel == nil {
+		return
+	}
+
+	g.clusterRefreshCancel()
+	if g.clusterRefreshCompleted != nil {
+		<-g.clusterRefreshCompleted
+	}
 }
 
 func (g *Gateway) SessionManager() *session.Manager {

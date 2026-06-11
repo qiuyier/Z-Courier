@@ -99,6 +99,7 @@ internal_http:
 cluster:
   enabled: false
   internal_addr: http://127.0.0.1:18080
+  route_refresh_interval: 10s
   registry:
     type: memory
     ttl: 30s
@@ -120,6 +121,9 @@ cluster:
   behavior.
 - `internal_addr`: address other gateway nodes will use to call this node.
   It is required when cluster mode is enabled.
+- `route_refresh_interval`: how often the gateway refreshes Redis or memory
+  online routes for currently connected local sessions. If omitted, it defaults
+  to one third of `registry.ttl`.
 - `registry.type`: online route registry implementation. Supported values are
   `memory` and `redis`. Use `memory` for single-process development and `redis`
   when multiple gateway nodes must share online routes.
@@ -139,6 +143,10 @@ registers `POST /internal/cluster/push` for gateway-to-gateway local TCP
 delivery. The public `/internal/push` downlink resolver first tries the local
 session manager, then looks up the online registry and calls a remote gateway
 peer when the client is connected elsewhere.
+
+While a session remains connected, the gateway periodically refreshes its
+online route. This keeps quiet clients discoverable even when they do not send
+upstream packets before the registry TTL expires.
 
 The local cluster verifier uses `configs/z-courier.cluster-a.yaml` and
 `configs/z-courier.cluster-b.yaml` with the same Redis key prefix and

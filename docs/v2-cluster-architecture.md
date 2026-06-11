@@ -187,6 +187,7 @@ gateway_node: gateway-a
 cluster:
   enabled: true
   internal_addr: http://gateway-a:18082
+  route_refresh_interval: 10s
   registry:
     type: redis
     ttl: 30s
@@ -215,6 +216,11 @@ dispatch.
 
 The existing `gateway_node` should remain the logical node identifier. V2 can
 add `cluster.internal_addr` because other nodes need a callable address.
+
+If `route_refresh_interval` is omitted, the server defaults it to
+`cluster.registry.ttl / 3`. As long as the local TCP session is alive, the
+gateway refreshes the shared online route even when the client sends no
+upstream packets.
 
 ## Cross-Node Downlink Flow
 
@@ -455,7 +461,9 @@ cluster config parsing.
 Phase 2 bind/unbind hooks are implemented for cluster.enabled=true. The runtime
 supports both memory and Redis online registries: session bind writes the
 current route, and connection close removes the route only when session_id still
-matches.
+matches. A cluster route refresher is also implemented: while a local session is
+alive, the gateway periodically refreshes or restores the shared route without
+overwriting a newer mismatched session.
 
 Peer Push API, the HTTP peer dispatcher, and cluster-aware downlink resolution
 are implemented. `/internal/push` now tries local delivery first, then looks up
@@ -464,7 +472,8 @@ remote node.
 
 Multi-node E2E is implemented in scripts/e2e_cluster.sh. It starts gateway-a and
 gateway-b with shared PostgreSQL and Redis, connects the test client to
-gateway-b, sends /internal/push to gateway-a, and verifies cross-node delivery.
+gateway-b, waits longer than the test registry TTL, sends /internal/push to
+gateway-a, and verifies cross-node delivery.
 
 Store-level retry claiming is still a future phase.
 ```

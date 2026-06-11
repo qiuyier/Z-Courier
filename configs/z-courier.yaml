@@ -19,6 +19,7 @@ internal_http:
 cluster:
   enabled: false
   internal_addr: http://127.0.0.1:18080
+  route_refresh_interval: 10s
   registry:
     type: memory
     ttl: 30s

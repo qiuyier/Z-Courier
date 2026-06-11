@@ -77,10 +77,11 @@ type DownlinkDeliveryConfig struct {
 }
 
 type ClusterConfig struct {
-	Enabled      bool
-	InternalAddr string
-	Registry     ClusterRegistryConfig
-	Peer         ClusterPeerConfig
+	Enabled              bool
+	InternalAddr         string
+	RouteRefreshInterval time.Duration
+	Registry             ClusterRegistryConfig
+	Peer                 ClusterPeerConfig
 }
 
 type ClusterRegistryConfig struct {
@@ -139,10 +140,13 @@ func DefaultConfig() Config {
 }
 
 func DefaultClusterConfig() ClusterConfig {
+	ttl := 30 * time.Second
+
 	return ClusterConfig{
+		RouteRefreshInterval: clusterRouteRefreshInterval(ttl),
 		Registry: ClusterRegistryConfig{
 			Type: "memory",
-			TTL:  30 * time.Second,
+			TTL:  ttl,
 			Redis: ClusterRedisConfig{
 				KeyPrefix:    "zcourier",
 				DialTimeout:  time.Second,
@@ -188,6 +192,9 @@ func normalizeConfig(config Config) Config {
 	}
 	if config.Cluster.Registry.Redis.WriteTimeout <= 0 {
 		config.Cluster.Registry.Redis.WriteTimeout = defaults.Cluster.Registry.Redis.WriteTimeout
+	}
+	if config.Cluster.RouteRefreshInterval <= 0 {
+		config.Cluster.RouteRefreshInterval = clusterRouteRefreshInterval(config.Cluster.Registry.TTL)
 	}
 	if config.Cluster.Peer.Timeout <= 0 {
 		config.Cluster.Peer.Timeout = defaults.Cluster.Peer.Timeout

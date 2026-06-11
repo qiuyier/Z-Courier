@@ -49,10 +49,11 @@ type InternalHTTPConfig struct {
 }
 
 type ClusterConfig struct {
-	Enabled      bool                  `yaml:"enabled"`
-	InternalAddr string                `yaml:"internal_addr"`
-	Registry     ClusterRegistryConfig `yaml:"registry"`
-	Peer         ClusterPeerConfig     `yaml:"peer"`
+	Enabled              bool                  `yaml:"enabled"`
+	InternalAddr         string                `yaml:"internal_addr"`
+	RouteRefreshInterval string                `yaml:"route_refresh_interval"`
+	Registry             ClusterRegistryConfig `yaml:"registry"`
+	Peer                 ClusterPeerConfig     `yaml:"peer"`
 }
 
 type ClusterRegistryConfig struct {
@@ -275,6 +276,16 @@ func applyClusterConfig(out *server.Config, config ClusterConfig) error {
 	}
 	if ttl > 0 {
 		out.Cluster.Registry.TTL = ttl
+	}
+
+	routeRefreshInterval, err := parseOptionalPositiveDuration(config.RouteRefreshInterval)
+	if err != nil {
+		return fmt.Errorf("config: cluster route_refresh_interval: %w", err)
+	}
+	if routeRefreshInterval > 0 {
+		out.Cluster.RouteRefreshInterval = routeRefreshInterval
+	} else if config.Registry.TTL != "" {
+		out.Cluster.RouteRefreshInterval = server.DefaultClusterRouteRefreshInterval(out.Cluster.Registry.TTL)
 	}
 
 	redis := config.Registry.Redis

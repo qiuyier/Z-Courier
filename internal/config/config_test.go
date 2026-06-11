@@ -45,6 +45,7 @@ internal_http:
 cluster:
   enabled: true
   internal_addr: http://gateway-a:18082
+  route_refresh_interval: 15s
   registry:
     type: redis
     ttl: 45s
@@ -154,6 +155,9 @@ upstream:
 	}
 	if config.Cluster.InternalAddr != "http://gateway-a:18082" {
 		t.Fatalf("Cluster InternalAddr = %q, want http://gateway-a:18082", config.Cluster.InternalAddr)
+	}
+	if config.Cluster.RouteRefreshInterval != 15*time.Second {
+		t.Fatalf("Cluster RouteRefreshInterval = %v, want 15s", config.Cluster.RouteRefreshInterval)
 	}
 	if config.Cluster.Registry.Type != "redis" {
 		t.Fatalf("Cluster Registry Type = %q, want redis", config.Cluster.Registry.Type)
@@ -314,6 +318,9 @@ func TestLoadServerConfigClusterDefaults(t *testing.T) {
 	if config.Cluster.Registry.TTL != 30*time.Second {
 		t.Fatalf("Cluster Registry TTL = %v, want 30s", config.Cluster.Registry.TTL)
 	}
+	if config.Cluster.RouteRefreshInterval != 10*time.Second {
+		t.Fatalf("Cluster RouteRefreshInterval = %v, want 10s", config.Cluster.RouteRefreshInterval)
+	}
 	if config.Cluster.Registry.Redis.KeyPrefix != "zcourier" {
 		t.Fatalf("Cluster Redis KeyPrefix = %q, want zcourier", config.Cluster.Registry.Redis.KeyPrefix)
 	}
@@ -322,6 +329,22 @@ func TestLoadServerConfigClusterDefaults(t *testing.T) {
 	}
 	if config.Cluster.Peer.Timeout != 2*time.Second {
 		t.Fatalf("Cluster Peer Timeout = %v, want 2s", config.Cluster.Peer.Timeout)
+	}
+}
+
+func TestLoadServerConfigClusterDerivesRouteRefreshIntervalFromTTL(t *testing.T) {
+	path := writeConfig(t, `
+cluster:
+  registry:
+    ttl: 45s
+`)
+
+	config, err := LoadServerConfig(path)
+	if err != nil {
+		t.Fatalf("LoadServerConfig() error = %v", err)
+	}
+	if config.Cluster.RouteRefreshInterval != 15*time.Second {
+		t.Fatalf("Cluster RouteRefreshInterval = %v, want 15s", config.Cluster.RouteRefreshInterval)
 	}
 }
 
@@ -370,6 +393,18 @@ func TestLoadServerConfigClusterRejectsInvalidTTL(t *testing.T) {
 cluster:
   registry:
     ttl: 0s
+`)
+
+	_, err := LoadServerConfig(path)
+	if err == nil {
+		t.Fatal("LoadServerConfig() error = nil, want error")
+	}
+}
+
+func TestLoadServerConfigClusterRejectsInvalidRouteRefreshInterval(t *testing.T) {
+	path := writeConfig(t, `
+cluster:
+  route_refresh_interval: 0s
 `)
 
 	_, err := LoadServerConfig(path)

@@ -207,6 +207,101 @@ func TestGatewayConnStopDoesNotRemoveNewerClusterRoute(t *testing.T) {
 	}
 }
 
+func TestClusterRouteRefresherBindsMissingRoute(t *testing.T) {
+	sessions := session.NewManager()
+	registry := cluster.NewMemoryRegistry(cluster.MemoryRegistryConfig{TTL: 30 * time.Second})
+	bindSession(t, sessions, "session-1", 7)
+
+	refresher := newClusterRouteRefresher(Config{
+		GatewayNode: "gateway-a",
+		Cluster: ClusterConfig{
+			InternalAddr:         "http://gateway-a:18080",
+			RouteRefreshInterval: time.Second,
+			Registry: ClusterRegistryConfig{
+				TTL: 30 * time.Second,
+			},
+		},
+	}, registry, sessions, zap.NewNop())
+
+	result := refresher.refresh(context.Background())
+	if result.Scanned != 1 || result.Refreshed != 1 || result.Skipped != 0 || result.Failed != 0 {
+		t.Fatalf("refresh result = %+v", result)
+	}
+
+	got, ok, err := registry.Lookup(context.Background(), cluster.RouteKey{
+		ClientID: "client-1",
+		DeviceID: "device-1",
+	})
+	if err != nil {
+		t.Fatalf("Lookup() error = %v", err)
+	}
+	if !ok {
+		t.Fatal("Lookup() ok = false, want refreshed route")
+	}
+	if got.SessionID != "session-1" || got.InternalAddr != "http://gateway-a:18080" {
+		t.Fatalf("route entry = %+v", got)
+	}
+}
+
+func TestClusterRouteRefresherDoesNotOverwriteMismatchedRoute(t *testing.T) {
+	sessions := session.NewManager()
+	registry := cluster.NewMemoryRegistry(cluster.MemoryRegistryConfig{TTL: 30 * time.Second})
+	bindSession(t, sessions, "session-old", 7)
+	if err := registry.Bind(context.Background(), testServerRouteEntry("session-new")); err != nil {
+		t.Fatalf("registry.Bind() error = %v", err)
+	}
+
+	refresher := newClusterRouteRefresher(Config{
+		GatewayNode: "gateway-a",
+		Cluster: ClusterConfig{
+			InternalAddr:         "http://gateway-a:18080",
+			RouteRefreshInterval: time.Second,
+			Registry: ClusterRegistryConfig{
+				TTL: 30 * time.Second,
+			},
+		},
+	}, registry, sessions, zap.NewNop())
+
+	result := refresher.refresh(context.Background())
+	if result.Scanned != 1 || result.Refreshed != 0 || result.Skipped != 1 || result.Failed != 0 {
+		t.Fatalf("refresh result = %+v", result)
+	}
+
+	got, ok, err := registry.Lookup(context.Background(), cluster.RouteKey{
+		ClientID: "client-1",
+		DeviceID: "device-1",
+	})
+	if err != nil {
+		t.Fatalf("Lookup() error = %v", err)
+	}
+	if !ok {
+		t.Fatal("Lookup() ok = false, want newer route kept")
+	}
+	if got.SessionID != "session-new" {
+		t.Fatalf("SessionID = %q, want session-new", got.SessionID)
+	}
+}
+
+func TestClusterRouteRefreshInterval(t *testing.T) {
+	tests := []struct {
+		name string
+		ttl  time.Duration
+		want time.Duration
+	}{
+		{name: "default", ttl: 0, want: 10 * time.Second},
+		{name: "third", ttl: 30 * time.Second, want: 10 * time.Second},
+		{name: "minimum", ttl: time.Second, want: 500 * time.Millisecond},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := clusterRouteRefreshInterval(tt.ttl); got != tt.want {
+				t.Fatalf("clusterRouteRefreshInterval(%v) = %v, want %v", tt.ttl, got, tt.want)
+			}
+		})
+	}
+}
+
 func bindSession(t *testing.T, sessions *session.Manager, sessionID string, connID uint64) {
 	t.Helper()
 

@@ -22,12 +22,26 @@ cleanup() {
 }
 trap cleanup EXIT
 
+check_gateways_alive() {
+  if [[ -n "$GATEWAY_A_PID" ]] && ! kill -0 "$GATEWAY_A_PID" >/dev/null 2>&1; then
+    echo "gateway-a exited unexpectedly" >&2
+    tail -n 120 "$LOG_DIR/e2e-cluster-gateway-a.log" >&2 || true
+    exit 1
+  fi
+  if [[ -n "$GATEWAY_B_PID" ]] && ! kill -0 "$GATEWAY_B_PID" >/dev/null 2>&1; then
+    echo "gateway-b exited unexpectedly" >&2
+    tail -n 120 "$LOG_DIR/e2e-cluster-gateway-b.log" >&2 || true
+    exit 1
+  fi
+}
+
 wait_http() {
   local name="$1"
   local url="$2"
 
   echo "waiting for $name..."
   for attempt in $(seq 1 60); do
+    check_gateways_alive
     if curl -fsS "$url" >/dev/null 2>&1; then
       return 0
     fi
@@ -41,6 +55,8 @@ wait_http() {
 
 cd "$ROOT_DIR"
 mkdir -p "$LOG_DIR"
+: >"$LOG_DIR/e2e-cluster-gateway-a.log"
+: >"$LOG_DIR/e2e-cluster-gateway-b.log"
 
 docker compose -f "$COMPOSE_FILE" up -d postgres redis nsqlookupd nsqd
 
@@ -85,5 +101,6 @@ go run ./cmd/e2e \
   -gateway-port 9902 \
   -internal-url http://127.0.0.1:18182 \
   -metrics-url http://127.0.0.1:18182/metrics,http://127.0.0.1:18183/metrics \
+  -online-push-delay 5s \
   -timeout 45s \
   "$@"
