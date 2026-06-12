@@ -28,6 +28,7 @@ func newDownlinkService(config Config, connManager ziface.IConnManager, registry
 	}
 	options = append(options,
 		downlink.WithRetryDelay(config.DownlinkDelivery.RetryDelay),
+		downlink.WithRetryClaim(config.GatewayNode, config.DownlinkDelivery.RetryLease),
 		downlink.WithMaxAttempts(config.DownlinkDelivery.MaxAttempts),
 	)
 	if registry != nil {

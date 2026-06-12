@@ -8,6 +8,7 @@ CONFIG_B="$ROOT_DIR/configs/z-courier.cluster-b.yaml"
 ZINX_CONFIG_A="$ROOT_DIR/conf/zinx.cluster-a.json"
 ZINX_CONFIG_B="$ROOT_DIR/conf/zinx.cluster-b.json"
 LOG_DIR="$ROOT_DIR/log"
+RUN_ID="$(date +%s)-$$"
 
 GATEWAY_A_PID=""
 GATEWAY_B_PID=""
@@ -101,6 +102,7 @@ go run ./cmd/e2e \
   -gateway-port 9902 \
   -internal-url http://127.0.0.1:18182 \
   -metrics-url http://127.0.0.1:18182/metrics,http://127.0.0.1:18183/metrics \
+  -device-id "e2e-cluster-device-$RUN_ID" \
   -online-push-delay 5s \
   -timeout 45s \
   "$@"

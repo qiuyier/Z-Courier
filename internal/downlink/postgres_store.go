@@ -23,6 +23,12 @@ type PostgresStore struct {
 	db *sql.DB
 }
 
+const postgresMessageColumns = `
+message_id, client_id, device_id, msg_id, body, ack_required, trace_id,
+session_id, status, attempts, next_retry_at, last_error, created_at,
+updated_at, sent_at, delivered_at, claim_owner, claim_until
+`
+
 func NewPostgresStore(ctx context.Context, config PostgresStoreConfig) (*PostgresStore, error) {
 	if config.DSN == "" {
 		return nil, fmt.Errorf("postgres dsn is required")
@@ -75,13 +81,22 @@ CREATE TABLE IF NOT EXISTS z_courier_downlink_messages (
   created_at TIMESTAMPTZ NOT NULL,
   updated_at TIMESTAMPTZ NOT NULL,
   sent_at TIMESTAMPTZ,
-  delivered_at TIMESTAMPTZ
+  delivered_at TIMESTAMPTZ,
+  claim_owner TEXT NOT NULL DEFAULT '',
+  claim_until TIMESTAMPTZ
 );
+ALTER TABLE z_courier_downlink_messages
+  ADD COLUMN IF NOT EXISTS claim_owner TEXT NOT NULL DEFAULT '';
+ALTER TABLE z_courier_downlink_messages
+  ADD COLUMN IF NOT EXISTS claim_until TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS z_courier_downlink_messages_client_device_status_idx
   ON z_courier_downlink_messages (client_id, device_id, status);
 CREATE INDEX IF NOT EXISTS z_courier_downlink_messages_next_retry_at_idx
   ON z_courier_downlink_messages (next_retry_at)
   WHERE next_retry_at IS NOT NULL;
+CREATE INDEX IF NOT EXISTS z_courier_downlink_messages_claim_until_idx
+  ON z_courier_downlink_messages (claim_until)
+  WHERE claim_until IS NOT NULL;
 `)
 	return err
 }
@@ -105,11 +120,11 @@ func (s *PostgresStore) Save(ctx context.Context, message Message) (Message, err
 INSERT INTO z_courier_downlink_messages (
   message_id, client_id, device_id, msg_id, body, ack_required, trace_id,
   session_id, status, attempts, next_retry_at, last_error, created_at,
-  updated_at, sent_at, delivered_at
+  updated_at, sent_at, delivered_at, claim_owner, claim_until
 ) VALUES (
   $1, $2, $3, $4, $5, $6, $7,
   $8, $9, $10, $11, $12, $13,
-  $14, $15, $16
+  $14, $15, $16, $17, $18
 )
 ON CONFLICT (message_id) DO NOTHING
 `,
@@ -129,6 +144,8 @@ ON CONFLICT (message_id) DO NOTHING
 		message.UpdatedAt,
 		nullTime(message.SentAt),
 		nullTime(message.DeliveredAt),
+		message.ClaimOwner,
+		nullTime(message.ClaimUntil),
 	)
 	if err != nil {
 		return Message{}, err
@@ -147,9 +164,7 @@ ON CONFLICT (message_id) DO NOTHING
 
 func (s *PostgresStore) Get(ctx context.Context, messageID string) (Message, bool, error) {
 	row := s.db.QueryRowContext(ctx, `
-SELECT message_id, client_id, device_id, msg_id, body, ack_required, trace_id,
-       session_id, status, attempts, next_retry_at, last_error, created_at,
-       updated_at, sent_at, delivered_at
+SELECT `+postgresMessageColumns+`
 FROM z_courier_downlink_messages
 WHERE message_id = $1
 `, messageID)
@@ -174,15 +189,58 @@ func (s *PostgresStore) ListDuePending(ctx context.Context, now time.Time, limit
 	}
 
 	rows, err := s.db.QueryContext(ctx, `
-SELECT message_id, client_id, device_id, msg_id, body, ack_required, trace_id,
-       session_id, status, attempts, next_retry_at, last_error, created_at,
-       updated_at, sent_at, delivered_at
+SELECT `+postgresMessageColumns+`
 FROM z_courier_downlink_messages
 WHERE status = $1
   AND (next_retry_at IS NULL OR next_retry_at <= $2)
+  AND (claim_until IS NULL OR claim_until <= $2)
 ORDER BY created_at ASC, message_id ASC
 LIMIT $3
 `, string(MessageStatusPending), now, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return scanMessages(rows)
+}
+
+func (s *PostgresStore) ClaimDuePending(ctx context.Context, now time.Time, limit int, owner string, lease time.Duration) ([]Message, error) {
+	if now.IsZero() {
+		now = time.Now()
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+	if owner == "" {
+		return s.ListDuePending(ctx, now, limit)
+	}
+	if lease <= 0 {
+		lease = 30 * time.Second
+	}
+
+	rows, err := s.db.QueryContext(ctx, `
+WITH claimed AS (
+  SELECT message_id
+  FROM z_courier_downlink_messages
+  WHERE status = $1
+    AND (next_retry_at IS NULL OR next_retry_at <= $2)
+    AND (claim_until IS NULL OR claim_until <= $2)
+  ORDER BY created_at ASC, message_id ASC
+  FOR UPDATE SKIP LOCKED
+  LIMIT $3
+)
+UPDATE z_courier_downlink_messages AS m
+SET claim_owner = $4,
+    claim_until = $5,
+    updated_at = $2
+FROM claimed
+WHERE m.message_id = claimed.message_id
+RETURNING m.message_id, m.client_id, m.device_id, m.msg_id, m.body,
+          m.ack_required, m.trace_id, m.session_id, m.status, m.attempts,
+          m.next_retry_at, m.last_error, m.created_at, m.updated_at,
+          m.sent_at, m.delivered_at, m.claim_owner, m.claim_until
+`, string(MessageStatusPending), now, limit, owner, now.Add(lease))
 	if err != nil {
 		return nil, err
 	}
@@ -196,17 +254,17 @@ func (s *PostgresStore) ListPendingByClientDevice(ctx context.Context, clientID,
 		limit = 100
 	}
 
+	now := time.Now()
 	rows, err := s.db.QueryContext(ctx, `
-SELECT message_id, client_id, device_id, msg_id, body, ack_required, trace_id,
-       session_id, status, attempts, next_retry_at, last_error, created_at,
-       updated_at, sent_at, delivered_at
+SELECT `+postgresMessageColumns+`
 FROM z_courier_downlink_messages
 WHERE status = $1
   AND client_id = $2
   AND device_id = $3
+  AND (claim_until IS NULL OR claim_until <= $4)
 ORDER BY created_at ASC, message_id ASC
-LIMIT $4
-`, string(MessageStatusPending), clientID, deviceID, limit)
+LIMIT $5
+`, string(MessageStatusPending), clientID, deviceID, now, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -227,6 +285,8 @@ SET status = $2,
     attempts = attempts + 1,
     last_error = '',
     next_retry_at = NULL,
+    claim_owner = '',
+    claim_until = NULL,
     sent_at = $4,
     updated_at = $4
 WHERE message_id = $1
@@ -248,6 +308,8 @@ UPDATE z_courier_downlink_messages
 SET status = $4,
     last_error = '',
     next_retry_at = NULL,
+    claim_owner = '',
+    claim_until = NULL,
     delivered_at = $5,
     updated_at = $5
 WHERE message_id = $1
@@ -268,6 +330,8 @@ SET status = $2,
     attempts = attempts + 1,
     last_error = $3,
     next_retry_at = $4,
+    claim_owner = '',
+    claim_until = NULL,
     updated_at = $5
 WHERE message_id = $1
 `, messageID, string(MessageStatusPending), reason, nullTime(nextRetryAt), time.Now())
@@ -289,6 +353,8 @@ SET status = $2,
     attempts = attempts + 1,
     last_error = $3,
     next_retry_at = NULL,
+    claim_owner = '',
+    claim_until = NULL,
     updated_at = $4
 WHERE message_id = $1
 `, messageID, string(MessageStatusFailed), reason, failedAt)
@@ -314,6 +380,7 @@ func scanMessage(row rowScanner) (Message, error) {
 	var nextRetryAt sql.NullTime
 	var sentAt sql.NullTime
 	var deliveredAt sql.NullTime
+	var claimUntil sql.NullTime
 
 	if err := row.Scan(
 		&message.MessageID,
@@ -332,6 +399,8 @@ func scanMessage(row rowScanner) (Message, error) {
 		&message.UpdatedAt,
 		&sentAt,
 		&deliveredAt,
+		&message.ClaimOwner,
+		&claimUntil,
 	); err != nil {
 		return Message{}, err
 	}
@@ -346,6 +415,9 @@ func scanMessage(row rowScanner) (Message, error) {
 	}
 	if deliveredAt.Valid {
 		message.DeliveredAt = deliveredAt.Time
+	}
+	if claimUntil.Valid {
+		message.ClaimUntil = claimUntil.Time
 	}
 	message.Body = bytes.Clone(message.Body)
 

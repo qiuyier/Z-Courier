@@ -423,6 +423,48 @@ func TestServiceRetryDueSendsPendingMessage(t *testing.T) {
 	}
 }
 
+func TestServiceRetryDueClaimsPendingMessagesWhenStoreSupportsIt(t *testing.T) {
+	now := time.UnixMilli(1760000000000)
+	memoryStore := NewMemoryStore()
+	memoryStore.now = func() time.Time { return now }
+	if _, err := memoryStore.Save(context.Background(), Message{
+		MessageID:   "message-1",
+		ClientID:    "client-1",
+		DeviceID:    "device-1",
+		MsgID:       2001,
+		Body:        []byte("hello"),
+		Status:      MessageStatusPending,
+		NextRetryAt: now,
+		CreatedAt:   now,
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	store := &fakeClaimStore{MemoryStore: memoryStore}
+	conn := &fakeConnection{}
+	service := NewService(
+		fakeSessions{session: &session.Session{SessionID: "session-1", ConnID: 7, ClientID: "client-1", DeviceID: "device-1"}},
+		fakeConnections{conn: conn},
+		WithStore(store),
+		WithRetryClaim("gateway-a", 12*time.Second),
+	)
+	service.now = func() time.Time { return now }
+
+	result, err := service.RetryDue(context.Background(), 9)
+	if err != nil {
+		t.Fatalf("RetryDue() error = %v", err)
+	}
+	if result.Scanned != 1 || result.Sent != 1 {
+		t.Fatalf("RetryDue() result = %+v, want one sent", result)
+	}
+	if store.claims != 1 {
+		t.Fatalf("ClaimDuePending calls = %d, want 1", store.claims)
+	}
+	if !store.claimNow.Equal(now) || store.claimLimit != 9 || store.claimOwner != "gateway-a" || store.claimLease != 12*time.Second {
+		t.Fatalf("claim args = now:%v limit:%d owner:%q lease:%v", store.claimNow, store.claimLimit, store.claimOwner, store.claimLease)
+	}
+}
+
 func TestServiceRetryDueSendsRemoteClusterMessage(t *testing.T) {
 	now := time.UnixMilli(1760000000000)
 	store := NewMemoryStore()
@@ -821,6 +863,25 @@ func (f fakeConnections) Get(_ uint64) (Connection, error) {
 	}
 
 	return f.conn, nil
+}
+
+type fakeClaimStore struct {
+	*MemoryStore
+	claims     int
+	claimNow   time.Time
+	claimLimit int
+	claimOwner string
+	claimLease time.Duration
+}
+
+func (f *fakeClaimStore) ClaimDuePending(ctx context.Context, now time.Time, limit int, owner string, lease time.Duration) ([]Message, error) {
+	f.claims++
+	f.claimNow = now
+	f.claimLimit = limit
+	f.claimOwner = owner
+	f.claimLease = lease
+
+	return f.MemoryStore.ListDuePending(ctx, now, limit)
 }
 
 type fakeConnection struct {

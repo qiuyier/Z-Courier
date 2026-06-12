@@ -40,6 +40,8 @@ type Message struct {
 	Attempts    int
 	NextRetryAt time.Time
 	LastError   string
+	ClaimOwner  string
+	ClaimUntil  time.Time
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 	SentAt      time.Time
@@ -60,6 +62,10 @@ type Store interface {
 	MarkDelivered(context.Context, string, string, string, time.Time) error
 	MarkAttemptFailed(context.Context, string, string, time.Time) error
 	MarkFailed(context.Context, string, string, time.Time) error
+}
+
+type ClaimStore interface {
+	ClaimDuePending(context.Context, time.Time, int, string, time.Duration) ([]Message, error)
 }
 
 func messageFromPushRequest(req PushRequest, now time.Time) Message {

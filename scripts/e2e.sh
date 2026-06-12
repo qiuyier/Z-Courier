@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE_FILE="$ROOT_DIR/deploy/local/docker-compose.yml"
 CONFIG_FILE="$ROOT_DIR/configs/z-courier.integration.yaml"
 ZINX_CONFIG_FILE="$ROOT_DIR/conf/zinx.integration.json"
+RUN_ID="$(date +%s)-$$"
 
 GATEWAY_PID=""
 
@@ -48,4 +49,6 @@ echo "starting gateway..."
 ZINX_CONFIG_FILE_PATH="$ZINX_CONFIG_FILE" go run ./cmd/gateway -config "$CONFIG_FILE" &
 GATEWAY_PID="$!"
 
-go run ./cmd/e2e "$@"
+go run ./cmd/e2e \
+  -device-id "e2e-device-$RUN_ID" \
+  "$@"

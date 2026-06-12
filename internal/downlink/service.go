@@ -25,12 +25,14 @@ type ConnectionFinder interface {
 }
 
 type Service struct {
-	sessions    SessionFinder
-	connections ConnectionFinder
-	store       Store
-	now         func() time.Time
-	retryDelay  time.Duration
-	maxAttempts int
+	sessions        SessionFinder
+	connections     ConnectionFinder
+	store           Store
+	now             func() time.Time
+	retryDelay      time.Duration
+	retryClaimOwner string
+	retryClaimLease time.Duration
+	maxAttempts     int
 
 	gatewayNode    string
 	onlineRegistry cluster.OnlineRegistry
@@ -67,6 +69,15 @@ func WithMaxAttempts(maxAttempts int) ServiceOption {
 	}
 }
 
+func WithRetryClaim(owner string, lease time.Duration) ServiceOption {
+	return func(s *Service) {
+		s.retryClaimOwner = owner
+		if lease > 0 {
+			s.retryClaimLease = lease
+		}
+	}
+}
+
 func WithClusterDelivery(config ClusterDeliveryConfig) ServiceOption {
 	return func(s *Service) {
 		s.gatewayNode = config.GatewayNode
@@ -77,11 +88,12 @@ func WithClusterDelivery(config ClusterDeliveryConfig) ServiceOption {
 
 func NewService(sessions SessionFinder, connections ConnectionFinder, options ...ServiceOption) *Service {
 	service := &Service{
-		sessions:    sessions,
-		connections: connections,
-		now:         time.Now,
-		retryDelay:  30 * time.Second,
-		maxAttempts: 5,
+		sessions:        sessions,
+		connections:     connections,
+		now:             time.Now,
+		retryDelay:      30 * time.Second,
+		retryClaimLease: 30 * time.Second,
+		maxAttempts:     5,
 	}
 	for _, option := range options {
 		option(service)
@@ -171,12 +183,22 @@ func (s *Service) RetryDue(ctx context.Context, limit int) (RetryResult, error) 
 		return RetryResult{}, nil
 	}
 
-	messages, err := s.store.ListDuePending(ctx, s.now(), limit)
+	now := s.now()
+	messages, err := s.listRetryMessages(ctx, now, limit)
 	if err != nil {
 		return RetryResult{}, fmt.Errorf("%w: %v", ErrStore, err)
 	}
 
 	return s.retryMessages(ctx, messages)
+}
+
+func (s *Service) listRetryMessages(ctx context.Context, now time.Time, limit int) ([]Message, error) {
+	claimStore, ok := s.store.(ClaimStore)
+	if ok && s.retryClaimOwner != "" {
+		return claimStore.ClaimDuePending(ctx, now, limit, s.retryClaimOwner, s.retryClaimLease)
+	}
+
+	return s.store.ListDuePending(ctx, now, limit)
 }
 
 func (s *Service) FlushClientDevice(ctx context.Context, clientID, deviceID string, limit int) (RetryResult, error) {
@@ -231,6 +253,8 @@ func (s *Service) Ack(ctx context.Context, clientID, deviceID string, req Client
 	message.Status = MessageStatusDelivered
 	message.LastError = ""
 	message.NextRetryAt = time.Time{}
+	message.ClaimOwner = ""
+	message.ClaimUntil = time.Time{}
 	message.DeliveredAt = deliveredAt
 	message.UpdatedAt = deliveredAt
 	return message, nil

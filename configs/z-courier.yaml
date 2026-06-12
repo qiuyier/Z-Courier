@@ -48,6 +48,7 @@ downlink:
   delivery:
     retry_interval: 5s
     retry_delay: 30s
+    retry_lease: 30s
     max_attempts: 5
     scan_limit: 100
     bind_flush_limit: 100

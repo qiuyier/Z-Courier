@@ -384,21 +384,21 @@ without calling the origin node.
 ## Retry Worker
 
 Every gateway node can run a retry worker. To avoid two nodes delivering the
-same pending message at the same time, V2 should add claiming semantics to the
-store before broad multi-node retry is enabled.
+same pending message at the same time, the PostgreSQL store claims due rows
+before retry delivery.
 
-Suggested store extension:
+Store extension:
 
 ```go
-type ClusterStore interface {
-    Store
+type ClaimStore interface {
     ClaimDuePending(ctx context.Context, now time.Time, limit int, owner string, lease time.Duration) ([]Message, error)
-    ReleaseClaim(ctx context.Context, messageID string, owner string) error
 }
 ```
 
-V2 phase 1 can keep retry worker enabled only on one node in integration tests,
-or rely on PostgreSQL row locking in the Postgres implementation.
+The Postgres implementation uses `FOR UPDATE SKIP LOCKED` and stores
+`claim_owner` plus `claim_until`. `MarkSent`, `MarkAttemptFailed`,
+`MarkDelivered`, and `MarkFailed` clear the claim. If a gateway crashes after
+claiming a message, another node can retry it after `downlink.delivery.retry_lease`.
 
 ## Metrics
 

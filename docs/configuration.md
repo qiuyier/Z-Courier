@@ -192,6 +192,7 @@ downlink:
   delivery:
     retry_interval: 5s
     retry_delay: 30s
+    retry_lease: 30s
     max_attempts: 5
     scan_limit: 100
     bind_flush_limit: 100
@@ -199,6 +200,8 @@ downlink:
 
 - `retry_interval`: how often the retry worker scans pending messages.
 - `retry_delay`: delay before the next attempt after a failed send.
+- `retry_lease`: how long one gateway node owns a claimed retry batch before
+  another node may reclaim it.
 - `max_attempts`: attempts before a message is marked `failed`.
 - `scan_limit`: maximum due messages scanned per retry tick.
 - `bind_flush_limit`: maximum pending messages flushed when a client binds.

@@ -73,6 +73,7 @@ downlink:
   delivery:
     retry_interval: 7s
     retry_delay: 11s
+    retry_lease: 13s
     max_attempts: 6
     scan_limit: 77
     bind_flush_limit: 88
@@ -221,6 +222,9 @@ upstream:
 	}
 	if config.DownlinkDelivery.RetryDelay != 11*time.Second {
 		t.Fatalf("DownlinkDelivery RetryDelay = %v, want 11s", config.DownlinkDelivery.RetryDelay)
+	}
+	if config.DownlinkDelivery.RetryLease != 13*time.Second {
+		t.Fatalf("DownlinkDelivery RetryLease = %v, want 13s", config.DownlinkDelivery.RetryLease)
 	}
 	if config.DownlinkDelivery.MaxAttempts != 6 {
 		t.Fatalf("DownlinkDelivery MaxAttempts = %d, want 6", config.DownlinkDelivery.MaxAttempts)
@@ -521,6 +525,19 @@ func TestLoadServerConfigInvalidDownlinkRetryInterval(t *testing.T) {
 downlink:
   delivery:
     retry_interval: nope
+`)
+
+	_, err := LoadServerConfig(path)
+	if err == nil {
+		t.Fatal("LoadServerConfig() error = nil, want error")
+	}
+}
+
+func TestLoadServerConfigInvalidDownlinkRetryLease(t *testing.T) {
+	path := writeConfig(t, `
+downlink:
+  delivery:
+    retry_lease: 0s
 `)
 
 	_, err := LoadServerConfig(path)

@@ -134,6 +134,8 @@ func (s *MemoryStore) MarkSent(ctx context.Context, messageID, sessionID string,
 	message.Attempts++
 	message.LastError = ""
 	message.NextRetryAt = time.Time{}
+	message.ClaimOwner = ""
+	message.ClaimUntil = time.Time{}
 	message.SentAt = sentAt
 	message.UpdatedAt = s.now()
 	s.messages[messageID] = message
@@ -158,6 +160,8 @@ func (s *MemoryStore) MarkDelivered(ctx context.Context, messageID, clientID, de
 	message.Status = MessageStatusDelivered
 	message.LastError = ""
 	message.NextRetryAt = time.Time{}
+	message.ClaimOwner = ""
+	message.ClaimUntil = time.Time{}
 	message.DeliveredAt = deliveredAt
 	message.UpdatedAt = deliveredAt
 	s.messages[messageID] = message
@@ -180,6 +184,8 @@ func (s *MemoryStore) MarkAttemptFailed(ctx context.Context, messageID, reason s
 	message.Attempts++
 	message.LastError = reason
 	message.NextRetryAt = nextRetryAt
+	message.ClaimOwner = ""
+	message.ClaimUntil = time.Time{}
 	message.UpdatedAt = s.now()
 	s.messages[messageID] = message
 	return nil
@@ -204,6 +210,8 @@ func (s *MemoryStore) MarkFailed(ctx context.Context, messageID, reason string, 
 	message.Attempts++
 	message.LastError = reason
 	message.NextRetryAt = time.Time{}
+	message.ClaimOwner = ""
+	message.ClaimUntil = time.Time{}
 	message.UpdatedAt = failedAt
 	s.messages[messageID] = message
 	return nil
