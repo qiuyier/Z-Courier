@@ -23,10 +23,11 @@ import (
 )
 
 const (
-	defaultGatewayHost = "127.0.0.1"
-	defaultGatewayPort = 9899
-	defaultInternalURL = "http://127.0.0.1:18082"
-	defaultPostgresDSN = "postgres://zcourier:zcourier@127.0.0.1:15432/zcourier?sslmode=disable"
+	defaultGatewayHost  = "127.0.0.1"
+	defaultGatewayPort  = 9899
+	defaultInternalURL  = "http://127.0.0.1:18082"
+	defaultPostgresDSN  = "postgres://zcourier:zcourier@127.0.0.1:15432/zcourier?sslmode=disable"
+	downlinkPushTimeout = 10 * time.Second
 )
 
 type config struct {
@@ -119,10 +120,10 @@ func run(ctx context.Context, cfg config) error {
 
 	fmt.Println("checking offline queue path")
 	if err := pushDownlink(ctx, cfg, offlineMessageID, []byte("offline-before-client"), http.StatusAccepted); err != nil {
-		return err
+		return fmt.Errorf("push offline downlink: %w", err)
 	}
 	if err := waitMessageStatus(ctx, db, offlineMessageID, string(downlink.MessageStatusPending)); err != nil {
-		return err
+		return fmt.Errorf("wait offline message pending: %w", err)
 	}
 
 	client := newE2EClient(cfg)
@@ -140,7 +141,7 @@ func run(ctx context.Context, cfg config) error {
 		return fmt.Errorf("wait offline downlink flush: %w", err)
 	}
 	if err := waitMessageStatus(ctx, db, offlineMessageID, string(downlink.MessageStatusDelivered)); err != nil {
-		return err
+		return fmt.Errorf("wait offline message delivered status: %w", err)
 	}
 	fmt.Println("offline message delivered")
 
@@ -155,13 +156,13 @@ func run(ctx context.Context, cfg config) error {
 
 	fmt.Println("checking online push path")
 	if err := pushDownlink(ctx, cfg, onlineMessageID, []byte("online-after-client"), http.StatusOK); err != nil {
-		return err
+		return fmt.Errorf("push online downlink: %w", err)
 	}
 	if err := client.WaitDownlink(ctx, onlineMessageID); err != nil {
 		return fmt.Errorf("wait online downlink: %w", err)
 	}
 	if err := waitMessageStatus(ctx, db, onlineMessageID, string(downlink.MessageStatusDelivered)); err != nil {
-		return err
+		return fmt.Errorf("wait online message delivered status: %w", err)
 	}
 	fmt.Println("online message delivered")
 
@@ -209,6 +210,9 @@ func waitPostgres(ctx context.Context, db *sql.DB) error {
 }
 
 func pushDownlink(ctx context.Context, cfg config, messageID string, body []byte, wantStatus int) error {
+	requestCtx, cancel := context.WithTimeout(ctx, downlinkPushTimeout)
+	defer cancel()
+
 	reqBody, err := sonic.Marshal(downlink.PushRequest{
 		ClientID:    cfg.ClientID,
 		DeviceID:    cfg.DeviceID,
@@ -222,7 +226,7 @@ func pushDownlink(ctx context.Context, cfg config, messageID string, body []byte
 		return err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.InternalURL+"/internal/push", bytes.NewReader(reqBody))
+	req, err := http.NewRequestWithContext(requestCtx, http.MethodPost, cfg.InternalURL+"/internal/push", bytes.NewReader(reqBody))
 	if err != nil {
 		return err
 	}

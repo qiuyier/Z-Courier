@@ -68,6 +68,17 @@ jobs:
         if: failure()
         run: docker compose -f deploy/local/docker-compose.yml logs --no-color
 
+      - name: Dump gateway logs on failure
+        if: failure()
+        run: |
+          for file in log/e2e-*.log; do
+            if [ -f "$file" ]; then
+              echo "::group::$file"
+              tail -n 300 "$file" || true
+              echo "::endgroup::"
+            fi
+          done
+
       - name: Cleanup local integration stack
         if: always()
         run: docker compose -f deploy/local/docker-compose.yml down -v

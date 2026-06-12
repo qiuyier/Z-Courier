@@ -159,6 +159,51 @@ func TestMemoryStoreMarkDelivered(t *testing.T) {
 	}
 }
 
+func TestMemoryStoreMarkSentDoesNotOverwriteDelivered(t *testing.T) {
+	store := NewMemoryStore()
+	now := time.UnixMilli(1760000000000)
+	store.now = func() time.Time { return now }
+
+	deliveredAt := now.Add(time.Second)
+	if _, err := store.Save(context.Background(), Message{
+		MessageID:   "message-1",
+		ClientID:    "c1",
+		DeviceID:    "d1",
+		MsgID:       2001,
+		Status:      MessageStatusDelivered,
+		SessionID:   "session-fast-ack",
+		Attempts:    1,
+		DeliveredAt: deliveredAt,
+		UpdatedAt:   deliveredAt,
+	}); err != nil {
+		t.Fatalf("Save error = %v", err)
+	}
+
+	if err := store.MarkSent(context.Background(), "message-1", "session-origin", now.Add(2*time.Second)); err != nil {
+		t.Fatalf("MarkSent() error = %v", err)
+	}
+
+	stored, ok, err := store.Get(context.Background(), "message-1")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if !ok {
+		t.Fatal("stored message not found")
+	}
+	if stored.Status != MessageStatusDelivered {
+		t.Fatalf("Status = %q, want delivered", stored.Status)
+	}
+	if stored.SessionID != "session-fast-ack" {
+		t.Fatalf("SessionID = %q, want session-fast-ack", stored.SessionID)
+	}
+	if stored.Attempts != 1 {
+		t.Fatalf("Attempts = %d, want 1", stored.Attempts)
+	}
+	if !stored.DeliveredAt.Equal(deliveredAt) {
+		t.Fatalf("DeliveredAt = %v, want %v", stored.DeliveredAt, deliveredAt)
+	}
+}
+
 func TestMemoryStoreMarkDeliveredRejectsDifferentClientDevice(t *testing.T) {
 	store := NewMemoryStore()
 	if _, err := store.Save(context.Background(), Message{

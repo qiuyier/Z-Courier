@@ -129,6 +129,9 @@ func (s *MemoryStore) MarkSent(ctx context.Context, messageID, sessionID string,
 	if !ok {
 		return ErrMessageNotFound
 	}
+	if message.Status == MessageStatusDelivered {
+		return nil
+	}
 	message.SessionID = sessionID
 	message.Status = MessageStatusSent
 	message.Attempts++

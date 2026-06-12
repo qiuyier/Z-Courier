@@ -280,17 +280,17 @@ func (s *PostgresStore) MarkSent(ctx context.Context, messageID, sessionID strin
 
 	result, err := s.db.ExecContext(ctx, `
 UPDATE z_courier_downlink_messages
-SET status = $2,
-    session_id = $3,
-    attempts = attempts + 1,
-    last_error = '',
-    next_retry_at = NULL,
-    claim_owner = '',
-    claim_until = NULL,
-    sent_at = $4,
-    updated_at = $4
+SET status = CASE WHEN status = $5 THEN status ELSE $2 END,
+    session_id = CASE WHEN status = $5 THEN session_id ELSE $3 END,
+    attempts = CASE WHEN status = $5 THEN attempts ELSE attempts + 1 END,
+    last_error = CASE WHEN status = $5 THEN last_error ELSE '' END,
+    next_retry_at = CASE WHEN status = $5 THEN next_retry_at ELSE NULL END,
+    claim_owner = CASE WHEN status = $5 THEN claim_owner ELSE '' END,
+    claim_until = CASE WHEN status = $5 THEN claim_until ELSE NULL END,
+    sent_at = CASE WHEN status = $5 THEN sent_at ELSE $4 END,
+    updated_at = CASE WHEN status = $5 THEN updated_at ELSE $4 END
 WHERE message_id = $1
-`, messageID, string(MessageStatusSent), sessionID, sentAt)
+`, messageID, string(MessageStatusSent), sessionID, sentAt, string(MessageStatusDelivered))
 	if err != nil {
 		return err
 	}
