@@ -80,3 +80,11 @@ upstream:
         write_timeout: 1s
         publish_mode: round_robin
         retry_attempts: 1
+    - name: cluster-b-http-upstream
+      enabled: true
+      msg_id_min: 1001
+      msg_id_max: 1999
+      target:
+        type: http
+        url: http://127.0.0.1:18081/gateway/upstream
+        timeout: 5s
