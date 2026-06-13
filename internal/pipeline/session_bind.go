@@ -67,6 +67,7 @@ func (h *SessionBindHandler) Handle(ctx *Context) error {
 	ctx.BindResult = bindResult
 	ctx.Session = bindResult.Session.Clone()
 	metrics.SetSessionsOnline(h.Sessions.Len())
+	metrics.SetClientsOnline(h.Sessions.UniqueClientLen())
 	if conn := ctx.Conn(); conn != nil && h.SessionProperty != "" {
 		conn.SetProperty(h.SessionProperty, bindResult.Session.SessionID)
 	}

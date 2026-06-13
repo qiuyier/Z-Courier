@@ -80,8 +80,8 @@ go run ./cmd/e2e \
 - PostgreSQL message status becomes `delivered`.
 - Online downlink push is delivered and ACKed.
 - A `MsgID = 2001` upstream packet is accepted by the NSQ route.
-- Gateway metrics include downlink push, downlink ACK, and online session
-  metrics.
+- Gateway metrics include downlink push, downlink ACK, online session, and
+  unique online client metrics.
 - The cluster verifier additionally checks cross-node downlink dispatch through
   Redis online routes and `POST /internal/cluster/push`.
 

@@ -383,6 +383,7 @@ func (g *Gateway) onConnStart(conn ziface.IConnection) {
 func (g *Gateway) onConnStop(conn ziface.IConnection) {
 	removed, ok := g.sessions.UnbindByConnID(conn.GetConnID())
 	metrics.SetSessionsOnline(g.sessions.Len())
+	metrics.SetClientsOnline(g.sessions.UniqueClientLen())
 	conn.RemoveProperty(sessionIDProperty)
 
 	if !ok {

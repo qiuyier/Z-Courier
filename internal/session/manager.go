@@ -212,6 +212,13 @@ func (m *Manager) Len() int {
 	return len(m.byConnID)
 }
 
+func (m *Manager) UniqueClientLen() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	return len(m.connIDByClientPair)
+}
+
 func (m *Manager) removeConnLocked(connID uint64) *Session {
 	found, ok := m.byConnID[connID]
 	if !ok {

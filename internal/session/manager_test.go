@@ -150,6 +150,44 @@ func TestManagerAllowsMultipleDevices(t *testing.T) {
 	if manager.Len() != 2 {
 		t.Fatalf("Len() = %d, want 2", manager.Len())
 	}
+	if manager.UniqueClientLen() != 1 {
+		t.Fatalf("UniqueClientLen() = %d, want 1", manager.UniqueClientLen())
+	}
+}
+
+func TestManagerCountsUniqueClients(t *testing.T) {
+	manager := NewManager()
+
+	if _, err := manager.Bind(BindInput{ConnID: 1, ClientID: "client-1", DeviceID: "phone"}); err != nil {
+		t.Fatalf("Bind client-1 phone error = %v", err)
+	}
+	if _, err := manager.Bind(BindInput{ConnID: 2, ClientID: "client-1", DeviceID: "tablet"}); err != nil {
+		t.Fatalf("Bind client-1 tablet error = %v", err)
+	}
+	if _, err := manager.Bind(BindInput{ConnID: 3, ClientID: "client-2", DeviceID: "phone"}); err != nil {
+		t.Fatalf("Bind client-2 phone error = %v", err)
+	}
+
+	if manager.Len() != 3 {
+		t.Fatalf("Len() = %d, want 3", manager.Len())
+	}
+	if manager.UniqueClientLen() != 2 {
+		t.Fatalf("UniqueClientLen() = %d, want 2", manager.UniqueClientLen())
+	}
+
+	if _, ok := manager.UnbindByConnID(1); !ok {
+		t.Fatal("UnbindByConnID(1) ok = false, want true")
+	}
+	if manager.UniqueClientLen() != 2 {
+		t.Fatalf("UniqueClientLen() after one device removed = %d, want 2", manager.UniqueClientLen())
+	}
+
+	if _, ok := manager.UnbindByConnID(2); !ok {
+		t.Fatal("UnbindByConnID(2) ok = false, want true")
+	}
+	if manager.UniqueClientLen() != 1 {
+		t.Fatalf("UniqueClientLen() after client removed = %d, want 1", manager.UniqueClientLen())
+	}
 }
 
 func TestManagerSnapshotReturnsClones(t *testing.T) {

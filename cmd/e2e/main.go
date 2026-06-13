@@ -31,17 +31,18 @@ const (
 )
 
 type config struct {
-	GatewayHost     string
-	GatewayPort     int
-	InternalURL     string
-	MetricsURLs     []string
-	InternalToken   string
-	PostgresDSN     string
-	ClientID        string
-	DeviceID        string
-	Token           string
-	Timeout         time.Duration
-	OnlinePushDelay time.Duration
+	GatewayHost           string
+	GatewayPort           int
+	InternalURL           string
+	MetricsURLs           []string
+	InternalToken         string
+	PostgresDSN           string
+	ClientID              string
+	DeviceID              string
+	Token                 string
+	Timeout               time.Duration
+	OnlinePushDelay       time.Duration
+	RequireClusterMetrics bool
 }
 
 func main() {
@@ -71,6 +72,7 @@ func parseFlags() config {
 	flag.StringVar(&cfg.Token, "token", "e2e-token", "client auth token")
 	flag.DurationVar(&cfg.Timeout, "timeout", 30*time.Second, "overall timeout")
 	flag.DurationVar(&cfg.OnlinePushDelay, "online-push-delay", 0, "delay before online downlink push after client bind")
+	flag.BoolVar(&cfg.RequireClusterMetrics, "require-cluster-metrics", false, "require cluster and retry metrics to be exposed")
 	flag.Parse()
 
 	cfg.InternalURL = strings.TrimRight(cfg.InternalURL, "/")
@@ -175,7 +177,7 @@ func run(ctx context.Context, cfg config) error {
 	}
 	fmt.Println("nsq upstream accepted")
 
-	if err := checkMetrics(ctx, cfg.MetricsURLs); err != nil {
+	if err := checkMetrics(ctx, cfg); err != nil {
 		return err
 	}
 	fmt.Println("metrics exposed")
@@ -276,9 +278,9 @@ WHERE message_id = $1
 	})
 }
 
-func checkMetrics(ctx context.Context, urls []string) error {
+func checkMetrics(ctx context.Context, cfg config) error {
 	var body []byte
-	for _, url := range urls {
+	for _, url := range cfg.MetricsURLs {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		if err != nil {
 			return err
@@ -305,9 +307,23 @@ func checkMetrics(ctx context.Context, urls []string) error {
 		"z_courier_downlink_push_total",
 		"z_courier_downlink_ack_total",
 		"z_courier_sessions_online",
+		"z_courier_clients_online",
 	} {
 		if !bytes.Contains(body, []byte(name)) {
 			return fmt.Errorf("metrics missing %s", name)
+		}
+	}
+
+	if cfg.RequireClusterMetrics {
+		for _, name := range []string{
+			"z_courier_cluster_registry_lookup_total",
+			"z_courier_cluster_peer_push_total",
+			"z_courier_downlink_retry_scan_total",
+			"z_courier_downlink_retry_claim_duration_seconds",
+		} {
+			if !bytes.Contains(body, []byte(name)) {
+				return fmt.Errorf("cluster metrics missing %s", name)
+			}
 		}
 	}
 

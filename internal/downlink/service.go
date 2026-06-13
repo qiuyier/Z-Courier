@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/qiuyier/Z-Courier/internal/cluster"
+	"github.com/qiuyier/Z-Courier/internal/metrics"
 	"github.com/qiuyier/Z-Courier/internal/protocol"
 	"github.com/qiuyier/Z-Courier/internal/session"
 )
@@ -183,19 +184,37 @@ func (s *Service) RetryDue(ctx context.Context, limit int) (RetryResult, error) 
 		return RetryResult{}, nil
 	}
 
+	startedAt := time.Now()
 	now := s.now()
 	messages, err := s.listRetryMessages(ctx, now, limit)
 	if err != nil {
+		metrics.RecordDownlinkRetryScan("failure", time.Since(startedAt))
 		return RetryResult{}, fmt.Errorf("%w: %v", ErrStore, err)
 	}
 
-	return s.retryMessages(ctx, messages)
+	result, err := s.retryMessages(ctx, messages)
+	if err != nil {
+		metrics.RecordDownlinkRetryMessages(result.Scanned, result.Sent, result.Queued, result.Failed)
+		metrics.RecordDownlinkRetryScan("failure", time.Since(startedAt))
+		return result, err
+	}
+
+	metrics.RecordDownlinkRetryMessages(result.Scanned, result.Sent, result.Queued, result.Failed)
+	metrics.RecordDownlinkRetryScan("success", time.Since(startedAt))
+	return result, nil
 }
 
 func (s *Service) listRetryMessages(ctx context.Context, now time.Time, limit int) ([]Message, error) {
 	claimStore, ok := s.store.(ClaimStore)
 	if ok && s.retryClaimOwner != "" {
-		return claimStore.ClaimDuePending(ctx, now, limit, s.retryClaimOwner, s.retryClaimLease)
+		startedAt := time.Now()
+		messages, err := claimStore.ClaimDuePending(ctx, now, limit, s.retryClaimOwner, s.retryClaimLease)
+		result := "success"
+		if err != nil {
+			result = "failure"
+		}
+		metrics.RecordDownlinkRetryClaim(s.retryClaimOwner, result, len(messages), time.Since(startedAt))
+		return messages, err
 	}
 
 	return s.store.ListDuePending(ctx, now, limit)
@@ -346,20 +365,28 @@ func (s *Service) pushCluster(ctx context.Context, req PushRequest) (*PushRespon
 	}
 
 	if entry.GatewayNode == s.gatewayNode || entry.InternalAddr == "" {
+		metrics.RecordClusterStaleRoute("local_or_empty_peer")
 		_ = s.onlineRegistry.Unbind(ctx, key, entry.SessionID)
 		return nil, ErrSessionNotFound
 	}
 	if s.peerDispatcher == nil {
+		metrics.RecordClusterPeerPush(entry.GatewayNode, "not_configured", 0)
 		return nil, ErrPeerNotConfigured
 	}
 
+	startedAt := time.Now()
 	peerResp, err := s.peerDispatcher.Push(ctx, entry, peerPushRequestFromPushRequest(req, s.gatewayNode, entry.SessionID))
 	if err != nil {
 		if isStalePeerRouteError(err) {
+			metrics.RecordClusterPeerPush(entry.GatewayNode, "stale_route", time.Since(startedAt))
+			metrics.RecordClusterStaleRoute("peer_error")
 			_ = s.onlineRegistry.Unbind(ctx, key, entry.SessionID)
+		} else {
+			metrics.RecordClusterPeerPush(entry.GatewayNode, "failure", time.Since(startedAt))
 		}
 		return nil, fmt.Errorf("%w: %w", ErrPeerDispatch, err)
 	}
+	metrics.RecordClusterPeerPush(entry.GatewayNode, "success", time.Since(startedAt))
 
 	sessionID := peerResp.SessionID
 	if sessionID == "" {

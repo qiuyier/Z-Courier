@@ -46,14 +46,27 @@ Check `Status -> Targets`. The `z-courier` target should be `UP`.
 Example PromQL queries:
 
 ```promql
+sum(z_courier_sessions_online)
 z_courier_sessions_online
+sum(z_courier_clients_online)
 sum by (result) (rate(z_courier_ingress_packets_total[1m]))
 sum by (route, target_type, result) (rate(z_courier_upstream_forward_total[1m]))
 histogram_quantile(0.95, sum by (le, route, target_type) (rate(z_courier_upstream_forward_duration_seconds_bucket[5m])))
 sum by (result) (rate(z_courier_downlink_push_total[1m]))
 sum by (result) (rate(z_courier_downlink_ack_total[1m]))
 histogram_quantile(0.95, sum by (le, msg_id) (rate(z_courier_downlink_ack_latency_seconds_bucket[5m])))
+sum by (result) (rate(z_courier_cluster_registry_lookup_total[1m]))
+sum by (target_node, result) (rate(z_courier_cluster_peer_push_total[1m]))
+histogram_quantile(0.95, sum by (le, target_node) (rate(z_courier_cluster_peer_push_duration_seconds_bucket[5m])))
+sum by (result) (rate(z_courier_downlink_retry_messages_total[1m]))
+sum by (owner, result) (rate(z_courier_downlink_retry_claim_messages_total[1m]))
+histogram_quantile(0.95, sum by (le) (rate(z_courier_downlink_retry_scan_duration_seconds_bucket[5m])))
+sum by (reason) (rate(z_courier_cluster_stale_routes_total[1m]))
 ```
+
+`z_courier_sessions_online` and `z_courier_clients_online` are emitted per
+gateway instance. Use `sum(...)` for the cluster total, or the raw metric with
+the `instance` label to inspect per-node distribution.
 
 Open Grafana:
 

@@ -402,14 +402,21 @@ claiming a message, another node can retry it after `downlink.delivery.retry_lea
 
 ## Metrics
 
-New metrics to add in V2:
+V2 cluster metrics:
 
 ```text
 z_courier_cluster_registry_lookup_total{result}
 z_courier_cluster_registry_bind_total{result}
+z_courier_cluster_registry_unbind_total{result}
+z_courier_cluster_registry_touch_total{result}
 z_courier_cluster_peer_push_total{target_node,result}
 z_courier_cluster_peer_push_duration_seconds{target_node,result}
-z_courier_cluster_stale_routes_total
+z_courier_cluster_stale_routes_total{reason}
+z_courier_downlink_retry_scan_total{result}
+z_courier_downlink_retry_scan_duration_seconds{result}
+z_courier_downlink_retry_messages_total{result}
+z_courier_downlink_retry_claim_messages_total{owner,result}
+z_courier_downlink_retry_claim_duration_seconds{owner,result}
 ```
 
 Existing V1 metrics should continue to work.

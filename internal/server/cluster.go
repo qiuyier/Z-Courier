@@ -48,7 +48,7 @@ func newClusterRegistry(config Config) (cluster.OnlineRegistry, io.Closer, error
 		return nil, nil, fmt.Errorf("cluster internal addr is required when cluster is enabled")
 	}
 	if config.OnlineRegistry != nil {
-		return config.OnlineRegistry, nil, nil
+		return newMetricsRegistry(config.OnlineRegistry), nil, nil
 	}
 
 	switch strings.ToLower(strings.TrimSpace(config.Cluster.Registry.Type)) {
@@ -56,7 +56,7 @@ func newClusterRegistry(config Config) (cluster.OnlineRegistry, io.Closer, error
 		registry := cluster.NewMemoryRegistry(cluster.MemoryRegistryConfig{
 			TTL: config.Cluster.Registry.TTL,
 		})
-		return registry, registry, nil
+		return newMetricsRegistry(registry), registry, nil
 	case "redis":
 		registry, err := cluster.NewRedisRegistry(cluster.RedisRegistryConfig{
 			Addr:         config.Cluster.Registry.Redis.Addr,
@@ -84,7 +84,7 @@ func newClusterRegistry(config Config) (cluster.OnlineRegistry, io.Closer, error
 			return nil, nil, fmt.Errorf("cluster redis registry ping: %w", err)
 		}
 
-		return registry, registry, nil
+		return newMetricsRegistry(registry), registry, nil
 	default:
 		return nil, nil, fmt.Errorf("unsupported cluster registry type %q", config.Cluster.Registry.Type)
 	}

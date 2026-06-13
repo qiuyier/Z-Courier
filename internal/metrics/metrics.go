@@ -52,6 +52,13 @@ var (
 		},
 	)
 
+	clientsOnline = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "z_courier_clients_online",
+			Help: "Current number of unique online client IDs on this gateway.",
+		},
+	)
+
 	downlinkPush = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "z_courier_downlink_push_total",
@@ -84,6 +91,105 @@ var (
 		},
 		[]string{"msg_id"},
 	)
+
+	clusterRegistryBind = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "z_courier_cluster_registry_bind_total",
+			Help: "Total number of cluster registry bind attempts.",
+		},
+		[]string{"result"},
+	)
+
+	clusterRegistryUnbind = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "z_courier_cluster_registry_unbind_total",
+			Help: "Total number of cluster registry unbind attempts.",
+		},
+		[]string{"result"},
+	)
+
+	clusterRegistryLookup = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "z_courier_cluster_registry_lookup_total",
+			Help: "Total number of cluster registry lookup attempts.",
+		},
+		[]string{"result"},
+	)
+
+	clusterRegistryTouch = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "z_courier_cluster_registry_touch_total",
+			Help: "Total number of cluster registry touch attempts.",
+		},
+		[]string{"result"},
+	)
+
+	clusterPeerPush = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "z_courier_cluster_peer_push_total",
+			Help: "Total number of cluster peer push attempts.",
+		},
+		[]string{"target_node", "result"},
+	)
+
+	clusterPeerPushDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "z_courier_cluster_peer_push_duration_seconds",
+			Help:    "Duration of cluster peer push attempts in seconds.",
+			Buckets: []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5},
+		},
+		[]string{"target_node", "result"},
+	)
+
+	clusterStaleRoutes = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "z_courier_cluster_stale_routes_total",
+			Help: "Total number of stale cluster routes detected by the gateway.",
+		},
+		[]string{"reason"},
+	)
+
+	downlinkRetryScan = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "z_courier_downlink_retry_scan_total",
+			Help: "Total number of downlink retry scans.",
+		},
+		[]string{"result"},
+	)
+
+	downlinkRetryScanDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "z_courier_downlink_retry_scan_duration_seconds",
+			Help:    "Duration of downlink retry scans in seconds.",
+			Buckets: []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5},
+		},
+		[]string{"result"},
+	)
+
+	downlinkRetryMessages = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "z_courier_downlink_retry_messages_total",
+			Help: "Total number of messages processed by the downlink retry worker.",
+		},
+		[]string{"result"},
+	)
+
+	downlinkRetryClaimMessages = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "z_courier_downlink_retry_claim_messages_total",
+			Help: "Total number of messages claimed by the downlink retry worker.",
+		},
+		[]string{"owner", "result"},
+	)
+
+	downlinkRetryClaimDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "z_courier_downlink_retry_claim_duration_seconds",
+			Help:    "Duration of downlink retry claim attempts in seconds.",
+			Buckets: []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5},
+		},
+		[]string{"owner", "result"},
+	)
 )
 
 func Handler() http.Handler {
@@ -108,6 +214,10 @@ func SetSessionsOnline(count int) {
 	sessionsOnline.Set(float64(count))
 }
 
+func SetClientsOnline(count int) {
+	clientsOnline.Set(float64(count))
+}
+
 func RecordDownlinkPush(msgID uint32, result string) {
 	downlinkPush.WithLabelValues(formatMsgID(msgID), nonEmpty(result, "unknown")).Inc()
 }
@@ -128,6 +238,57 @@ func RecordRateLimitRejected(msgID uint32) {
 	rateLimitRejected.WithLabelValues(formatMsgID(msgID)).Inc()
 }
 
+func RecordClusterRegistryBind(result string) {
+	clusterRegistryBind.WithLabelValues(nonEmpty(result, "unknown")).Inc()
+}
+
+func RecordClusterRegistryUnbind(result string) {
+	clusterRegistryUnbind.WithLabelValues(nonEmpty(result, "unknown")).Inc()
+}
+
+func RecordClusterRegistryLookup(result string) {
+	clusterRegistryLookup.WithLabelValues(nonEmpty(result, "unknown")).Inc()
+}
+
+func RecordClusterRegistryTouch(result string) {
+	clusterRegistryTouch.WithLabelValues(nonEmpty(result, "unknown")).Inc()
+}
+
+func RecordClusterPeerPush(targetNode, result string, duration time.Duration) {
+	labels := []string{nonEmpty(targetNode, "unknown"), nonEmpty(result, "unknown")}
+	clusterPeerPush.WithLabelValues(labels...).Inc()
+	if duration >= 0 {
+		clusterPeerPushDuration.WithLabelValues(labels...).Observe(duration.Seconds())
+	}
+}
+
+func RecordClusterStaleRoute(reason string) {
+	clusterStaleRoutes.WithLabelValues(nonEmpty(reason, "unknown")).Inc()
+}
+
+func RecordDownlinkRetryScan(result string, duration time.Duration) {
+	label := nonEmpty(result, "unknown")
+	downlinkRetryScan.WithLabelValues(label).Inc()
+	if duration >= 0 {
+		downlinkRetryScanDuration.WithLabelValues(label).Observe(duration.Seconds())
+	}
+}
+
+func RecordDownlinkRetryMessages(scanned, sent, queued, failed int) {
+	addCounter(downlinkRetryMessages.WithLabelValues("scanned"), scanned)
+	addCounter(downlinkRetryMessages.WithLabelValues("sent"), sent)
+	addCounter(downlinkRetryMessages.WithLabelValues("queued"), queued)
+	addCounter(downlinkRetryMessages.WithLabelValues("failed"), failed)
+}
+
+func RecordDownlinkRetryClaim(owner, result string, claimed int, duration time.Duration) {
+	labels := []string{nonEmpty(owner, "unknown"), nonEmpty(result, "unknown")}
+	addCounter(downlinkRetryClaimMessages.WithLabelValues(labels...), claimed)
+	if duration >= 0 {
+		downlinkRetryClaimDuration.WithLabelValues(labels...).Observe(duration.Seconds())
+	}
+}
+
 func formatMsgID(msgID uint32) string {
 	return strconv.FormatUint(uint64(msgID), 10)
 }
@@ -138,4 +299,12 @@ func nonEmpty(value, fallback string) string {
 	}
 
 	return value
+}
+
+func addCounter(counter prometheus.Counter, value int) {
+	if value <= 0 {
+		return
+	}
+
+	counter.Add(float64(value))
 }

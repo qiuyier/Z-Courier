@@ -17,6 +17,13 @@ cleanup() {
 }
 trap cleanup EXIT
 
+check_gateway_alive() {
+  if [[ -n "$GATEWAY_PID" ]] && ! kill -0 "$GATEWAY_PID" >/dev/null 2>&1; then
+    echo "gateway exited unexpectedly" >&2
+    exit 1
+  fi
+}
+
 cd "$ROOT_DIR"
 
 docker compose -f "$COMPOSE_FILE" up -d postgres redis nsqlookupd nsqd nsqadmin prometheus grafana
@@ -49,6 +56,7 @@ echo "starting gateway..."
 ZINX_CONFIG_FILE_PATH="$ZINX_CONFIG_FILE" go run ./cmd/gateway -config "$CONFIG_FILE" &
 GATEWAY_PID="$!"
 
+check_gateway_alive
 go run ./cmd/e2e \
   -device-id "e2e-device-$RUN_ID" \
   "$@"

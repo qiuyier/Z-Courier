@@ -44,6 +44,7 @@ wait_http() {
   for attempt in $(seq 1 60); do
     check_gateways_alive
     if curl -fsS "$url" >/dev/null 2>&1; then
+      check_gateways_alive
       return 0
     fi
     if [[ "$attempt" == "60" ]]; then
@@ -104,5 +105,6 @@ go run ./cmd/e2e \
   -metrics-url http://127.0.0.1:18182/metrics,http://127.0.0.1:18183/metrics \
   -device-id "e2e-cluster-device-$RUN_ID" \
   -online-push-delay 5s \
+  -require-cluster-metrics \
   -timeout 45s \
   "$@"
