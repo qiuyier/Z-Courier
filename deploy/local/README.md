@@ -72,6 +72,25 @@ go run ./cmd/e2e \
   -metrics-url http://127.0.0.1:18182/metrics,http://127.0.0.1:18183/metrics
 ```
 
+Manually push a downlink message through `gateway-a` to a client connected to
+`gateway-b`:
+
+```bash
+go run ./cmd/devclient \
+  -port 9902 \
+  -client-id e2e-client \
+  -device-id e2e-device \
+  -token e2e-token
+
+go run ./cmd/devbackend push \
+  -internal-url http://127.0.0.1:18182 \
+  -internal-token dev-internal-token \
+  -client-id e2e-client \
+  -device-id e2e-device \
+  -msg-id 2001 \
+  -body "hello from gateway-a"
+```
+
 ## What E2E Checks
 
 - Offline downlink push returns `queued` and is stored in PostgreSQL.
