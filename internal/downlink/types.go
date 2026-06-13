@@ -34,6 +34,19 @@ type PushResponse struct {
 	TraceID       string `json:"trace_id,omitempty"`
 }
 
+type BatchPushRequest struct {
+	Messages []PushRequest `json:"messages"`
+}
+
+type BatchPushResponse struct {
+	Code    string         `json:"code"`
+	Reason  string         `json:"reason,omitempty"`
+	Total   int            `json:"total"`
+	Success int            `json:"success"`
+	Failed  int            `json:"failed"`
+	Results []PushResponse `json:"results"`
+}
+
 type PeerPushResponse struct {
 	Code          string `json:"code"`
 	Reason        string `json:"reason,omitempty"`

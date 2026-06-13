@@ -91,6 +91,16 @@ go run ./cmd/devbackend push \
   -body "hello from gateway-a"
 ```
 
+Push multiple downlink messages in one request:
+
+```bash
+go run ./cmd/devbackend batch \
+  -internal-url http://127.0.0.1:18182 \
+  -internal-token dev-internal-token \
+  -message "e2e-client,e2e-device,2001,hello one" \
+  -message "e2e-client,e2e-device,2001,hello two"
+```
+
 ## What E2E Checks
 
 - Offline downlink push returns `queued` and is stored in PostgreSQL.

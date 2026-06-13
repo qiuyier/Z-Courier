@@ -12,29 +12,9 @@ import (
 )
 
 func TestPushSendsInternalPushRequest(t *testing.T) {
-	oldClient := http.DefaultClient
-	t.Cleanup(func() {
-		http.DefaultClient = oldClient
-	})
-
 	var gotReq *http.Request
 	var gotBody []byte
-	http.DefaultClient = &http.Client{
-		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			gotReq = req
-			var err error
-			gotBody, err = io.ReadAll(req.Body)
-			if err != nil {
-				t.Fatalf("ReadAll() error = %v", err)
-			}
-			return &http.Response{
-				StatusCode: http.StatusAccepted,
-				Body:       io.NopCloser(strings.NewReader(`{"code":"accepted"}`)),
-				Header:     make(http.Header),
-				Request:    req,
-			}, nil
-		}),
-	}
+	stubHTTPClient(t, http.StatusAccepted, `{"code":"accepted"}`, &gotReq, &gotBody)
 
 	err := push(pushConfig{
 		InternalURL:   "http://gateway-a:18182/",
@@ -80,6 +60,85 @@ func TestPushSendsInternalPushRequest(t *testing.T) {
 	}
 	if string(gotPush.Body) != "hello" {
 		t.Fatalf("Body = %q, want hello", string(gotPush.Body))
+	}
+}
+
+func TestBatchSendsInternalBatchPushRequest(t *testing.T) {
+	var gotReq *http.Request
+	var gotBody []byte
+	stubHTTPClient(t, http.StatusOK, `{"code":"ok","total":2,"success":2}`, &gotReq, &gotBody)
+
+	err := batch(batchConfig{
+		InternalURL:   "http://gateway-a:18182/",
+		InternalToken: "secret",
+		Messages: messageFlags{
+			"client-1,device-1,2001,hello",
+			"client-2,device-2,2002,world,with,comma",
+		},
+		AckRequired: true,
+		Timeout:     time.Second,
+	})
+	if err != nil {
+		t.Fatalf("batch() error = %v", err)
+	}
+
+	if gotReq == nil {
+		t.Fatal("request was not sent")
+	}
+	if gotReq.Method != http.MethodPost {
+		t.Fatalf("method = %s, want POST", gotReq.Method)
+	}
+	if gotReq.URL.String() != "http://gateway-a:18182/internal/push/batch" {
+		t.Fatalf("url = %s, want http://gateway-a:18182/internal/push/batch", gotReq.URL.String())
+	}
+	if gotReq.Header.Get(downlink.InternalTokenHeader) != "secret" {
+		t.Fatalf("internal token header = %q, want secret", gotReq.Header.Get(downlink.InternalTokenHeader))
+	}
+
+	var gotPush downlink.BatchPushRequest
+	if err := sonic.Unmarshal(gotBody, &gotPush); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if len(gotPush.Messages) != 2 {
+		t.Fatalf("messages length = %d, want 2", len(gotPush.Messages))
+	}
+	if gotPush.Messages[0].ClientID != "client-1" || gotPush.Messages[0].DeviceID != "device-1" || gotPush.Messages[0].MsgID != 2001 {
+		t.Fatalf("first identity = %q/%q/%d, want client-1/device-1/2001", gotPush.Messages[0].ClientID, gotPush.Messages[0].DeviceID, gotPush.Messages[0].MsgID)
+	}
+	if string(gotPush.Messages[0].Body) != "hello" {
+		t.Fatalf("first body = %q, want hello", string(gotPush.Messages[0].Body))
+	}
+	if string(gotPush.Messages[1].Body) != "world,with,comma" {
+		t.Fatalf("second body = %q, want world,with,comma", string(gotPush.Messages[1].Body))
+	}
+	if gotPush.Messages[0].MessageID == "" || gotPush.Messages[0].TraceID == "" {
+		t.Fatal("first message id and trace id should be generated")
+	}
+}
+
+func stubHTTPClient(t *testing.T, status int, body string, gotReq **http.Request, gotBody *[]byte) {
+	t.Helper()
+
+	oldClient := http.DefaultClient
+	t.Cleanup(func() {
+		http.DefaultClient = oldClient
+	})
+
+	http.DefaultClient = &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			*gotReq = req
+			var err error
+			*gotBody, err = io.ReadAll(req.Body)
+			if err != nil {
+				t.Fatalf("ReadAll() error = %v", err)
+			}
+			return &http.Response{
+				StatusCode: status,
+				Body:       io.NopCloser(strings.NewReader(body)),
+				Header:     make(http.Header),
+				Request:    req,
+			}, nil
+		}),
 	}
 }
 

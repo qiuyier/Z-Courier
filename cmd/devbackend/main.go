@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -20,6 +21,8 @@ import (
 
 func main() {
 	switch {
+	case len(os.Args) > 1 && os.Args[1] == "batch":
+		os.Exit(runBatch(os.Args[2:]))
 	case len(os.Args) > 1 && os.Args[1] == "push":
 		os.Exit(runPush(os.Args[2:]))
 	case len(os.Args) > 1 && os.Args[1] == "serve":
@@ -109,6 +112,25 @@ type pushConfig struct {
 	Timeout       time.Duration
 }
 
+type batchConfig struct {
+	InternalURL   string
+	InternalToken string
+	Messages      messageFlags
+	AckRequired   bool
+	Timeout       time.Duration
+}
+
+type messageFlags []string
+
+func (f *messageFlags) String() string {
+	return strings.Join(*f, ";")
+}
+
+func (f *messageFlags) Set(value string) error {
+	*f = append(*f, value)
+	return nil
+}
+
 func runPush(args []string) int {
 	fs := flag.NewFlagSet("push", flag.ExitOnError)
 	var config pushConfig
@@ -133,6 +155,29 @@ func runPush(args []string) int {
 
 	if err := push(config); err != nil {
 		fmt.Fprintf(os.Stderr, "push failed: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+func runBatch(args []string) int {
+	fs := flag.NewFlagSet("batch", flag.ExitOnError)
+	var config batchConfig
+	fs.StringVar(&config.InternalURL, "internal-url", "http://127.0.0.1:18082", "gateway internal HTTP base URL")
+	fs.StringVar(&config.InternalToken, "internal-token", "dev-internal-token", "gateway internal HTTP token")
+	fs.Var(&config.Messages, "message", "message in client_id,device_id,msg_id,body format; repeat for multiple messages")
+	fs.BoolVar(&config.AckRequired, "ack-required", true, "whether clients should ACK the downlink packets")
+	fs.DurationVar(&config.Timeout, "timeout", 10*time.Second, "batch push request timeout")
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: devbackend batch -message client,device,msg_id,body [flags]\n")
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+
+	if err := batch(config); err != nil {
+		fmt.Fprintf(os.Stderr, "batch push failed: %v\n", err)
 		return 1
 	}
 	return 0
@@ -179,39 +224,59 @@ func push(config pushConfig) error {
 		return fmt.Errorf("marshal push request: %w", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), config.Timeout)
-	defer cancel()
-
-	url := strings.TrimRight(config.InternalURL, "/") + "/internal/push"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(reqBody))
+	status, respBody, err := postJSON(config.InternalURL, "/internal/push", config.InternalToken, reqBody, config.Timeout)
 	if err != nil {
-		return fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if config.InternalToken != "" {
-		req.Header.Set(downlink.InternalTokenHeader, config.InternalToken)
+		return err
 	}
 
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("post %s: %w", url, err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("read response: %w", err)
-	}
-
-	fmt.Printf("status=%d\n", resp.StatusCode)
+	fmt.Printf("status=%d\n", status)
 	fmt.Printf("message_id=%s\n", messageID)
 	fmt.Printf("trace_id=%s\n", traceID)
 	if len(respBody) > 0 {
 		fmt.Printf("response=%s\n", string(respBody))
 	}
 
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return fmt.Errorf("gateway returned status %d", resp.StatusCode)
+	if status < http.StatusOK || status >= http.StatusMultipleChoices {
+		return fmt.Errorf("gateway returned status %d", status)
+	}
+	return nil
+}
+
+func batch(config batchConfig) error {
+	if config.InternalURL == "" {
+		return fmt.Errorf("internal-url is required")
+	}
+	if len(config.Messages) == 0 {
+		return fmt.Errorf("at least one -message is required")
+	}
+
+	messages := make([]downlink.PushRequest, 0, len(config.Messages))
+	for i, raw := range config.Messages {
+		message, err := parseBatchMessage(raw, config.AckRequired, i)
+		if err != nil {
+			return err
+		}
+		messages = append(messages, message)
+	}
+
+	reqBody, err := sonic.Marshal(downlink.BatchPushRequest{Messages: messages})
+	if err != nil {
+		return fmt.Errorf("marshal batch push request: %w", err)
+	}
+
+	status, respBody, err := postJSON(config.InternalURL, "/internal/push/batch", config.InternalToken, reqBody, config.Timeout)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("status=%d\n", status)
+	fmt.Printf("total=%d\n", len(messages))
+	if len(respBody) > 0 {
+		fmt.Printf("response=%s\n", string(respBody))
+	}
+
+	if status < http.StatusOK || status >= http.StatusMultipleChoices {
+		return fmt.Errorf("gateway returned status %d", status)
 	}
 	return nil
 }
@@ -226,4 +291,66 @@ func pushBody(config pushConfig) ([]byte, error) {
 		return nil, fmt.Errorf("read body file: %w", err)
 	}
 	return body, nil
+}
+
+func parseBatchMessage(raw string, ackRequired bool, index int) (downlink.PushRequest, error) {
+	parts := strings.SplitN(raw, ",", 4)
+	if len(parts) != 4 {
+		return downlink.PushRequest{}, fmt.Errorf("message %d must use client_id,device_id,msg_id,body format", index)
+	}
+
+	clientID := strings.TrimSpace(parts[0])
+	deviceID := strings.TrimSpace(parts[1])
+	msgID, err := strconv.ParseUint(strings.TrimSpace(parts[2]), 10, 32)
+	if err != nil {
+		return downlink.PushRequest{}, fmt.Errorf("message %d invalid msg_id: %w", index, err)
+	}
+	if clientID == "" {
+		return downlink.PushRequest{}, fmt.Errorf("message %d client_id is required", index)
+	}
+	if deviceID == "" {
+		return downlink.PushRequest{}, fmt.Errorf("message %d device_id is required", index)
+	}
+	if msgID == 0 {
+		return downlink.PushRequest{}, fmt.Errorf("message %d msg_id is required", index)
+	}
+
+	messageID := fmt.Sprintf("devbackend-batch-%d-%d", time.Now().UnixNano(), index)
+	return downlink.PushRequest{
+		ClientID:    clientID,
+		DeviceID:    deviceID,
+		MsgID:       uint32(msgID),
+		MessageID:   messageID,
+		TraceID:     messageID,
+		AckRequired: ackRequired,
+		Body:        []byte(parts[3]),
+	}, nil
+}
+
+func postJSON(internalURL, path, token string, body []byte, timeout time.Duration) (int, []byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	url := strings.TrimRight(internalURL, "/") + path
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return 0, nil, fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set(downlink.InternalTokenHeader, token)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return 0, nil, fmt.Errorf("post %s: %w", url, err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, nil, fmt.Errorf("read response: %w", err)
+	}
+
+	return resp.StatusCode, respBody, nil
 }

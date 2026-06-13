@@ -153,6 +153,41 @@ If the client is online, the gateway sends a protocol packet with the requested
 `MsgID`. If the client is offline and storage is configured, the message is
 queued for retry or bind-time flush.
 
+Backends can push multiple downlink messages in one internal request:
+
+```text
+POST /internal/push/batch
+```
+
+```json
+{
+  "messages": [
+    {
+      "client_id": "client-a",
+      "device_id": "phone",
+      "msg_id": 2001,
+      "message_id": "message-1",
+      "trace_id": "trace-1",
+      "ack_required": true,
+      "body": "aGVsbG8="
+    },
+    {
+      "client_id": "client-b",
+      "device_id": "phone",
+      "msg_id": 2001,
+      "message_id": "message-2",
+      "trace_id": "trace-2",
+      "ack_required": true,
+      "body": "d29ybGQ="
+    }
+  ]
+}
+```
+
+The batch response contains one result per message. A partially failed batch
+returns HTTP `207` with `code = partial_failure`; request-level errors such as
+invalid JSON still return `400`.
+
 ## Downlink Delivery ACK
 
 Clients confirm downlink delivery by sending a protocol packet with `MsgID = 2`.

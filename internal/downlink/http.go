@@ -16,34 +16,47 @@ type HandlerConfig struct {
 	Service            *Service
 	InternalToken      string
 	MaxRequestBodySize int64
+	MaxBatchMessages   int
 	Logger             *zap.Logger
 }
 
 func NewHandler(config HandlerConfig) http.Handler {
+	return &handler{config: normalizeHandlerConfig(config)}
+}
+
+func NewBatchHandler(config HandlerConfig) http.Handler {
+	return &handler{config: normalizeHandlerConfig(config), batch: true}
+}
+
+func normalizeHandlerConfig(config HandlerConfig) HandlerConfig {
 	if config.Logger == nil {
 		config.Logger = zap.NewNop()
 	}
 	if config.MaxRequestBodySize <= 0 {
 		config.MaxRequestBodySize = 10 << 20
 	}
+	if config.MaxBatchMessages <= 0 {
+		config.MaxBatchMessages = 100
+	}
 
-	return &handler{config: config}
+	return config
 }
 
 type handler struct {
 	config HandlerConfig
+	batch  bool
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		metrics.RecordDownlinkPush(0, "method_not_allowed")
-		writeJSON(w, http.StatusMethodNotAllowed, PushResponse{Code: "method_not_allowed"})
+		h.writeFailure(w, http.StatusMethodNotAllowed, "method_not_allowed", "")
 		return
 	}
 
 	if h.config.InternalToken != "" && r.Header.Get(InternalTokenHeader) != h.config.InternalToken {
 		metrics.RecordDownlinkPush(0, "unauthorized")
-		writeJSON(w, http.StatusUnauthorized, PushResponse{Code: "unauthorized"})
+		h.writeFailure(w, http.StatusUnauthorized, "unauthorized", "")
 		return
 	}
 
@@ -51,17 +64,79 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, h.config.MaxRequestBodySize))
 	if err != nil {
 		metrics.RecordDownlinkPush(0, "request_too_large")
-		writeJSON(w, http.StatusRequestEntityTooLarge, PushResponse{Code: "request_too_large", Reason: err.Error()})
+		h.writeFailure(w, http.StatusRequestEntityTooLarge, "request_too_large", err.Error())
 		return
 	}
 
+	if h.batch {
+		h.serveBatch(w, r, body)
+		return
+	}
+
+	h.serveSingle(w, r, body)
+}
+
+func (h *handler) serveSingle(w http.ResponseWriter, r *http.Request, body []byte) {
 	var req PushRequest
 	if err := sonic.Unmarshal(body, &req); err != nil {
 		metrics.RecordDownlinkPush(0, "bad_request")
-		writeJSON(w, http.StatusBadRequest, PushResponse{Code: "bad_request", Reason: err.Error()})
+		h.writeFailure(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
 
+	resp, status := h.pushOne(r, req)
+	writeJSON(w, status, resp)
+}
+
+func (h *handler) serveBatch(w http.ResponseWriter, r *http.Request, body []byte) {
+	var req BatchPushRequest
+	if err := sonic.Unmarshal(body, &req); err != nil {
+		metrics.RecordDownlinkPush(0, "bad_request")
+		h.writeFailure(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	if len(req.Messages) == 0 {
+		metrics.RecordDownlinkPush(0, "bad_request")
+		h.writeFailure(w, http.StatusBadRequest, "bad_request", "messages is required")
+		return
+	}
+	if len(req.Messages) > h.config.MaxBatchMessages {
+		metrics.RecordDownlinkPush(0, "bad_request")
+		h.writeFailure(w, http.StatusBadRequest, "bad_request", "too many messages")
+		return
+	}
+
+	resp := BatchPushResponse{
+		Code:    "ok",
+		Total:   len(req.Messages),
+		Results: make([]PushResponse, 0, len(req.Messages)),
+	}
+	for _, message := range req.Messages {
+		itemResp, status := h.pushOne(r, message)
+		resp.Results = append(resp.Results, itemResp)
+		if status >= http.StatusBadRequest {
+			resp.Failed++
+			continue
+		}
+		resp.Success++
+	}
+
+	status := http.StatusOK
+	switch {
+	case resp.Failed == 0:
+		resp.Code = "ok"
+	case resp.Success == 0:
+		resp.Code = "failed"
+		status = http.StatusMultiStatus
+	default:
+		resp.Code = "partial_failure"
+		status = http.StatusMultiStatus
+	}
+
+	writeJSON(w, status, resp)
+}
+
+func (h *handler) pushOne(r *http.Request, req PushRequest) (PushResponse, int) {
 	resp, err := h.config.Service.Push(r.Context(), req)
 	if err != nil {
 		status := statusFromError(err)
@@ -75,15 +150,14 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			zap.String("trace_id", req.TraceID),
 			zap.Error(err),
 		)
-		writeJSON(w, status, PushResponse{
+		return PushResponse{
 			Code:      codeFromStatus(status),
 			Reason:    err.Error(),
 			ClientID:  req.ClientID,
 			DeviceID:  req.DeviceID,
 			MessageID: req.MessageID,
 			TraceID:   req.TraceID,
-		})
-		return
+		}, status
 	}
 
 	status := http.StatusOK
@@ -103,7 +177,15 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		zap.String("trace_id", resp.TraceID),
 	)
 
-	writeJSON(w, status, *resp)
+	return *resp, status
+}
+
+func (h *handler) writeFailure(w http.ResponseWriter, status int, code, reason string) {
+	if h.batch {
+		writeJSON(w, status, BatchPushResponse{Code: code, Reason: reason})
+		return
+	}
+	writeJSON(w, status, PushResponse{Code: code, Reason: reason})
 }
 
 func statusFromError(err error) int {
