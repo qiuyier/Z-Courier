@@ -107,6 +107,21 @@ func (s *Service) HasStore() bool {
 	return s.store != nil
 }
 
+func (s *Service) MessageStatus(ctx context.Context, messageID string) (Message, bool, error) {
+	if messageID == "" {
+		return Message{}, false, ErrMissingMessageID
+	}
+	if s.store == nil {
+		return Message{}, false, ErrStoreNotConfigured
+	}
+
+	message, ok, err := s.store.Get(ctx, messageID)
+	if err != nil {
+		return Message{}, false, fmt.Errorf("%w: %v", ErrStore, err)
+	}
+	return message, ok, nil
+}
+
 func (s *Service) Push(ctx context.Context, req PushRequest) (*PushResponse, error) {
 	if err := validatePushRequest(req); err != nil {
 		return nil, err

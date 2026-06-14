@@ -252,6 +252,7 @@ Recommended APIs:
 ```text
 POST /internal/push
 POST /internal/push/batch
+GET /internal/message/status
 POST /internal/kick
 POST /internal/session/query
 ```

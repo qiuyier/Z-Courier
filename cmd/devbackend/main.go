@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strconv"
@@ -25,6 +26,8 @@ func main() {
 		os.Exit(runBatch(os.Args[2:]))
 	case len(os.Args) > 1 && os.Args[1] == "push":
 		os.Exit(runPush(os.Args[2:]))
+	case len(os.Args) > 1 && os.Args[1] == "status":
+		os.Exit(runStatus(os.Args[2:]))
 	case len(os.Args) > 1 && os.Args[1] == "serve":
 		os.Exit(runServe(os.Args[2:]))
 	default:
@@ -120,6 +123,13 @@ type batchConfig struct {
 	Timeout       time.Duration
 }
 
+type statusConfig struct {
+	InternalURL   string
+	InternalToken string
+	MessageID     string
+	Timeout       time.Duration
+}
+
 type messageFlags []string
 
 func (f *messageFlags) String() string {
@@ -178,6 +188,28 @@ func runBatch(args []string) int {
 
 	if err := batch(config); err != nil {
 		fmt.Fprintf(os.Stderr, "batch push failed: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+func runStatus(args []string) int {
+	fs := flag.NewFlagSet("status", flag.ExitOnError)
+	var config statusConfig
+	fs.StringVar(&config.InternalURL, "internal-url", "http://127.0.0.1:18082", "gateway internal HTTP base URL")
+	fs.StringVar(&config.InternalToken, "internal-token", "dev-internal-token", "gateway internal HTTP token")
+	fs.StringVar(&config.MessageID, "message-id", "", "downlink message id")
+	fs.DurationVar(&config.Timeout, "timeout", 10*time.Second, "status request timeout")
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: devbackend status -message-id message-id [flags]\n")
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+
+	if err := status(config); err != nil {
+		fmt.Fprintf(os.Stderr, "status query failed: %v\n", err)
 		return 1
 	}
 	return 0
@@ -281,6 +313,31 @@ func batch(config batchConfig) error {
 	return nil
 }
 
+func status(config statusConfig) error {
+	if config.InternalURL == "" {
+		return fmt.Errorf("internal-url is required")
+	}
+	if strings.TrimSpace(config.MessageID) == "" {
+		return fmt.Errorf("message-id is required")
+	}
+
+	path := "/internal/message/status?message_id=" + url.QueryEscape(strings.TrimSpace(config.MessageID))
+	statusCode, respBody, err := getJSON(config.InternalURL, path, config.InternalToken, config.Timeout)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("status=%d\n", statusCode)
+	if len(respBody) > 0 {
+		fmt.Printf("response=%s\n", string(respBody))
+	}
+
+	if statusCode < http.StatusOK || statusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("gateway returned status %d", statusCode)
+	}
+	return nil
+}
+
 func pushBody(config pushConfig) ([]byte, error) {
 	if config.BodyFile == "" {
 		return []byte(config.Body), nil
@@ -328,22 +385,36 @@ func parseBatchMessage(raw string, ackRequired bool, index int) (downlink.PushRe
 }
 
 func postJSON(internalURL, path, token string, body []byte, timeout time.Duration) (int, []byte, error) {
+	return requestJSON(http.MethodPost, internalURL, path, token, body, timeout)
+}
+
+func getJSON(internalURL, path, token string, timeout time.Duration) (int, []byte, error) {
+	return requestJSON(http.MethodGet, internalURL, path, token, nil, timeout)
+}
+
+func requestJSON(method, internalURL, path, token string, body []byte, timeout time.Duration) (int, []byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	url := strings.TrimRight(internalURL, "/") + path
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	var reader io.Reader
+	if body != nil {
+		reader = bytes.NewReader(body)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, url, reader)
 	if err != nil {
 		return 0, nil, fmt.Errorf("create request: %w", err)
 	}
-	req.Header.Set("Content-Type", "application/json")
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	if token != "" {
 		req.Header.Set(downlink.InternalTokenHeader, token)
 	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return 0, nil, fmt.Errorf("post %s: %w", url, err)
+		return 0, nil, fmt.Errorf("%s %s: %w", method, url, err)
 	}
 	defer resp.Body.Close()
 

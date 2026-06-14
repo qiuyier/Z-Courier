@@ -837,6 +837,40 @@ func TestServicePushConnectionNotFound(t *testing.T) {
 	}
 }
 
+func TestServiceMessageStatus(t *testing.T) {
+	store := NewMemoryStore()
+	if _, err := store.Save(context.Background(), Message{
+		MessageID: "message-1",
+		ClientID:  "client-1",
+		DeviceID:  "device-1",
+		MsgID:     2001,
+		Status:    MessageStatusPending,
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	service := NewService(fakeSessions{}, fakeConnections{}, WithStore(store))
+
+	message, ok, err := service.MessageStatus(context.Background(), "message-1")
+	if err != nil {
+		t.Fatalf("MessageStatus() error = %v", err)
+	}
+	if !ok {
+		t.Fatal("MessageStatus() ok = false, want true")
+	}
+	if message.MessageID != "message-1" || message.Status != MessageStatusPending {
+		t.Fatalf("message = %+v, want message-1 pending", message)
+	}
+}
+
+func TestServiceMessageStatusRequiresStore(t *testing.T) {
+	service := NewService(fakeSessions{}, fakeConnections{})
+
+	_, _, err := service.MessageStatus(context.Background(), "message-1")
+	if !errors.Is(err, ErrStoreNotConfigured) {
+		t.Fatalf("MessageStatus() error = %v, want %v", err, ErrStoreNotConfigured)
+	}
+}
+
 type fakeSessions struct {
 	session *session.Session
 }

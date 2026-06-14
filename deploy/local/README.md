@@ -101,6 +101,15 @@ go run ./cmd/devbackend batch \
   -message "e2e-client,e2e-device,2001,hello two"
 ```
 
+Query a stored downlink message status:
+
+```bash
+go run ./cmd/devbackend status \
+  -internal-url http://127.0.0.1:18182 \
+  -internal-token dev-internal-token \
+  -message-id devbackend-push-...
+```
+
 ## What E2E Checks
 
 - Offline downlink push returns `queued` and is stored in PostgreSQL.

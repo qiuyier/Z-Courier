@@ -116,6 +116,41 @@ func TestBatchSendsInternalBatchPushRequest(t *testing.T) {
 	}
 }
 
+func TestStatusSendsInternalStatusRequest(t *testing.T) {
+	var gotReq *http.Request
+	var gotBody []byte
+	stubHTTPClient(t, http.StatusOK, `{"code":"ok","message_id":"message-1","status":"delivered"}`, &gotReq, &gotBody)
+
+	err := status(statusConfig{
+		InternalURL:   "http://gateway-a:18182/",
+		InternalToken: "secret",
+		MessageID:     "message-1",
+		Timeout:       time.Second,
+	})
+	if err != nil {
+		t.Fatalf("status() error = %v", err)
+	}
+
+	if gotReq == nil {
+		t.Fatal("request was not sent")
+	}
+	if gotReq.Method != http.MethodGet {
+		t.Fatalf("method = %s, want GET", gotReq.Method)
+	}
+	if gotReq.URL.Path != "/internal/message/status" {
+		t.Fatalf("path = %s, want /internal/message/status", gotReq.URL.Path)
+	}
+	if gotReq.URL.Query().Get("message_id") != "message-1" {
+		t.Fatalf("message_id query = %q, want message-1", gotReq.URL.Query().Get("message_id"))
+	}
+	if gotReq.Header.Get(downlink.InternalTokenHeader) != "secret" {
+		t.Fatalf("internal token header = %q, want secret", gotReq.Header.Get(downlink.InternalTokenHeader))
+	}
+	if len(gotBody) != 0 {
+		t.Fatalf("body length = %d, want 0", len(gotBody))
+	}
+}
+
 func stubHTTPClient(t *testing.T, status int, body string, gotReq **http.Request, gotBody *[]byte) {
 	t.Helper()
 
@@ -127,10 +162,14 @@ func stubHTTPClient(t *testing.T, status int, body string, gotReq **http.Request
 	http.DefaultClient = &http.Client{
 		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			*gotReq = req
-			var err error
-			*gotBody, err = io.ReadAll(req.Body)
-			if err != nil {
-				t.Fatalf("ReadAll() error = %v", err)
+			if req.Body != nil {
+				var err error
+				*gotBody, err = io.ReadAll(req.Body)
+				if err != nil {
+					t.Fatalf("ReadAll() error = %v", err)
+				}
+			} else {
+				*gotBody = nil
 			}
 			return &http.Response{
 				StatusCode: status,

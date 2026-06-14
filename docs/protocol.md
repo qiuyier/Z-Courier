@@ -188,6 +188,33 @@ The batch response contains one result per message. A partially failed batch
 returns HTTP `207` with `code = partial_failure`; request-level errors such as
 invalid JSON still return `400`.
 
+Backends can query a stored downlink message by `message_id`:
+
+```text
+GET /internal/message/status?message_id=message-1
+```
+
+The response includes the current reliable delivery status and retry metadata:
+
+```json
+{
+  "code": "ok",
+  "message_id": "message-1",
+  "client_id": "dev-client",
+  "device_id": "device-1",
+  "msg_id": 2001,
+  "trace_id": "trace-1",
+  "session_id": "zs_...",
+  "status": "delivered",
+  "attempts": 1,
+  "body_size_bytes": 5,
+  "created_at": "2026-06-13T12:00:00Z",
+  "updated_at": "2026-06-13T12:00:01Z",
+  "sent_at": "2026-06-13T12:00:00Z",
+  "delivered_at": "2026-06-13T12:00:01Z"
+}
+```
+
 ## Downlink Delivery ACK
 
 Clients confirm downlink delivery by sending a protocol packet with `MsgID = 2`.

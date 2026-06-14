@@ -29,6 +29,12 @@ func newInternalHTTPServer(config Config, logger *zap.Logger, service *downlink.
 		MaxRequestBodySize: config.InternalMaxRequestBodySize,
 		Logger:             logger,
 	}))
+	mux.Handle("/internal/message/status", downlink.NewStatusHandler(downlink.HandlerConfig{
+		Service:            service,
+		InternalToken:      config.InternalToken,
+		MaxRequestBodySize: config.InternalMaxRequestBodySize,
+		Logger:             logger,
+	}))
 	if config.Cluster.Enabled {
 		mux.Handle(downlink.PeerPushPath, downlink.NewPeerHandler(downlink.PeerHandlerConfig{
 			Service:            service,
