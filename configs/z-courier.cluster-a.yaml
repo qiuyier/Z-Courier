@@ -48,6 +48,7 @@ downlink:
   delivery:
     retry_interval: 1s
     retry_delay: 1s
+    ack_timeout: 1s
     retry_lease: 5s
     max_attempts: 5
     scan_limit: 100

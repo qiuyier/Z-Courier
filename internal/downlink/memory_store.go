@@ -68,6 +68,10 @@ func (s *MemoryStore) Get(ctx context.Context, messageID string) (Message, bool,
 }
 
 func (s *MemoryStore) ListDuePending(ctx context.Context, now time.Time, limit int) ([]Message, error) {
+	return s.ListDueRetry(ctx, now, 0, limit)
+}
+
+func (s *MemoryStore) ListDueRetry(ctx context.Context, now time.Time, ackTimeout time.Duration, limit int) ([]Message, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -80,16 +84,27 @@ func (s *MemoryStore) ListDuePending(ctx context.Context, now time.Time, limit i
 
 	messages := make([]Message, 0)
 	for _, message := range s.messages {
-		if message.Status != MessageStatusPending {
-			continue
-		}
-		if !message.NextRetryAt.IsZero() && message.NextRetryAt.After(now) {
+		if !messageDueForRetry(message, now, ackTimeout) {
 			continue
 		}
 		messages = append(messages, message.Clone())
 	}
 
 	return limitMessages(messages, limit), nil
+}
+
+func messageDueForRetry(message Message, now time.Time, ackTimeout time.Duration) bool {
+	switch message.Status {
+	case MessageStatusPending:
+		return message.NextRetryAt.IsZero() || !message.NextRetryAt.After(now)
+	case MessageStatusSent:
+		if !message.AckRequired || ackTimeout <= 0 || message.SentAt.IsZero() {
+			return false
+		}
+		return !message.SentAt.Add(ackTimeout).After(now)
+	default:
+		return false
+	}
 }
 
 func (s *MemoryStore) ListPendingByClientDevice(ctx context.Context, clientID, deviceID string, limit int) ([]Message, error) {

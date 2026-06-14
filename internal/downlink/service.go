@@ -31,6 +31,7 @@ type Service struct {
 	store           Store
 	now             func() time.Time
 	retryDelay      time.Duration
+	ackTimeout      time.Duration
 	retryClaimOwner string
 	retryClaimLease time.Duration
 	maxAttempts     int
@@ -58,6 +59,14 @@ func WithRetryDelay(delay time.Duration) ServiceOption {
 	return func(s *Service) {
 		if delay > 0 {
 			s.retryDelay = delay
+		}
+	}
+}
+
+func WithAckTimeout(timeout time.Duration) ServiceOption {
+	return func(s *Service) {
+		if timeout > 0 {
+			s.ackTimeout = timeout
 		}
 	}
 }
@@ -93,6 +102,7 @@ func NewService(sessions SessionFinder, connections ConnectionFinder, options ..
 		connections:     connections,
 		now:             time.Now,
 		retryDelay:      30 * time.Second,
+		ackTimeout:      30 * time.Second,
 		retryClaimLease: 30 * time.Second,
 		maxAttempts:     5,
 	}
@@ -223,7 +233,7 @@ func (s *Service) listRetryMessages(ctx context.Context, now time.Time, limit in
 	claimStore, ok := s.store.(ClaimStore)
 	if ok && s.retryClaimOwner != "" {
 		startedAt := time.Now()
-		messages, err := claimStore.ClaimDuePending(ctx, now, limit, s.retryClaimOwner, s.retryClaimLease)
+		messages, err := claimStore.ClaimDueRetry(ctx, now, s.ackTimeout, limit, s.retryClaimOwner, s.retryClaimLease)
 		result := "success"
 		if err != nil {
 			result = "failure"
@@ -232,7 +242,7 @@ func (s *Service) listRetryMessages(ctx context.Context, now time.Time, limit in
 		return messages, err
 	}
 
-	return s.store.ListDuePending(ctx, now, limit)
+	return s.store.ListDueRetry(ctx, now, s.ackTimeout, limit)
 }
 
 func (s *Service) FlushClientDevice(ctx context.Context, clientID, deviceID string, limit int) (RetryResult, error) {
@@ -320,6 +330,13 @@ func (s *Service) retryMessages(ctx context.Context, messages []Message) (RetryR
 }
 
 func (s *Service) retryMessage(ctx context.Context, message Message) (MessageStatus, error) {
+	if s.ackTimedOut(message) && s.maxAttempts > 0 && message.Attempts >= s.maxAttempts {
+		if err := s.store.MarkFailed(ctx, message.MessageID, "downlink ack timeout", s.now()); err != nil {
+			return "", fmt.Errorf("%w: %v", ErrStore, err)
+		}
+		return MessageStatusFailed, nil
+	}
+
 	sentResp, err := s.deliverOnline(ctx, pushRequestFromMessage(message))
 	if err != nil {
 		if s.maxAttempts > 0 && message.Attempts+1 >= s.maxAttempts {
@@ -340,6 +357,14 @@ func (s *Service) retryMessage(ctx context.Context, message Message) (MessageSta
 	}
 
 	return MessageStatusSent, nil
+}
+
+func (s *Service) ackTimedOut(message Message) bool {
+	if message.Status != MessageStatusSent || !message.AckRequired || message.SentAt.IsZero() || s.ackTimeout <= 0 {
+		return false
+	}
+
+	return !message.SentAt.Add(s.ackTimeout).After(s.now())
 }
 
 func (s *Service) pushOnline(req PushRequest) (*PushResponse, error) {

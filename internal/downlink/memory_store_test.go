@@ -53,6 +53,65 @@ func TestMemoryStoreListDuePending(t *testing.T) {
 	}
 }
 
+func TestMemoryStoreListDueRetryIncludesAckTimeout(t *testing.T) {
+	store := NewMemoryStore()
+	now := time.UnixMilli(1760000000000)
+	store.now = func() time.Time { return now }
+
+	for _, message := range []Message{
+		{
+			MessageID:   "pending",
+			ClientID:    "c1",
+			DeviceID:    "d1",
+			MsgID:       2001,
+			Status:      MessageStatusPending,
+			NextRetryAt: now,
+			CreatedAt:   now,
+		},
+		{
+			MessageID:   "sent-timeout",
+			ClientID:    "c1",
+			DeviceID:    "d1",
+			MsgID:       2001,
+			AckRequired: true,
+			Status:      MessageStatusSent,
+			SentAt:      now.Add(-2 * time.Second),
+			CreatedAt:   now.Add(time.Second),
+		},
+		{
+			MessageID:   "sent-fresh",
+			ClientID:    "c1",
+			DeviceID:    "d1",
+			MsgID:       2001,
+			AckRequired: true,
+			Status:      MessageStatusSent,
+			SentAt:      now.Add(-500 * time.Millisecond),
+			CreatedAt:   now.Add(2 * time.Second),
+		},
+		{
+			MessageID: "sent-no-ack",
+			ClientID:  "c1",
+			DeviceID:  "d1",
+			MsgID:     2001,
+			Status:    MessageStatusSent,
+			SentAt:    now.Add(-2 * time.Second),
+			CreatedAt: now.Add(3 * time.Second),
+		},
+	} {
+		if _, err := store.Save(context.Background(), message); err != nil {
+			t.Fatalf("Save %s error = %v", message.MessageID, err)
+		}
+	}
+
+	messages, err := store.ListDueRetry(context.Background(), now, time.Second, 10)
+	if err != nil {
+		t.Fatalf("ListDueRetry() error = %v", err)
+	}
+	if len(messages) != 2 || messages[0].MessageID != "pending" || messages[1].MessageID != "sent-timeout" {
+		t.Fatalf("ListDueRetry() = %+v, want pending and sent-timeout", messages)
+	}
+}
+
 func TestMemoryStoreListPendingByClientDeviceIgnoresRetryTime(t *testing.T) {
 	store := NewMemoryStore()
 	now := time.UnixMilli(1760000000000)

@@ -384,14 +384,14 @@ without calling the origin node.
 ## Retry Worker
 
 Every gateway node can run a retry worker. To avoid two nodes delivering the
-same pending message at the same time, the PostgreSQL store claims due rows
-before retry delivery.
+same due message at the same time, the PostgreSQL store claims due rows before
+retry delivery.
 
 Store extension:
 
 ```go
 type ClaimStore interface {
-    ClaimDuePending(ctx context.Context, now time.Time, limit int, owner string, lease time.Duration) ([]Message, error)
+    ClaimDueRetry(ctx context.Context, now time.Time, ackTimeout time.Duration, limit int, owner string, lease time.Duration) ([]Message, error)
 }
 ```
 

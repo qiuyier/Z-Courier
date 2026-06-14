@@ -181,22 +181,30 @@ WHERE message_id = $1
 }
 
 func (s *PostgresStore) ListDuePending(ctx context.Context, now time.Time, limit int) ([]Message, error) {
+	return s.ListDueRetry(ctx, now, 0, limit)
+}
+
+func (s *PostgresStore) ListDueRetry(ctx context.Context, now time.Time, ackTimeout time.Duration, limit int) ([]Message, error) {
 	if now.IsZero() {
 		now = time.Now()
 	}
 	if limit <= 0 {
 		limit = 100
 	}
+	includeAckTimeout := ackTimeout > 0
+	ackDeadline := now.Add(-ackTimeout)
 
 	rows, err := s.db.QueryContext(ctx, `
 SELECT `+postgresMessageColumns+`
 FROM z_courier_downlink_messages
-WHERE status = $1
-  AND (next_retry_at IS NULL OR next_retry_at <= $2)
+WHERE (
+    (status = $1 AND (next_retry_at IS NULL OR next_retry_at <= $2))
+    OR ($4 AND status = $5 AND ack_required = true AND sent_at IS NOT NULL AND sent_at <= $6)
+  )
   AND (claim_until IS NULL OR claim_until <= $2)
 ORDER BY created_at ASC, message_id ASC
 LIMIT $3
-`, string(MessageStatusPending), now, limit)
+`, string(MessageStatusPending), now, limit, includeAckTimeout, string(MessageStatusSent), ackDeadline)
 	if err != nil {
 		return nil, err
 	}
@@ -206,6 +214,10 @@ LIMIT $3
 }
 
 func (s *PostgresStore) ClaimDuePending(ctx context.Context, now time.Time, limit int, owner string, lease time.Duration) ([]Message, error) {
+	return s.ClaimDueRetry(ctx, now, 0, limit, owner, lease)
+}
+
+func (s *PostgresStore) ClaimDueRetry(ctx context.Context, now time.Time, ackTimeout time.Duration, limit int, owner string, lease time.Duration) ([]Message, error) {
 	if now.IsZero() {
 		now = time.Now()
 	}
@@ -213,18 +225,22 @@ func (s *PostgresStore) ClaimDuePending(ctx context.Context, now time.Time, limi
 		limit = 100
 	}
 	if owner == "" {
-		return s.ListDuePending(ctx, now, limit)
+		return s.ListDueRetry(ctx, now, ackTimeout, limit)
 	}
 	if lease <= 0 {
 		lease = 30 * time.Second
 	}
+	includeAckTimeout := ackTimeout > 0
+	ackDeadline := now.Add(-ackTimeout)
 
 	rows, err := s.db.QueryContext(ctx, `
 WITH claimed AS (
   SELECT message_id
   FROM z_courier_downlink_messages
-  WHERE status = $1
-    AND (next_retry_at IS NULL OR next_retry_at <= $2)
+  WHERE (
+      (status = $1 AND (next_retry_at IS NULL OR next_retry_at <= $2))
+      OR ($7 AND status = $8 AND ack_required = true AND sent_at IS NOT NULL AND sent_at <= $9)
+    )
     AND (claim_until IS NULL OR claim_until <= $2)
   ORDER BY created_at ASC, message_id ASC
   FOR UPDATE SKIP LOCKED
@@ -240,7 +256,7 @@ RETURNING m.message_id, m.client_id, m.device_id, m.msg_id, m.body,
           m.ack_required, m.trace_id, m.session_id, m.status, m.attempts,
           m.next_retry_at, m.last_error, m.created_at, m.updated_at,
           m.sent_at, m.delivered_at, m.claim_owner, m.claim_until
-`, string(MessageStatusPending), now, limit, owner, now.Add(lease))
+`, string(MessageStatusPending), now, limit, owner, now.Add(lease), includeAckTimeout, string(MessageStatusSent), ackDeadline)
 	if err != nil {
 		return nil, err
 	}

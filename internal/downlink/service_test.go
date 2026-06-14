@@ -458,10 +458,157 @@ func TestServiceRetryDueClaimsPendingMessagesWhenStoreSupportsIt(t *testing.T) {
 		t.Fatalf("RetryDue() result = %+v, want one sent", result)
 	}
 	if store.claims != 1 {
-		t.Fatalf("ClaimDuePending calls = %d, want 1", store.claims)
+		t.Fatalf("ClaimDueRetry calls = %d, want 1", store.claims)
 	}
 	if !store.claimNow.Equal(now) || store.claimLimit != 9 || store.claimOwner != "gateway-a" || store.claimLease != 12*time.Second {
 		t.Fatalf("claim args = now:%v limit:%d owner:%q lease:%v", store.claimNow, store.claimLimit, store.claimOwner, store.claimLease)
+	}
+}
+
+func TestServiceRetryDueResendsAckTimedOutMessage(t *testing.T) {
+	now := time.UnixMilli(1760000000000)
+	store := NewMemoryStore()
+	store.now = func() time.Time { return now }
+	if _, err := store.Save(context.Background(), Message{
+		MessageID:   "message-1",
+		ClientID:    "client-1",
+		DeviceID:    "device-1",
+		MsgID:       2001,
+		Body:        []byte("hello"),
+		AckRequired: true,
+		Status:      MessageStatusSent,
+		Attempts:    1,
+		SentAt:      now.Add(-2 * time.Second),
+		CreatedAt:   now.Add(-3 * time.Second),
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	conn := &fakeConnection{}
+	service := NewService(
+		fakeSessions{session: &session.Session{SessionID: "session-1", ConnID: 7, ClientID: "client-1", DeviceID: "device-1"}},
+		fakeConnections{conn: conn},
+		WithStore(store),
+		WithAckTimeout(time.Second),
+		WithMaxAttempts(3),
+	)
+	service.now = func() time.Time { return now }
+
+	result, err := service.RetryDue(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("RetryDue() error = %v", err)
+	}
+	if result.Scanned != 1 || result.Sent != 1 || result.Queued != 0 || result.Failed != 0 {
+		t.Fatalf("RetryDue() result = %+v, want one resent", result)
+	}
+	if len(conn.data) == 0 {
+		t.Fatal("connection did not receive data")
+	}
+
+	stored, _, err := store.Get(context.Background(), "message-1")
+	if err != nil {
+		t.Fatalf("store.Get() error = %v", err)
+	}
+	if stored.Status != MessageStatusSent {
+		t.Fatalf("stored Status = %q, want sent", stored.Status)
+	}
+	if stored.Attempts != 2 {
+		t.Fatalf("stored Attempts = %d, want 2", stored.Attempts)
+	}
+	if !stored.SentAt.Equal(now) {
+		t.Fatalf("stored SentAt = %v, want %v", stored.SentAt, now)
+	}
+}
+
+func TestServiceRetryDueSkipsSentMessageBeforeAckTimeout(t *testing.T) {
+	now := time.UnixMilli(1760000000000)
+	store := NewMemoryStore()
+	store.now = func() time.Time { return now }
+	if _, err := store.Save(context.Background(), Message{
+		MessageID:   "message-1",
+		ClientID:    "client-1",
+		DeviceID:    "device-1",
+		MsgID:       2001,
+		Body:        []byte("hello"),
+		AckRequired: true,
+		Status:      MessageStatusSent,
+		Attempts:    1,
+		SentAt:      now.Add(-500 * time.Millisecond),
+		CreatedAt:   now.Add(-time.Second),
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	conn := &fakeConnection{}
+	service := NewService(
+		fakeSessions{session: &session.Session{SessionID: "session-1", ConnID: 7, ClientID: "client-1", DeviceID: "device-1"}},
+		fakeConnections{conn: conn},
+		WithStore(store),
+		WithAckTimeout(time.Second),
+	)
+	service.now = func() time.Time { return now }
+
+	result, err := service.RetryDue(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("RetryDue() error = %v", err)
+	}
+	if result.Scanned != 0 || result.Sent != 0 || result.Queued != 0 || result.Failed != 0 {
+		t.Fatalf("RetryDue() result = %+v, want no retry", result)
+	}
+	if len(conn.data) != 0 {
+		t.Fatal("connection received unexpected data")
+	}
+}
+
+func TestServiceRetryDueMarksAckTimedOutMessageFailedAfterMaxAttempts(t *testing.T) {
+	now := time.UnixMilli(1760000000000)
+	store := NewMemoryStore()
+	store.now = func() time.Time { return now }
+	if _, err := store.Save(context.Background(), Message{
+		MessageID:   "message-1",
+		ClientID:    "client-1",
+		DeviceID:    "device-1",
+		MsgID:       2001,
+		Body:        []byte("hello"),
+		AckRequired: true,
+		Status:      MessageStatusSent,
+		Attempts:    2,
+		SentAt:      now.Add(-2 * time.Second),
+		CreatedAt:   now.Add(-3 * time.Second),
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	conn := &fakeConnection{}
+	service := NewService(
+		fakeSessions{session: &session.Session{SessionID: "session-1", ConnID: 7, ClientID: "client-1", DeviceID: "device-1"}},
+		fakeConnections{conn: conn},
+		WithStore(store),
+		WithAckTimeout(time.Second),
+		WithMaxAttempts(2),
+	)
+	service.now = func() time.Time { return now }
+
+	result, err := service.RetryDue(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("RetryDue() error = %v", err)
+	}
+	if result.Scanned != 1 || result.Sent != 0 || result.Queued != 0 || result.Failed != 1 {
+		t.Fatalf("RetryDue() result = %+v, want one failed", result)
+	}
+	if len(conn.data) != 0 {
+		t.Fatal("connection received unexpected data")
+	}
+
+	stored, _, err := store.Get(context.Background(), "message-1")
+	if err != nil {
+		t.Fatalf("store.Get() error = %v", err)
+	}
+	if stored.Status != MessageStatusFailed {
+		t.Fatalf("stored Status = %q, want failed", stored.Status)
+	}
+	if stored.LastError != "downlink ack timeout" {
+		t.Fatalf("stored LastError = %q, want downlink ack timeout", stored.LastError)
 	}
 }
 
@@ -908,14 +1055,14 @@ type fakeClaimStore struct {
 	claimLease time.Duration
 }
 
-func (f *fakeClaimStore) ClaimDuePending(ctx context.Context, now time.Time, limit int, owner string, lease time.Duration) ([]Message, error) {
+func (f *fakeClaimStore) ClaimDueRetry(ctx context.Context, now time.Time, ackTimeout time.Duration, limit int, owner string, lease time.Duration) ([]Message, error) {
 	f.claims++
 	f.claimNow = now
 	f.claimLimit = limit
 	f.claimOwner = owner
 	f.claimLease = lease
 
-	return f.MemoryStore.ListDuePending(ctx, now, limit)
+	return f.MemoryStore.ListDueRetry(ctx, now, ackTimeout, limit)
 }
 
 type fakeConnection struct {

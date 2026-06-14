@@ -73,6 +73,7 @@ downlink:
   delivery:
     retry_interval: 7s
     retry_delay: 11s
+    ack_timeout: 12s
     retry_lease: 13s
     max_attempts: 6
     scan_limit: 77
@@ -222,6 +223,9 @@ upstream:
 	}
 	if config.DownlinkDelivery.RetryDelay != 11*time.Second {
 		t.Fatalf("DownlinkDelivery RetryDelay = %v, want 11s", config.DownlinkDelivery.RetryDelay)
+	}
+	if config.DownlinkDelivery.AckTimeout != 12*time.Second {
+		t.Fatalf("DownlinkDelivery AckTimeout = %v, want 12s", config.DownlinkDelivery.AckTimeout)
 	}
 	if config.DownlinkDelivery.RetryLease != 13*time.Second {
 		t.Fatalf("DownlinkDelivery RetryLease = %v, want 13s", config.DownlinkDelivery.RetryLease)

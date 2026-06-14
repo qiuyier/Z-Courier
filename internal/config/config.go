@@ -103,6 +103,7 @@ type DownlinkPostgresConfig struct {
 type DownlinkDeliveryConfig struct {
 	RetryInterval  string `yaml:"retry_interval"`
 	RetryDelay     string `yaml:"retry_delay"`
+	AckTimeout     string `yaml:"ack_timeout"`
 	RetryLease     string `yaml:"retry_lease"`
 	MaxAttempts    int    `yaml:"max_attempts"`
 	ScanLimit      int    `yaml:"scan_limit"`
@@ -397,6 +398,10 @@ func applyDownlinkConfig(out *server.Config, config DownlinkConfig) error {
 	if err != nil {
 		return fmt.Errorf("config: downlink delivery retry_delay: %w", err)
 	}
+	ackTimeout, err := parseOptionalPositiveDuration(delivery.AckTimeout)
+	if err != nil {
+		return fmt.Errorf("config: downlink delivery ack_timeout: %w", err)
+	}
 	retryLease, err := parseOptionalPositiveDuration(delivery.RetryLease)
 	if err != nil {
 		return fmt.Errorf("config: downlink delivery retry_lease: %w", err)
@@ -406,6 +411,9 @@ func applyDownlinkConfig(out *server.Config, config DownlinkConfig) error {
 	}
 	if retryDelay > 0 {
 		out.DownlinkDelivery.RetryDelay = retryDelay
+	}
+	if ackTimeout > 0 {
+		out.DownlinkDelivery.AckTimeout = ackTimeout
 	}
 	if retryLease > 0 {
 		out.DownlinkDelivery.RetryLease = retryLease

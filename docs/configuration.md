@@ -192,14 +192,17 @@ downlink:
   delivery:
     retry_interval: 5s
     retry_delay: 30s
+    ack_timeout: 30s
     retry_lease: 30s
     max_attempts: 5
     scan_limit: 100
     bind_flush_limit: 100
 ```
 
-- `retry_interval`: how often the retry worker scans pending messages.
+- `retry_interval`: how often the retry worker scans due messages.
 - `retry_delay`: delay before the next attempt after a failed send.
+- `ack_timeout`: how long a sent ACK-required message may wait for client ACK
+  before it is eligible for retry.
 - `retry_lease`: how long one gateway node owns a claimed retry batch before
   another node may reclaim it.
 - `max_attempts`: attempts before a message is marked `failed`.

@@ -237,7 +237,7 @@ V1 aims for at-least-once downlink delivery:
 
 - The gateway persists downlink requests before attempting online delivery.
 - Offline clients receive pending messages when they bind.
-- Failed sends are retried until `max_attempts`.
+- Failed sends and ACK timeouts are retried until `max_attempts`.
 - Clients must de-duplicate by `MessageID` if duplicate delivery is possible.
 
 Z-Courier does not claim exactly-once delivery.

@@ -157,6 +157,7 @@ downlink:
   delivery:
     retry_interval: 5s
     retry_delay: 30s
+    ack_timeout: 30s
     max_attempts: 5
     scan_limit: 100
     bind_flush_limit: 100
@@ -167,11 +168,13 @@ When the target client is online, `/internal/push` returns `200` with
 it returns `202` with `delivery_state = queued`. The `memory` store is useful
 for local development, but queued messages are lost on gateway restart.
 
-Queued messages are retried in two ways:
+Stored messages are retried in three ways:
 
 - The retry worker scans due pending messages every `retry_interval`.
 - When a client session is newly bound, the gateway immediately flushes pending
   messages for that `client_id` + `device_id`, up to `bind_flush_limit`.
+- Sent messages that require client ACK are retried after `ack_timeout` if the
+  ACK does not arrive.
 
 Failed retry attempts update `attempts`, `last_error`, and `next_retry_at`.
 After `max_attempts`, the message is marked `failed`.

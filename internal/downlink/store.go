@@ -56,7 +56,7 @@ func (m Message) Clone() Message {
 type Store interface {
 	Save(context.Context, Message) (Message, error)
 	Get(context.Context, string) (Message, bool, error)
-	ListDuePending(context.Context, time.Time, int) ([]Message, error)
+	ListDueRetry(context.Context, time.Time, time.Duration, int) ([]Message, error)
 	ListPendingByClientDevice(context.Context, string, string, int) ([]Message, error)
 	MarkSent(context.Context, string, string, time.Time) error
 	MarkDelivered(context.Context, string, string, string, time.Time) error
@@ -65,7 +65,7 @@ type Store interface {
 }
 
 type ClaimStore interface {
-	ClaimDuePending(context.Context, time.Time, int, string, time.Duration) ([]Message, error)
+	ClaimDueRetry(context.Context, time.Time, time.Duration, int, string, time.Duration) ([]Message, error)
 }
 
 func messageFromPushRequest(req PushRequest, now time.Time) Message {
