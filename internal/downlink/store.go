@@ -25,6 +25,7 @@ const (
 	MessageStatusSent      MessageStatus = "sent"
 	MessageStatusDelivered MessageStatus = "delivered"
 	MessageStatusFailed    MessageStatus = "failed"
+	MessageStatusDiscarded MessageStatus = "discarded"
 )
 
 type Message struct {
@@ -56,12 +57,15 @@ func (m Message) Clone() Message {
 type Store interface {
 	Save(context.Context, Message) (Message, error)
 	Get(context.Context, string) (Message, bool, error)
+	ListByStatus(context.Context, MessageStatus, int) ([]Message, error)
 	ListDueRetry(context.Context, time.Time, time.Duration, int) ([]Message, error)
 	ListPendingByClientDevice(context.Context, string, string, int) ([]Message, error)
 	MarkSent(context.Context, string, string, time.Time) error
 	MarkDelivered(context.Context, string, string, string, time.Time) error
 	MarkAttemptFailed(context.Context, string, string, time.Time) error
 	MarkFailed(context.Context, string, string, time.Time) error
+	Requeue(context.Context, string, time.Time) error
+	Discard(context.Context, string, string, time.Time) error
 }
 
 type ClaimStore interface {

@@ -179,6 +179,26 @@ Stored messages are retried in three ways:
 Failed retry attempts update `attempts`, `last_error`, and `next_retry_at`.
 After `max_attempts`, the message is marked `failed`.
 
+Failed messages can be inspected and manually handled through the internal API:
+
+```bash
+go run ./cmd/devbackend list \
+  -internal-url http://127.0.0.1:18080 \
+  -internal-token dev-internal-token \
+  -status failed
+
+go run ./cmd/devbackend requeue \
+  -internal-url http://127.0.0.1:18080 \
+  -internal-token dev-internal-token \
+  -message-id message-1
+
+go run ./cmd/devbackend discard \
+  -internal-url http://127.0.0.1:18080 \
+  -internal-token dev-internal-token \
+  -message-id message-1 \
+  -reason "handled manually"
+```
+
 Clients confirm downlink delivery by sending a Z-Courier protocol packet with
 `MsgID = 2`. The ACK packet is authenticated like other client packets and is
 not forwarded upstream. Its JSON body is:

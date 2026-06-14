@@ -110,6 +110,26 @@ go run ./cmd/devbackend status \
   -message-id devbackend-push-...
 ```
 
+List failed messages and manually handle one:
+
+```bash
+go run ./cmd/devbackend list \
+  -internal-url http://127.0.0.1:18182 \
+  -internal-token dev-internal-token \
+  -status failed
+
+go run ./cmd/devbackend requeue \
+  -internal-url http://127.0.0.1:18182 \
+  -internal-token dev-internal-token \
+  -message-id devbackend-push-...
+
+go run ./cmd/devbackend discard \
+  -internal-url http://127.0.0.1:18182 \
+  -internal-token dev-internal-token \
+  -message-id devbackend-push-... \
+  -reason "handled manually"
+```
+
 ## What E2E Checks
 
 - Offline downlink push returns `queued` and is stored in PostgreSQL.

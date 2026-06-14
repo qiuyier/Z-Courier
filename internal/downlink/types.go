@@ -76,6 +76,20 @@ type MessageStatusResponse struct {
 	BodySizeBytes int           `json:"body_size_bytes,omitempty"`
 }
 
+type ListMessagesResponse struct {
+	Code     string                  `json:"code"`
+	Reason   string                  `json:"reason,omitempty"`
+	Status   MessageStatus           `json:"status,omitempty"`
+	Limit    int                     `json:"limit,omitempty"`
+	Total    int                     `json:"total"`
+	Messages []MessageStatusResponse `json:"messages,omitempty"`
+}
+
+type MessageActionRequest struct {
+	MessageID string `json:"message_id"`
+	Reason    string `json:"reason,omitempty"`
+}
+
 type PeerPushResponse struct {
 	Code          string `json:"code"`
 	Reason        string `json:"reason,omitempty"`

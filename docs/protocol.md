@@ -215,6 +215,46 @@ The response includes the current reliable delivery status and retry metadata:
 }
 ```
 
+Backends and operators can list stored messages by delivery status:
+
+```text
+GET /internal/messages?status=failed&limit=100
+```
+
+Supported statuses are `pending`, `sent`, `delivered`, `failed`, and
+`discarded`. When `status` is omitted, the gateway lists `failed` messages.
+
+Failed or stuck messages can be manually requeued:
+
+```text
+POST /internal/message/requeue
+```
+
+```json
+{
+  "message_id": "message-1"
+}
+```
+
+Requeue resets `attempts` to `0`, clears retry metadata, and changes the
+message back to `pending`. Delivered and discarded messages cannot be requeued.
+
+Messages that should no longer be processed can be discarded:
+
+```text
+POST /internal/message/discard
+```
+
+```json
+{
+  "message_id": "message-1",
+  "reason": "handled manually"
+}
+```
+
+Discard changes the status to `discarded`, clears retry metadata, and keeps the
+reason in `last_error`.
+
 ## Downlink Delivery ACK
 
 Clients confirm downlink delivery by sending a protocol packet with `MsgID = 2`.

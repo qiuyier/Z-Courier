@@ -253,6 +253,9 @@ Recommended APIs:
 POST /internal/push
 POST /internal/push/batch
 GET /internal/message/status
+GET /internal/messages
+POST /internal/message/requeue
+POST /internal/message/discard
 POST /internal/kick
 POST /internal/session/query
 ```
@@ -314,6 +317,7 @@ sent_to_client
 client_acked
 failed
 expired
+discarded
 dead_lettered
 ```
 
@@ -374,6 +378,8 @@ z_courier_clients_online
 z_courier_downlink_push_total
 z_courier_downlink_ack_total
 z_courier_downlink_ack_latency_seconds
+z_courier_downlink_requeue_total
+z_courier_downlink_discard_total
 z_courier_rate_limit_rejected_total
 ```
 

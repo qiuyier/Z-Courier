@@ -1018,6 +1018,135 @@ func TestServiceMessageStatusRequiresStore(t *testing.T) {
 	}
 }
 
+func TestServiceListMessages(t *testing.T) {
+	store := NewMemoryStore()
+	if _, err := store.Save(context.Background(), Message{
+		MessageID: "failed-1",
+		ClientID:  "client-1",
+		DeviceID:  "device-1",
+		MsgID:     2001,
+		Status:    MessageStatusFailed,
+	}); err != nil {
+		t.Fatalf("Save failed error = %v", err)
+	}
+	if _, err := store.Save(context.Background(), Message{
+		MessageID: "pending-1",
+		ClientID:  "client-1",
+		DeviceID:  "device-1",
+		MsgID:     2001,
+		Status:    MessageStatusPending,
+	}); err != nil {
+		t.Fatalf("Save pending error = %v", err)
+	}
+	service := NewService(fakeSessions{}, fakeConnections{}, WithStore(store))
+
+	messages, err := service.ListMessages(context.Background(), MessageStatusFailed, 10)
+	if err != nil {
+		t.Fatalf("ListMessages() error = %v", err)
+	}
+	if len(messages) != 1 || messages[0].MessageID != "failed-1" {
+		t.Fatalf("ListMessages() = %+v, want failed-1", messages)
+	}
+}
+
+func TestServiceListMessagesRejectsInvalidStatus(t *testing.T) {
+	service := NewService(fakeSessions{}, fakeConnections{}, WithStore(NewMemoryStore()))
+
+	_, err := service.ListMessages(context.Background(), "unknown", 10)
+	if !errors.Is(err, ErrInvalidStatus) {
+		t.Fatalf("ListMessages() error = %v, want %v", err, ErrInvalidStatus)
+	}
+}
+
+func TestServiceRequeue(t *testing.T) {
+	now := time.UnixMilli(1760000000000)
+	store := NewMemoryStore()
+	store.now = func() time.Time { return now }
+	if _, err := store.Save(context.Background(), Message{
+		MessageID: "message-1",
+		ClientID:  "client-1",
+		DeviceID:  "device-1",
+		MsgID:     2001,
+		Status:    MessageStatusFailed,
+		Attempts:  5,
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	service := NewService(fakeSessions{}, fakeConnections{}, WithStore(store))
+	service.now = func() time.Time { return now.Add(time.Second) }
+
+	message, err := service.Requeue(context.Background(), "message-1")
+	if err != nil {
+		t.Fatalf("Requeue() error = %v", err)
+	}
+	if message.Status != MessageStatusPending || message.Attempts != 0 {
+		t.Fatalf("message = %+v, want pending with attempts reset", message)
+	}
+}
+
+func TestServiceRequeueRejectsDeliveredOrDiscarded(t *testing.T) {
+	store := NewMemoryStore()
+	for _, message := range []Message{
+		{MessageID: "delivered", ClientID: "client-1", DeviceID: "device-1", MsgID: 2001, Status: MessageStatusDelivered},
+		{MessageID: "discarded", ClientID: "client-1", DeviceID: "device-1", MsgID: 2001, Status: MessageStatusDiscarded},
+	} {
+		if _, err := store.Save(context.Background(), message); err != nil {
+			t.Fatalf("Save %s error = %v", message.MessageID, err)
+		}
+	}
+	service := NewService(fakeSessions{}, fakeConnections{}, WithStore(store))
+
+	for _, messageID := range []string{"delivered", "discarded"} {
+		t.Run(messageID, func(t *testing.T) {
+			_, err := service.Requeue(context.Background(), messageID)
+			if !errors.Is(err, ErrInvalidTransition) {
+				t.Fatalf("Requeue() error = %v, want %v", err, ErrInvalidTransition)
+			}
+		})
+	}
+}
+
+func TestServiceDiscard(t *testing.T) {
+	store := NewMemoryStore()
+	if _, err := store.Save(context.Background(), Message{
+		MessageID: "message-1",
+		ClientID:  "client-1",
+		DeviceID:  "device-1",
+		MsgID:     2001,
+		Status:    MessageStatusFailed,
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	service := NewService(fakeSessions{}, fakeConnections{}, WithStore(store))
+
+	message, err := service.Discard(context.Background(), "message-1", "manual")
+	if err != nil {
+		t.Fatalf("Discard() error = %v", err)
+	}
+	if message.Status != MessageStatusDiscarded || message.LastError != "manual" {
+		t.Fatalf("message = %+v, want discarded with reason", message)
+	}
+}
+
+func TestServiceDiscardRejectsDelivered(t *testing.T) {
+	store := NewMemoryStore()
+	if _, err := store.Save(context.Background(), Message{
+		MessageID: "message-1",
+		ClientID:  "client-1",
+		DeviceID:  "device-1",
+		MsgID:     2001,
+		Status:    MessageStatusDelivered,
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	service := NewService(fakeSessions{}, fakeConnections{}, WithStore(store))
+
+	_, err := service.Discard(context.Background(), "message-1", "manual")
+	if !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("Discard() error = %v, want %v", err, ErrInvalidTransition)
+	}
+}
+
 type fakeSessions struct {
 	session *session.Session
 }

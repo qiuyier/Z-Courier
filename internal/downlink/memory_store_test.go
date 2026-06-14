@@ -112,6 +112,54 @@ func TestMemoryStoreListDueRetryIncludesAckTimeout(t *testing.T) {
 	}
 }
 
+func TestMemoryStoreListByStatus(t *testing.T) {
+	store := NewMemoryStore()
+	now := time.UnixMilli(1760000000000)
+	store.now = func() time.Time { return now }
+
+	if _, err := store.Save(context.Background(), Message{
+		MessageID: "old-failed",
+		ClientID:  "c1",
+		DeviceID:  "d1",
+		MsgID:     2001,
+		Status:    MessageStatusFailed,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("Save old failed error = %v", err)
+	}
+	if _, err := store.Save(context.Background(), Message{
+		MessageID: "pending",
+		ClientID:  "c1",
+		DeviceID:  "d1",
+		MsgID:     2001,
+		Status:    MessageStatusPending,
+		CreatedAt: now.Add(time.Second),
+		UpdatedAt: now.Add(time.Second),
+	}); err != nil {
+		t.Fatalf("Save pending error = %v", err)
+	}
+	if _, err := store.Save(context.Background(), Message{
+		MessageID: "new-failed",
+		ClientID:  "c1",
+		DeviceID:  "d1",
+		MsgID:     2001,
+		Status:    MessageStatusFailed,
+		CreatedAt: now.Add(2 * time.Second),
+		UpdatedAt: now.Add(2 * time.Second),
+	}); err != nil {
+		t.Fatalf("Save new failed error = %v", err)
+	}
+
+	messages, err := store.ListByStatus(context.Background(), MessageStatusFailed, 10)
+	if err != nil {
+		t.Fatalf("ListByStatus() error = %v", err)
+	}
+	if len(messages) != 2 || messages[0].MessageID != "new-failed" || messages[1].MessageID != "old-failed" {
+		t.Fatalf("ListByStatus() = %+v, want new-failed then old-failed", messages)
+	}
+}
+
 func TestMemoryStoreListPendingByClientDeviceIgnoresRetryTime(t *testing.T) {
 	store := NewMemoryStore()
 	now := time.UnixMilli(1760000000000)
@@ -145,6 +193,91 @@ func TestMemoryStoreListPendingByClientDeviceIgnoresRetryTime(t *testing.T) {
 	}
 	if len(messages) != 1 || messages[0].MessageID != "future" {
 		t.Fatalf("ListPendingByClientDevice() = %+v, want only future", messages)
+	}
+}
+
+func TestMemoryStoreRequeue(t *testing.T) {
+	store := NewMemoryStore()
+	now := time.UnixMilli(1760000000000)
+	store.now = func() time.Time { return now }
+
+	if _, err := store.Save(context.Background(), Message{
+		MessageID:   "message-1",
+		ClientID:    "c1",
+		DeviceID:    "d1",
+		MsgID:       2001,
+		Status:      MessageStatusFailed,
+		Attempts:    5,
+		LastError:   "offline",
+		NextRetryAt: now.Add(time.Minute),
+		ClaimOwner:  "gateway-a",
+		ClaimUntil:  now.Add(time.Minute),
+		SessionID:   "session-1",
+		SentAt:      now,
+		DeliveredAt: now,
+	}); err != nil {
+		t.Fatalf("Save error = %v", err)
+	}
+
+	requeuedAt := now.Add(time.Second)
+	if err := store.Requeue(context.Background(), "message-1", requeuedAt); err != nil {
+		t.Fatalf("Requeue() error = %v", err)
+	}
+
+	stored, ok, err := store.Get(context.Background(), "message-1")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if !ok {
+		t.Fatal("stored message not found")
+	}
+	if stored.Status != MessageStatusPending || stored.Attempts != 0 || stored.LastError != "" {
+		t.Fatalf("stored = %+v, want pending attempts reset", stored)
+	}
+	if !stored.NextRetryAt.IsZero() || stored.ClaimOwner != "" || !stored.ClaimUntil.IsZero() || stored.SessionID != "" || !stored.SentAt.IsZero() || !stored.DeliveredAt.IsZero() {
+		t.Fatalf("stored retry metadata = %+v, want cleared", stored)
+	}
+	if !stored.UpdatedAt.Equal(requeuedAt) {
+		t.Fatalf("UpdatedAt = %v, want %v", stored.UpdatedAt, requeuedAt)
+	}
+}
+
+func TestMemoryStoreDiscard(t *testing.T) {
+	store := NewMemoryStore()
+	now := time.UnixMilli(1760000000000)
+	store.now = func() time.Time { return now }
+
+	if _, err := store.Save(context.Background(), Message{
+		MessageID:   "message-1",
+		ClientID:    "c1",
+		DeviceID:    "d1",
+		MsgID:       2001,
+		Status:      MessageStatusFailed,
+		LastError:   "offline",
+		NextRetryAt: now.Add(time.Minute),
+		ClaimOwner:  "gateway-a",
+		ClaimUntil:  now.Add(time.Minute),
+	}); err != nil {
+		t.Fatalf("Save error = %v", err)
+	}
+
+	discardedAt := now.Add(time.Second)
+	if err := store.Discard(context.Background(), "message-1", "manual discard", discardedAt); err != nil {
+		t.Fatalf("Discard() error = %v", err)
+	}
+
+	stored, ok, err := store.Get(context.Background(), "message-1")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if !ok {
+		t.Fatal("stored message not found")
+	}
+	if stored.Status != MessageStatusDiscarded || stored.LastError != "manual discard" {
+		t.Fatalf("stored = %+v, want discarded with reason", stored)
+	}
+	if !stored.NextRetryAt.IsZero() || stored.ClaimOwner != "" || !stored.ClaimUntil.IsZero() {
+		t.Fatalf("stored retry metadata = %+v, want cleared", stored)
 	}
 }
 

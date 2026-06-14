@@ -55,6 +55,8 @@ histogram_quantile(0.95, sum by (le, route, target_type) (rate(z_courier_upstrea
 sum by (result) (rate(z_courier_downlink_push_total[1m]))
 sum by (result) (rate(z_courier_downlink_ack_total[1m]))
 histogram_quantile(0.95, sum by (le, msg_id) (rate(z_courier_downlink_ack_latency_seconds_bucket[5m])))
+sum by (result) (rate(z_courier_downlink_requeue_total[1m]))
+sum by (result) (rate(z_courier_downlink_discard_total[1m]))
 sum by (result) (rate(z_courier_cluster_registry_lookup_total[1m]))
 sum by (target_node, result) (rate(z_courier_cluster_peer_push_total[1m]))
 histogram_quantile(0.95, sum by (le, target_node) (rate(z_courier_cluster_peer_push_duration_seconds_bucket[5m])))

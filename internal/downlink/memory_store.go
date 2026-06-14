@@ -67,6 +67,25 @@ func (s *MemoryStore) Get(ctx context.Context, messageID string) (Message, bool,
 	return message.Clone(), true, nil
 }
 
+func (s *MemoryStore) ListByStatus(ctx context.Context, status MessageStatus, limit int) ([]Message, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	messages := make([]Message, 0)
+	for _, message := range s.messages {
+		if message.Status != status {
+			continue
+		}
+		messages = append(messages, message.Clone())
+	}
+
+	return limitMessagesByUpdatedDesc(messages, limit), nil
+}
+
 func (s *MemoryStore) ListDuePending(ctx context.Context, now time.Time, limit int) ([]Message, error) {
 	return s.ListDueRetry(ctx, now, 0, limit)
 }
@@ -147,6 +166,9 @@ func (s *MemoryStore) MarkSent(ctx context.Context, messageID, sessionID string,
 	if message.Status == MessageStatusDelivered {
 		return nil
 	}
+	if message.Status == MessageStatusDiscarded {
+		return nil
+	}
 	message.SessionID = sessionID
 	message.Status = MessageStatusSent
 	message.Attempts++
@@ -198,6 +220,9 @@ func (s *MemoryStore) MarkAttemptFailed(ctx context.Context, messageID, reason s
 	if !ok {
 		return ErrMessageNotFound
 	}
+	if message.Status == MessageStatusDelivered || message.Status == MessageStatusDiscarded {
+		return nil
+	}
 	message.Status = MessageStatusPending
 	message.Attempts++
 	message.LastError = reason
@@ -224,6 +249,9 @@ func (s *MemoryStore) MarkFailed(ctx context.Context, messageID, reason string, 
 	if !ok {
 		return ErrMessageNotFound
 	}
+	if message.Status == MessageStatusDelivered || message.Status == MessageStatusDiscarded {
+		return nil
+	}
 	message.Status = MessageStatusFailed
 	message.Attempts++
 	message.LastError = reason
@@ -231,6 +259,60 @@ func (s *MemoryStore) MarkFailed(ctx context.Context, messageID, reason string, 
 	message.ClaimOwner = ""
 	message.ClaimUntil = time.Time{}
 	message.UpdatedAt = failedAt
+	s.messages[messageID] = message
+	return nil
+}
+
+func (s *MemoryStore) Requeue(ctx context.Context, messageID string, requeuedAt time.Time) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if requeuedAt.IsZero() {
+		requeuedAt = s.now()
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	message, ok := s.messages[messageID]
+	if !ok {
+		return ErrMessageNotFound
+	}
+	message.Status = MessageStatusPending
+	message.Attempts = 0
+	message.LastError = ""
+	message.NextRetryAt = time.Time{}
+	message.ClaimOwner = ""
+	message.ClaimUntil = time.Time{}
+	message.SessionID = ""
+	message.SentAt = time.Time{}
+	message.DeliveredAt = time.Time{}
+	message.UpdatedAt = requeuedAt
+	s.messages[messageID] = message
+	return nil
+}
+
+func (s *MemoryStore) Discard(ctx context.Context, messageID, reason string, discardedAt time.Time) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if discardedAt.IsZero() {
+		discardedAt = s.now()
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	message, ok := s.messages[messageID]
+	if !ok {
+		return ErrMessageNotFound
+	}
+	message.Status = MessageStatusDiscarded
+	message.LastError = reason
+	message.NextRetryAt = time.Time{}
+	message.ClaimOwner = ""
+	message.ClaimUntil = time.Time{}
+	message.UpdatedAt = discardedAt
 	s.messages[messageID] = message
 	return nil
 }
@@ -246,6 +328,29 @@ func limitMessages(messages []Message, limit int) []Message {
 		}
 
 		return messages[i].CreatedAt.Before(messages[j].CreatedAt)
+	})
+	if limit > 0 && len(messages) > limit {
+		messages = messages[:limit]
+	}
+
+	return messages
+}
+
+func limitMessagesByUpdatedDesc(messages []Message, limit int) []Message {
+	sort.Slice(messages, func(i, j int) bool {
+		left := messages[i].UpdatedAt
+		right := messages[j].UpdatedAt
+		if left.IsZero() {
+			left = messages[i].CreatedAt
+		}
+		if right.IsZero() {
+			right = messages[j].CreatedAt
+		}
+		if left.Equal(right) {
+			return messages[i].MessageID < messages[j].MessageID
+		}
+
+		return left.After(right)
 	})
 	if limit > 0 && len(messages) > limit {
 		messages = messages[:limit]

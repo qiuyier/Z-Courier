@@ -28,6 +28,12 @@ func main() {
 		os.Exit(runPush(os.Args[2:]))
 	case len(os.Args) > 1 && os.Args[1] == "status":
 		os.Exit(runStatus(os.Args[2:]))
+	case len(os.Args) > 1 && os.Args[1] == "list":
+		os.Exit(runList(os.Args[2:]))
+	case len(os.Args) > 1 && os.Args[1] == "requeue":
+		os.Exit(runRequeue(os.Args[2:]))
+	case len(os.Args) > 1 && os.Args[1] == "discard":
+		os.Exit(runDiscard(os.Args[2:]))
 	case len(os.Args) > 1 && os.Args[1] == "serve":
 		os.Exit(runServe(os.Args[2:]))
 	default:
@@ -130,6 +136,22 @@ type statusConfig struct {
 	Timeout       time.Duration
 }
 
+type listConfig struct {
+	InternalURL   string
+	InternalToken string
+	Status        string
+	Limit         int
+	Timeout       time.Duration
+}
+
+type messageActionConfig struct {
+	InternalURL   string
+	InternalToken string
+	MessageID     string
+	Reason        string
+	Timeout       time.Duration
+}
+
 type messageFlags []string
 
 func (f *messageFlags) String() string {
@@ -210,6 +232,74 @@ func runStatus(args []string) int {
 
 	if err := status(config); err != nil {
 		fmt.Fprintf(os.Stderr, "status query failed: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+func runList(args []string) int {
+	fs := flag.NewFlagSet("list", flag.ExitOnError)
+	var config listConfig
+	fs.StringVar(&config.InternalURL, "internal-url", "http://127.0.0.1:18082", "gateway internal HTTP base URL")
+	fs.StringVar(&config.InternalToken, "internal-token", "dev-internal-token", "gateway internal HTTP token")
+	fs.StringVar(&config.Status, "status", string(downlink.MessageStatusFailed), "downlink message status")
+	fs.IntVar(&config.Limit, "limit", 100, "maximum messages to return")
+	fs.DurationVar(&config.Timeout, "timeout", 10*time.Second, "list request timeout")
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: devbackend list [flags]\n")
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+
+	if err := listMessages(config); err != nil {
+		fmt.Fprintf(os.Stderr, "list messages failed: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+func runRequeue(args []string) int {
+	fs := flag.NewFlagSet("requeue", flag.ExitOnError)
+	var config messageActionConfig
+	fs.StringVar(&config.InternalURL, "internal-url", "http://127.0.0.1:18082", "gateway internal HTTP base URL")
+	fs.StringVar(&config.InternalToken, "internal-token", "dev-internal-token", "gateway internal HTTP token")
+	fs.StringVar(&config.MessageID, "message-id", "", "downlink message id")
+	fs.DurationVar(&config.Timeout, "timeout", 10*time.Second, "requeue request timeout")
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: devbackend requeue -message-id message-id [flags]\n")
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+
+	if err := requeue(config); err != nil {
+		fmt.Fprintf(os.Stderr, "requeue failed: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+func runDiscard(args []string) int {
+	fs := flag.NewFlagSet("discard", flag.ExitOnError)
+	var config messageActionConfig
+	fs.StringVar(&config.InternalURL, "internal-url", "http://127.0.0.1:18082", "gateway internal HTTP base URL")
+	fs.StringVar(&config.InternalToken, "internal-token", "dev-internal-token", "gateway internal HTTP token")
+	fs.StringVar(&config.MessageID, "message-id", "", "downlink message id")
+	fs.StringVar(&config.Reason, "reason", "", "discard reason")
+	fs.DurationVar(&config.Timeout, "timeout", 10*time.Second, "discard request timeout")
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: devbackend discard -message-id message-id [flags]\n")
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+
+	if err := discard(config); err != nil {
+		fmt.Fprintf(os.Stderr, "discard failed: %v\n", err)
 		return 1
 	}
 	return 0
@@ -323,6 +413,74 @@ func status(config statusConfig) error {
 
 	path := "/internal/message/status?message_id=" + url.QueryEscape(strings.TrimSpace(config.MessageID))
 	statusCode, respBody, err := getJSON(config.InternalURL, path, config.InternalToken, config.Timeout)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("status=%d\n", statusCode)
+	if len(respBody) > 0 {
+		fmt.Printf("response=%s\n", string(respBody))
+	}
+
+	if statusCode < http.StatusOK || statusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("gateway returned status %d", statusCode)
+	}
+	return nil
+}
+
+func listMessages(config listConfig) error {
+	if config.InternalURL == "" {
+		return fmt.Errorf("internal-url is required")
+	}
+	if strings.TrimSpace(config.Status) == "" {
+		return fmt.Errorf("status is required")
+	}
+	if config.Limit <= 0 {
+		return fmt.Errorf("limit must be greater than 0")
+	}
+
+	path := "/internal/messages?status=" + url.QueryEscape(strings.TrimSpace(config.Status)) + "&limit=" + strconv.Itoa(config.Limit)
+	statusCode, respBody, err := getJSON(config.InternalURL, path, config.InternalToken, config.Timeout)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("status=%d\n", statusCode)
+	if len(respBody) > 0 {
+		fmt.Printf("response=%s\n", string(respBody))
+	}
+
+	if statusCode < http.StatusOK || statusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("gateway returned status %d", statusCode)
+	}
+	return nil
+}
+
+func requeue(config messageActionConfig) error {
+	return messageAction(config, "/internal/message/requeue")
+}
+
+func discard(config messageActionConfig) error {
+	return messageAction(config, "/internal/message/discard")
+}
+
+func messageAction(config messageActionConfig, path string) error {
+	if config.InternalURL == "" {
+		return fmt.Errorf("internal-url is required")
+	}
+	if strings.TrimSpace(config.MessageID) == "" {
+		return fmt.Errorf("message-id is required")
+	}
+
+	reqBody, err := sonic.Marshal(downlink.MessageActionRequest{
+		MessageID: strings.TrimSpace(config.MessageID),
+		Reason:    config.Reason,
+	})
+	if err != nil {
+		return fmt.Errorf("marshal message action request: %w", err)
+	}
+
+	statusCode, respBody, err := postJSON(config.InternalURL, path, config.InternalToken, reqBody, config.Timeout)
 	if err != nil {
 		return err
 	}

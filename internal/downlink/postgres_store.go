@@ -180,6 +180,26 @@ WHERE message_id = $1
 	return message, true, nil
 }
 
+func (s *PostgresStore) ListByStatus(ctx context.Context, status MessageStatus, limit int) ([]Message, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+
+	rows, err := s.db.QueryContext(ctx, `
+SELECT `+postgresMessageColumns+`
+FROM z_courier_downlink_messages
+WHERE status = $1
+ORDER BY updated_at DESC, message_id ASC
+LIMIT $2
+`, string(status), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return scanMessages(rows)
+}
+
 func (s *PostgresStore) ListDuePending(ctx context.Context, now time.Time, limit int) ([]Message, error) {
 	return s.ListDueRetry(ctx, now, 0, limit)
 }
@@ -296,17 +316,17 @@ func (s *PostgresStore) MarkSent(ctx context.Context, messageID, sessionID strin
 
 	result, err := s.db.ExecContext(ctx, `
 UPDATE z_courier_downlink_messages
-SET status = CASE WHEN status = $5 THEN status ELSE $2 END,
-    session_id = CASE WHEN status = $5 THEN session_id ELSE $3 END,
-    attempts = CASE WHEN status = $5 THEN attempts ELSE attempts + 1 END,
-    last_error = CASE WHEN status = $5 THEN last_error ELSE '' END,
-    next_retry_at = CASE WHEN status = $5 THEN next_retry_at ELSE NULL END,
-    claim_owner = CASE WHEN status = $5 THEN claim_owner ELSE '' END,
-    claim_until = CASE WHEN status = $5 THEN claim_until ELSE NULL END,
-    sent_at = CASE WHEN status = $5 THEN sent_at ELSE $4 END,
-    updated_at = CASE WHEN status = $5 THEN updated_at ELSE $4 END
+SET status = CASE WHEN status IN ($5, $6) THEN status ELSE $2 END,
+    session_id = CASE WHEN status IN ($5, $6) THEN session_id ELSE $3 END,
+    attempts = CASE WHEN status IN ($5, $6) THEN attempts ELSE attempts + 1 END,
+    last_error = CASE WHEN status IN ($5, $6) THEN last_error ELSE '' END,
+    next_retry_at = CASE WHEN status IN ($5, $6) THEN next_retry_at ELSE NULL END,
+    claim_owner = CASE WHEN status IN ($5, $6) THEN claim_owner ELSE '' END,
+    claim_until = CASE WHEN status IN ($5, $6) THEN claim_until ELSE NULL END,
+    sent_at = CASE WHEN status IN ($5, $6) THEN sent_at ELSE $4 END,
+    updated_at = CASE WHEN status IN ($5, $6) THEN updated_at ELSE $4 END
 WHERE message_id = $1
-`, messageID, string(MessageStatusSent), sessionID, sentAt, string(MessageStatusDelivered))
+`, messageID, string(MessageStatusSent), sessionID, sentAt, string(MessageStatusDelivered), string(MessageStatusDiscarded))
 	if err != nil {
 		return err
 	}
@@ -342,15 +362,15 @@ WHERE message_id = $1
 func (s *PostgresStore) MarkAttemptFailed(ctx context.Context, messageID, reason string, nextRetryAt time.Time) error {
 	result, err := s.db.ExecContext(ctx, `
 UPDATE z_courier_downlink_messages
-SET status = $2,
-    attempts = attempts + 1,
-    last_error = $3,
-    next_retry_at = $4,
-    claim_owner = '',
-    claim_until = NULL,
-    updated_at = $5
+SET status = CASE WHEN status IN ($6, $7) THEN status ELSE $2 END,
+    attempts = CASE WHEN status IN ($6, $7) THEN attempts ELSE attempts + 1 END,
+    last_error = CASE WHEN status IN ($6, $7) THEN last_error ELSE $3 END,
+    next_retry_at = CASE WHEN status IN ($6, $7) THEN next_retry_at ELSE $4 END,
+    claim_owner = CASE WHEN status IN ($6, $7) THEN claim_owner ELSE '' END,
+    claim_until = CASE WHEN status IN ($6, $7) THEN claim_until ELSE NULL END,
+    updated_at = CASE WHEN status IN ($6, $7) THEN updated_at ELSE $5 END
 WHERE message_id = $1
-`, messageID, string(MessageStatusPending), reason, nullTime(nextRetryAt), time.Now())
+`, messageID, string(MessageStatusPending), reason, nullTime(nextRetryAt), time.Now(), string(MessageStatusDelivered), string(MessageStatusDiscarded))
 	if err != nil {
 		return err
 	}
@@ -365,15 +385,63 @@ func (s *PostgresStore) MarkFailed(ctx context.Context, messageID, reason string
 
 	result, err := s.db.ExecContext(ctx, `
 UPDATE z_courier_downlink_messages
+SET status = CASE WHEN status IN ($5, $6) THEN status ELSE $2 END,
+    attempts = CASE WHEN status IN ($5, $6) THEN attempts ELSE attempts + 1 END,
+    last_error = CASE WHEN status IN ($5, $6) THEN last_error ELSE $3 END,
+    next_retry_at = CASE WHEN status IN ($5, $6) THEN next_retry_at ELSE NULL END,
+    claim_owner = CASE WHEN status IN ($5, $6) THEN claim_owner ELSE '' END,
+    claim_until = CASE WHEN status IN ($5, $6) THEN claim_until ELSE NULL END,
+    updated_at = CASE WHEN status IN ($5, $6) THEN updated_at ELSE $4 END
+WHERE message_id = $1
+`, messageID, string(MessageStatusFailed), reason, failedAt, string(MessageStatusDelivered), string(MessageStatusDiscarded))
+	if err != nil {
+		return err
+	}
+
+	return requireAffected(result)
+}
+
+func (s *PostgresStore) Requeue(ctx context.Context, messageID string, requeuedAt time.Time) error {
+	if requeuedAt.IsZero() {
+		requeuedAt = time.Now()
+	}
+
+	result, err := s.db.ExecContext(ctx, `
+UPDATE z_courier_downlink_messages
 SET status = $2,
-    attempts = attempts + 1,
+    attempts = 0,
+    last_error = '',
+    next_retry_at = NULL,
+    claim_owner = '',
+    claim_until = NULL,
+    session_id = '',
+    sent_at = NULL,
+    delivered_at = NULL,
+    updated_at = $3
+WHERE message_id = $1
+`, messageID, string(MessageStatusPending), requeuedAt)
+	if err != nil {
+		return err
+	}
+
+	return requireAffected(result)
+}
+
+func (s *PostgresStore) Discard(ctx context.Context, messageID, reason string, discardedAt time.Time) error {
+	if discardedAt.IsZero() {
+		discardedAt = time.Now()
+	}
+
+	result, err := s.db.ExecContext(ctx, `
+UPDATE z_courier_downlink_messages
+SET status = $2,
     last_error = $3,
     next_retry_at = NULL,
     claim_owner = '',
     claim_until = NULL,
     updated_at = $4
 WHERE message_id = $1
-`, messageID, string(MessageStatusFailed), reason, failedAt)
+`, messageID, string(MessageStatusDiscarded), reason, discardedAt)
 	if err != nil {
 		return err
 	}

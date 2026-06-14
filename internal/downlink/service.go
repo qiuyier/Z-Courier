@@ -132,6 +132,85 @@ func (s *Service) MessageStatus(ctx context.Context, messageID string) (Message,
 	return message, ok, nil
 }
 
+func (s *Service) ListMessages(ctx context.Context, status MessageStatus, limit int) ([]Message, error) {
+	if s.store == nil {
+		return nil, ErrStoreNotConfigured
+	}
+	if !validMessageStatus(status) {
+		return nil, ErrInvalidStatus
+	}
+
+	messages, err := s.store.ListByStatus(ctx, status, limit)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrStore, err)
+	}
+	return messages, nil
+}
+
+func (s *Service) Requeue(ctx context.Context, messageID string) (Message, error) {
+	if s.store == nil {
+		return Message{}, ErrStoreNotConfigured
+	}
+	if messageID == "" {
+		return Message{}, ErrMissingMessageID
+	}
+
+	message, ok, err := s.store.Get(ctx, messageID)
+	if err != nil {
+		return Message{}, fmt.Errorf("%w: %v", ErrStore, err)
+	}
+	if !ok {
+		return Message{}, ErrMessageNotFound
+	}
+	if message.Status == MessageStatusDelivered || message.Status == MessageStatusDiscarded {
+		return Message{}, ErrInvalidTransition
+	}
+
+	if err := s.store.Requeue(ctx, messageID, s.now()); err != nil {
+		return Message{}, fmt.Errorf("%w: %v", ErrStore, err)
+	}
+	message, ok, err = s.store.Get(ctx, messageID)
+	if err != nil {
+		return Message{}, fmt.Errorf("%w: %v", ErrStore, err)
+	}
+	if !ok {
+		return Message{}, ErrMessageNotFound
+	}
+	return message, nil
+}
+
+func (s *Service) Discard(ctx context.Context, messageID, reason string) (Message, error) {
+	if s.store == nil {
+		return Message{}, ErrStoreNotConfigured
+	}
+	if messageID == "" {
+		return Message{}, ErrMissingMessageID
+	}
+
+	message, ok, err := s.store.Get(ctx, messageID)
+	if err != nil {
+		return Message{}, fmt.Errorf("%w: %v", ErrStore, err)
+	}
+	if !ok {
+		return Message{}, ErrMessageNotFound
+	}
+	if message.Status == MessageStatusDelivered {
+		return Message{}, ErrInvalidTransition
+	}
+
+	if err := s.store.Discard(ctx, messageID, reason, s.now()); err != nil {
+		return Message{}, fmt.Errorf("%w: %v", ErrStore, err)
+	}
+	message, ok, err = s.store.Get(ctx, messageID)
+	if err != nil {
+		return Message{}, fmt.Errorf("%w: %v", ErrStore, err)
+	}
+	if !ok {
+		return Message{}, ErrMessageNotFound
+	}
+	return message, nil
+}
+
 func (s *Service) Push(ctx context.Context, req PushRequest) (*PushResponse, error) {
 	if err := validatePushRequest(req); err != nil {
 		return nil, err
@@ -529,6 +608,15 @@ func validatePushRequest(req PushRequest) error {
 	}
 
 	return nil
+}
+
+func validMessageStatus(status MessageStatus) bool {
+	switch status {
+	case MessageStatusPending, MessageStatusSent, MessageStatusDelivered, MessageStatusFailed, MessageStatusDiscarded:
+		return true
+	default:
+		return false
+	}
 }
 
 func isStalePeerRouteError(err error) bool {

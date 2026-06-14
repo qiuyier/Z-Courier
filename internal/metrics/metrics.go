@@ -84,6 +84,22 @@ var (
 		[]string{"msg_id"},
 	)
 
+	downlinkRequeue = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "z_courier_downlink_requeue_total",
+			Help: "Total number of manual downlink message requeue attempts.",
+		},
+		[]string{"result"},
+	)
+
+	downlinkDiscard = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "z_courier_downlink_discard_total",
+			Help: "Total number of manual downlink message discard attempts.",
+		},
+		[]string{"result"},
+	)
+
 	rateLimitRejected = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "z_courier_rate_limit_rejected_total",
@@ -232,6 +248,14 @@ func ObserveDownlinkAckLatency(msgID uint32, duration time.Duration) {
 	}
 
 	downlinkAckLatency.WithLabelValues(formatMsgID(msgID)).Observe(duration.Seconds())
+}
+
+func RecordDownlinkRequeue(result string) {
+	downlinkRequeue.WithLabelValues(nonEmpty(result, "unknown")).Inc()
+}
+
+func RecordDownlinkDiscard(result string) {
+	downlinkDiscard.WithLabelValues(nonEmpty(result, "unknown")).Inc()
 }
 
 func RecordRateLimitRejected(msgID uint32) {
