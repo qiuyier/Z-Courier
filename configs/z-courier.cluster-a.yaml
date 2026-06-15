@@ -15,6 +15,7 @@ internal_http:
   addr: 127.0.0.1:18182
   token: dev-internal-token
   max_request_body_size: 10485760
+  max_in_flight: 1000
 
 cluster:
   enabled: true
@@ -88,6 +89,7 @@ upstream:
         write_timeout: 1s
         publish_mode: round_robin
         retry_attempts: 1
+        max_in_flight: 1000
     - name: cluster-b-http-upstream
       enabled: true
       msg_id_min: 1001
@@ -96,3 +98,4 @@ upstream:
         type: http
         url: http://127.0.0.1:18081/gateway/upstream
         timeout: 5s
+        max_in_flight: 1000

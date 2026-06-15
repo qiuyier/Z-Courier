@@ -45,6 +45,22 @@ var (
 		[]string{"route", "target_type", "result"},
 	)
 
+	upstreamInFlight = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "z_courier_upstream_inflight",
+			Help: "Current number of in-flight upstream forwarding requests.",
+		},
+		[]string{"route", "target_type"},
+	)
+
+	upstreamOverloadRejected = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "z_courier_upstream_overload_rejected_total",
+			Help: "Total number of upstream forwarding attempts rejected by in-flight capacity limits.",
+		},
+		[]string{"route", "target_type"},
+	)
+
 	sessionsOnline = promauto.NewGauge(
 		prometheus.GaugeOpts{
 			Name: "z_courier_sessions_online",
@@ -65,6 +81,22 @@ var (
 			Help: "Total number of downlink push requests handled by the gateway.",
 		},
 		[]string{"msg_id", "result"},
+	)
+
+	internalHTTPInFlight = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "z_courier_internal_http_inflight",
+			Help: "Current number of in-flight protected internal HTTP requests.",
+		},
+		[]string{"path"},
+	)
+
+	internalHTTPOverloadRejected = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "z_courier_internal_http_overload_rejected_total",
+			Help: "Total number of internal HTTP requests rejected by in-flight capacity limits.",
+		},
+		[]string{"path"},
 	)
 
 	downlinkAck = promauto.NewCounterVec(
@@ -251,6 +283,14 @@ func RecordUpstreamForward(route, targetType, result string, duration time.Durat
 	upstreamForwardDuration.WithLabelValues(labels...).Observe(duration.Seconds())
 }
 
+func AddUpstreamInFlight(route, targetType string, delta float64) {
+	upstreamInFlight.WithLabelValues(nonEmpty(route, "unknown"), nonEmpty(targetType, "unknown")).Add(delta)
+}
+
+func RecordUpstreamOverloadRejected(route, targetType string) {
+	upstreamOverloadRejected.WithLabelValues(nonEmpty(route, "unknown"), nonEmpty(targetType, "unknown")).Inc()
+}
+
 func SetSessionsOnline(count int) {
 	sessionsOnline.Set(float64(count))
 }
@@ -261,6 +301,14 @@ func SetClientsOnline(count int) {
 
 func RecordDownlinkPush(msgID uint32, result string) {
 	downlinkPush.WithLabelValues(formatMsgID(msgID), nonEmpty(result, "unknown")).Inc()
+}
+
+func AddInternalHTTPInFlight(path string, delta float64) {
+	internalHTTPInFlight.WithLabelValues(nonEmpty(path, "unknown")).Add(delta)
+}
+
+func RecordInternalHTTPOverloadRejected(path string) {
+	internalHTTPOverloadRejected.WithLabelValues(nonEmpty(path, "unknown")).Inc()
 }
 
 func RecordDownlinkAck(msgID uint32, result string) {

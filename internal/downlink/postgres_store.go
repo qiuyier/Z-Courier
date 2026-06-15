@@ -261,7 +261,7 @@ WITH claimed AS (
   FROM z_courier_downlink_messages
   WHERE (
       (status = $1 AND (next_retry_at IS NULL OR next_retry_at <= $2))
-      OR ($7 AND status = $8 AND ack_required = true AND sent_at IS NOT NULL AND sent_at <= $9)
+      OR ($6 AND status = $7 AND ack_required = true AND sent_at IS NOT NULL AND sent_at <= $8)
     )
     AND (claim_until IS NULL OR claim_until <= $2)
   ORDER BY created_at ASC, message_id ASC

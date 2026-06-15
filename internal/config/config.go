@@ -46,6 +46,7 @@ type InternalHTTPConfig struct {
 	Addr               *string `yaml:"addr"`
 	Token              *string `yaml:"token"`
 	MaxRequestBodySize *int64  `yaml:"max_request_body_size"`
+	MaxInFlight        int     `yaml:"max_in_flight"`
 }
 
 type ClusterConfig struct {
@@ -149,6 +150,7 @@ type TargetConfig struct {
 	URL           string   `yaml:"url"`
 	Token         string   `yaml:"token"`
 	Timeout       string   `yaml:"timeout"`
+	MaxInFlight   int      `yaml:"max_in_flight"`
 	Addr          string   `yaml:"addr"`
 	NSQDAddrs     []string `yaml:"nsqd_addrs"`
 	Topic         string   `yaml:"topic"`
@@ -209,7 +211,9 @@ func (c *File) ToServerConfig() (server.Config, error) {
 		out.Verifier = auth.NewStaticTokenVerifier(toPrincipals(c.Auth.StaticTokens))
 	}
 
-	applyInternalHTTPConfig(&out, c.InternalHTTP)
+	if err := applyInternalHTTPConfig(&out, c.InternalHTTP); err != nil {
+		return server.Config{}, err
+	}
 	if err := applyClusterConfig(&out, c.Cluster); err != nil {
 		return server.Config{}, err
 	}
@@ -250,7 +254,7 @@ func toPrincipals(tokens map[string]StaticTokenConfig) map[string]auth.Principal
 	return principals
 }
 
-func applyInternalHTTPConfig(out *server.Config, config InternalHTTPConfig) {
+func applyInternalHTTPConfig(out *server.Config, config InternalHTTPConfig) error {
 	if config.Enabled != nil {
 		out.DisableInternalHTTP = !*config.Enabled
 	}
@@ -263,6 +267,14 @@ func applyInternalHTTPConfig(out *server.Config, config InternalHTTPConfig) {
 	if config.MaxRequestBodySize != nil {
 		out.InternalMaxRequestBodySize = *config.MaxRequestBodySize
 	}
+	if config.MaxInFlight < 0 {
+		return fmt.Errorf("config: internal_http max_in_flight must be greater than or equal to 0")
+	}
+	if config.MaxInFlight > 0 {
+		out.InternalPushMaxInFlight = config.MaxInFlight
+	}
+
+	return nil
 }
 
 func applyClusterConfig(out *server.Config, config ClusterConfig) error {
@@ -508,10 +520,11 @@ func toUpstreamRoutes(routes []UpstreamRouteConfig) ([]server.UpstreamRouteConfi
 			}
 
 			out = append(out, server.UpstreamRouteConfig{
-				Name:     route.Name,
-				MsgIDMin: route.MsgIDMin,
-				MsgIDMax: route.MsgIDMax,
-				HTTP:     httpConfig,
+				Name:        route.Name,
+				MsgIDMin:    route.MsgIDMin,
+				MsgIDMax:    route.MsgIDMax,
+				MaxInFlight: route.Target.MaxInFlight,
+				HTTP:        httpConfig,
 			})
 		case "nsq":
 			nsqConfig, err := toNSQUpstreamConfig(route)
@@ -520,10 +533,11 @@ func toUpstreamRoutes(routes []UpstreamRouteConfig) ([]server.UpstreamRouteConfi
 			}
 
 			out = append(out, server.UpstreamRouteConfig{
-				Name:     route.Name,
-				MsgIDMin: route.MsgIDMin,
-				MsgIDMax: route.MsgIDMax,
-				NSQ:      nsqConfig,
+				Name:        route.Name,
+				MsgIDMin:    route.MsgIDMin,
+				MsgIDMax:    route.MsgIDMax,
+				MaxInFlight: route.Target.MaxInFlight,
+				NSQ:         nsqConfig,
 			})
 		default:
 			return nil, fmt.Errorf("config: unsupported upstream target type %q for route %q", targetType, route.Name)
@@ -539,6 +553,9 @@ func validateMsgIDRange(route UpstreamRouteConfig) error {
 	}
 	if route.MsgIDMax != 0 && route.MsgIDMax < route.MsgIDMin {
 		return fmt.Errorf("config: route %q msg_id_max must be greater than or equal to msg_id_min", route.Name)
+	}
+	if route.Target.MaxInFlight < 0 {
+		return fmt.Errorf("config: route %q target max_in_flight must be greater than or equal to 0", route.Name)
 	}
 
 	return nil

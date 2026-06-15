@@ -15,6 +15,7 @@ internal_http:
   addr: 127.0.0.1:18080
   token: dev-internal-token
   max_request_body_size: 10485760
+  max_in_flight: 1000
 
 cluster:
   enabled: false
@@ -83,6 +84,7 @@ upstream:
         url: http://127.0.0.1:18081/gateway/upstream
         token: ""
         timeout: 5s
+        max_in_flight: 1000
     - name: dev-nsq-upstream
       enabled: true
       msg_id_min: 2000
@@ -98,3 +100,4 @@ upstream:
         write_timeout: 1s
         publish_mode: round_robin
         retry_attempts: 1
+        max_in_flight: 1000

@@ -42,6 +42,7 @@ internal_http:
   addr: 127.0.0.1:19080
   token: internal-a
   max_request_body_size: 12345
+  max_in_flight: 321
 cluster:
   enabled: true
   internal_addr: http://gateway-a:18082
@@ -117,6 +118,7 @@ upstream:
         url: http://backend.local/gateway/upstream
         token: upstream-a
         timeout: 3s
+        max_in_flight: 111
     - name: nsq
       enabled: true
       msg_id_min: 3000
@@ -133,6 +135,7 @@ upstream:
         write_timeout: 2s
         publish_mode: round_robin
         retry_attempts: 1
+        max_in_flight: 222
 `)
 
 	config, err := LoadServerConfig(path)
@@ -157,6 +160,9 @@ upstream:
 	}
 	if config.InternalMaxRequestBodySize != 12345 {
 		t.Fatalf("InternalMaxRequestBodySize = %d, want 12345", config.InternalMaxRequestBodySize)
+	}
+	if config.InternalPushMaxInFlight != 321 {
+		t.Fatalf("InternalPushMaxInFlight = %d, want 321", config.InternalPushMaxInFlight)
 	}
 	if !config.Cluster.Enabled {
 		t.Fatal("Cluster Enabled = false, want true")
@@ -297,6 +303,9 @@ upstream:
 	if route.HTTP.Timeout != 3*time.Second {
 		t.Fatalf("route HTTP Timeout = %v, want 3s", route.HTTP.Timeout)
 	}
+	if route.MaxInFlight != 111 {
+		t.Fatalf("route MaxInFlight = %d, want 111", route.MaxInFlight)
+	}
 
 	nsqRoute := config.UpstreamRoutes[1]
 	if nsqRoute.Name != "nsq" || nsqRoute.NSQ == nil {
@@ -328,6 +337,9 @@ upstream:
 	}
 	if nsqRoute.NSQ.RetryAttempts != 1 {
 		t.Fatalf("NSQ RetryAttempts = %d, want 1", nsqRoute.NSQ.RetryAttempts)
+	}
+	if nsqRoute.MaxInFlight != 222 {
+		t.Fatalf("NSQ MaxInFlight = %d, want 222", nsqRoute.MaxInFlight)
 	}
 }
 
@@ -498,6 +510,18 @@ upstream:
 	}
 }
 
+func TestLoadServerConfigInvalidInternalHTTPMaxInFlight(t *testing.T) {
+	path := writeConfig(t, `
+internal_http:
+  max_in_flight: -1
+`)
+
+	_, err := LoadServerConfig(path)
+	if err == nil {
+		t.Fatal("LoadServerConfig() error = nil, want error")
+	}
+}
+
 func TestLoadServerConfigInvalidRateLimit(t *testing.T) {
 	path := writeConfig(t, `
 pipeline:
@@ -644,6 +668,24 @@ upstream:
       target:
         type: http
         url: http://backend.local
+`)
+
+	_, err := LoadServerConfig(path)
+	if err == nil {
+		t.Fatal("LoadServerConfig() error = nil, want error")
+	}
+}
+
+func TestLoadServerConfigInvalidRouteMaxInFlight(t *testing.T) {
+	path := writeConfig(t, `
+upstream:
+  routes:
+    - name: broken
+      msg_id_min: 1000
+      target:
+        type: http
+        url: http://backend.local
+        max_in_flight: -1
 `)
 
 	_, err := LoadServerConfig(path)

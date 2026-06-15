@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/bytedance/sonic"
+	"github.com/qiuyier/Z-Courier/internal/capacity"
 	"github.com/qiuyier/Z-Courier/internal/session"
 	"go.uber.org/zap"
 )
@@ -56,6 +57,40 @@ func TestHandlerPushOK(t *testing.T) {
 	}
 	if len(conn.data) == 0 {
 		t.Fatal("connection did not receive data")
+	}
+}
+
+func TestHandlerRejectsWhenCapacityExceeded(t *testing.T) {
+	limiter := capacity.NewLimiter(1)
+	if !limiter.TryAcquire() {
+		t.Fatal("failed to occupy limiter")
+	}
+	defer limiter.Release()
+
+	handler := NewHandler(HandlerConfig{
+		Service:       NewService(fakeSessions{}, fakeConnections{}, WithStore(NewMemoryStore())),
+		InternalToken: "secret",
+		PushLimiter:   limiter,
+		Logger:        zap.NewNop(),
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/internal/push", strings.NewReader(`{
+		"client_id":"c1",
+		"device_id":"d1",
+		"msg_id":2001,
+		"message_id":"m1",
+		"body":"aGVsbG8="
+	}`))
+	req.Header.Set(InternalTokenHeader, "secret")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusTooManyRequests, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"code":"overloaded"`) {
+		t.Fatalf("body = %s, want overloaded code", rec.Body.String())
 	}
 }
 

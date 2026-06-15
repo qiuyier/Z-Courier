@@ -22,6 +22,7 @@ type Config struct {
 	InternalHTTPAddr           string
 	InternalToken              string
 	InternalMaxRequestBodySize int64
+	InternalPushMaxInFlight    int
 	UpstreamRoutes             []UpstreamRouteConfig
 	Pipeline                   pipeline.Config
 	DownlinkStore              downlink.Store
@@ -31,11 +32,12 @@ type Config struct {
 }
 
 type UpstreamRouteConfig struct {
-	Name     string
-	MsgIDMin uint32
-	MsgIDMax uint32
-	HTTP     *HTTPUpstreamConfig
-	NSQ      *NSQUpstreamConfig
+	Name        string
+	MsgIDMin    uint32
+	MsgIDMax    uint32
+	MaxInFlight int
+	HTTP        *HTTPUpstreamConfig
+	NSQ         *NSQUpstreamConfig
 }
 
 type HTTPUpstreamConfig struct {
@@ -134,6 +136,7 @@ func DefaultConfig() Config {
 		InternalHTTPAddr:           "127.0.0.1:18080",
 		InternalToken:              "dev-internal-token",
 		InternalMaxRequestBodySize: 10 << 20,
+		InternalPushMaxInFlight:    1000,
 		DownlinkStorage: DownlinkStorageConfig{
 			Type: "memory",
 			Postgres: DownlinkPostgresConfig{
@@ -228,6 +231,9 @@ func normalizeConfig(config Config) Config {
 	}
 	if config.InternalMaxRequestBodySize == 0 {
 		config.InternalMaxRequestBodySize = defaults.InternalMaxRequestBodySize
+	}
+	if config.InternalPushMaxInFlight <= 0 {
+		config.InternalPushMaxInFlight = defaults.InternalPushMaxInFlight
 	}
 	if config.DownlinkStorage.Type == "" {
 		config.DownlinkStorage.Type = defaults.DownlinkStorage.Type

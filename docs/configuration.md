@@ -89,6 +89,7 @@ internal_http:
   addr: 127.0.0.1:18080
   token: dev-internal-token
   max_request_body_size: 10485760
+  max_in_flight: 1000
 ```
 
 - `enabled`: starts or disables internal HTTP endpoints.
@@ -96,6 +97,8 @@ internal_http:
   `/readyz`.
 - `token`: value required in the `X-ZCourier-Internal-Token` header.
 - `max_request_body_size`: maximum JSON request size in bytes.
+- `max_in_flight`: maximum concurrent `/internal/push` and
+  `/internal/push/batch` requests. Requests above this limit return `429`.
 
 `/healthz` returns `200` while the internal HTTP server is alive. `/readyz`
 returns `200` while the gateway can receive traffic and `503` after graceful
@@ -287,6 +290,7 @@ upstream:
         url: http://127.0.0.1:18081/gateway/upstream
         token: ""
         timeout: 5s
+        max_in_flight: 1000
 ```
 
 - `enabled`: disabled routes are ignored.
@@ -298,6 +302,9 @@ HTTP target fields:
 - `url`: backend endpoint.
 - `token`: optional bearer token sent to the backend.
 - `timeout`: HTTP request timeout.
+- `max_in_flight`: optional per-route upstream forwarding concurrency limit.
+  Packets above this limit are rejected quickly instead of waiting behind a
+  slow backend.
 
 NSQ target example:
 
@@ -319,6 +326,7 @@ upstream:
         write_timeout: 1s
         publish_mode: round_robin
         retry_attempts: 1
+        max_in_flight: 1000
 ```
 
 NSQ target fields:
@@ -330,5 +338,6 @@ NSQ target fields:
 - `publish_mode`: V1 supports `round_robin`.
 - `retry_attempts`: retries across configured nsqd addresses after publish
   failure.
+- `max_in_flight`: optional per-route NSQ publish concurrency limit.
 
 `addr` is still accepted for a single nsqd node, but `nsqd_addrs` is preferred.

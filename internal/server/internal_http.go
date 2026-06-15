@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/aceld/zinx/ziface"
+	"github.com/qiuyier/Z-Courier/internal/capacity"
 	"github.com/qiuyier/Z-Courier/internal/downlink"
 	"github.com/qiuyier/Z-Courier/internal/metrics"
 	"go.uber.org/zap"
@@ -17,18 +18,21 @@ func newInternalHTTPServer(config Config, logger *zap.Logger, service *downlink.
 	}
 
 	mux := http.NewServeMux()
+	pushLimiter := capacity.NewLimiter(config.InternalPushMaxInFlight)
 	mux.Handle("/healthz", newHealthHandler())
 	mux.Handle("/readyz", newReadyHandler(health))
 	mux.Handle("/internal/push", downlink.NewHandler(downlink.HandlerConfig{
 		Service:            service,
 		InternalToken:      config.InternalToken,
 		MaxRequestBodySize: config.InternalMaxRequestBodySize,
+		PushLimiter:        pushLimiter,
 		Logger:             logger,
 	}))
 	mux.Handle("/internal/push/batch", downlink.NewBatchHandler(downlink.HandlerConfig{
 		Service:            service,
 		InternalToken:      config.InternalToken,
 		MaxRequestBodySize: config.InternalMaxRequestBodySize,
+		PushLimiter:        pushLimiter,
 		Logger:             logger,
 	}))
 	mux.Handle("/internal/message/status", downlink.NewStatusHandler(downlink.HandlerConfig{

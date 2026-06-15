@@ -62,6 +62,37 @@ Run tests:
 go test ./...
 ```
 
+Run a small upstream load test against a local gateway:
+
+```bash
+go run ./cmd/loadtest \
+  -mode upstream \
+  -port 9899 \
+  -token e2e-token \
+  -clients 100 \
+  -messages 10 \
+  -upstream-msg-id 2001
+```
+
+`cmd/loadtest` suppresses Zinx internal connection logs by default so the output
+focuses on the summary. Pass `-zinx-log` when debugging low-level client
+connections.
+
+Run a downlink HTTP load test:
+
+```bash
+go run ./cmd/loadtest \
+  -mode downlink \
+  -internal-url http://127.0.0.1:18082 \
+  -clients 100 \
+  -messages 10 \
+  -http-concurrency 50
+```
+
+For real online downlink delivery, keep matching clients connected first. Without
+online clients, the gateway still accepts the request and writes the offline
+retry path when storage is enabled.
+
 Run the local V1 integration verifier:
 
 ```bash

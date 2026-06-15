@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/bytedance/sonic"
+	"github.com/qiuyier/Z-Courier/internal/capacity"
 	"github.com/qiuyier/Z-Courier/internal/metrics"
 	"go.uber.org/zap"
 )
@@ -17,6 +18,7 @@ type HandlerConfig struct {
 	InternalToken      string
 	MaxRequestBodySize int64
 	MaxBatchMessages   int
+	PushLimiter        *capacity.Limiter
 	Logger             *zap.Logger
 }
 
@@ -60,6 +62,11 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !h.acquireCapacity(w, r) {
+		return
+	}
+	defer h.releaseCapacity(r)
+
 	defer r.Body.Close()
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, h.config.MaxRequestBodySize))
 	if err != nil {
@@ -74,6 +81,32 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.serveSingle(w, r, body)
+}
+
+func (h *handler) acquireCapacity(w http.ResponseWriter, r *http.Request) bool {
+	if h.config.PushLimiter == nil {
+		return true
+	}
+
+	path := r.URL.Path
+	if !h.config.PushLimiter.TryAcquire() {
+		metrics.RecordDownlinkPush(0, "overloaded")
+		metrics.RecordInternalHTTPOverloadRejected(path)
+		h.writeFailure(w, http.StatusTooManyRequests, "overloaded", "internal push capacity exceeded")
+		return false
+	}
+
+	metrics.AddInternalHTTPInFlight(path, 1)
+	return true
+}
+
+func (h *handler) releaseCapacity(r *http.Request) {
+	if h.config.PushLimiter == nil {
+		return
+	}
+
+	h.config.PushLimiter.Release()
+	metrics.AddInternalHTTPInFlight(r.URL.Path, -1)
 }
 
 func (h *handler) serveSingle(w http.ResponseWriter, r *http.Request, body []byte) {
