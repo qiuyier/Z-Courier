@@ -97,6 +97,23 @@ go run ./cmd/loadtest \
   -http-concurrency 50
 ```
 
+Run a sustained downlink load test for dashboard observation:
+
+```bash
+go run ./cmd/loadtest \
+  -mode downlink \
+  -internal-url http://127.0.0.1:18182 \
+  -internal-token dev-internal-token \
+  -duration 60s \
+  -rate 500 \
+  -clients 100 \
+  -http-concurrency 100
+```
+
+When `-duration` is set, `-rate` is required and means target messages per
+second. Without `-duration`, `cmd/loadtest` keeps the original finite behavior
+and sends `clients * messages` messages.
+
 For real online downlink delivery, keep matching clients connected first. Without
 online clients, the gateway still accepts the request and writes the offline
 retry path when storage is enabled.

@@ -24,6 +24,33 @@ func TestLatencyRecorderSummary(t *testing.T) {
 	}
 }
 
+func TestConfigOverallTimeout(t *testing.T) {
+	cfg := config{Timeout: 30 * time.Second}
+	if cfg.DurationMode() {
+		t.Fatal("DurationMode() = true, want false")
+	}
+	if got := cfg.OverallTimeout(); got != 30*time.Second {
+		t.Fatalf("OverallTimeout() = %s, want 30s", got)
+	}
+
+	cfg.RunDuration = time.Minute
+	if !cfg.DurationMode() {
+		t.Fatal("DurationMode() = false, want true")
+	}
+	if got := cfg.OverallTimeout(); got != 90*time.Second {
+		t.Fatalf("OverallTimeout() = %s, want 90s", got)
+	}
+}
+
+func TestRateInterval(t *testing.T) {
+	if got := rateInterval(1000); got != time.Millisecond {
+		t.Fatalf("rateInterval(1000) = %s, want 1ms", got)
+	}
+	if got := rateInterval(0); got != time.Second {
+		t.Fatalf("rateInterval(0) = %s, want 1s", got)
+	}
+}
+
 func TestReasonCountsSnapshotSortsByCount(t *testing.T) {
 	var counts reasonCounts
 	counts.Add("timeout")

@@ -40,6 +40,8 @@ type config struct {
 	DownlinkMsgID     uint
 	BodySize          int
 	Timeout           time.Duration
+	RunDuration       time.Duration
+	Rate              int
 	EnableZinxLog     bool
 }
 
@@ -65,7 +67,7 @@ func main() {
 		zlog.SetLogger(nopZinxLogger{})
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), cfg.Timeout)
+	ctx, cancel := context.WithTimeout(context.Background(), cfg.OverallTimeout())
 	defer cancel()
 
 	startedAt := time.Now()
@@ -104,7 +106,9 @@ func parseFlags() config {
 	fs.UintVar(&cfg.UpstreamMsgID, "upstream-msg-id", 1001, "upstream business message id")
 	fs.UintVar(&cfg.DownlinkMsgID, "downlink-msg-id", 2001, "downlink message id")
 	fs.IntVar(&cfg.BodySize, "body-size", 128, "message body size in bytes")
-	fs.DurationVar(&cfg.Timeout, "timeout", 30*time.Second, "overall load test timeout")
+	fs.DurationVar(&cfg.Timeout, "timeout", 30*time.Second, "one-shot overall timeout, or duration-mode drain timeout")
+	fs.DurationVar(&cfg.RunDuration, "duration", 0, "continuous load duration; 0 sends clients*messages and exits")
+	fs.IntVar(&cfg.Rate, "rate", 0, "target messages per second in duration mode")
 	fs.BoolVar(&cfg.EnableZinxLog, "zinx-log", false, "enable Zinx internal logs")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: loadtest [flags]\n")
@@ -126,12 +130,38 @@ func parseFlags() config {
 	if cfg.BodySize < 0 {
 		cfg.BodySize = 0
 	}
+	if cfg.Timeout <= 0 {
+		cfg.Timeout = 30 * time.Second
+	}
+	if cfg.RunDuration < 0 {
+		fmt.Fprintln(os.Stderr, "-duration must be greater than or equal to 0")
+		os.Exit(2)
+	}
+	if cfg.DurationMode() && cfg.Rate <= 0 {
+		fmt.Fprintln(os.Stderr, "-rate must be greater than 0 when -duration is set")
+		os.Exit(2)
+	}
 
 	return cfg
 }
 
+func (cfg config) DurationMode() bool {
+	return cfg.RunDuration > 0
+}
+
+func (cfg config) OverallTimeout() time.Duration {
+	if !cfg.DurationMode() {
+		return cfg.Timeout
+	}
+
+	return cfg.RunDuration + cfg.Timeout
+}
+
 func runUpstream(ctx context.Context, cfg config, counts *counters) error {
 	expected := int64(cfg.Clients * cfg.MessagesPerClient)
+	if cfg.DurationMode() {
+		expected = -1
+	}
 	done := make(chan struct{})
 	var doneOnce sync.Once
 	if expected == 0 {
@@ -144,6 +174,7 @@ func runUpstream(ctx context.Context, cfg config, counts *counters) error {
 		done:     done,
 		doneOnce: &doneOnce,
 		body:     payload(cfg.BodySize),
+		bound:    make(chan upstreamSender, cfg.Clients),
 	}
 
 	clients := make([]ziface.IClient, 0, cfg.Clients)
@@ -172,7 +203,9 @@ func runUpstream(ctx context.Context, cfg config, counts *counters) error {
 				counts.sendErrors.Add(1)
 				counts.bindRejected.Add(1)
 				counts.failures.Add("bind_send_error")
-				state.markUpstreamSkipped(cfg.MessagesPerClient)
+				if !cfg.DurationMode() {
+					state.markUpstreamSkipped(cfg.MessagesPerClient)
+				}
 				conn.Stop()
 			}
 		})
@@ -180,6 +213,10 @@ func runUpstream(ctx context.Context, cfg config, counts *counters) error {
 		clients = append(clients, client)
 	}
 	defer stopClients(clients)
+
+	if cfg.DurationMode() {
+		return state.runContinuous(ctx)
+	}
 
 	select {
 	case <-ctx.Done():
@@ -198,6 +235,15 @@ type upstreamState struct {
 	doneOnce *sync.Once
 	body     []byte
 	sentAt   sync.Map
+	bound    chan upstreamSender
+	inFlight atomic.Int64
+	stopped  atomic.Bool
+}
+
+type upstreamSender struct {
+	conn     ziface.IConnection
+	clientID string
+	deviceID string
 }
 
 func (s *upstreamState) rememberSent(messageID string) {
@@ -242,12 +288,18 @@ func (s *upstreamState) markUpstreamAck(ack protocol.Ack) {
 		return
 	}
 
+	if s.durationMode() {
+		s.inFlight.Add(-1)
+	}
 	s.closeWhenExpectedReached()
 }
 
 func (s *upstreamState) markUpstreamRejected(reason string) {
 	s.counts.upstreamRejected.Add(1)
 	s.counts.failures.Add(reason)
+	if s.durationMode() {
+		s.inFlight.Add(-1)
+	}
 	s.closeWhenExpectedReached()
 }
 
@@ -261,9 +313,93 @@ func (s *upstreamState) markUpstreamSkipped(count int) {
 }
 
 func (s *upstreamState) closeWhenExpectedReached() {
+	if s.durationMode() {
+		if s.stopped.Load() && s.inFlight.Load() <= 0 {
+			s.doneOnce.Do(func() { close(s.done) })
+		}
+		return
+	}
+
 	total := s.counts.upstreamAccepted.Load() + s.counts.upstreamRejected.Load()
 	if total >= s.expected {
 		s.doneOnce.Do(func() { close(s.done) })
+	}
+}
+
+func (s *upstreamState) durationMode() bool {
+	return s.expected < 0
+}
+
+func (s *upstreamState) addSender(sender upstreamSender) {
+	if !s.durationMode() {
+		return
+	}
+	if sender.conn == nil {
+		return
+	}
+
+	select {
+	case s.bound <- sender:
+	default:
+		s.counts.failures.Add("sender_queue_full")
+	}
+}
+
+func (s *upstreamState) runContinuous(ctx context.Context) error {
+	ticker := time.NewTicker(rateInterval(s.config.Rate))
+	defer ticker.Stop()
+
+	durationTimer := time.NewTimer(s.config.RunDuration)
+	defer durationTimer.Stop()
+
+	var senders []upstreamSender
+	nextSender := 0
+	messageSeq := int64(0)
+
+	for {
+		select {
+		case <-ctx.Done():
+			s.counts.failures.Add(reasonFromError(ctx.Err()))
+			return ctx.Err()
+		case sender := <-s.bound:
+			senders = append(senders, sender)
+		case <-ticker.C:
+			if len(senders) == 0 {
+				continue
+			}
+			sender := senders[nextSender%len(senders)]
+			nextSender++
+			seq := atomic.AddInt64(&messageSeq, 1)
+			s.sendContinuous(sender, seq)
+		case <-durationTimer.C:
+			s.stopped.Store(true)
+			s.closeWhenExpectedReached()
+			select {
+			case <-ctx.Done():
+				s.counts.failures.Add(reasonFromError(ctx.Err()))
+				return ctx.Err()
+			case <-s.done:
+				return nil
+			}
+		}
+	}
+}
+
+func (s *upstreamState) sendContinuous(sender upstreamSender, seq int64) {
+	messageID := fmt.Sprintf("load-upstream-%s-%d-%d", sender.deviceID, seq, time.Now().UnixNano())
+	s.rememberSent(messageID)
+	s.inFlight.Add(1)
+	if err := sendPacket(sender.conn, packetInput{
+		msgID:     uint32(s.config.UpstreamMsgID),
+		clientID:  sender.clientID,
+		deviceID:  sender.deviceID,
+		token:     s.config.Token,
+		messageID: messageID,
+		body:      s.body,
+	}); err != nil {
+		s.forgetSent(messageID)
+		s.counts.sendErrors.Add(1)
+		s.markUpstreamRejected("upstream_send_error")
 	}
 }
 
@@ -298,13 +434,23 @@ func (r *ackRouter) Handle(request ziface.IRequest) {
 		if accepted {
 			r.state.counts.bindAccepted.Add(1)
 			r.sendOnce.Do(func() {
+				if r.state.durationMode() {
+					r.state.addSender(upstreamSender{
+						conn:     request.GetConnection(),
+						clientID: r.clientID,
+						deviceID: r.deviceID,
+					})
+					return
+				}
 				r.sendUpstream(request.GetConnection())
 			})
 			return
 		}
 		r.state.counts.bindRejected.Add(1)
 		r.state.counts.failures.Add(classifyAck("bind", ack))
-		r.state.markUpstreamSkipped(r.state.config.MessagesPerClient)
+		if !r.state.durationMode() {
+			r.state.markUpstreamSkipped(r.state.config.MessagesPerClient)
+		}
 		return
 	}
 
@@ -367,6 +513,10 @@ func stopClients(clients []ziface.IClient) {
 }
 
 func runDownlink(ctx context.Context, cfg config, counts *counters) error {
+	if cfg.DurationMode() {
+		return runDownlinkContinuous(ctx, cfg, counts)
+	}
+
 	total := cfg.Clients * cfg.MessagesPerClient
 	if total == 0 {
 		return nil
@@ -421,6 +571,83 @@ func runDownlink(ctx context.Context, cfg config, counts *counters) error {
 	close(jobs)
 	wg.Wait()
 	return ctx.Err()
+}
+
+func runDownlinkContinuous(ctx context.Context, cfg config, counts *counters) error {
+	jobs := make(chan int, cfg.HTTPConcurrency*2)
+	var wg sync.WaitGroup
+	client := &http.Client{Timeout: cfg.Timeout}
+	body := payload(cfg.BodySize)
+
+	for i := 0; i < cfg.HTTPConcurrency; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for job := range jobs {
+				if err := ctx.Err(); err != nil {
+					counts.sendErrors.Add(1)
+					counts.failures.Add(reasonFromError(err))
+					continue
+				}
+				result, err := postDownlink(ctx, client, cfg, job, body)
+				counts.downlinkLatency.Record(result.latency)
+				if err != nil {
+					counts.sendErrors.Add(1)
+					counts.failures.Add(result.code)
+					continue
+				}
+				if result.status >= http.StatusOK && result.status < http.StatusMultipleChoices {
+					counts.downlinkSuccess.Add(1)
+				} else {
+					counts.downlinkRejected.Add(1)
+					counts.failures.Add(result.code)
+				}
+			}
+		}()
+	}
+
+	ticker := time.NewTicker(rateInterval(cfg.Rate))
+	defer ticker.Stop()
+	durationTimer := time.NewTimer(cfg.RunDuration)
+	defer durationTimer.Stop()
+
+	job := 0
+	for {
+		select {
+		case <-ctx.Done():
+			counts.failures.Add(reasonFromError(ctx.Err()))
+			close(jobs)
+			wg.Wait()
+			return ctx.Err()
+		case <-durationTimer.C:
+			close(jobs)
+			wg.Wait()
+			return nil
+		case <-ticker.C:
+			select {
+			case <-ctx.Done():
+				counts.failures.Add(reasonFromError(ctx.Err()))
+				close(jobs)
+				wg.Wait()
+				return ctx.Err()
+			case jobs <- job:
+				job++
+			}
+		}
+	}
+}
+
+func rateInterval(rate int) time.Duration {
+	if rate <= 0 {
+		return time.Second
+	}
+
+	interval := time.Second / time.Duration(rate)
+	if interval <= 0 {
+		return time.Nanosecond
+	}
+
+	return interval
 }
 
 type downlinkResult struct {
@@ -486,7 +713,11 @@ func printSummary(cfg config, counts *counters, duration time.Duration) {
 		qps = float64(total) / duration.Seconds()
 	}
 
-	fmt.Printf("mode=%s clients=%d messages_per_client=%d duration=%s qps=%.2f\n", cfg.Mode, cfg.Clients, cfg.MessagesPerClient, duration.Truncate(time.Millisecond), qps)
+	fmt.Printf("mode=%s clients=%d messages_per_client=%d duration=%s", cfg.Mode, cfg.Clients, cfg.MessagesPerClient, duration.Truncate(time.Millisecond))
+	if cfg.DurationMode() {
+		fmt.Printf(" target_duration=%s rate=%d", cfg.RunDuration, cfg.Rate)
+	}
+	fmt.Printf(" qps=%.2f\n", qps)
 	fmt.Printf("bind accepted=%d rejected=%d\n", counts.bindAccepted.Load(), counts.bindRejected.Load())
 	fmt.Printf("upstream accepted=%d rejected=%d\n", counts.upstreamAccepted.Load(), counts.upstreamRejected.Load())
 	fmt.Printf("downlink success=%d rejected=%d\n", counts.downlinkSuccess.Load(), counts.downlinkRejected.Load())
