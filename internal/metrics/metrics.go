@@ -100,6 +100,31 @@ var (
 		[]string{"result"},
 	)
 
+	downlinkCleanup = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "z_courier_downlink_cleanup_total",
+			Help: "Total number of downlink retention cleanup attempts.",
+		},
+		[]string{"status", "result"},
+	)
+
+	downlinkCleanupDeleted = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "z_courier_downlink_cleanup_deleted_total",
+			Help: "Total number of expired downlink messages deleted by retention cleanup.",
+		},
+		[]string{"status"},
+	)
+
+	downlinkCleanupDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "z_courier_downlink_cleanup_duration_seconds",
+			Help:    "Duration of downlink retention cleanup runs in seconds.",
+			Buckets: []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5},
+		},
+		[]string{"result"},
+	)
+
 	rateLimitRejected = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "z_courier_rate_limit_rejected_total",
@@ -256,6 +281,19 @@ func RecordDownlinkRequeue(result string) {
 
 func RecordDownlinkDiscard(result string) {
 	downlinkDiscard.WithLabelValues(nonEmpty(result, "unknown")).Inc()
+}
+
+func RecordDownlinkCleanupStatus(status, result string, deleted int) {
+	status = nonEmpty(status, "unknown")
+	downlinkCleanup.WithLabelValues(status, nonEmpty(result, "unknown")).Inc()
+	addCounter(downlinkCleanupDeleted.WithLabelValues(status), deleted)
+}
+
+func RecordDownlinkCleanupDuration(result string, duration time.Duration) {
+	label := nonEmpty(result, "unknown")
+	if duration >= 0 {
+		downlinkCleanupDuration.WithLabelValues(label).Observe(duration.Seconds())
+	}
 }
 
 func RecordRateLimitRejected(msgID uint32) {

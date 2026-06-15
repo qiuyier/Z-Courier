@@ -27,19 +27,23 @@ type Gateway struct {
 	sessions *session.Manager
 	logger   *zap.Logger
 
-	clusterRegistry         cluster.OnlineRegistry
-	clusterRegistryCloser   io.Closer
-	internalHTTP            *http.Server
-	upstream                *router.Engine
-	downlink                *downlink.Service
-	downlinkCloser          io.Closer
-	downlinkRetryInterval   time.Duration
-	downlinkRetryScanLimit  int
-	downlinkWorkerCancel    context.CancelFunc
-	downlinkWorkerCompleted chan struct{}
-	clusterRouteRefresher   *clusterRouteRefresher
-	clusterRefreshCancel    context.CancelFunc
-	clusterRefreshCompleted chan struct{}
+	clusterRegistry          cluster.OnlineRegistry
+	clusterRegistryCloser    io.Closer
+	internalHTTP             *http.Server
+	upstream                 *router.Engine
+	downlink                 *downlink.Service
+	downlinkCloser           io.Closer
+	downlinkRetryInterval    time.Duration
+	downlinkRetryScanLimit   int
+	downlinkWorkerCancel     context.CancelFunc
+	downlinkWorkerCompleted  chan struct{}
+	downlinkRetention        downlink.RetentionPolicy
+	downlinkCleanupInterval  time.Duration
+	downlinkCleanupCancel    context.CancelFunc
+	downlinkCleanupCompleted chan struct{}
+	clusterRouteRefresher    *clusterRouteRefresher
+	clusterRefreshCancel     context.CancelFunc
+	clusterRefreshCompleted  chan struct{}
 }
 
 func New(config Config, logger *zap.Logger) (*Gateway, error) {
@@ -88,7 +92,14 @@ func New(config Config, logger *zap.Logger) (*Gateway, error) {
 		downlinkCloser:         downlinkCloser,
 		downlinkRetryInterval:  config.DownlinkDelivery.RetryInterval,
 		downlinkRetryScanLimit: config.DownlinkDelivery.ScanLimit,
-		clusterRouteRefresher:  newClusterRouteRefresher(config, clusterRegistry, config.Sessions, logger),
+		downlinkRetention: downlink.RetentionPolicy{
+			DeliveredTTL: config.DownlinkRetention.DeliveredTTL,
+			FailedTTL:    config.DownlinkRetention.FailedTTL,
+			DiscardedTTL: config.DownlinkRetention.DiscardedTTL,
+			Limit:        config.DownlinkRetention.CleanupLimit,
+		},
+		downlinkCleanupInterval: config.DownlinkRetention.CleanupInterval,
+		clusterRouteRefresher:   newClusterRouteRefresher(config, clusterRegistry, config.Sessions, logger),
 	}
 
 	zServer.SetOnConnStart(gateway.onConnStart)
@@ -129,11 +140,13 @@ func newIngressPipeline(config Config, logger *zap.Logger, registry cluster.Onli
 func (g *Gateway) Serve() {
 	g.startInternalHTTP()
 	g.startDownlinkRetryWorker()
+	g.startDownlinkCleanupWorker()
 	g.startClusterRouteRefresher()
 	defer g.shutdownClusterRegistry()
 	defer g.shutdownClusterRouteRefresher()
 	defer g.shutdownDownlink()
 	defer g.shutdownUpstream()
+	defer g.shutdownDownlinkCleanupWorker()
 	defer g.shutdownDownlinkRetryWorker()
 	defer g.shutdownInternalHTTP()
 
@@ -300,6 +313,81 @@ func (g *Gateway) shutdownDownlinkRetryWorker() {
 	if g.downlinkWorkerCompleted != nil {
 		<-g.downlinkWorkerCompleted
 	}
+}
+
+func (g *Gateway) startDownlinkCleanupWorker() {
+	if g.downlink == nil || !g.downlink.HasStore() || !retentionPolicyEnabled(g.downlinkRetention) {
+		return
+	}
+
+	interval := g.downlinkCleanupInterval
+	if interval <= 0 {
+		interval = time.Hour
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	g.downlinkCleanupCancel = cancel
+	g.downlinkCleanupCompleted = make(chan struct{})
+
+	g.logger.Info(
+		"starting downlink cleanup worker",
+		zap.Duration("interval", interval),
+		zap.Duration("delivered_ttl", g.downlinkRetention.DeliveredTTL),
+		zap.Duration("failed_ttl", g.downlinkRetention.FailedTTL),
+		zap.Duration("discarded_ttl", g.downlinkRetention.DiscardedTTL),
+		zap.Int("cleanup_limit", g.downlinkRetention.Limit),
+	)
+
+	go func() {
+		defer close(g.downlinkCleanupCompleted)
+
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				g.cleanupDownlinkExpired(ctx)
+			}
+		}
+	}()
+}
+
+func (g *Gateway) cleanupDownlinkExpired(ctx context.Context) {
+	startedAt := time.Now()
+	result, err := g.downlink.CleanupExpired(ctx, g.downlinkRetention)
+	if err != nil {
+		g.logger.Warn("downlink cleanup worker failed", zap.Error(err))
+		return
+	}
+	if result.Total() == 0 {
+		return
+	}
+
+	g.logger.Info(
+		"downlink cleanup worker completed",
+		zap.Int("delivered", result.Delivered),
+		zap.Int("failed", result.Failed),
+		zap.Int("discarded", result.Discarded),
+		zap.Duration("duration", time.Since(startedAt)),
+	)
+}
+
+func (g *Gateway) shutdownDownlinkCleanupWorker() {
+	if g.downlinkCleanupCancel == nil {
+		return
+	}
+
+	g.downlinkCleanupCancel()
+	if g.downlinkCleanupCompleted != nil {
+		<-g.downlinkCleanupCompleted
+	}
+}
+
+func retentionPolicyEnabled(policy downlink.RetentionPolicy) bool {
+	return policy.DeliveredTTL > 0 || policy.FailedTTL > 0 || policy.DiscardedTTL > 0
 }
 
 func registeredMsgIDs(config Config) ([]uint32, error) {

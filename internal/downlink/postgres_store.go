@@ -97,6 +97,8 @@ CREATE INDEX IF NOT EXISTS z_courier_downlink_messages_next_retry_at_idx
 CREATE INDEX IF NOT EXISTS z_courier_downlink_messages_claim_until_idx
   ON z_courier_downlink_messages (claim_until)
   WHERE claim_until IS NOT NULL;
+CREATE INDEX IF NOT EXISTS z_courier_downlink_messages_status_updated_at_idx
+  ON z_courier_downlink_messages (status, updated_at);
 `)
 	return err
 }
@@ -447,6 +449,38 @@ WHERE message_id = $1
 	}
 
 	return requireAffected(result)
+}
+
+func (s *PostgresStore) DeleteExpired(ctx context.Context, status MessageStatus, before time.Time, limit int) (int, error) {
+	if before.IsZero() {
+		return 0, nil
+	}
+	if limit <= 0 {
+		limit = 1000
+	}
+
+	result, err := s.db.ExecContext(ctx, `
+WITH expired AS (
+  SELECT message_id
+  FROM z_courier_downlink_messages
+  WHERE status = $1
+    AND updated_at < $2
+  ORDER BY updated_at ASC, message_id ASC
+  LIMIT $3
+)
+DELETE FROM z_courier_downlink_messages AS m
+USING expired
+WHERE m.message_id = expired.message_id
+`, string(status), before, limit)
+	if err != nil {
+		return 0, err
+	}
+
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return int(affected), nil
 }
 
 func (s *PostgresStore) Close() error {

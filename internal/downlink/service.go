@@ -308,6 +308,57 @@ func (s *Service) RetryDue(ctx context.Context, limit int) (RetryResult, error) 
 	return result, nil
 }
 
+func (s *Service) CleanupExpired(ctx context.Context, policy RetentionPolicy) (CleanupResult, error) {
+	if s.store == nil {
+		return CleanupResult{}, nil
+	}
+	if policy.Limit <= 0 {
+		policy.Limit = 1000
+	}
+
+	startedAt := time.Now()
+	now := s.now()
+	result := CleanupResult{}
+
+	for _, target := range []struct {
+		status MessageStatus
+		ttl    time.Duration
+		assign func(int)
+	}{
+		{
+			status: MessageStatusDelivered,
+			ttl:    policy.DeliveredTTL,
+			assign: func(count int) { result.Delivered = count },
+		},
+		{
+			status: MessageStatusFailed,
+			ttl:    policy.FailedTTL,
+			assign: func(count int) { result.Failed = count },
+		},
+		{
+			status: MessageStatusDiscarded,
+			ttl:    policy.DiscardedTTL,
+			assign: func(count int) { result.Discarded = count },
+		},
+	} {
+		if target.ttl <= 0 {
+			continue
+		}
+
+		deleted, err := s.store.DeleteExpired(ctx, target.status, now.Add(-target.ttl), policy.Limit)
+		if err != nil {
+			metrics.RecordDownlinkCleanupStatus(string(target.status), "failure", 0)
+			metrics.RecordDownlinkCleanupDuration("failure", time.Since(startedAt))
+			return result, fmt.Errorf("%w: %v", ErrStore, err)
+		}
+		target.assign(deleted)
+		metrics.RecordDownlinkCleanupStatus(string(target.status), "success", deleted)
+	}
+
+	metrics.RecordDownlinkCleanupDuration("success", time.Since(startedAt))
+	return result, nil
+}
+
 func (s *Service) listRetryMessages(ctx context.Context, now time.Time, limit int) ([]Message, error) {
 	claimStore, ok := s.store.(ClaimStore)
 	if ok && s.retryClaimOwner != "" {

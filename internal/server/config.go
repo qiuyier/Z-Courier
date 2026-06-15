@@ -27,6 +27,7 @@ type Config struct {
 	DownlinkStore              downlink.Store
 	DownlinkStorage            DownlinkStorageConfig
 	DownlinkDelivery           DownlinkDeliveryConfig
+	DownlinkRetention          DownlinkRetentionConfig
 }
 
 type UpstreamRouteConfig struct {
@@ -77,6 +78,14 @@ type DownlinkDeliveryConfig struct {
 	MaxAttempts    int
 	ScanLimit      int
 	BindFlushLimit int
+}
+
+type DownlinkRetentionConfig struct {
+	DeliveredTTL    time.Duration
+	FailedTTL       time.Duration
+	DiscardedTTL    time.Duration
+	CleanupInterval time.Duration
+	CleanupLimit    int
 }
 
 type ClusterConfig struct {
@@ -140,6 +149,13 @@ func DefaultConfig() Config {
 			MaxAttempts:    5,
 			ScanLimit:      100,
 			BindFlushLimit: 100,
+		},
+		DownlinkRetention: DownlinkRetentionConfig{
+			DeliveredTTL:    24 * time.Hour,
+			FailedTTL:       7 * 24 * time.Hour,
+			DiscardedTTL:    7 * 24 * time.Hour,
+			CleanupInterval: time.Hour,
+			CleanupLimit:    1000,
 		},
 	}
 }
@@ -240,6 +256,21 @@ func normalizeConfig(config Config) Config {
 	}
 	if config.DownlinkDelivery.BindFlushLimit <= 0 {
 		config.DownlinkDelivery.BindFlushLimit = defaults.DownlinkDelivery.BindFlushLimit
+	}
+	if config.DownlinkRetention.DeliveredTTL <= 0 {
+		config.DownlinkRetention.DeliveredTTL = defaults.DownlinkRetention.DeliveredTTL
+	}
+	if config.DownlinkRetention.FailedTTL <= 0 {
+		config.DownlinkRetention.FailedTTL = defaults.DownlinkRetention.FailedTTL
+	}
+	if config.DownlinkRetention.DiscardedTTL <= 0 {
+		config.DownlinkRetention.DiscardedTTL = defaults.DownlinkRetention.DiscardedTTL
+	}
+	if config.DownlinkRetention.CleanupInterval <= 0 {
+		config.DownlinkRetention.CleanupInterval = defaults.DownlinkRetention.CleanupInterval
+	}
+	if config.DownlinkRetention.CleanupLimit <= 0 {
+		config.DownlinkRetention.CleanupLimit = defaults.DownlinkRetention.CleanupLimit
 	}
 
 	return config

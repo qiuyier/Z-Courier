@@ -281,6 +281,72 @@ func TestMemoryStoreDiscard(t *testing.T) {
 	}
 }
 
+func TestMemoryStoreDeleteExpired(t *testing.T) {
+	store := NewMemoryStore()
+	now := time.UnixMilli(1760000000000)
+	store.now = func() time.Time { return now }
+
+	for _, message := range []Message{
+		{
+			MessageID: "old-delivered",
+			ClientID:  "c1",
+			DeviceID:  "d1",
+			MsgID:     2001,
+			Status:    MessageStatusDelivered,
+			CreatedAt: now.Add(-3 * time.Hour),
+			UpdatedAt: now.Add(-3 * time.Hour),
+		},
+		{
+			MessageID: "fresh-delivered",
+			ClientID:  "c1",
+			DeviceID:  "d1",
+			MsgID:     2001,
+			Status:    MessageStatusDelivered,
+			CreatedAt: now.Add(-30 * time.Minute),
+			UpdatedAt: now.Add(-30 * time.Minute),
+		},
+		{
+			MessageID: "old-failed",
+			ClientID:  "c1",
+			DeviceID:  "d1",
+			MsgID:     2001,
+			Status:    MessageStatusFailed,
+			CreatedAt: now.Add(-3 * time.Hour),
+			UpdatedAt: now.Add(-3 * time.Hour),
+		},
+		{
+			MessageID: "old-pending",
+			ClientID:  "c1",
+			DeviceID:  "d1",
+			MsgID:     2001,
+			Status:    MessageStatusPending,
+			CreatedAt: now.Add(-3 * time.Hour),
+			UpdatedAt: now.Add(-3 * time.Hour),
+		},
+	} {
+		if _, err := store.Save(context.Background(), message); err != nil {
+			t.Fatalf("Save %s error = %v", message.MessageID, err)
+		}
+	}
+
+	deleted, err := store.DeleteExpired(context.Background(), MessageStatusDelivered, now.Add(-time.Hour), 10)
+	if err != nil {
+		t.Fatalf("DeleteExpired() error = %v", err)
+	}
+	if deleted != 1 {
+		t.Fatalf("DeleteExpired() deleted = %d, want 1", deleted)
+	}
+
+	if _, ok, err := store.Get(context.Background(), "old-delivered"); err != nil || ok {
+		t.Fatalf("old-delivered exists = %v, err = %v; want deleted", ok, err)
+	}
+	for _, messageID := range []string{"fresh-delivered", "old-failed", "old-pending"} {
+		if _, ok, err := store.Get(context.Background(), messageID); err != nil || !ok {
+			t.Fatalf("%s exists = %v, err = %v; want retained", messageID, ok, err)
+		}
+	}
+}
+
 func TestMemoryStoreMarkFailed(t *testing.T) {
 	store := NewMemoryStore()
 	now := time.UnixMilli(1760000000000)

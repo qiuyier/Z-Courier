@@ -317,6 +317,51 @@ func (s *MemoryStore) Discard(ctx context.Context, messageID, reason string, dis
 	return nil
 }
 
+func (s *MemoryStore) DeleteExpired(ctx context.Context, status MessageStatus, before time.Time, limit int) (int, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	if before.IsZero() {
+		return 0, nil
+	}
+	if limit <= 0 {
+		limit = 1000
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	messages := make([]Message, 0)
+	for _, message := range s.messages {
+		if message.Status != status {
+			continue
+		}
+		updatedAt := retentionTime(message)
+		if updatedAt.IsZero() || !updatedAt.Before(before) {
+			continue
+		}
+		messages = append(messages, message)
+	}
+	sort.Slice(messages, func(i, j int) bool {
+		left := retentionTime(messages[i])
+		right := retentionTime(messages[j])
+		if left.Equal(right) {
+			return messages[i].MessageID < messages[j].MessageID
+		}
+
+		return left.Before(right)
+	})
+	if len(messages) > limit {
+		messages = messages[:limit]
+	}
+
+	for _, message := range messages {
+		delete(s.messages, message.MessageID)
+	}
+
+	return len(messages), nil
+}
+
 func (s *MemoryStore) Close() error {
 	return nil
 }
@@ -338,14 +383,8 @@ func limitMessages(messages []Message, limit int) []Message {
 
 func limitMessagesByUpdatedDesc(messages []Message, limit int) []Message {
 	sort.Slice(messages, func(i, j int) bool {
-		left := messages[i].UpdatedAt
-		right := messages[j].UpdatedAt
-		if left.IsZero() {
-			left = messages[i].CreatedAt
-		}
-		if right.IsZero() {
-			right = messages[j].CreatedAt
-		}
+		left := retentionTime(messages[i])
+		right := retentionTime(messages[j])
 		if left.Equal(right) {
 			return messages[i].MessageID < messages[j].MessageID
 		}
@@ -357,4 +396,12 @@ func limitMessagesByUpdatedDesc(messages []Message, limit int) []Message {
 	}
 
 	return messages
+}
+
+func retentionTime(message Message) time.Time {
+	if !message.UpdatedAt.IsZero() {
+		return message.UpdatedAt
+	}
+
+	return message.CreatedAt
 }

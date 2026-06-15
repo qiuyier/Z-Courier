@@ -255,6 +255,11 @@ POST /internal/message/discard
 Discard changes the status to `discarded`, clears retry metadata, and keeps the
 reason in `last_error`.
 
+Terminal messages are eventually removed by the downlink retention worker.
+`delivered`, `failed`, and `discarded` each have independent TTL settings in
+`downlink.retention`. The cleanup worker does not delete `pending` or `sent`
+messages, because those are still part of the delivery/retry lifecycle.
+
 ## Downlink Delivery ACK
 
 Clients confirm downlink delivery by sending a protocol packet with `MsgID = 2`.

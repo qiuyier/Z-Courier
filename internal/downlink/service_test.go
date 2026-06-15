@@ -1147,6 +1147,125 @@ func TestServiceDiscardRejectsDelivered(t *testing.T) {
 	}
 }
 
+func TestServiceCleanupExpiredDeletesOnlyTerminalMessages(t *testing.T) {
+	now := time.UnixMilli(1760000000000)
+	store := NewMemoryStore()
+	store.now = func() time.Time { return now }
+	for _, message := range []Message{
+		{
+			MessageID: "delivered",
+			ClientID:  "client-1",
+			DeviceID:  "device-1",
+			MsgID:     2001,
+			Status:    MessageStatusDelivered,
+			CreatedAt: now.Add(-3 * time.Hour),
+			UpdatedAt: now.Add(-3 * time.Hour),
+		},
+		{
+			MessageID: "failed",
+			ClientID:  "client-1",
+			DeviceID:  "device-1",
+			MsgID:     2001,
+			Status:    MessageStatusFailed,
+			CreatedAt: now.Add(-3 * time.Hour),
+			UpdatedAt: now.Add(-3 * time.Hour),
+		},
+		{
+			MessageID: "discarded",
+			ClientID:  "client-1",
+			DeviceID:  "device-1",
+			MsgID:     2001,
+			Status:    MessageStatusDiscarded,
+			CreatedAt: now.Add(-3 * time.Hour),
+			UpdatedAt: now.Add(-3 * time.Hour),
+		},
+		{
+			MessageID: "pending",
+			ClientID:  "client-1",
+			DeviceID:  "device-1",
+			MsgID:     2001,
+			Status:    MessageStatusPending,
+			CreatedAt: now.Add(-3 * time.Hour),
+			UpdatedAt: now.Add(-3 * time.Hour),
+		},
+		{
+			MessageID: "sent",
+			ClientID:  "client-1",
+			DeviceID:  "device-1",
+			MsgID:     2001,
+			Status:    MessageStatusSent,
+			CreatedAt: now.Add(-3 * time.Hour),
+			UpdatedAt: now.Add(-3 * time.Hour),
+		},
+	} {
+		if _, err := store.Save(context.Background(), message); err != nil {
+			t.Fatalf("Save %s error = %v", message.MessageID, err)
+		}
+	}
+
+	service := NewService(fakeSessions{}, fakeConnections{}, WithStore(store))
+	service.now = func() time.Time { return now }
+
+	result, err := service.CleanupExpired(context.Background(), RetentionPolicy{
+		DeliveredTTL: time.Hour,
+		FailedTTL:    time.Hour,
+		DiscardedTTL: time.Hour,
+		Limit:        10,
+	})
+	if err != nil {
+		t.Fatalf("CleanupExpired() error = %v", err)
+	}
+	if result.Delivered != 1 || result.Failed != 1 || result.Discarded != 1 {
+		t.Fatalf("CleanupExpired() result = %+v, want one per terminal status", result)
+	}
+
+	for _, messageID := range []string{"delivered", "failed", "discarded"} {
+		if _, ok, err := store.Get(context.Background(), messageID); err != nil || ok {
+			t.Fatalf("%s exists = %v, err = %v; want deleted", messageID, ok, err)
+		}
+	}
+	for _, messageID := range []string{"pending", "sent"} {
+		if _, ok, err := store.Get(context.Background(), messageID); err != nil || !ok {
+			t.Fatalf("%s exists = %v, err = %v; want retained", messageID, ok, err)
+		}
+	}
+}
+
+func TestServiceCleanupExpiredSkipsDisabledTTL(t *testing.T) {
+	now := time.UnixMilli(1760000000000)
+	store := NewMemoryStore()
+	store.now = func() time.Time { return now }
+	if _, err := store.Save(context.Background(), Message{
+		MessageID: "delivered",
+		ClientID:  "client-1",
+		DeviceID:  "device-1",
+		MsgID:     2001,
+		Status:    MessageStatusDelivered,
+		CreatedAt: now.Add(-3 * time.Hour),
+		UpdatedAt: now.Add(-3 * time.Hour),
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	service := NewService(fakeSessions{}, fakeConnections{}, WithStore(store))
+	service.now = func() time.Time { return now }
+
+	result, err := service.CleanupExpired(context.Background(), RetentionPolicy{
+		FailedTTL:    time.Hour,
+		DiscardedTTL: time.Hour,
+		Limit:        10,
+	})
+	if err != nil {
+		t.Fatalf("CleanupExpired() error = %v", err)
+	}
+	if result.Total() != 0 {
+		t.Fatalf("CleanupExpired() result = %+v, want no deletion", result)
+	}
+	if _, ok, err := store.Get(context.Background(), "delivered"); err != nil || !ok {
+		t.Fatalf("delivered exists = %v, err = %v; want retained", ok, err)
+	}
+}
+
 type fakeSessions struct {
 	session *session.Session
 }

@@ -53,6 +53,12 @@ downlink:
     max_attempts: 5
     scan_limit: 100
     bind_flush_limit: 100
+  retention:
+    delivered_ttl: 24h
+    failed_ttl: 168h
+    discarded_ttl: 168h
+    cleanup_interval: 1h
+    cleanup_limit: 1000
 
 pipeline:
   allowlist:

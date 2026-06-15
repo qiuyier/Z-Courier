@@ -83,8 +83,9 @@ type UpstreamConfig struct {
 }
 
 type DownlinkConfig struct {
-	Storage  DownlinkStorageConfig  `yaml:"storage"`
-	Delivery DownlinkDeliveryConfig `yaml:"delivery"`
+	Storage   DownlinkStorageConfig   `yaml:"storage"`
+	Delivery  DownlinkDeliveryConfig  `yaml:"delivery"`
+	Retention DownlinkRetentionConfig `yaml:"retention"`
 }
 
 type DownlinkStorageConfig struct {
@@ -108,6 +109,14 @@ type DownlinkDeliveryConfig struct {
 	MaxAttempts    int    `yaml:"max_attempts"`
 	ScanLimit      int    `yaml:"scan_limit"`
 	BindFlushLimit int    `yaml:"bind_flush_limit"`
+}
+
+type DownlinkRetentionConfig struct {
+	DeliveredTTL    string `yaml:"delivered_ttl"`
+	FailedTTL       string `yaml:"failed_ttl"`
+	DiscardedTTL    string `yaml:"discarded_ttl"`
+	CleanupInterval string `yaml:"cleanup_interval"`
+	CleanupLimit    int    `yaml:"cleanup_limit"`
 }
 
 type PipelineConfig struct {
@@ -435,6 +444,42 @@ func applyDownlinkConfig(out *server.Config, config DownlinkConfig) error {
 	}
 	if delivery.BindFlushLimit > 0 {
 		out.DownlinkDelivery.BindFlushLimit = delivery.BindFlushLimit
+	}
+
+	retention := config.Retention
+	deliveredTTL, err := parseOptionalPositiveDuration(retention.DeliveredTTL)
+	if err != nil {
+		return fmt.Errorf("config: downlink retention delivered_ttl: %w", err)
+	}
+	failedTTL, err := parseOptionalPositiveDuration(retention.FailedTTL)
+	if err != nil {
+		return fmt.Errorf("config: downlink retention failed_ttl: %w", err)
+	}
+	discardedTTL, err := parseOptionalPositiveDuration(retention.DiscardedTTL)
+	if err != nil {
+		return fmt.Errorf("config: downlink retention discarded_ttl: %w", err)
+	}
+	cleanupInterval, err := parseOptionalPositiveDuration(retention.CleanupInterval)
+	if err != nil {
+		return fmt.Errorf("config: downlink retention cleanup_interval: %w", err)
+	}
+	if deliveredTTL > 0 {
+		out.DownlinkRetention.DeliveredTTL = deliveredTTL
+	}
+	if failedTTL > 0 {
+		out.DownlinkRetention.FailedTTL = failedTTL
+	}
+	if discardedTTL > 0 {
+		out.DownlinkRetention.DiscardedTTL = discardedTTL
+	}
+	if cleanupInterval > 0 {
+		out.DownlinkRetention.CleanupInterval = cleanupInterval
+	}
+	if retention.CleanupLimit < 0 {
+		return fmt.Errorf("config: downlink retention cleanup_limit must be greater than or equal to 0")
+	}
+	if retention.CleanupLimit > 0 {
+		out.DownlinkRetention.CleanupLimit = retention.CleanupLimit
 	}
 
 	return nil

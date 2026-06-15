@@ -78,6 +78,12 @@ downlink:
     max_attempts: 6
     scan_limit: 77
     bind_flush_limit: 88
+  retention:
+    delivered_ttl: 24h
+    failed_ttl: 48h
+    discarded_ttl: 72h
+    cleanup_interval: 9m
+    cleanup_limit: 123
 pipeline:
   allowlist:
     client_ids:
@@ -239,6 +245,21 @@ upstream:
 	if config.DownlinkDelivery.BindFlushLimit != 88 {
 		t.Fatalf("DownlinkDelivery BindFlushLimit = %d, want 88", config.DownlinkDelivery.BindFlushLimit)
 	}
+	if config.DownlinkRetention.DeliveredTTL != 24*time.Hour {
+		t.Fatalf("DownlinkRetention DeliveredTTL = %v, want 24h", config.DownlinkRetention.DeliveredTTL)
+	}
+	if config.DownlinkRetention.FailedTTL != 48*time.Hour {
+		t.Fatalf("DownlinkRetention FailedTTL = %v, want 48h", config.DownlinkRetention.FailedTTL)
+	}
+	if config.DownlinkRetention.DiscardedTTL != 72*time.Hour {
+		t.Fatalf("DownlinkRetention DiscardedTTL = %v, want 72h", config.DownlinkRetention.DiscardedTTL)
+	}
+	if config.DownlinkRetention.CleanupInterval != 9*time.Minute {
+		t.Fatalf("DownlinkRetention CleanupInterval = %v, want 9m", config.DownlinkRetention.CleanupInterval)
+	}
+	if config.DownlinkRetention.CleanupLimit != 123 {
+		t.Fatalf("DownlinkRetention CleanupLimit = %d, want 123", config.DownlinkRetention.CleanupLimit)
+	}
 	if len(config.Pipeline.Policy.AllowClientIDs) != 1 || config.Pipeline.Policy.AllowClientIDs[0] != "client-a" {
 		t.Fatalf("Pipeline AllowClientIDs = %v, want [client-a]", config.Pipeline.Policy.AllowClientIDs)
 	}
@@ -337,6 +358,30 @@ func TestLoadServerConfigClusterDefaults(t *testing.T) {
 	}
 	if config.Cluster.Peer.Timeout != 2*time.Second {
 		t.Fatalf("Cluster Peer Timeout = %v, want 2s", config.Cluster.Peer.Timeout)
+	}
+}
+
+func TestLoadServerConfigDownlinkRetentionDefaults(t *testing.T) {
+	path := writeConfig(t, `{}`)
+
+	config, err := LoadServerConfig(path)
+	if err != nil {
+		t.Fatalf("LoadServerConfig() error = %v", err)
+	}
+	if config.DownlinkRetention.DeliveredTTL != 24*time.Hour {
+		t.Fatalf("DownlinkRetention DeliveredTTL = %v, want 24h", config.DownlinkRetention.DeliveredTTL)
+	}
+	if config.DownlinkRetention.FailedTTL != 7*24*time.Hour {
+		t.Fatalf("DownlinkRetention FailedTTL = %v, want 168h", config.DownlinkRetention.FailedTTL)
+	}
+	if config.DownlinkRetention.DiscardedTTL != 7*24*time.Hour {
+		t.Fatalf("DownlinkRetention DiscardedTTL = %v, want 168h", config.DownlinkRetention.DiscardedTTL)
+	}
+	if config.DownlinkRetention.CleanupInterval != time.Hour {
+		t.Fatalf("DownlinkRetention CleanupInterval = %v, want 1h", config.DownlinkRetention.CleanupInterval)
+	}
+	if config.DownlinkRetention.CleanupLimit != 1000 {
+		t.Fatalf("DownlinkRetention CleanupLimit = %d, want 1000", config.DownlinkRetention.CleanupLimit)
 	}
 }
 
@@ -555,6 +600,32 @@ func TestLoadServerConfigInvalidDownlinkDeliveryLimit(t *testing.T) {
 downlink:
   delivery:
     scan_limit: -1
+`)
+
+	_, err := LoadServerConfig(path)
+	if err == nil {
+		t.Fatal("LoadServerConfig() error = nil, want error")
+	}
+}
+
+func TestLoadServerConfigInvalidDownlinkRetentionDuration(t *testing.T) {
+	path := writeConfig(t, `
+downlink:
+  retention:
+    cleanup_interval: nope
+`)
+
+	_, err := LoadServerConfig(path)
+	if err == nil {
+		t.Fatal("LoadServerConfig() error = nil, want error")
+	}
+}
+
+func TestLoadServerConfigInvalidDownlinkRetentionLimit(t *testing.T) {
+	path := writeConfig(t, `
+downlink:
+  retention:
+    cleanup_limit: -1
 `)
 
 	_, err := LoadServerConfig(path)

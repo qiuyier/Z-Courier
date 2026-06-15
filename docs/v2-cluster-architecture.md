@@ -417,6 +417,9 @@ z_courier_downlink_retry_scan_duration_seconds{result}
 z_courier_downlink_retry_messages_total{result}
 z_courier_downlink_retry_claim_messages_total{owner,result}
 z_courier_downlink_retry_claim_duration_seconds{owner,result}
+z_courier_downlink_cleanup_total{status,result}
+z_courier_downlink_cleanup_deleted_total{status}
+z_courier_downlink_cleanup_duration_seconds{result}
 ```
 
 Existing V1 metrics should continue to work.

@@ -158,9 +158,16 @@ downlink:
     retry_interval: 5s
     retry_delay: 30s
     ack_timeout: 30s
+    retry_lease: 30s
     max_attempts: 5
     scan_limit: 100
     bind_flush_limit: 100
+  retention:
+    delivered_ttl: 24h
+    failed_ttl: 168h
+    discarded_ttl: 168h
+    cleanup_interval: 1h
+    cleanup_limit: 1000
 ```
 
 When the target client is online, `/internal/push` returns `200` with
@@ -178,6 +185,11 @@ Stored messages are retried in three ways:
 
 Failed retry attempts update `attempts`, `last_error`, and `next_retry_at`.
 After `max_attempts`, the message is marked `failed`.
+
+The retention worker deletes expired terminal messages from the downlink store:
+`delivered` after `delivered_ttl`, `failed` after `failed_ttl`, and
+`discarded` after `discarded_ttl`. Pending and sent messages are not deleted by
+retention cleanup.
 
 Failed messages can be inspected and manually handled through the internal API:
 

@@ -209,6 +209,31 @@ downlink:
 - `scan_limit`: maximum due messages scanned per retry tick.
 - `bind_flush_limit`: maximum pending messages flushed when a client binds.
 
+## Downlink Retention
+
+```yaml
+downlink:
+  retention:
+    delivered_ttl: 24h
+    failed_ttl: 168h
+    discarded_ttl: 168h
+    cleanup_interval: 1h
+    cleanup_limit: 1000
+```
+
+- `delivered_ttl`: how long delivered messages stay in the downlink store.
+- `failed_ttl`: how long failed messages stay available for inspection and
+  manual requeue/discard decisions.
+- `discarded_ttl`: how long manually discarded messages stay available for
+  audit.
+- `cleanup_interval`: how often the gateway scans for expired terminal
+  messages.
+- `cleanup_limit`: maximum expired messages deleted per status in one cleanup
+  run.
+
+Retention cleanup only deletes terminal messages: `delivered`, `failed`, and
+`discarded`. It does not delete `pending` or `sent` messages.
+
 ## Pipeline
 
 ```yaml

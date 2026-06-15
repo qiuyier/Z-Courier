@@ -380,6 +380,9 @@ z_courier_downlink_ack_total
 z_courier_downlink_ack_latency_seconds
 z_courier_downlink_requeue_total
 z_courier_downlink_discard_total
+z_courier_downlink_cleanup_total
+z_courier_downlink_cleanup_deleted_total
+z_courier_downlink_cleanup_duration_seconds
 z_courier_rate_limit_rejected_total
 ```
 

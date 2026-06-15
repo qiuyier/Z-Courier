@@ -18,6 +18,23 @@ type RetryResult struct {
 	Failed  int
 }
 
+type CleanupResult struct {
+	Delivered int
+	Failed    int
+	Discarded int
+}
+
+func (r CleanupResult) Total() int {
+	return r.Delivered + r.Failed + r.Discarded
+}
+
+type RetentionPolicy struct {
+	DeliveredTTL time.Duration
+	FailedTTL    time.Duration
+	DiscardedTTL time.Duration
+	Limit        int
+}
+
 type MessageStatus string
 
 const (
@@ -66,6 +83,7 @@ type Store interface {
 	MarkFailed(context.Context, string, string, time.Time) error
 	Requeue(context.Context, string, time.Time) error
 	Discard(context.Context, string, string, time.Time) error
+	DeleteExpired(context.Context, MessageStatus, time.Time, int) (int, error)
 }
 
 type ClaimStore interface {
