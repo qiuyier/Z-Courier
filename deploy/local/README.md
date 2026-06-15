@@ -150,8 +150,11 @@ go run ./cmd/devbackend discard \
 - NSQ Admin: `http://127.0.0.1:14171`
 - Redis: `127.0.0.1:16379`
 - Gateway metrics: `http://127.0.0.1:18082/metrics`
+- Gateway readiness: `http://127.0.0.1:18082/readyz`
 - Cluster gateway A metrics: `http://127.0.0.1:18182/metrics`
 - Cluster gateway B metrics: `http://127.0.0.1:18183/metrics`
+- Cluster gateway A readiness: `http://127.0.0.1:18182/readyz`
+- Cluster gateway B readiness: `http://127.0.0.1:18183/readyz`
 
 ## Stop
 

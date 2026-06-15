@@ -345,3 +345,20 @@ func unbindClusterRoute(
 		)
 	}
 }
+
+func (g *Gateway) unbindAllClusterRoutes(ctx context.Context) int {
+	if g == nil || g.sessions == nil || g.clusterRegistry == nil {
+		return 0
+	}
+
+	sessions := g.sessions.Snapshot()
+	for _, found := range sessions {
+		if err := ctx.Err(); err != nil {
+			g.logger.Warn("stopped unbinding cluster routes because shutdown context ended", zap.Error(err))
+			break
+		}
+		unbindClusterRoute(ctx, g.clusterRegistry, found, g.logger)
+	}
+
+	return len(sessions)
+}

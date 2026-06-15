@@ -207,6 +207,69 @@ func TestGatewayConnStopDoesNotRemoveNewerClusterRoute(t *testing.T) {
 	}
 }
 
+func TestGatewayUnbindAllClusterRoutes(t *testing.T) {
+	sessions := session.NewManager()
+	registry := cluster.NewMemoryRegistry(cluster.MemoryRegistryConfig{})
+	bindSession(t, sessions, "session-1", 7)
+	if err := registry.Bind(context.Background(), testServerRouteEntry("session-1")); err != nil {
+		t.Fatalf("registry.Bind() error = %v", err)
+	}
+
+	gateway := &Gateway{
+		sessions:        sessions,
+		logger:          zap.NewNop(),
+		clusterRegistry: registry,
+	}
+	unbound := gateway.unbindAllClusterRoutes(context.Background())
+	if unbound != 1 {
+		t.Fatalf("unbound = %d, want 1", unbound)
+	}
+
+	_, ok, err := registry.Lookup(context.Background(), cluster.RouteKey{
+		ClientID: "client-1",
+		DeviceID: "device-1",
+	})
+	if err != nil {
+		t.Fatalf("Lookup() error = %v", err)
+	}
+	if ok {
+		t.Fatal("Lookup() ok = true, want route removed")
+	}
+}
+
+func TestGatewayUnbindAllClusterRoutesDoesNotRemoveNewerRoute(t *testing.T) {
+	sessions := session.NewManager()
+	registry := cluster.NewMemoryRegistry(cluster.MemoryRegistryConfig{})
+	bindSession(t, sessions, "session-old", 7)
+	if err := registry.Bind(context.Background(), testServerRouteEntry("session-new")); err != nil {
+		t.Fatalf("registry.Bind() error = %v", err)
+	}
+
+	gateway := &Gateway{
+		sessions:        sessions,
+		logger:          zap.NewNop(),
+		clusterRegistry: registry,
+	}
+	unbound := gateway.unbindAllClusterRoutes(context.Background())
+	if unbound != 1 {
+		t.Fatalf("unbound = %d, want 1", unbound)
+	}
+
+	got, ok, err := registry.Lookup(context.Background(), cluster.RouteKey{
+		ClientID: "client-1",
+		DeviceID: "device-1",
+	})
+	if err != nil {
+		t.Fatalf("Lookup() error = %v", err)
+	}
+	if !ok {
+		t.Fatal("Lookup() ok = false, want newer route kept")
+	}
+	if got.SessionID != "session-new" {
+		t.Fatalf("SessionID = %q, want session-new", got.SessionID)
+	}
+}
+
 func TestClusterRouteRefresherBindsMissingRoute(t *testing.T) {
 	sessions := session.NewManager()
 	registry := cluster.NewMemoryRegistry(cluster.MemoryRegistryConfig{TTL: 30 * time.Second})

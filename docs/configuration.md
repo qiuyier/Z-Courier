@@ -92,9 +92,15 @@ internal_http:
 ```
 
 - `enabled`: starts or disables internal HTTP endpoints.
-- `addr`: listen address for `/internal/push` and `/metrics`.
+- `addr`: listen address for `/internal/push`, `/metrics`, `/healthz`, and
+  `/readyz`.
 - `token`: value required in the `X-ZCourier-Internal-Token` header.
 - `max_request_body_size`: maximum JSON request size in bytes.
+
+`/healthz` returns `200` while the internal HTTP server is alive. `/readyz`
+returns `200` while the gateway can receive traffic and `503` after graceful
+shutdown begins. Use `/readyz` for load balancer or Kubernetes readiness
+checks.
 
 ## Cluster
 
@@ -150,6 +156,12 @@ peer when the client is connected elsewhere.
 While a session remains connected, the gateway periodically refreshes its
 online route. This keeps quiet clients discoverable even when they do not send
 upstream packets before the registry TTL expires.
+
+During graceful shutdown, the gateway marks readiness as unavailable, stops the
+route refresher, removes all current node routes whose `session_id` still
+matches, shuts down internal HTTP, then stops the Zinx TCP server and background
+workers. Downlink messages still pending in PostgreSQL remain retryable by other
+nodes.
 
 The local cluster verifier uses `configs/z-courier.cluster-a.yaml` and
 `configs/z-courier.cluster-b.yaml` with the same Redis key prefix and

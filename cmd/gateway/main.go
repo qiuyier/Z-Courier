@@ -1,7 +1,11 @@
 package main
 
 import (
+	"context"
 	"flag"
+	"os/signal"
+	"syscall"
+	"time"
 
 	appconfig "github.com/qiuyier/Z-Courier/internal/config"
 	"github.com/qiuyier/Z-Courier/internal/server"
@@ -32,5 +36,16 @@ func main() {
 	}
 
 	logger.Info("starting z-courier gateway", zap.String("config", configPath))
-	gateway.Serve()
+	gateway.Start()
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	<-ctx.Done()
+	stop()
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := gateway.Shutdown(shutdownCtx); err != nil {
+		logger.Warn("z-courier gateway shutdown completed with errors", zap.Error(err))
+	}
 }

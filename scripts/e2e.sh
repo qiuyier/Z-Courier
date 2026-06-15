@@ -24,6 +24,25 @@ check_gateway_alive() {
   fi
 }
 
+wait_http() {
+  local name="$1"
+  local url="$2"
+
+  echo "waiting for $name..."
+  for attempt in $(seq 1 60); do
+    check_gateway_alive
+    if curl -fsS "$url" >/dev/null 2>&1; then
+      check_gateway_alive
+      return 0
+    fi
+    if [[ "$attempt" == "60" ]]; then
+      echo "$name did not become ready in time" >&2
+      return 1
+    fi
+    sleep 1
+  done
+}
+
 cd "$ROOT_DIR"
 
 docker compose -f "$COMPOSE_FILE" up -d postgres redis nsqlookupd nsqd nsqadmin prometheus grafana
@@ -56,7 +75,7 @@ echo "starting gateway..."
 ZINX_CONFIG_FILE_PATH="$ZINX_CONFIG_FILE" go run ./cmd/gateway -config "$CONFIG_FILE" &
 GATEWAY_PID="$!"
 
-check_gateway_alive
+wait_http "gateway readiness" "http://127.0.0.1:18082/readyz"
 go run ./cmd/e2e \
   -device-id "e2e-device-$RUN_ID" \
   "$@"

@@ -389,6 +389,10 @@ z_courier_rate_limit_rejected_total
 The first Prometheus scrape endpoint is exposed on the internal HTTP server at
 `/metrics`.
 
+The internal HTTP server also exposes `/healthz` and `/readyz`. `/readyz`
+switches to `503` as soon as graceful shutdown begins, before the gateway stops
+background workers and removes this node's online routes.
+
 Every packet should carry or receive a `TraceID`. Forwarded HTTP/gRPC/MQ
 requests should preserve that trace id.
 

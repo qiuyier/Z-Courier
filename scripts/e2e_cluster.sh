@@ -96,8 +96,8 @@ echo "starting gateway-b..."
 ZINX_CONFIG_FILE_PATH="$ZINX_CONFIG_B" go run ./cmd/gateway -config "$CONFIG_B" >"$LOG_DIR/e2e-cluster-gateway-b.log" 2>&1 &
 GATEWAY_B_PID="$!"
 
-wait_http "gateway-a metrics" "http://127.0.0.1:18182/metrics"
-wait_http "gateway-b metrics" "http://127.0.0.1:18183/metrics"
+wait_http "gateway-a readiness" "http://127.0.0.1:18182/readyz"
+wait_http "gateway-b readiness" "http://127.0.0.1:18183/readyz"
 
 go run ./cmd/e2e \
   -gateway-port 9902 \

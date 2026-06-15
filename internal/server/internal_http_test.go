@@ -24,7 +24,7 @@ func TestInternalHTTPRegistersPeerPushWhenClusterEnabled(t *testing.T) {
 		},
 	})
 
-	server := newInternalHTTPServer(config, zap.NewNop(), service)
+	server := newInternalHTTPServer(config, zap.NewNop(), service, &gatewayHealth{})
 	if server == nil {
 		t.Fatal("newInternalHTTPServer() = nil")
 	}
@@ -44,7 +44,7 @@ func TestInternalHTTPDoesNotRegisterPeerPushWhenClusterDisabled(t *testing.T) {
 		InternalHTTPAddr: "127.0.0.1:18080",
 	})
 
-	server := newInternalHTTPServer(config, zap.NewNop(), service)
+	server := newInternalHTTPServer(config, zap.NewNop(), service, &gatewayHealth{})
 	if server == nil {
 		t.Fatal("newInternalHTTPServer() = nil")
 	}
@@ -65,7 +65,7 @@ func TestInternalHTTPRegistersMessageAdminRoutes(t *testing.T) {
 		InternalToken:    "secret",
 	})
 
-	server := newInternalHTTPServer(config, zap.NewNop(), service)
+	server := newInternalHTTPServer(config, zap.NewNop(), service, &gatewayHealth{})
 	if server == nil {
 		t.Fatal("newInternalHTTPServer() = nil")
 	}
@@ -91,5 +91,40 @@ func TestInternalHTTPRegistersMessageAdminRoutes(t *testing.T) {
 				t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
 			}
 		})
+	}
+}
+
+func TestInternalHTTPHealthAndReady(t *testing.T) {
+	service := downlink.NewService(testSessionFinder{}, testConnectionFinder{})
+	health := &gatewayHealth{}
+	config := normalizeConfig(Config{
+		InternalHTTPAddr: "127.0.0.1:18080",
+	})
+
+	server := newInternalHTTPServer(config, zap.NewNop(), service, health)
+	if server == nil {
+		t.Fatal("newInternalHTTPServer() = nil")
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	rec := httptest.NewRecorder()
+	server.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("/healthz status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	rec = httptest.NewRecorder()
+	server.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("/readyz status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	health.BeginDrain()
+	req = httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	rec = httptest.NewRecorder()
+	server.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("/readyz draining status = %d, want %d", rec.Code, http.StatusServiceUnavailable)
 	}
 }

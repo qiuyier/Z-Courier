@@ -6,8 +6,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"os/signal"
 	"sort"
 	"strconv"
+	"sync"
+	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/aceld/zinx/ziface"
@@ -26,6 +31,8 @@ type Gateway struct {
 	server   ziface.IServer
 	sessions *session.Manager
 	logger   *zap.Logger
+	health   *gatewayHealth
+	started  atomic.Bool
 
 	clusterRegistry          cluster.OnlineRegistry
 	clusterRegistryCloser    io.Closer
@@ -44,6 +51,8 @@ type Gateway struct {
 	clusterRouteRefresher    *clusterRouteRefresher
 	clusterRefreshCancel     context.CancelFunc
 	clusterRefreshCompleted  chan struct{}
+	shutdownOnce             sync.Once
+	shutdownErr              error
 }
 
 func New(config Config, logger *zap.Logger) (*Gateway, error) {
@@ -80,13 +89,15 @@ func New(config Config, logger *zap.Logger) (*Gateway, error) {
 		return nil, err
 	}
 
+	health := &gatewayHealth{}
 	gateway := &Gateway{
 		server:                 zServer,
 		sessions:               config.Sessions,
 		logger:                 logger,
+		health:                 health,
 		clusterRegistry:        clusterRegistry,
 		clusterRegistryCloser:  clusterRegistryCloser,
-		internalHTTP:           newInternalHTTPServer(config, logger, downlinkService),
+		internalHTTP:           newInternalHTTPServer(config, logger, downlinkService, health),
 		upstream:               upstream,
 		downlink:               downlinkService,
 		downlinkCloser:         downlinkCloser,
@@ -138,19 +149,57 @@ func newIngressPipeline(config Config, logger *zap.Logger, registry cluster.Onli
 }
 
 func (g *Gateway) Serve() {
+	g.Start()
+	signalCh := make(chan os.Signal, 1)
+	signal.Notify(signalCh, syscall.SIGINT, syscall.SIGTERM)
+	sig := <-signalCh
+	signal.Stop(signalCh)
+	g.logger.Info("gateway received shutdown signal", zap.String("signal", sig.String()))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := g.Shutdown(ctx); err != nil {
+		g.logger.Warn("gateway graceful shutdown completed with errors", zap.Error(err))
+	}
+}
+
+func (g *Gateway) Start() {
+	if g.started.Swap(true) {
+		return
+	}
+
 	g.startInternalHTTP()
 	g.startDownlinkRetryWorker()
 	g.startDownlinkCleanupWorker()
 	g.startClusterRouteRefresher()
-	defer g.shutdownClusterRegistry()
-	defer g.shutdownClusterRouteRefresher()
-	defer g.shutdownDownlink()
-	defer g.shutdownUpstream()
-	defer g.shutdownDownlinkCleanupWorker()
-	defer g.shutdownDownlinkRetryWorker()
-	defer g.shutdownInternalHTTP()
 
-	g.server.Serve()
+	g.server.Start()
+}
+
+func (g *Gateway) Shutdown(ctx context.Context) error {
+	g.shutdownOnce.Do(func() {
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		g.logger.Info("starting gateway graceful shutdown")
+		g.health.BeginDrain()
+
+		g.shutdownClusterRouteRefresher()
+		g.shutdownZinxServer()
+		unbound := g.unbindAllClusterRoutes(ctx)
+		g.shutdownInternalHTTPWithContext(ctx)
+		g.shutdownDownlinkCleanupWorker()
+		g.shutdownDownlinkRetryWorker()
+		g.shutdownUpstream()
+		g.shutdownDownlink()
+		g.shutdownClusterRegistry()
+		metrics.SetSessionsOnline(g.sessions.Len())
+		metrics.SetClientsOnline(g.sessions.UniqueClientLen())
+
+		g.logger.Info("gateway graceful shutdown completed", zap.Int("cluster_routes_unbound", unbound))
+	})
+
+	return g.shutdownErr
 }
 
 func (g *Gateway) startClusterRouteRefresher() {
@@ -214,6 +263,28 @@ func (g *Gateway) shutdownInternalHTTP() {
 	if err := g.internalHTTP.Shutdown(ctx); err != nil {
 		g.logger.Warn("failed to shutdown internal HTTP API cleanly", zap.Error(err))
 	}
+}
+
+func (g *Gateway) shutdownInternalHTTPWithContext(ctx context.Context) {
+	if g.internalHTTP == nil {
+		return
+	}
+
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := g.internalHTTP.Shutdown(ctx); err != nil {
+		g.shutdownErr = errors.Join(g.shutdownErr, err)
+		g.logger.Warn("failed to shutdown internal HTTP API cleanly", zap.Error(err))
+	}
+}
+
+func (g *Gateway) shutdownZinxServer() {
+	if g.server == nil || !g.started.Load() {
+		return
+	}
+
+	g.server.Stop()
 }
 
 func (g *Gateway) shutdownUpstream() {

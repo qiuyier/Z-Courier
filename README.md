@@ -9,6 +9,7 @@ A high-performance message push gateway based on the `zinx` network framework.
 - Structured logging based on Zap
 - Pluggable route targets such as HTTP, gRPC, NSQ, Kafka, and NATS
 - Reliable downlink delivery with ACK, retry, and idempotency hooks
+- Graceful shutdown with readiness drain and cluster route cleanup
 - MIT Licensed
 
 ## Architecture

@@ -11,12 +11,14 @@ import (
 	"go.uber.org/zap"
 )
 
-func newInternalHTTPServer(config Config, logger *zap.Logger, service *downlink.Service) *http.Server {
+func newInternalHTTPServer(config Config, logger *zap.Logger, service *downlink.Service, health *gatewayHealth) *http.Server {
 	if config.DisableInternalHTTP || config.InternalHTTPAddr == "" || service == nil {
 		return nil
 	}
 
 	mux := http.NewServeMux()
+	mux.Handle("/healthz", newHealthHandler())
+	mux.Handle("/readyz", newReadyHandler(health))
 	mux.Handle("/internal/push", downlink.NewHandler(downlink.HandlerConfig{
 		Service:            service,
 		InternalToken:      config.InternalToken,
