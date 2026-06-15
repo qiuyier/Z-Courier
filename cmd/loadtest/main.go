@@ -3,10 +3,14 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
+	"math"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -48,6 +52,11 @@ type counters struct {
 	downlinkRejected atomic.Int64
 	sendErrors       atomic.Int64
 	decodeErrors     atomic.Int64
+
+	bindLatency     latencyRecorder
+	upstreamLatency latencyRecorder
+	downlinkLatency latencyRecorder
+	failures        reasonCounts
 }
 
 func main() {
@@ -150,6 +159,7 @@ func runUpstream(ctx context.Context, cfg config, counts *counters) error {
 			bindMessageID: bindMessageID,
 		})
 		client.SetOnConnStart(func(conn ziface.IConnection) {
+			state.rememberSent(bindMessageID)
 			if err := sendPacket(conn, packetInput{
 				msgID:     protocol.MsgIDBind,
 				clientID:  clientID,
@@ -158,8 +168,10 @@ func runUpstream(ctx context.Context, cfg config, counts *counters) error {
 				messageID: bindMessageID,
 				body:      []byte("load-bind"),
 			}); err != nil {
+				state.forgetSent(bindMessageID)
 				counts.sendErrors.Add(1)
 				counts.bindRejected.Add(1)
+				counts.failures.Add("bind_send_error")
 				state.markUpstreamSkipped(cfg.MessagesPerClient)
 				conn.Stop()
 			}
@@ -171,6 +183,7 @@ func runUpstream(ctx context.Context, cfg config, counts *counters) error {
 
 	select {
 	case <-ctx.Done():
+		counts.failures.Add(reasonFromError(ctx.Err()))
 		return ctx.Err()
 	case <-done:
 		return nil
@@ -184,15 +197,57 @@ type upstreamState struct {
 	done     chan struct{}
 	doneOnce *sync.Once
 	body     []byte
+	sentAt   sync.Map
 }
 
-func (s *upstreamState) markUpstreamAck(accepted bool) {
-	if accepted {
-		s.counts.upstreamAccepted.Add(1)
-	} else {
-		s.counts.upstreamRejected.Add(1)
+func (s *upstreamState) rememberSent(messageID string) {
+	if messageID == "" {
+		return
 	}
 
+	s.sentAt.Store(messageID, time.Now())
+}
+
+func (s *upstreamState) forgetSent(messageID string) {
+	if messageID == "" {
+		return
+	}
+
+	s.sentAt.Delete(messageID)
+}
+
+func (s *upstreamState) observeLatency(messageID string, recorder *latencyRecorder) {
+	if messageID == "" || recorder == nil {
+		return
+	}
+
+	value, ok := s.sentAt.LoadAndDelete(messageID)
+	if !ok {
+		return
+	}
+	sentAt, ok := value.(time.Time)
+	if !ok || sentAt.IsZero() {
+		return
+	}
+
+	recorder.Record(time.Since(sentAt))
+}
+
+func (s *upstreamState) markUpstreamAck(ack protocol.Ack) {
+	s.observeLatency(ack.MessageID, &s.counts.upstreamLatency)
+	if ack.Code == protocol.AckAccepted {
+		s.counts.upstreamAccepted.Add(1)
+	} else {
+		s.markUpstreamRejected(classifyAck("upstream", ack))
+		return
+	}
+
+	s.closeWhenExpectedReached()
+}
+
+func (s *upstreamState) markUpstreamRejected(reason string) {
+	s.counts.upstreamRejected.Add(1)
+	s.counts.failures.Add(reason)
 	s.closeWhenExpectedReached()
 }
 
@@ -226,17 +281,20 @@ func (r *ackRouter) Handle(request ziface.IRequest) {
 	packet, err := protocol.Decode(request.GetData())
 	if err != nil {
 		r.state.counts.decodeErrors.Add(1)
+		r.state.counts.failures.Add("decode_error")
 		return
 	}
 
 	var ack protocol.Ack
 	if err := sonic.Unmarshal(packet.Body, &ack); err != nil {
 		r.state.counts.decodeErrors.Add(1)
+		r.state.counts.failures.Add("decode_error")
 		return
 	}
 
 	accepted := ack.Code == protocol.AckAccepted
 	if ack.MessageID == r.bindMessageID {
+		r.state.observeLatency(ack.MessageID, &r.state.counts.bindLatency)
 		if accepted {
 			r.state.counts.bindAccepted.Add(1)
 			r.sendOnce.Do(func() {
@@ -245,16 +303,18 @@ func (r *ackRouter) Handle(request ziface.IRequest) {
 			return
 		}
 		r.state.counts.bindRejected.Add(1)
+		r.state.counts.failures.Add(classifyAck("bind", ack))
 		r.state.markUpstreamSkipped(r.state.config.MessagesPerClient)
 		return
 	}
 
-	r.state.markUpstreamAck(accepted)
+	r.state.markUpstreamAck(ack)
 }
 
 func (r *ackRouter) sendUpstream(conn ziface.IConnection) {
 	for i := 0; i < r.state.config.MessagesPerClient; i++ {
 		messageID := fmt.Sprintf("load-upstream-%s-%d-%d", r.deviceID, i, time.Now().UnixNano())
+		r.state.rememberSent(messageID)
 		if err := sendPacket(conn, packetInput{
 			msgID:     uint32(r.state.config.UpstreamMsgID),
 			clientID:  r.clientID,
@@ -263,8 +323,9 @@ func (r *ackRouter) sendUpstream(conn ziface.IConnection) {
 			messageID: messageID,
 			body:      r.state.body,
 		}); err != nil {
+			r.state.forgetSent(messageID)
 			r.state.counts.sendErrors.Add(1)
-			r.state.markUpstreamAck(false)
+			r.state.markUpstreamRejected("upstream_send_error")
 		}
 	}
 }
@@ -327,17 +388,21 @@ func runDownlink(ctx context.Context, cfg config, counts *counters) error {
 			for job := range jobs {
 				if err := ctx.Err(); err != nil {
 					counts.sendErrors.Add(1)
+					counts.failures.Add(reasonFromError(err))
 					continue
 				}
-				status, err := postDownlink(ctx, client, cfg, job, body)
+				result, err := postDownlink(ctx, client, cfg, job, body)
+				counts.downlinkLatency.Record(result.latency)
 				if err != nil {
 					counts.sendErrors.Add(1)
+					counts.failures.Add(result.code)
 					continue
 				}
-				if status >= http.StatusOK && status < http.StatusMultipleChoices {
+				if result.status >= http.StatusOK && result.status < http.StatusMultipleChoices {
 					counts.downlinkSuccess.Add(1)
 				} else {
 					counts.downlinkRejected.Add(1)
+					counts.failures.Add(result.code)
 				}
 			}
 		}()
@@ -346,6 +411,7 @@ func runDownlink(ctx context.Context, cfg config, counts *counters) error {
 	for i := 0; i < total; i++ {
 		select {
 		case <-ctx.Done():
+			counts.failures.Add(reasonFromError(ctx.Err()))
 			close(jobs)
 			wg.Wait()
 			return ctx.Err()
@@ -357,7 +423,14 @@ func runDownlink(ctx context.Context, cfg config, counts *counters) error {
 	return ctx.Err()
 }
 
-func postDownlink(ctx context.Context, client *http.Client, cfg config, index int, body []byte) (int, error) {
+type downlinkResult struct {
+	status  int
+	code    string
+	latency time.Duration
+}
+
+func postDownlink(ctx context.Context, client *http.Client, cfg config, index int, body []byte) (downlinkResult, error) {
+	startedAt := time.Now()
 	clientIndex := index % cfg.Clients
 	messageID := fmt.Sprintf("load-downlink-%d-%d", index, time.Now().UnixNano())
 	reqBody, err := sonic.Marshal(downlink.PushRequest{
@@ -370,12 +443,12 @@ func postDownlink(ctx context.Context, client *http.Client, cfg config, index in
 		Body:        body,
 	})
 	if err != nil {
-		return 0, err
+		return downlinkResult{code: "marshal_error", latency: time.Since(startedAt)}, err
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(cfg.InternalURL, "/")+"/internal/push", bytes.NewReader(reqBody))
 	if err != nil {
-		return 0, err
+		return downlinkResult{code: "request_error", latency: time.Since(startedAt)}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if cfg.InternalToken != "" {
@@ -384,10 +457,16 @@ func postDownlink(ctx context.Context, client *http.Client, cfg config, index in
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return 0, err
+		return downlinkResult{code: reasonFromError(err), latency: time.Since(startedAt)}, err
 	}
 	defer resp.Body.Close()
-	return resp.StatusCode, nil
+
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	return downlinkResult{
+		status:  resp.StatusCode,
+		code:    codeFromHTTPResponse(resp.StatusCode, respBody),
+		latency: time.Since(startedAt),
+	}, nil
 }
 
 func payload(size int) []byte {
@@ -412,6 +491,206 @@ func printSummary(cfg config, counts *counters, duration time.Duration) {
 	fmt.Printf("upstream accepted=%d rejected=%d\n", counts.upstreamAccepted.Load(), counts.upstreamRejected.Load())
 	fmt.Printf("downlink success=%d rejected=%d\n", counts.downlinkSuccess.Load(), counts.downlinkRejected.Load())
 	fmt.Printf("errors send=%d decode=%d\n", counts.sendErrors.Load(), counts.decodeErrors.Load())
+	printLatencySummary("bind_ack", counts.bindLatency.Summary())
+	printLatencySummary("upstream_ack", counts.upstreamLatency.Summary())
+	printLatencySummary("downlink_http", counts.downlinkLatency.Summary())
+	printFailureSummary(counts.failures.Snapshot())
+}
+
+func classifyAck(prefix string, ack protocol.Ack) string {
+	code := string(ack.Code)
+	if code == "" {
+		code = "unknown"
+	}
+
+	reason := strings.ToLower(ack.Reason)
+	if ack.Code == protocol.AckRejected && strings.Contains(reason, "overload") {
+		code = "overloaded"
+	}
+
+	return prefix + "_" + code
+}
+
+func reasonFromError(err error) string {
+	if err == nil {
+		return "unknown"
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "timeout"
+	}
+	if errors.Is(err, context.Canceled) {
+		return "context_canceled"
+	}
+
+	return "request_error"
+}
+
+type latencyRecorder struct {
+	mu     sync.Mutex
+	values []time.Duration
+}
+
+func (r *latencyRecorder) Record(value time.Duration) {
+	if value < 0 {
+		return
+	}
+
+	r.mu.Lock()
+	r.values = append(r.values, value)
+	r.mu.Unlock()
+}
+
+func (r *latencyRecorder) Summary() latencySummary {
+	r.mu.Lock()
+	values := append([]time.Duration(nil), r.values...)
+	r.mu.Unlock()
+
+	if len(values) == 0 {
+		return latencySummary{}
+	}
+	sort.Slice(values, func(i, j int) bool {
+		return values[i] < values[j]
+	})
+
+	var sum time.Duration
+	for _, value := range values {
+		sum += value
+	}
+
+	return latencySummary{
+		Count: len(values),
+		Min:   values[0],
+		Avg:   sum / time.Duration(len(values)),
+		P50:   percentile(values, 0.50),
+		P95:   percentile(values, 0.95),
+		P99:   percentile(values, 0.99),
+		Max:   values[len(values)-1],
+	}
+}
+
+type latencySummary struct {
+	Count int
+	Min   time.Duration
+	Avg   time.Duration
+	P50   time.Duration
+	P95   time.Duration
+	P99   time.Duration
+	Max   time.Duration
+}
+
+func percentile(values []time.Duration, p float64) time.Duration {
+	if len(values) == 0 {
+		return 0
+	}
+
+	index := int(math.Ceil(p*float64(len(values)))) - 1
+	if index < 0 {
+		index = 0
+	}
+	if index >= len(values) {
+		index = len(values) - 1
+	}
+
+	return values[index]
+}
+
+func printLatencySummary(name string, summary latencySummary) {
+	if summary.Count == 0 {
+		return
+	}
+
+	fmt.Printf(
+		"latency %s count=%d min=%s avg=%s p50=%s p95=%s p99=%s max=%s\n",
+		name,
+		summary.Count,
+		formatLatency(summary.Min),
+		formatLatency(summary.Avg),
+		formatLatency(summary.P50),
+		formatLatency(summary.P95),
+		formatLatency(summary.P99),
+		formatLatency(summary.Max),
+	)
+}
+
+func formatLatency(value time.Duration) string {
+	switch {
+	case value >= time.Second:
+		return value.Truncate(time.Millisecond).String()
+	case value >= time.Millisecond:
+		return value.Truncate(time.Microsecond).String()
+	default:
+		return value.String()
+	}
+}
+
+type reasonCounts struct {
+	mu     sync.Mutex
+	counts map[string]int64
+}
+
+func (r *reasonCounts) Add(reason string) {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "unknown"
+	}
+
+	r.mu.Lock()
+	if r.counts == nil {
+		r.counts = make(map[string]int64)
+	}
+	r.counts[reason]++
+	r.mu.Unlock()
+}
+
+func (r *reasonCounts) Snapshot() []reasonCount {
+	r.mu.Lock()
+	items := make([]reasonCount, 0, len(r.counts))
+	for reason, count := range r.counts {
+		items = append(items, reasonCount{Reason: reason, Count: count})
+	}
+	r.mu.Unlock()
+
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Count == items[j].Count {
+			return items[i].Reason < items[j].Reason
+		}
+		return items[i].Count > items[j].Count
+	})
+
+	return items
+}
+
+type reasonCount struct {
+	Reason string
+	Count  int64
+}
+
+func printFailureSummary(items []reasonCount) {
+	if len(items) == 0 {
+		return
+	}
+
+	fmt.Println("failure reasons:")
+	for _, item := range items {
+		fmt.Printf("  %s=%d\n", item.Reason, item.Count)
+	}
+}
+
+func codeFromHTTPResponse(status int, body []byte) string {
+	var resp struct {
+		Code string `json:"code"`
+	}
+	if len(body) > 0 {
+		_ = sonic.Unmarshal(body, &resp)
+	}
+	if resp.Code != "" {
+		return resp.Code
+	}
+	if status > 0 {
+		return fmt.Sprintf("status_%d", status)
+	}
+
+	return "unknown"
 }
 
 type nopZinxLogger struct{}

@@ -78,6 +78,14 @@ go run ./cmd/loadtest \
 focuses on the summary. Pass `-zinx-log` when debugging low-level client
 connections.
 
+The summary includes ACK/HTTP latency percentiles and grouped failure reasons:
+
+```text
+latency upstream_ack count=1000 min=1.2ms avg=3.4ms p50=2.8ms p95=8.9ms p99=12.1ms max=20.4ms
+failure reasons:
+  upstream_overloaded=42
+```
+
 Run a downlink HTTP load test:
 
 ```bash
