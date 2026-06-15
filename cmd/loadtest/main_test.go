@@ -2,8 +2,12 @@ package main
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/bytedance/sonic"
 )
 
 func TestLatencyRecorderSummary(t *testing.T) {
@@ -16,10 +20,10 @@ func TestLatencyRecorderSummary(t *testing.T) {
 	if summary.Count != 100 {
 		t.Fatalf("Count = %d, want 100", summary.Count)
 	}
-	if summary.Min != time.Millisecond || summary.Max != 100*time.Millisecond {
+	if summary.Min != "1ms" || summary.Max != "100ms" {
 		t.Fatalf("min/max = %s/%s, want 1ms/100ms", summary.Min, summary.Max)
 	}
-	if summary.P50 != 50*time.Millisecond || summary.P95 != 95*time.Millisecond || summary.P99 != 99*time.Millisecond {
+	if summary.P50MS != 50 || summary.P95MS != 95 || summary.P99MS != 99 {
 		t.Fatalf("percentiles = p50:%s p95:%s p99:%s, want 50ms/95ms/99ms", summary.P50, summary.P95, summary.P99)
 	}
 }
@@ -48,6 +52,72 @@ func TestRateInterval(t *testing.T) {
 	}
 	if got := rateInterval(0); got != time.Second {
 		t.Fatalf("rateInterval(0) = %s, want 1s", got)
+	}
+}
+
+func TestBuildSummary(t *testing.T) {
+	cfg := config{
+		Mode:              "downlink",
+		Clients:           10,
+		MessagesPerClient: 20,
+		HTTPConcurrency:   5,
+		RunDuration:       time.Minute,
+		Rate:              100,
+	}
+	counts := &counters{}
+	counts.downlinkSuccess.Store(123)
+	counts.downlinkRejected.Store(4)
+	counts.sendErrors.Store(2)
+	counts.downlinkLatency.Record(5 * time.Millisecond)
+	counts.failures.Add("overloaded")
+	counts.failures.Add("overloaded")
+
+	summary := buildSummary(cfg, counts, 2*time.Second, nil)
+	if summary.Mode != "downlink" || summary.TargetDuration != "1m0s" || summary.Rate != 100 {
+		t.Fatalf("summary mode/duration/rate = %+v", summary)
+	}
+	if summary.QPS != 63.5 {
+		t.Fatalf("QPS = %v, want 63.5", summary.QPS)
+	}
+	if summary.Counts.DownlinkSuccess != 123 || summary.Counts.DownlinkRejected != 4 || summary.Counts.SendErrors != 2 {
+		t.Fatalf("counts = %+v", summary.Counts)
+	}
+	if summary.Latency["downlink_http"].P50MS != 5 {
+		t.Fatalf("downlink p50 = %+v, want 5ms", summary.Latency["downlink_http"])
+	}
+	if summary.Failures["overloaded"] != 2 {
+		t.Fatalf("failures = %+v, want overloaded=2", summary.Failures)
+	}
+}
+
+func TestWriteReport(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "reports", "loadtest.json")
+	want := summary{
+		Mode:           "upstream",
+		Clients:        2,
+		Duration:       "1s",
+		DurationMillis: 1000,
+		QPS:            42.5,
+		Counts: summaryCounts{
+			UpstreamAccepted: 85,
+		},
+	}
+
+	if err := writeReport(path, want); err != nil {
+		t.Fatalf("writeReport() error = %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+
+	var got summary
+	if err := sonic.Unmarshal(data, &got); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if got.Mode != want.Mode || got.QPS != want.QPS || got.Counts.UpstreamAccepted != want.Counts.UpstreamAccepted {
+		t.Fatalf("report = %+v, want %+v", got, want)
 	}
 }
 

@@ -107,12 +107,16 @@ go run ./cmd/loadtest \
   -duration 60s \
   -rate 500 \
   -clients 100 \
-  -http-concurrency 100
+  -http-concurrency 100 \
+  -report reports/loadtest-downlink.json
 ```
 
 When `-duration` is set, `-rate` is required and means target messages per
 second. Without `-duration`, `cmd/loadtest` keeps the original finite behavior
 and sends `clients * messages` messages.
+
+Pass `-report` to save the same summary as JSON. Missing report directories are
+created automatically.
 
 For real online downlink delivery, keep matching clients connected first. Without
 online clients, the gateway still accepts the request and writes the offline

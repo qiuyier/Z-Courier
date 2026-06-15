@@ -10,6 +10,7 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -42,6 +43,7 @@ type config struct {
 	Timeout           time.Duration
 	RunDuration       time.Duration
 	Rate              int
+	ReportPath        string
 	EnableZinxLog     bool
 }
 
@@ -82,7 +84,12 @@ func main() {
 		err = fmt.Errorf("unsupported mode %q", cfg.Mode)
 	}
 
-	printSummary(cfg, counts, time.Since(startedAt))
+	summary := buildSummary(cfg, counts, time.Since(startedAt), err)
+	printSummary(summary)
+	if reportErr := writeReport(cfg.ReportPath, summary); reportErr != nil {
+		fmt.Fprintf(os.Stderr, "write report failed: %v\n", reportErr)
+		os.Exit(1)
+	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "loadtest failed: %v\n", err)
 		os.Exit(1)
@@ -109,6 +116,7 @@ func parseFlags() config {
 	fs.DurationVar(&cfg.Timeout, "timeout", 30*time.Second, "one-shot overall timeout, or duration-mode drain timeout")
 	fs.DurationVar(&cfg.RunDuration, "duration", 0, "continuous load duration; 0 sends clients*messages and exits")
 	fs.IntVar(&cfg.Rate, "rate", 0, "target messages per second in duration mode")
+	fs.StringVar(&cfg.ReportPath, "report", "", "write JSON load test report to this path")
 	fs.BoolVar(&cfg.EnableZinxLog, "zinx-log", false, "enable Zinx internal logs")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: loadtest [flags]\n")
@@ -161,12 +169,11 @@ func runUpstream(ctx context.Context, cfg config, counts *counters) error {
 	expected := int64(cfg.Clients * cfg.MessagesPerClient)
 	if cfg.DurationMode() {
 		expected = -1
+	} else if expected == 0 {
+		return nil
 	}
 	done := make(chan struct{})
 	var doneOnce sync.Once
-	if expected == 0 {
-		close(done)
-	}
 	state := &upstreamState{
 		config:   cfg,
 		counts:   counts,
@@ -704,7 +711,34 @@ func payload(size int) []byte {
 	return bytes.Repeat([]byte("x"), size)
 }
 
-func printSummary(cfg config, counts *counters, duration time.Duration) {
+type summary struct {
+	Mode              string                    `json:"mode"`
+	Clients           int                       `json:"clients"`
+	MessagesPerClient int                       `json:"messages_per_client"`
+	HTTPConcurrency   int                       `json:"http_concurrency,omitempty"`
+	Duration          string                    `json:"duration"`
+	DurationMillis    int64                     `json:"duration_ms"`
+	TargetDuration    string                    `json:"target_duration,omitempty"`
+	Rate              int                       `json:"rate,omitempty"`
+	QPS               float64                   `json:"qps"`
+	Counts            summaryCounts             `json:"counts"`
+	Latency           map[string]latencySummary `json:"latency,omitempty"`
+	Failures          map[string]int64          `json:"failures,omitempty"`
+	Error             string                    `json:"error,omitempty"`
+}
+
+type summaryCounts struct {
+	BindAccepted     int64 `json:"bind_accepted"`
+	BindRejected     int64 `json:"bind_rejected"`
+	UpstreamAccepted int64 `json:"upstream_accepted"`
+	UpstreamRejected int64 `json:"upstream_rejected"`
+	DownlinkSuccess  int64 `json:"downlink_success"`
+	DownlinkRejected int64 `json:"downlink_rejected"`
+	SendErrors       int64 `json:"send_errors"`
+	DecodeErrors     int64 `json:"decode_errors"`
+}
+
+func buildSummary(cfg config, counts *counters, duration time.Duration, runErr error) summary {
 	totalUpstream := counts.upstreamAccepted.Load() + counts.upstreamRejected.Load()
 	totalDownlink := counts.downlinkSuccess.Load() + counts.downlinkRejected.Load()
 	total := totalUpstream + totalDownlink
@@ -713,19 +747,106 @@ func printSummary(cfg config, counts *counters, duration time.Duration) {
 		qps = float64(total) / duration.Seconds()
 	}
 
-	fmt.Printf("mode=%s clients=%d messages_per_client=%d duration=%s", cfg.Mode, cfg.Clients, cfg.MessagesPerClient, duration.Truncate(time.Millisecond))
-	if cfg.DurationMode() {
-		fmt.Printf(" target_duration=%s rate=%d", cfg.RunDuration, cfg.Rate)
+	out := summary{
+		Mode:              cfg.Mode,
+		Clients:           cfg.Clients,
+		MessagesPerClient: cfg.MessagesPerClient,
+		HTTPConcurrency:   cfg.HTTPConcurrency,
+		Duration:          duration.Truncate(time.Millisecond).String(),
+		DurationMillis:    duration.Milliseconds(),
+		QPS:               qps,
+		Counts: summaryCounts{
+			BindAccepted:     counts.bindAccepted.Load(),
+			BindRejected:     counts.bindRejected.Load(),
+			UpstreamAccepted: counts.upstreamAccepted.Load(),
+			UpstreamRejected: counts.upstreamRejected.Load(),
+			DownlinkSuccess:  counts.downlinkSuccess.Load(),
+			DownlinkRejected: counts.downlinkRejected.Load(),
+			SendErrors:       counts.sendErrors.Load(),
+			DecodeErrors:     counts.decodeErrors.Load(),
+		},
+		Latency:  latencySummaries(counts),
+		Failures: failureMap(counts.failures.Snapshot()),
 	}
-	fmt.Printf(" qps=%.2f\n", qps)
-	fmt.Printf("bind accepted=%d rejected=%d\n", counts.bindAccepted.Load(), counts.bindRejected.Load())
-	fmt.Printf("upstream accepted=%d rejected=%d\n", counts.upstreamAccepted.Load(), counts.upstreamRejected.Load())
-	fmt.Printf("downlink success=%d rejected=%d\n", counts.downlinkSuccess.Load(), counts.downlinkRejected.Load())
-	fmt.Printf("errors send=%d decode=%d\n", counts.sendErrors.Load(), counts.decodeErrors.Load())
-	printLatencySummary("bind_ack", counts.bindLatency.Summary())
-	printLatencySummary("upstream_ack", counts.upstreamLatency.Summary())
-	printLatencySummary("downlink_http", counts.downlinkLatency.Summary())
-	printFailureSummary(counts.failures.Snapshot())
+	if cfg.DurationMode() {
+		out.TargetDuration = cfg.RunDuration.String()
+		out.Rate = cfg.Rate
+	}
+	if runErr != nil {
+		out.Error = runErr.Error()
+	}
+
+	return out
+}
+
+func latencySummaries(counts *counters) map[string]latencySummary {
+	items := map[string]latencySummary{
+		"bind_ack":      counts.bindLatency.Summary(),
+		"upstream_ack":  counts.upstreamLatency.Summary(),
+		"downlink_http": counts.downlinkLatency.Summary(),
+	}
+
+	for name, item := range items {
+		if item.Count == 0 {
+			delete(items, name)
+		}
+	}
+	if len(items) == 0 {
+		return nil
+	}
+
+	return items
+}
+
+func failureMap(items []reasonCount) map[string]int64 {
+	if len(items) == 0 {
+		return nil
+	}
+
+	out := make(map[string]int64, len(items))
+	for _, item := range items {
+		out[item.Reason] = item.Count
+	}
+	return out
+}
+
+func printSummary(summary summary) {
+	fmt.Printf("mode=%s clients=%d messages_per_client=%d duration=%s", summary.Mode, summary.Clients, summary.MessagesPerClient, summary.Duration)
+	if summary.TargetDuration != "" {
+		fmt.Printf(" target_duration=%s rate=%d", summary.TargetDuration, summary.Rate)
+	}
+	fmt.Printf(" qps=%.2f\n", summary.QPS)
+	fmt.Printf("bind accepted=%d rejected=%d\n", summary.Counts.BindAccepted, summary.Counts.BindRejected)
+	fmt.Printf("upstream accepted=%d rejected=%d\n", summary.Counts.UpstreamAccepted, summary.Counts.UpstreamRejected)
+	fmt.Printf("downlink success=%d rejected=%d\n", summary.Counts.DownlinkSuccess, summary.Counts.DownlinkRejected)
+	fmt.Printf("errors send=%d decode=%d\n", summary.Counts.SendErrors, summary.Counts.DecodeErrors)
+	printLatencySummary("bind_ack", summary.Latency["bind_ack"])
+	printLatencySummary("upstream_ack", summary.Latency["upstream_ack"])
+	printLatencySummary("downlink_http", summary.Latency["downlink_http"])
+	printFailureSummary(reasonCountsFromMap(summary.Failures))
+	if summary.Error != "" {
+		fmt.Printf("error=%s\n", summary.Error)
+	}
+}
+
+func writeReport(path string, summary summary) error {
+	if path == "" {
+		return nil
+	}
+
+	if dir := filepath.Dir(path); dir != "." && dir != "" {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+	}
+
+	data, err := sonic.MarshalIndent(summary, "", "  ")
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+
+	return os.WriteFile(path, data, 0o644)
 }
 
 func classifyAck(prefix string, ack protocol.Ack) string {
@@ -789,24 +910,48 @@ func (r *latencyRecorder) Summary() latencySummary {
 	}
 
 	return latencySummary{
-		Count: len(values),
-		Min:   values[0],
-		Avg:   sum / time.Duration(len(values)),
-		P50:   percentile(values, 0.50),
-		P95:   percentile(values, 0.95),
-		P99:   percentile(values, 0.99),
-		Max:   values[len(values)-1],
+		Count:    len(values),
+		Min:      formatLatency(values[0]),
+		Avg:      formatLatency(sum / time.Duration(len(values))),
+		P50:      formatLatency(percentile(values, 0.50)),
+		P95:      formatLatency(percentile(values, 0.95)),
+		P99:      formatLatency(percentile(values, 0.99)),
+		Max:      formatLatency(values[len(values)-1]),
+		MinMS:    durationMillis(values[0]),
+		AvgMS:    durationMillis(sum / time.Duration(len(values))),
+		P50MS:    durationMillis(percentile(values, 0.50)),
+		P95MS:    durationMillis(percentile(values, 0.95)),
+		P99MS:    durationMillis(percentile(values, 0.99)),
+		MaxMS:    durationMillis(values[len(values)-1]),
+		minValue: values[0],
+		avgValue: sum / time.Duration(len(values)),
+		p50Value: percentile(values, 0.50),
+		p95Value: percentile(values, 0.95),
+		p99Value: percentile(values, 0.99),
+		maxValue: values[len(values)-1],
 	}
 }
 
 type latencySummary struct {
-	Count int
-	Min   time.Duration
-	Avg   time.Duration
-	P50   time.Duration
-	P95   time.Duration
-	P99   time.Duration
-	Max   time.Duration
+	Count    int     `json:"count"`
+	Min      string  `json:"min"`
+	Avg      string  `json:"avg"`
+	P50      string  `json:"p50"`
+	P95      string  `json:"p95"`
+	P99      string  `json:"p99"`
+	Max      string  `json:"max"`
+	MinMS    float64 `json:"min_ms"`
+	AvgMS    float64 `json:"avg_ms"`
+	P50MS    float64 `json:"p50_ms"`
+	P95MS    float64 `json:"p95_ms"`
+	P99MS    float64 `json:"p99_ms"`
+	MaxMS    float64 `json:"max_ms"`
+	minValue time.Duration
+	avgValue time.Duration
+	p50Value time.Duration
+	p95Value time.Duration
+	p99Value time.Duration
+	maxValue time.Duration
 }
 
 func percentile(values []time.Duration, p float64) time.Duration {
@@ -834,13 +979,17 @@ func printLatencySummary(name string, summary latencySummary) {
 		"latency %s count=%d min=%s avg=%s p50=%s p95=%s p99=%s max=%s\n",
 		name,
 		summary.Count,
-		formatLatency(summary.Min),
-		formatLatency(summary.Avg),
-		formatLatency(summary.P50),
-		formatLatency(summary.P95),
-		formatLatency(summary.P99),
-		formatLatency(summary.Max),
+		summary.Min,
+		summary.Avg,
+		summary.P50,
+		summary.P95,
+		summary.P99,
+		summary.Max,
 	)
+}
+
+func durationMillis(value time.Duration) float64 {
+	return float64(value) / float64(time.Millisecond)
 }
 
 func formatLatency(value time.Duration) string {
@@ -905,6 +1054,25 @@ func printFailureSummary(items []reasonCount) {
 	for _, item := range items {
 		fmt.Printf("  %s=%d\n", item.Reason, item.Count)
 	}
+}
+
+func reasonCountsFromMap(items map[string]int64) []reasonCount {
+	if len(items) == 0 {
+		return nil
+	}
+
+	out := make([]reasonCount, 0, len(items))
+	for reason, count := range items {
+		out = append(out, reasonCount{Reason: reason, Count: count})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Count == out[j].Count {
+			return out[i].Reason < out[j].Reason
+		}
+		return out[i].Count > out[j].Count
+	})
+
+	return out
 }
 
 func codeFromHTTPResponse(status int, body []byte) string {
