@@ -161,6 +161,22 @@ go run ./cmd/loadreport \
   reports/loadtest-manual/*.json
 ```
 
+Compare a current report with a saved baseline:
+
+```bash
+mkdir -p reports/baseline
+cp reports/loadtest-manual/downlink.json reports/baseline/downlink.json
+
+go run ./cmd/loadcompare \
+  -base reports/baseline/downlink.json \
+  -current reports/loadtest-manual/downlink.json \
+  -output reports/loadtest-manual/compare.md
+```
+
+`cmd/loadcompare` compares QPS, error rate, p95, and p99 for reports with the
+same mode. Keep baselines local until you decide which numbers are stable enough
+to commit.
+
 Use threshold flags when you want the load test to behave like an acceptance
 check. The command exits with code 1 when any check fails, but still writes the
 JSON report first:

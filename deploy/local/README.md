@@ -69,6 +69,18 @@ go run ./cmd/loadreport \
   reports/loadtest-manual/*.json
 ```
 
+Save a stable report as a local baseline and compare future runs against it:
+
+```bash
+mkdir -p reports/baseline
+cp reports/loadtest-manual/upstream.json reports/baseline/upstream.json
+
+go run ./cmd/loadcompare \
+  -base reports/baseline/upstream.json \
+  -current reports/loadtest-manual/upstream.json \
+  -output reports/loadtest-manual/compare.md
+```
+
 ## Manual Run
 
 Start local dependencies:
