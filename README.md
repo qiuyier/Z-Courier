@@ -129,7 +129,8 @@ integration gateway, then runs conservative upstream and downlink threshold
 checks. Reports are written to `reports/loadtest-smoke/`.
 
 GitHub Actions also runs this smoke check after validation. The JSON reports and
-gateway log are uploaded as the `loadtest-smoke-reports` artifact.
+gateway log are uploaded as the `loadtest-smoke-reports` artifact. The workflow
+also writes a Markdown summary directly into the GitHub Actions summary page.
 
 Run a larger manual load test locally with the same script used by the manual
 GitHub Actions workflow:
@@ -149,7 +150,16 @@ LOADTEST_MAX_ERROR_RATE=0.01 \
 
 In GitHub Actions, open **Manual Load Test**, choose **Run workflow**, then set
 the same inputs there. The report and gateway log are uploaded as an artifact
-named `manual-loadtest-<mode>`.
+named `manual-loadtest-<mode>`, and a Markdown summary is shown on the workflow
+run page.
+
+Convert existing JSON reports into Markdown locally:
+
+```bash
+go run ./cmd/loadreport \
+  -output reports/loadtest-manual/summary.md \
+  reports/loadtest-manual/*.json
+```
 
 Use threshold flags when you want the load test to behave like an acceptance
 check. The command exits with code 1 when any check fails, but still writes the

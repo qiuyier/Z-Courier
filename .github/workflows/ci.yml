@@ -114,6 +114,16 @@ jobs:
       - name: Run load test smoke verifier
         run: bash scripts/loadtest_smoke.sh
 
+      - name: Summarize load test smoke reports
+        if: always()
+        run: |
+          if compgen -G "reports/loadtest-smoke/*.json" >/dev/null; then
+            go run ./cmd/loadreport -output reports/loadtest-smoke/summary.md reports/loadtest-smoke/*.json
+            cat reports/loadtest-smoke/summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No load test smoke reports were generated." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Upload load test smoke reports
         if: always()
         uses: actions/upload-artifact@v6
@@ -121,6 +131,7 @@ jobs:
           name: loadtest-smoke-reports
           path: |
             reports/loadtest-smoke/*.json
+            reports/loadtest-smoke/summary.md
             log/loadtest-smoke-gateway.log
           if-no-files-found: warn
 

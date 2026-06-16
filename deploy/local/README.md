@@ -60,7 +60,14 @@ LOADTEST_MIN_QPS=1 \
 ```
 
 Reports are written to `reports/loadtest-manual/`, and the gateway log is
-written to `log/loadtest-manual-gateway.log`.
+written to `log/loadtest-manual-gateway.log`. Convert JSON reports into a
+Markdown summary with:
+
+```bash
+go run ./cmd/loadreport \
+  -output reports/loadtest-manual/summary.md \
+  reports/loadtest-manual/*.json
+```
 
 ## Manual Run
 

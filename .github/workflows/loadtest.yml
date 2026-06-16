@@ -86,6 +86,16 @@ jobs:
       - name: Run manual load test
         run: bash scripts/loadtest_manual.sh
 
+      - name: Summarize load test report
+        if: always()
+        run: |
+          if compgen -G "reports/loadtest-manual/*.json" >/dev/null; then
+            go run ./cmd/loadreport -output reports/loadtest-manual/summary.md reports/loadtest-manual/*.json
+            cat reports/loadtest-manual/summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No manual load test reports were generated." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Upload load test report
         if: always()
         uses: actions/upload-artifact@v6
@@ -93,6 +103,7 @@ jobs:
           name: manual-loadtest-${{ inputs.mode }}
           path: |
             reports/loadtest-manual/*.json
+            reports/loadtest-manual/summary.md
             log/loadtest-manual-gateway.log
           if-no-files-found: warn
 
