@@ -265,6 +265,78 @@ func TestDiscardSendsInternalDiscardRequest(t *testing.T) {
 	}
 }
 
+func TestRouteSendsInternalDebugRouteRequest(t *testing.T) {
+	var gotReq *http.Request
+	var gotBody []byte
+	stubHTTPClient(t, http.StatusOK, `{"code":"ok","local_session_found":true}`, &gotReq, &gotBody)
+
+	err := route(routeConfig{
+		InternalURL:   "http://gateway-a:18182/",
+		InternalToken: "secret",
+		ClientID:      "client-1",
+		DeviceID:      "device-1",
+		Timeout:       time.Second,
+	})
+	if err != nil {
+		t.Fatalf("route() error = %v", err)
+	}
+
+	if gotReq == nil {
+		t.Fatal("request was not sent")
+	}
+	if gotReq.Method != http.MethodGet {
+		t.Fatalf("method = %s, want GET", gotReq.Method)
+	}
+	if gotReq.URL.Path != "/internal/debug/route" {
+		t.Fatalf("path = %s, want /internal/debug/route", gotReq.URL.Path)
+	}
+	if gotReq.URL.Query().Get("client_id") != "client-1" || gotReq.URL.Query().Get("device_id") != "device-1" {
+		t.Fatalf("query = %s, want client/device", gotReq.URL.RawQuery)
+	}
+	if gotReq.Header.Get(downlink.InternalTokenHeader) != "secret" {
+		t.Fatalf("internal token header = %q, want secret", gotReq.Header.Get(downlink.InternalTokenHeader))
+	}
+	if len(gotBody) != 0 {
+		t.Fatalf("body length = %d, want 0", len(gotBody))
+	}
+}
+
+func TestSessionsSendsInternalDebugSessionsRequest(t *testing.T) {
+	var gotReq *http.Request
+	var gotBody []byte
+	stubHTTPClient(t, http.StatusOK, `{"code":"ok","total":1}`, &gotReq, &gotBody)
+
+	err := sessions(sessionsConfig{
+		InternalURL:   "http://gateway-a:18182/",
+		InternalToken: "secret",
+		ClientID:      "client-1",
+		Limit:         25,
+		Timeout:       time.Second,
+	})
+	if err != nil {
+		t.Fatalf("sessions() error = %v", err)
+	}
+
+	if gotReq == nil {
+		t.Fatal("request was not sent")
+	}
+	if gotReq.Method != http.MethodGet {
+		t.Fatalf("method = %s, want GET", gotReq.Method)
+	}
+	if gotReq.URL.Path != "/internal/debug/sessions" {
+		t.Fatalf("path = %s, want /internal/debug/sessions", gotReq.URL.Path)
+	}
+	if gotReq.URL.Query().Get("client_id") != "client-1" || gotReq.URL.Query().Get("limit") != "25" {
+		t.Fatalf("query = %s, want client_id and limit", gotReq.URL.RawQuery)
+	}
+	if gotReq.Header.Get(downlink.InternalTokenHeader) != "secret" {
+		t.Fatalf("internal token header = %q, want secret", gotReq.Header.Get(downlink.InternalTokenHeader))
+	}
+	if len(gotBody) != 0 {
+		t.Fatalf("body length = %d, want 0", len(gotBody))
+	}
+}
+
 func stubHTTPClient(t *testing.T, status int, body string, gotReq **http.Request, gotBody *[]byte) {
 	t.Helper()
 

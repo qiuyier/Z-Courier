@@ -174,7 +174,7 @@ func renderMarkdown(reports []reportFile) string {
 		summary := report.Summary
 		latency := primaryLatency(summary)
 		b.WriteString(fmt.Sprintf(
-			"| %s | %s | %t | %.2f | %.2f%% | %s | %s | %s | %s | %s | %d | %d |\n",
+			"| %s | %s | %t | %.2f | %.2f%% | %s | %s | %s | %s | %s | %d | %s |\n",
 			escapeCell(reportLabel(report.Path)),
 			escapeCell(summary.Mode),
 			summary.Passed,
@@ -186,7 +186,7 @@ func renderMarkdown(reports []reportFile) string {
 			escapeCell(emptyDash(summary.TargetDuration)),
 			formatIntCell(summary.Rate),
 			summary.Clients,
-			summary.MessagesPerClient,
+			formatMessagesCell(summary),
 		))
 	}
 
@@ -336,6 +336,14 @@ func formatIntCell(value int) string {
 	}
 
 	return fmt.Sprintf("%d", value)
+}
+
+func formatMessagesCell(summary loadSummary) string {
+	if strings.TrimSpace(summary.TargetDuration) != "" {
+		return "-"
+	}
+
+	return formatIntCell(summary.MessagesPerClient)
 }
 
 func emptyDash(value string) string {

@@ -34,6 +34,10 @@ func main() {
 		os.Exit(runRequeue(os.Args[2:]))
 	case len(os.Args) > 1 && os.Args[1] == "discard":
 		os.Exit(runDiscard(os.Args[2:]))
+	case len(os.Args) > 1 && os.Args[1] == "route":
+		os.Exit(runRoute(os.Args[2:]))
+	case len(os.Args) > 1 && os.Args[1] == "sessions":
+		os.Exit(runSessions(os.Args[2:]))
 	case len(os.Args) > 1 && os.Args[1] == "serve":
 		os.Exit(runServe(os.Args[2:]))
 	default:
@@ -149,6 +153,22 @@ type messageActionConfig struct {
 	InternalToken string
 	MessageID     string
 	Reason        string
+	Timeout       time.Duration
+}
+
+type routeConfig struct {
+	InternalURL   string
+	InternalToken string
+	ClientID      string
+	DeviceID      string
+	Timeout       time.Duration
+}
+
+type sessionsConfig struct {
+	InternalURL   string
+	InternalToken string
+	ClientID      string
+	Limit         int
 	Timeout       time.Duration
 }
 
@@ -300,6 +320,52 @@ func runDiscard(args []string) int {
 
 	if err := discard(config); err != nil {
 		fmt.Fprintf(os.Stderr, "discard failed: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+func runRoute(args []string) int {
+	fs := flag.NewFlagSet("route", flag.ExitOnError)
+	var config routeConfig
+	fs.StringVar(&config.InternalURL, "internal-url", "http://127.0.0.1:18082", "gateway internal HTTP base URL")
+	fs.StringVar(&config.InternalToken, "internal-token", "dev-internal-token", "gateway internal HTTP token")
+	fs.StringVar(&config.ClientID, "client-id", "", "client id")
+	fs.StringVar(&config.DeviceID, "device-id", "", "device id")
+	fs.DurationVar(&config.Timeout, "timeout", 10*time.Second, "route query timeout")
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: devbackend route -client-id client -device-id device [flags]\n")
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+
+	if err := route(config); err != nil {
+		fmt.Fprintf(os.Stderr, "route query failed: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+func runSessions(args []string) int {
+	fs := flag.NewFlagSet("sessions", flag.ExitOnError)
+	var config sessionsConfig
+	fs.StringVar(&config.InternalURL, "internal-url", "http://127.0.0.1:18082", "gateway internal HTTP base URL")
+	fs.StringVar(&config.InternalToken, "internal-token", "dev-internal-token", "gateway internal HTTP token")
+	fs.StringVar(&config.ClientID, "client-id", "", "optional client id filter")
+	fs.IntVar(&config.Limit, "limit", 100, "maximum sessions to return")
+	fs.DurationVar(&config.Timeout, "timeout", 10*time.Second, "sessions query timeout")
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: devbackend sessions [flags]\n")
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+
+	if err := sessions(config); err != nil {
+		fmt.Fprintf(os.Stderr, "sessions query failed: %v\n", err)
 		return 1
 	}
 	return 0
@@ -462,6 +528,67 @@ func requeue(config messageActionConfig) error {
 
 func discard(config messageActionConfig) error {
 	return messageAction(config, "/internal/message/discard")
+}
+
+func route(config routeConfig) error {
+	if config.InternalURL == "" {
+		return fmt.Errorf("internal-url is required")
+	}
+	if strings.TrimSpace(config.ClientID) == "" {
+		return fmt.Errorf("client-id is required")
+	}
+	if strings.TrimSpace(config.DeviceID) == "" {
+		return fmt.Errorf("device-id is required")
+	}
+
+	query := url.Values{}
+	query.Set("client_id", strings.TrimSpace(config.ClientID))
+	query.Set("device_id", strings.TrimSpace(config.DeviceID))
+	path := "/internal/debug/route?" + query.Encode()
+	statusCode, respBody, err := getJSON(config.InternalURL, path, config.InternalToken, config.Timeout)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("status=%d\n", statusCode)
+	if len(respBody) > 0 {
+		fmt.Printf("response=%s\n", string(respBody))
+	}
+
+	if statusCode < http.StatusOK || statusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("gateway returned status %d", statusCode)
+	}
+	return nil
+}
+
+func sessions(config sessionsConfig) error {
+	if config.InternalURL == "" {
+		return fmt.Errorf("internal-url is required")
+	}
+	if config.Limit <= 0 {
+		return fmt.Errorf("limit must be greater than 0")
+	}
+
+	query := url.Values{}
+	query.Set("limit", strconv.Itoa(config.Limit))
+	if strings.TrimSpace(config.ClientID) != "" {
+		query.Set("client_id", strings.TrimSpace(config.ClientID))
+	}
+	path := "/internal/debug/sessions?" + query.Encode()
+	statusCode, respBody, err := getJSON(config.InternalURL, path, config.InternalToken, config.Timeout)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("status=%d\n", statusCode)
+	if len(respBody) > 0 {
+		fmt.Printf("response=%s\n", string(respBody))
+	}
+
+	if statusCode < http.StatusOK || statusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("gateway returned status %d", statusCode)
+	}
+	return nil
 }
 
 func messageAction(config messageActionConfig, path string) error {

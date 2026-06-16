@@ -256,9 +256,15 @@ GET /internal/message/status
 GET /internal/messages
 POST /internal/message/requeue
 POST /internal/message/discard
+GET /internal/debug/route
+GET /internal/debug/sessions
 POST /internal/kick
-POST /internal/session/query
 ```
+
+`GET /internal/debug/route?client_id=...&device_id=...` returns the local
+session, if present, and the cluster online route, if cluster routing is enabled.
+`GET /internal/debug/sessions?client_id=...&limit=...` lists local sessions on
+the current gateway node.
 
 Downlink request envelope:
 

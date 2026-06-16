@@ -7,12 +7,13 @@ import (
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/qiuyier/Z-Courier/internal/capacity"
+	"github.com/qiuyier/Z-Courier/internal/cluster"
 	"github.com/qiuyier/Z-Courier/internal/downlink"
 	"github.com/qiuyier/Z-Courier/internal/metrics"
 	"go.uber.org/zap"
 )
 
-func newInternalHTTPServer(config Config, logger *zap.Logger, service *downlink.Service, health *gatewayHealth) *http.Server {
+func newInternalHTTPServer(config Config, logger *zap.Logger, service *downlink.Service, health *gatewayHealth, registry cluster.OnlineRegistry) *http.Server {
 	if config.DisableInternalHTTP || config.InternalHTTPAddr == "" || service == nil {
 		return nil
 	}
@@ -59,6 +60,8 @@ func newInternalHTTPServer(config Config, logger *zap.Logger, service *downlink.
 		MaxRequestBodySize: config.InternalMaxRequestBodySize,
 		Logger:             logger,
 	}))
+	mux.Handle("/internal/debug/route", newDebugRouteHandler(config, registry))
+	mux.Handle("/internal/debug/sessions", newDebugSessionsHandler(config))
 	if config.Cluster.Enabled {
 		mux.Handle(downlink.PeerPushPath, downlink.NewPeerHandler(downlink.PeerHandlerConfig{
 			Service:            service,

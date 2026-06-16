@@ -46,7 +46,7 @@ func TestRenderMarkdown(t *testing.T) {
 	markdown := renderMarkdown(reports)
 	for _, want := range []string{
 		"# Load Test Report",
-		"| reports/loadtest-manual/downlink.json | downlink | true | 49.70 | 1.00% | 20ms | 30ms | 1s | 1s | 50 | 10 | 5 |",
+		"| reports/loadtest-manual/downlink.json | downlink | true | 49.70 | 1.00% | 20ms | 30ms | 1s | 1s | 50 | 10 | - |",
 		"### reports/loadtest-manual/downlink.json",
 		"| min_qps | true | 49.7000 | >= 1.0000 | - |",
 		"## Failure Reasons",
@@ -55,6 +55,26 @@ func TestRenderMarkdown(t *testing.T) {
 		if !strings.Contains(markdown, want) {
 			t.Fatalf("markdown missing %q:\n%s", want, markdown)
 		}
+	}
+}
+
+func TestRenderMarkdownKeepsMessagesForOneShotRuns(t *testing.T) {
+	reports := []reportFile{{
+		Path: "reports/loadtest-smoke/upstream.json",
+		Summary: loadSummary{
+			Mode:              "upstream",
+			Clients:           2,
+			MessagesPerClient: 5,
+			Duration:          "100ms",
+			QPS:               100,
+			Passed:            true,
+		},
+	}}
+
+	markdown := renderMarkdown(reports)
+	want := "| reports/loadtest-smoke/upstream.json | upstream | true | 100.00 | 0.00% | - | - | 100ms | - | - | 2 | 5 |"
+	if !strings.Contains(markdown, want) {
+		t.Fatalf("markdown missing %q:\n%s", want, markdown)
 	}
 }
 

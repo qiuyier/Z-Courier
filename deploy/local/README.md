@@ -155,6 +155,25 @@ go run ./cmd/devbackend status \
   -message-id devbackend-push-...
 ```
 
+Query where a client/device is currently routed:
+
+```bash
+go run ./cmd/devbackend route \
+  -internal-url http://127.0.0.1:18182 \
+  -internal-token dev-internal-token \
+  -client-id e2e-client \
+  -device-id e2e-device
+```
+
+List local sessions on a gateway node:
+
+```bash
+go run ./cmd/devbackend sessions \
+  -internal-url http://127.0.0.1:18182 \
+  -internal-token dev-internal-token \
+  -client-id e2e-client
+```
+
 List failed messages and manually handle one:
 
 ```bash

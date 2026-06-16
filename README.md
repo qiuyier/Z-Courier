@@ -468,7 +468,7 @@ scrape-target details.
 ## Project Structure
 - `cmd/gateway`: Gateway entry point
 - `cmd/devclient`: Development client for manual end-to-end testing
-- `cmd/devbackend`: Development backend for upstream forwarding tests
+- `cmd/devbackend`: Development backend and internal API debugging CLI
 - `configs`: Z-Courier gateway configuration
 - `conf`: Zinx runtime configuration
 - `deploy`: Local deployment examples such as monitoring

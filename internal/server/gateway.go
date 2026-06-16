@@ -97,7 +97,7 @@ func New(config Config, logger *zap.Logger) (*Gateway, error) {
 		health:                 health,
 		clusterRegistry:        clusterRegistry,
 		clusterRegistryCloser:  clusterRegistryCloser,
-		internalHTTP:           newInternalHTTPServer(config, logger, downlinkService, health),
+		internalHTTP:           newInternalHTTPServer(config, logger, downlinkService, health, clusterRegistry),
 		upstream:               upstream,
 		downlink:               downlinkService,
 		downlinkCloser:         downlinkCloser,
