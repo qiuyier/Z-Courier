@@ -79,6 +79,9 @@ func TestBuildSummary(t *testing.T) {
 	if summary.QPS != 63.5 {
 		t.Fatalf("QPS = %v, want 63.5", summary.QPS)
 	}
+	if !summary.Passed {
+		t.Fatalf("Passed = false, want true")
+	}
 	if summary.Counts.DownlinkSuccess != 123 || summary.Counts.DownlinkRejected != 4 || summary.Counts.SendErrors != 2 {
 		t.Fatalf("counts = %+v", summary.Counts)
 	}
@@ -87,6 +90,90 @@ func TestBuildSummary(t *testing.T) {
 	}
 	if summary.Failures["overloaded"] != 2 {
 		t.Fatalf("failures = %+v, want overloaded=2", summary.Failures)
+	}
+}
+
+func TestBuildSummaryThresholdChecksPass(t *testing.T) {
+	cfg := config{
+		Mode:            "downlink",
+		Clients:         10,
+		HTTPConcurrency: 5,
+		MinQPS:          90,
+		MaxP95MS:        10,
+		MaxP99MS:        10,
+		MaxErrorRate:    0.02,
+		MaxErrorRateSet: true,
+	}
+	counts := &counters{}
+	counts.downlinkSuccess.Store(99)
+	counts.downlinkRejected.Store(1)
+	counts.downlinkLatency.Record(8 * time.Millisecond)
+
+	summary := buildSummary(cfg, counts, time.Second, nil)
+	if !summary.Passed {
+		t.Fatalf("Passed = false, want true; checks=%+v", summary.Checks)
+	}
+	if summary.ErrorRate != 0.01 {
+		t.Fatalf("ErrorRate = %v, want 0.01", summary.ErrorRate)
+	}
+	if len(summary.Checks) != 4 {
+		t.Fatalf("len(checks) = %d, want 4", len(summary.Checks))
+	}
+	for _, check := range summary.Checks {
+		if !check.Passed {
+			t.Fatalf("check %+v failed, want all pass", check)
+		}
+	}
+}
+
+func TestBuildSummaryThresholdChecksFail(t *testing.T) {
+	cfg := config{
+		Mode:            "downlink",
+		MinQPS:          200,
+		MaxP95MS:        1,
+		MaxErrorRate:    0,
+		MaxErrorRateSet: true,
+	}
+	counts := &counters{}
+	counts.downlinkSuccess.Store(99)
+	counts.downlinkRejected.Store(1)
+	counts.downlinkLatency.Record(8 * time.Millisecond)
+
+	summary := buildSummary(cfg, counts, time.Second, nil)
+	if summary.Passed {
+		t.Fatalf("Passed = true, want false; checks=%+v", summary.Checks)
+	}
+	if !summary.hasFailedChecks() {
+		t.Fatalf("hasFailedChecks() = false, want true")
+	}
+	failed := map[string]bool{}
+	for _, check := range summary.Checks {
+		if !check.Passed {
+			failed[check.Name] = true
+		}
+	}
+	if !failed["min_qps"] || !failed["max_p95_ms"] || !failed["max_error_rate"] {
+		t.Fatalf("failed checks = %+v, want min_qps/max_p95_ms/max_error_rate", failed)
+	}
+}
+
+func TestBuildSummaryMissingLatencyThresholdFails(t *testing.T) {
+	cfg := config{
+		Mode:     "upstream",
+		MaxP95MS: 10,
+	}
+	counts := &counters{}
+	counts.upstreamAccepted.Store(1)
+
+	summary := buildSummary(cfg, counts, time.Second, nil)
+	if summary.Passed {
+		t.Fatalf("Passed = true, want false")
+	}
+	if len(summary.Checks) != 1 {
+		t.Fatalf("len(checks) = %d, want 1", len(summary.Checks))
+	}
+	if summary.Checks[0].Passed || summary.Checks[0].Reason == "" {
+		t.Fatalf("check = %+v, want failed check with reason", summary.Checks[0])
 	}
 }
 

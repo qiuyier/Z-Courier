@@ -118,6 +118,28 @@ and sends `clients * messages` messages.
 Pass `-report` to save the same summary as JSON. Missing report directories are
 created automatically.
 
+Use threshold flags when you want the load test to behave like an acceptance
+check. The command exits with code 1 when any check fails, but still writes the
+JSON report first:
+
+```bash
+go run ./cmd/loadtest \
+  -mode downlink \
+  -internal-url http://127.0.0.1:18182 \
+  -duration 60s \
+  -rate 500 \
+  -clients 100 \
+  -http-concurrency 100 \
+  -min-qps 450 \
+  -max-p95-ms 50 \
+  -max-p99-ms 100 \
+  -max-error-rate 0.01 \
+  -report reports/loadtest-downlink.json
+```
+
+`-max-error-rate 0` means no failures are allowed. The error rate is reported as
+a fraction, so `0.01` means 1%.
+
 For real online downlink delivery, keep matching clients connected first. Without
 online clients, the gateway still accepts the request and writes the offline
 retry path when storage is enabled.

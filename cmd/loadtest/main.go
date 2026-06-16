@@ -44,6 +44,11 @@ type config struct {
 	RunDuration       time.Duration
 	Rate              int
 	ReportPath        string
+	MinQPS            float64
+	MaxP95MS          float64
+	MaxP99MS          float64
+	MaxErrorRate      float64
+	MaxErrorRateSet   bool
 	EnableZinxLog     bool
 }
 
@@ -94,6 +99,10 @@ func main() {
 		fmt.Fprintf(os.Stderr, "loadtest failed: %v\n", err)
 		os.Exit(1)
 	}
+	if summary.hasFailedChecks() {
+		fmt.Fprintln(os.Stderr, "loadtest checks failed")
+		os.Exit(1)
+	}
 }
 
 func parseFlags() config {
@@ -117,6 +126,10 @@ func parseFlags() config {
 	fs.DurationVar(&cfg.RunDuration, "duration", 0, "continuous load duration; 0 sends clients*messages and exits")
 	fs.IntVar(&cfg.Rate, "rate", 0, "target messages per second in duration mode")
 	fs.StringVar(&cfg.ReportPath, "report", "", "write JSON load test report to this path")
+	fs.Float64Var(&cfg.MinQPS, "min-qps", 0, "fail if achieved QPS is below this value")
+	fs.Float64Var(&cfg.MaxP95MS, "max-p95-ms", 0, "fail if primary latency p95 exceeds this value in milliseconds")
+	fs.Float64Var(&cfg.MaxP99MS, "max-p99-ms", 0, "fail if primary latency p99 exceeds this value in milliseconds")
+	fs.Float64Var(&cfg.MaxErrorRate, "max-error-rate", 0, "fail if overall error rate exceeds this fraction, e.g. 0.01 for 1%; disabled unless set")
 	fs.BoolVar(&cfg.EnableZinxLog, "zinx-log", false, "enable Zinx internal logs")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: loadtest [flags]\n")
@@ -125,6 +138,11 @@ func parseFlags() config {
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		os.Exit(2)
 	}
+	fs.Visit(func(parsedFlag *flag.Flag) {
+		if parsedFlag.Name == "max-error-rate" {
+			cfg.MaxErrorRateSet = true
+		}
+	})
 
 	if cfg.Clients <= 0 {
 		cfg.Clients = 1
@@ -147,6 +165,22 @@ func parseFlags() config {
 	}
 	if cfg.DurationMode() && cfg.Rate <= 0 {
 		fmt.Fprintln(os.Stderr, "-rate must be greater than 0 when -duration is set")
+		os.Exit(2)
+	}
+	if cfg.MinQPS < 0 {
+		fmt.Fprintln(os.Stderr, "-min-qps must be greater than or equal to 0")
+		os.Exit(2)
+	}
+	if cfg.MaxP95MS < 0 {
+		fmt.Fprintln(os.Stderr, "-max-p95-ms must be greater than or equal to 0")
+		os.Exit(2)
+	}
+	if cfg.MaxP99MS < 0 {
+		fmt.Fprintln(os.Stderr, "-max-p99-ms must be greater than or equal to 0")
+		os.Exit(2)
+	}
+	if cfg.MaxErrorRateSet && (cfg.MaxErrorRate < 0 || cfg.MaxErrorRate > 1) {
+		fmt.Fprintln(os.Stderr, "-max-error-rate must be between 0 and 1")
 		os.Exit(2)
 	}
 
@@ -721,9 +755,12 @@ type summary struct {
 	TargetDuration    string                    `json:"target_duration,omitempty"`
 	Rate              int                       `json:"rate,omitempty"`
 	QPS               float64                   `json:"qps"`
+	ErrorRate         float64                   `json:"error_rate"`
 	Counts            summaryCounts             `json:"counts"`
 	Latency           map[string]latencySummary `json:"latency,omitempty"`
 	Failures          map[string]int64          `json:"failures,omitempty"`
+	Checks            []thresholdCheck          `json:"checks,omitempty"`
+	Passed            bool                      `json:"passed"`
 	Error             string                    `json:"error,omitempty"`
 }
 
@@ -736,6 +773,15 @@ type summaryCounts struct {
 	DownlinkRejected int64 `json:"downlink_rejected"`
 	SendErrors       int64 `json:"send_errors"`
 	DecodeErrors     int64 `json:"decode_errors"`
+}
+
+type thresholdCheck struct {
+	Name     string  `json:"name"`
+	Passed   bool    `json:"passed"`
+	Actual   float64 `json:"actual"`
+	Expected float64 `json:"expected"`
+	Operator string  `json:"operator"`
+	Reason   string  `json:"reason,omitempty"`
 }
 
 func buildSummary(cfg config, counts *counters, duration time.Duration, runErr error) summary {
@@ -775,8 +821,116 @@ func buildSummary(cfg config, counts *counters, duration time.Duration, runErr e
 	if runErr != nil {
 		out.Error = runErr.Error()
 	}
+	out.ErrorRate = summaryErrorRate(out)
+	out.Checks = evaluateChecks(cfg, out)
+	out.Passed = runErr == nil && !hasFailedChecks(out.Checks)
 
 	return out
+}
+
+func summaryErrorRate(summary summary) float64 {
+	total := summary.Counts.BindAccepted +
+		summary.Counts.BindRejected +
+		summary.Counts.UpstreamAccepted +
+		summary.Counts.UpstreamRejected +
+		summary.Counts.DownlinkSuccess +
+		summary.Counts.DownlinkRejected
+	errors := summary.Counts.BindRejected +
+		summary.Counts.UpstreamRejected +
+		summary.Counts.DownlinkRejected +
+		summary.Counts.SendErrors +
+		summary.Counts.DecodeErrors
+	if total == 0 {
+		total = errors
+	}
+	if total == 0 {
+		return 0
+	}
+	if errors > total {
+		total = errors
+	}
+
+	return float64(errors) / float64(total)
+}
+
+func evaluateChecks(cfg config, summary summary) []thresholdCheck {
+	var checks []thresholdCheck
+	if cfg.MinQPS > 0 {
+		checks = append(checks, thresholdCheck{
+			Name:     "min_qps",
+			Passed:   summary.QPS >= cfg.MinQPS,
+			Actual:   summary.QPS,
+			Expected: cfg.MinQPS,
+			Operator: ">=",
+		})
+	}
+	if cfg.MaxErrorRateSet {
+		checks = append(checks, thresholdCheck{
+			Name:     "max_error_rate",
+			Passed:   summary.ErrorRate <= cfg.MaxErrorRate,
+			Actual:   summary.ErrorRate,
+			Expected: cfg.MaxErrorRate,
+			Operator: "<=",
+		})
+	}
+	if cfg.MaxP95MS > 0 {
+		checks = append(checks, latencyThresholdCheck("max_p95_ms", summary, cfg.MaxP95MS, func(latency latencySummary) float64 {
+			return latency.P95MS
+		}))
+	}
+	if cfg.MaxP99MS > 0 {
+		checks = append(checks, latencyThresholdCheck("max_p99_ms", summary, cfg.MaxP99MS, func(latency latencySummary) float64 {
+			return latency.P99MS
+		}))
+	}
+
+	return checks
+}
+
+func latencyThresholdCheck(name string, summary summary, expected float64, value func(latencySummary) float64) thresholdCheck {
+	latencyName := primaryLatencyName(summary.Mode)
+	latency, ok := summary.Latency[latencyName]
+	if !ok || latency.Count == 0 {
+		return thresholdCheck{
+			Name:     name,
+			Passed:   false,
+			Expected: expected,
+			Operator: "<=",
+			Reason:   fmt.Sprintf("%s latency sample unavailable", latencyName),
+		}
+	}
+
+	actual := value(latency)
+	return thresholdCheck{
+		Name:     name,
+		Passed:   actual <= expected,
+		Actual:   actual,
+		Expected: expected,
+		Operator: "<=",
+	}
+}
+
+func primaryLatencyName(mode string) string {
+	switch mode {
+	case "downlink":
+		return "downlink_http"
+	default:
+		return "upstream_ack"
+	}
+}
+
+func (summary summary) hasFailedChecks() bool {
+	return hasFailedChecks(summary.Checks)
+}
+
+func hasFailedChecks(checks []thresholdCheck) bool {
+	for _, check := range checks {
+		if !check.Passed {
+			return true
+		}
+	}
+
+	return false
 }
 
 func latencySummaries(counts *counters) map[string]latencySummary {
@@ -820,12 +974,33 @@ func printSummary(summary summary) {
 	fmt.Printf("upstream accepted=%d rejected=%d\n", summary.Counts.UpstreamAccepted, summary.Counts.UpstreamRejected)
 	fmt.Printf("downlink success=%d rejected=%d\n", summary.Counts.DownlinkSuccess, summary.Counts.DownlinkRejected)
 	fmt.Printf("errors send=%d decode=%d\n", summary.Counts.SendErrors, summary.Counts.DecodeErrors)
+	fmt.Printf("error_rate=%.4f passed=%t\n", summary.ErrorRate, summary.Passed)
 	printLatencySummary("bind_ack", summary.Latency["bind_ack"])
 	printLatencySummary("upstream_ack", summary.Latency["upstream_ack"])
 	printLatencySummary("downlink_http", summary.Latency["downlink_http"])
 	printFailureSummary(reasonCountsFromMap(summary.Failures))
+	printCheckSummary(summary.Checks)
 	if summary.Error != "" {
 		fmt.Printf("error=%s\n", summary.Error)
+	}
+}
+
+func printCheckSummary(checks []thresholdCheck) {
+	if len(checks) == 0 {
+		return
+	}
+
+	fmt.Println("checks:")
+	for _, check := range checks {
+		status := "PASS"
+		if !check.Passed {
+			status = "FAIL"
+		}
+		reason := ""
+		if check.Reason != "" {
+			reason = " reason=" + check.Reason
+		}
+		fmt.Printf("  %s %s actual=%.4f expected%s%.4f%s\n", status, check.Name, check.Actual, check.Operator, check.Expected, reason)
 	}
 }
 
