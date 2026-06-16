@@ -118,6 +118,16 @@ and sends `clients * messages` messages.
 Pass `-report` to save the same summary as JSON. Missing report directories are
 created automatically.
 
+Run a local load-test smoke check:
+
+```bash
+bash scripts/loadtest_smoke.sh
+```
+
+The smoke script starts the local PostgreSQL and NSQ dependencies, starts one
+integration gateway, then runs conservative upstream and downlink threshold
+checks. Reports are written to `reports/loadtest-smoke/`.
+
 Use threshold flags when you want the load test to behave like an acceptance
 check. The command exits with code 1 when any check fails, but still writes the
 JSON report first:

@@ -36,6 +36,18 @@ message to the client on `gateway-b`. The cluster config uses a short Redis
 route TTL and waits before the online push, so the test also verifies the
 gateway-side route refresher keeps quiet clients discoverable.
 
+Run the local load-test smoke verifier:
+
+```bash
+bash scripts/loadtest_smoke.sh
+```
+
+It starts PostgreSQL and NSQ, starts one integration gateway, then runs
+conservative upstream and downlink `cmd/loadtest` checks with JSON reports in
+`reports/loadtest-smoke/`. The downlink smoke targets `/internal/push`; it
+checks internal HTTP acceptance and storage/queueing behavior rather than
+real online client delivery.
+
 ## Manual Run
 
 Start local dependencies:
