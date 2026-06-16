@@ -1,0 +1,112 @@
+name: Manual Load Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Load mode"
+        required: true
+        default: "downlink"
+        type: choice
+        options:
+          - upstream
+          - downlink
+      clients:
+        description: "Number of simulated clients"
+        required: true
+        default: "100"
+      messages:
+        description: "Messages per client in finite mode"
+        required: true
+        default: "10"
+      duration:
+        description: "Sustained load duration, or 0 for finite mode"
+        required: true
+        default: "60s"
+      rate:
+        description: "Target messages per second when duration is non-zero"
+        required: true
+        default: "100"
+      http_concurrency:
+        description: "Downlink HTTP worker concurrency"
+        required: true
+        default: "50"
+      body_size:
+        description: "Message body size in bytes"
+        required: true
+        default: "128"
+      min_qps:
+        description: "Fail when QPS is below this value"
+        required: true
+        default: "1"
+      max_p95_ms:
+        description: "Fail when primary p95 latency exceeds this many ms"
+        required: true
+        default: "5000"
+      max_p99_ms:
+        description: "Fail when primary p99 latency exceeds this many ms"
+        required: true
+        default: "10000"
+      max_error_rate:
+        description: "Fail when error rate exceeds this fraction"
+        required: true
+        default: "0.01"
+
+permissions:
+  contents: read
+
+jobs:
+  loadtest:
+    name: Load Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      LOADTEST_MODE: ${{ inputs.mode }}
+      LOADTEST_CLIENTS: ${{ inputs.clients }}
+      LOADTEST_MESSAGES: ${{ inputs.messages }}
+      LOADTEST_DURATION: ${{ inputs.duration }}
+      LOADTEST_RATE: ${{ inputs.rate }}
+      LOADTEST_HTTP_CONCURRENCY: ${{ inputs.http_concurrency }}
+      LOADTEST_BODY_SIZE: ${{ inputs.body_size }}
+      LOADTEST_MIN_QPS: ${{ inputs.min_qps }}
+      LOADTEST_MAX_P95_MS: ${{ inputs.max_p95_ms }}
+      LOADTEST_MAX_P99_MS: ${{ inputs.max_p99_ms }}
+      LOADTEST_MAX_ERROR_RATE: ${{ inputs.max_error_rate }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run manual load test
+        run: bash scripts/loadtest_manual.sh
+
+      - name: Upload load test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: manual-loadtest-${{ inputs.mode }}
+          path: |
+            reports/loadtest-manual/*.json
+            log/loadtest-manual-gateway.log
+          if-no-files-found: warn
+
+      - name: Dump Docker logs on failure
+        if: failure()
+        run: docker compose -f deploy/local/docker-compose.yml logs --no-color
+
+      - name: Dump gateway log on failure
+        if: failure()
+        run: |
+          if [ -f log/loadtest-manual-gateway.log ]; then
+            tail -n 300 log/loadtest-manual-gateway.log || true
+          fi
+
+      - name: Cleanup local integration stack
+        if: always()
+        run: docker compose -f deploy/local/docker-compose.yml down -v

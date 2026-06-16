@@ -131,6 +131,26 @@ checks. Reports are written to `reports/loadtest-smoke/`.
 GitHub Actions also runs this smoke check after validation. The JSON reports and
 gateway log are uploaded as the `loadtest-smoke-reports` artifact.
 
+Run a larger manual load test locally with the same script used by the manual
+GitHub Actions workflow:
+
+```bash
+LOADTEST_MODE=downlink \
+LOADTEST_DURATION=60s \
+LOADTEST_RATE=500 \
+LOADTEST_CLIENTS=100 \
+LOADTEST_HTTP_CONCURRENCY=100 \
+LOADTEST_MIN_QPS=450 \
+LOADTEST_MAX_P95_MS=50 \
+LOADTEST_MAX_P99_MS=100 \
+LOADTEST_MAX_ERROR_RATE=0.01 \
+  bash scripts/loadtest_manual.sh
+```
+
+In GitHub Actions, open **Manual Load Test**, choose **Run workflow**, then set
+the same inputs there. The report and gateway log are uploaded as an artifact
+named `manual-loadtest-<mode>`.
+
 Use threshold flags when you want the load test to behave like an acceptance
 check. The command exits with code 1 when any check fails, but still writes the
 JSON report first:

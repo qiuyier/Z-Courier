@@ -48,6 +48,20 @@ conservative upstream and downlink `cmd/loadtest` checks with JSON reports in
 checks internal HTTP acceptance and storage/queueing behavior rather than
 real online client delivery.
 
+Run the same manual load-test path used by GitHub Actions:
+
+```bash
+LOADTEST_MODE=upstream \
+LOADTEST_DURATION=30s \
+LOADTEST_RATE=200 \
+LOADTEST_CLIENTS=100 \
+LOADTEST_MIN_QPS=1 \
+  bash scripts/loadtest_manual.sh
+```
+
+Reports are written to `reports/loadtest-manual/`, and the gateway log is
+written to `log/loadtest-manual-gateway.log`.
+
 ## Manual Run
 
 Start local dependencies:
