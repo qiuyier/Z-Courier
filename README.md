@@ -128,6 +128,9 @@ The smoke script starts the local PostgreSQL and NSQ dependencies, starts one
 integration gateway, then runs conservative upstream and downlink threshold
 checks. Reports are written to `reports/loadtest-smoke/`.
 
+GitHub Actions also runs this smoke check after validation. The JSON reports and
+gateway log are uploaded as the `loadtest-smoke-reports` artifact.
+
 Use threshold flags when you want the load test to behave like an acceptance
 check. The command exits with code 1 when any check fails, but still writes the
 JSON report first:

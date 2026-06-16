@@ -33,6 +33,9 @@ jobs:
       - name: Test
         run: go test ./...
 
+      - name: Validate shell scripts
+        run: bash -n scripts/*.sh
+
       - name: Validate Docker Compose configs
         run: |
           docker compose -f deploy/local/docker-compose.yml config
@@ -78,6 +81,59 @@ jobs:
               echo "::endgroup::"
             fi
           done
+
+      - name: Cleanup local integration stack
+        if: always()
+        run: docker compose -f deploy/local/docker-compose.yml down -v
+
+  loadtest-smoke:
+    name: Load Test Smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs:
+      - validate
+    env:
+      LOADTEST_SMOKE_UPSTREAM_MIN_QPS: "1"
+      LOADTEST_SMOKE_DOWNLINK_MIN_QPS: "1"
+      LOADTEST_SMOKE_MAX_ERROR_RATE: "0"
+      LOADTEST_SMOKE_UPSTREAM_MAX_P95_MS: "5000"
+      LOADTEST_SMOKE_UPSTREAM_MAX_P99_MS: "10000"
+      LOADTEST_SMOKE_DOWNLINK_MAX_P95_MS: "5000"
+      LOADTEST_SMOKE_DOWNLINK_MAX_P99_MS: "10000"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run load test smoke verifier
+        run: bash scripts/loadtest_smoke.sh
+
+      - name: Upload load test smoke reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: loadtest-smoke-reports
+          path: |
+            reports/loadtest-smoke/*.json
+            log/loadtest-smoke-gateway.log
+          if-no-files-found: warn
+
+      - name: Dump Docker logs on failure
+        if: failure()
+        run: docker compose -f deploy/local/docker-compose.yml logs --no-color
+
+      - name: Dump gateway log on failure
+        if: failure()
+        run: |
+          if [ -f log/loadtest-smoke-gateway.log ]; then
+            tail -n 300 log/loadtest-smoke-gateway.log || true
+          fi
 
       - name: Cleanup local integration stack
         if: always()
