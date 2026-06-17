@@ -557,6 +557,6 @@ tag should be release quality work rather than new core gateway behavior:
 refresh README and local deployment docs
 run CI from a clean push
 review Grafana dashboard panels against current metric names
-wire optional load baseline comparison into GitHub Actions as summary/warning
+choose and commit stable load-test baseline reports when ready
 write release notes for the chosen version tag
 ```

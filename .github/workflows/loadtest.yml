@@ -92,6 +92,29 @@ jobs:
           if compgen -G "reports/loadtest-manual/*.json" >/dev/null; then
             go run ./cmd/loadreport -output reports/loadtest-manual/summary.md reports/loadtest-manual/*.json
             cat reports/loadtest-manual/summary.md >> "$GITHUB_STEP_SUMMARY"
+            {
+              echo ""
+              echo "## Baseline Comparison"
+            } >> "$GITHUB_STEP_SUMMARY"
+            for current in reports/loadtest-manual/*.json; do
+              mode="$(basename "$current" .json)"
+              base="reports/baseline/loadtest-manual/${mode}.json"
+              fallback_base="reports/baseline/${mode}.json"
+              if [ ! -f "$base" ] && [ -f "$fallback_base" ]; then
+                base="$fallback_base"
+              fi
+              output="reports/loadtest-manual/compare-${mode}.md"
+              if [ -f "$base" ]; then
+                if go run ./cmd/loadcompare -base "$base" -current "$current" -output "$output"; then
+                  cat "$output" >> "$GITHUB_STEP_SUMMARY"
+                else
+                  echo "::warning::Load test baseline comparison failed for ${mode}"
+                  echo "- Comparison failed for \`${mode}\`; see job logs." >> "$GITHUB_STEP_SUMMARY"
+                fi
+              else
+                echo "- No baseline found for \`${mode}\` at \`reports/baseline/loadtest-manual/${mode}.json\` or \`${fallback_base}\`; skipping comparison." >> "$GITHUB_STEP_SUMMARY"
+              fi
+            done
           else
             echo "No manual load test reports were generated." >> "$GITHUB_STEP_SUMMARY"
           fi
@@ -104,6 +127,7 @@ jobs:
           path: |
             reports/loadtest-manual/*.json
             reports/loadtest-manual/summary.md
+            reports/loadtest-manual/compare-*.md
             log/loadtest-manual-gateway.log
           if-no-files-found: warn
 

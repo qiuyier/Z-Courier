@@ -214,18 +214,21 @@ go run ./cmd/loadreport \
 Compare a current report with a saved baseline:
 
 ```bash
-mkdir -p reports/baseline
-cp reports/loadtest-manual/downlink.json reports/baseline/downlink.json
+mkdir -p reports/baseline/loadtest-manual
+cp reports/loadtest-manual/downlink.json reports/baseline/loadtest-manual/downlink.json
 
 go run ./cmd/loadcompare \
-  -base reports/baseline/downlink.json \
+  -base reports/baseline/loadtest-manual/downlink.json \
   -current reports/loadtest-manual/downlink.json \
   -output reports/loadtest-manual/compare.md
 ```
 
 `cmd/loadcompare` compares QPS, error rate, p95, and p99 for reports with the
-same mode. Keep baselines local until you decide which numbers are stable enough
-to commit.
+same mode. For GitHub Actions, prefer workflow-specific baselines such as
+`reports/baseline/loadtest-smoke/downlink.json` or
+`reports/baseline/loadtest-manual/downlink.json`. The workflows fall back to
+`reports/baseline/<mode>.json` for compatibility. Comparisons are informational
+only; they append to the workflow summary and do not fail the workflow.
 
 Use threshold flags when you want the load test to behave like an acceptance
 check. The command exits with code 1 when any check fails, but still writes the

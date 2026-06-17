@@ -120,6 +120,29 @@ jobs:
           if compgen -G "reports/loadtest-smoke/*.json" >/dev/null; then
             go run ./cmd/loadreport -output reports/loadtest-smoke/summary.md reports/loadtest-smoke/*.json
             cat reports/loadtest-smoke/summary.md >> "$GITHUB_STEP_SUMMARY"
+            {
+              echo ""
+              echo "## Baseline Comparison"
+            } >> "$GITHUB_STEP_SUMMARY"
+            for current in reports/loadtest-smoke/*.json; do
+              mode="$(basename "$current" .json)"
+              base="reports/baseline/loadtest-smoke/${mode}.json"
+              fallback_base="reports/baseline/${mode}.json"
+              if [ ! -f "$base" ] && [ -f "$fallback_base" ]; then
+                base="$fallback_base"
+              fi
+              output="reports/loadtest-smoke/compare-${mode}.md"
+              if [ -f "$base" ]; then
+                if go run ./cmd/loadcompare -base "$base" -current "$current" -output "$output"; then
+                  cat "$output" >> "$GITHUB_STEP_SUMMARY"
+                else
+                  echo "::warning::Load test baseline comparison failed for ${mode}"
+                  echo "- Comparison failed for \`${mode}\`; see job logs." >> "$GITHUB_STEP_SUMMARY"
+                fi
+              else
+                echo "- No baseline found for \`${mode}\` at \`reports/baseline/loadtest-smoke/${mode}.json\` or \`${fallback_base}\`; skipping comparison." >> "$GITHUB_STEP_SUMMARY"
+              fi
+            done
           else
             echo "No load test smoke reports were generated." >> "$GITHUB_STEP_SUMMARY"
           fi
@@ -132,6 +155,7 @@ jobs:
           path: |
             reports/loadtest-smoke/*.json
             reports/loadtest-smoke/summary.md
+            reports/loadtest-smoke/compare-*.md
             log/loadtest-smoke-gateway.log
           if-no-files-found: warn
 

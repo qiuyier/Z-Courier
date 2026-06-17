@@ -3,3 +3,9 @@ log/*
 .gocache/
 .gomodcache/
 reports/*
+!reports/baseline/
+!reports/baseline/README.md
+!reports/baseline/*.json
+!reports/baseline/**/
+!reports/baseline/**/README.md
+!reports/baseline/**/*.json

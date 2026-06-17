@@ -74,14 +74,22 @@ go run ./cmd/loadreport \
 Save a stable report as a local baseline and compare future runs against it:
 
 ```bash
-mkdir -p reports/baseline
-cp reports/loadtest-manual/upstream.json reports/baseline/upstream.json
+mkdir -p reports/baseline/loadtest-manual
+cp reports/loadtest-manual/upstream.json reports/baseline/loadtest-manual/upstream.json
 
 go run ./cmd/loadcompare \
-  -base reports/baseline/upstream.json \
+  -base reports/baseline/loadtest-manual/upstream.json \
   -current reports/loadtest-manual/upstream.json \
   -output reports/loadtest-manual/compare.md
 ```
+
+CI and the manual load-test workflow use the same convention. The preferred
+paths are `reports/baseline/loadtest-smoke/<mode>.json` and
+`reports/baseline/loadtest-manual/<mode>.json`; workflows also fall back to
+`reports/baseline/<mode>.json` for compatibility. If a matching baseline exists,
+the workflow appends a comparison to the GitHub Actions summary and uploads the
+comparison Markdown with the report artifact. If no baseline exists, the
+workflow only prints a skip notice.
 
 ## Manual Run
 
