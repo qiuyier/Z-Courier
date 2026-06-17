@@ -129,7 +129,7 @@ cluster:
     timeout: 2s
 ```
 
-- `enabled`: enables V2 online route registration. `false` keeps V1 local-only
+- `enabled`: enables V2 online route registration. `false` keeps local-only
   behavior.
 - `internal_addr`: address other gateway nodes will use to call this node.
   It is required when cluster mode is enabled.
@@ -191,12 +191,12 @@ downlink:
 Supported storage types:
 
 - `memory`: useful for local development; queued messages are lost on restart.
-- `postgres`: durable V1 storage for offline and retryable downlink messages.
+- `postgres`: durable storage for offline and retryable downlink messages.
 
 PostgreSQL fields:
 
 - `dsn`: pgx-compatible PostgreSQL DSN.
-- `auto_migrate`: creates the V1 downlink table when the store starts.
+- `auto_migrate`: creates the downlink table when the store starts.
 - `max_open_conns`, `max_idle_conns`, `conn_max_lifetime`: database pool
   controls.
 
@@ -274,7 +274,7 @@ auth -> allowlist/blocklist -> rate limit -> session bind -> access log
 If an allowlist is empty, it does not restrict that dimension. Blocklists always
 take priority.
 
-The V1 rate limiter is a fixed-window per-client limiter.
+The current rate limiter is a fixed-window per-client limiter.
 
 ## Upstream Routes
 
@@ -295,7 +295,7 @@ upstream:
 
 - `enabled`: disabled routes are ignored.
 - `msg_id_min` and `msg_id_max`: inclusive MsgID range.
-- `target.type`: supported V1 values are `http` and `nsq`.
+- `target.type`: currently supported values are `http` and `nsq`.
 
 HTTP target fields:
 
@@ -335,7 +335,7 @@ NSQ target fields:
 - `topic`: NSQ topic name.
 - `auth_secret`: optional NSQ auth secret.
 - `dial_timeout`, `read_timeout`, `write_timeout`: NSQ producer timeouts.
-- `publish_mode`: V1 supports `round_robin`.
+- `publish_mode`: currently supports `round_robin`.
 - `retry_attempts`: retries across configured nsqd addresses after publish
   failure.
 - `max_in_flight`: optional per-route NSQ publish concurrency limit.

@@ -34,8 +34,8 @@ The fixed header is 36 bytes before variable-length strings and body bytes.
 
 ## Important Fields
 
-- `Version`: protocol version. V1 currently uses `1`.
-- `Flags`: bit flags. V1 defines `ack_required`.
+- `Version`: protocol version. The current protocol uses `1`.
+- `Flags`: bit flags. The current protocol defines `ack_required`.
 - `MsgID`: command or business route identifier.
 - `Seq`: per-connection sequence number supplied by the client.
 - `Timestamp`: Unix milliseconds from the sender.
@@ -278,7 +278,7 @@ marks the stored downlink message as `delivered` and records ACK metrics.
 
 ## Reliability Contract
 
-V1 aims for at-least-once downlink delivery:
+Z-Courier aims for at-least-once downlink delivery:
 
 - The gateway persists downlink requests before attempting online delivery.
 - Offline clients receive pending messages when they bind.

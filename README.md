@@ -7,7 +7,8 @@ A high-performance message push gateway based on the `zinx` network framework.
 - Lightweight and efficient message routing
 - Fast JSON serialization based on Sonic
 - Structured logging based on Zap
-- Pluggable route targets such as HTTP, gRPC, NSQ, Kafka, and NATS
+- Built-in HTTP and NSQ upstream adapters, with adapter interfaces for gRPC,
+  Kafka, NATS, and custom targets
 - Reliable downlink delivery with ACK, retry, and idempotency hooks
 - Two-node cluster delivery with Redis online routes and gateway peer push
 - Reconnect-safe delivery: disconnected clients keep messages pending until the
@@ -27,9 +28,12 @@ V2 cluster design is tracked in
 
 Release history is tracked in [CHANGELOG.md](CHANGELOG.md).
 
+The current V2 release-candidate guide is
+[docs/v2-release-candidate.md](docs/v2-release-candidate.md).
+
 ## Quick Start
 
-Run the V1 local integration verifier from the repository root:
+Run the single-node integration verifier from the repository root:
 
 ```bash
 bash scripts/e2e.sh
@@ -44,7 +48,7 @@ validates:
 - upstream forwarding to NSQ
 - Prometheus metrics exposure
 
-Run the V2 two-node cluster verifier:
+Run the two-node cluster verifier:
 
 ```bash
 bash scripts/e2e_cluster.sh
@@ -86,9 +90,22 @@ which sessions are local to the gateway node you queried.
 Local service URLs and the manual workflow are documented in
 [deploy/local/README.md](deploy/local/README.md).
 
+For a full release-candidate check, run:
+
+```bash
+actionlint
+go test ./...
+bash scripts/e2e.sh
+bash scripts/e2e_cluster.sh
+bash scripts/loadtest_smoke.sh
+git diff --check
+```
+
+This is the same checklist used before cutting a V2 RC tag.
+
 ## V2 Status
 
-V2 is in feature-complete release-candidate shape. Implemented behavior:
+V2 is in release-candidate shape. Implemented behavior:
 
 - Shared Redis online route registry for `client_id + device_id`
 - Gateway peer push with `POST /internal/cluster/push`
@@ -98,9 +115,13 @@ V2 is in feature-complete release-candidate shape. Implemented behavior:
 - Multi-node E2E and reconnect/retry metrics assertions
 - Load-test smoke and manual load-test GitHub Actions workflows
 
-Remaining release-prep work is quality-focused: final CI confirmation, optional
-baseline comparison as a GitHub Actions summary/warning, dashboard review, and
-release notes.
+GitHub Actions includes unit tests, local E2E, cluster E2E, load-test smoke, and
+non-blocking load-test baseline comparisons in workflow summaries.
+
+Before tagging, confirm CI is green for the exact commit, review
+[CHANGELOG.md](CHANGELOG.md), and use
+[docs/v2-release-candidate.md](docs/v2-release-candidate.md) as the final
+release checklist.
 
 ## Development
 
@@ -256,7 +277,7 @@ For real online downlink delivery, keep matching clients connected first. Withou
 online clients, the gateway still accepts the request and writes the offline
 retry path when storage is enabled.
 
-Run the local V1 integration verifier:
+Run the local single-node integration verifier:
 
 ```bash
 bash scripts/e2e.sh
@@ -267,7 +288,7 @@ reliable downlink path with PostgreSQL storage. See
 [deploy/local/README.md](deploy/local/README.md) for the manual workflow and
 local URLs.
 
-Run the local V2 cluster integration verifier:
+Run the local cluster integration verifier:
 
 ```bash
 bash scripts/e2e_cluster.sh
@@ -284,7 +305,7 @@ file, set `ZINX_CONFIG_FILE_PATH` before starting the gateway.
 
 Z-Courier loads its gateway config from `configs/z-courier.yaml` by default. You
 can override it with `-config` or the `ZCOURIER_CONFIG` environment variable.
-See [docs/configuration.md](docs/configuration.md) for all current V1 config
+See [docs/configuration.md](docs/configuration.md) for all current config
 fields.
 
 The current binary packet format is documented in

@@ -3,6 +3,9 @@
 This stack is for validating the Z-Courier reliable downlink path with
 PostgreSQL storage, Redis, NSQ, Prometheus, and Grafana.
 
+For the full V2 release-candidate checklist, see
+[../../docs/v2-release-candidate.md](../../docs/v2-release-candidate.md).
+
 ## One Command
 
 From the repository root:

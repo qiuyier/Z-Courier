@@ -550,13 +550,17 @@ GitHub Actions validation, E2E, and load-test smoke workflows
 manual load-test workflow and report generation
 ```
 
-The V2 feature set is now in release-candidate shape. Further work before a
-tag should be release quality work rather than new core gateway behavior:
+The V2 feature set is now in release-candidate shape. The release-prep path is
+tracked in [v2-release-candidate.md](v2-release-candidate.md). Completed RC
+prep includes:
 
 ```text
 refresh README and local deployment docs
 run CI from a clean push
 review Grafana dashboard panels against current metric names
-choose and commit stable load-test baseline reports when ready
-write release notes for the chosen version tag
+choose and commit stable load-test baseline reports
+write release-candidate notes
 ```
+
+Before tagging, confirm GitHub Actions is green on the exact commit and review
+the changelog entry for the chosen version tag.

@@ -5,6 +5,57 @@ All notable changes to Z-Courier are documented in this file.
 The format follows the spirit of Keep a Changelog, and this project uses
 semantic versioning after the first public MVP tag.
 
+## [v2.0.0-rc.1] - Unreleased
+
+### Added
+
+- Explicit `MsgID = 1000` AUTH/BIND flow before business packets.
+- Two-node cluster delivery with Redis online routes and gateway peer push.
+- Route refresh for quiet connected clients so online routes stay discoverable.
+- PostgreSQL retry claiming with leases for multi-node retry workers.
+- Internal cluster peer push endpoint `POST /internal/cluster/push`.
+- Internal debug APIs for route lookup and local session listing.
+- Reconnect-safe downlink delivery: messages attempted while a client is
+  disconnected stay pending and flush after the next bind.
+- Internal downlink batch push, message status, message listing, requeue, and
+  discard helpers.
+- Capacity protection for upstream forwarding and internal HTTP push paths.
+- Graceful shutdown with readiness drain and cluster route cleanup.
+- Cluster, retry, cleanup, capacity, unique-online-client, and load-test-facing
+  Prometheus metrics.
+- Multi-node local E2E verifier through `scripts/e2e_cluster.sh`.
+- Load-test smoke script, manual load-test workflow, Markdown report generator,
+  and baseline comparison tool.
+- GitHub Actions CI for validation, E2E, cluster E2E, and load-test smoke.
+- Workflow-specific load-test baselines under `reports/baseline/`.
+- V2 release-candidate documentation.
+
+### Changed
+
+- README now treats the cluster verifier as the primary V2 validation path.
+- Load-test reports show `Messages` as `-` for sustained duration mode to avoid
+  confusing finite message counts with rate-based runs.
+- Upstream adapter wording now distinguishes built-in HTTP/NSQ support from
+  future or custom adapter targets.
+
+### Verified
+
+- `actionlint`
+- `go test ./...`
+- `bash scripts/e2e.sh`
+- `bash scripts/e2e_cluster.sh`
+- `bash scripts/loadtest_smoke.sh`
+- GitHub Actions on `main`
+
+### Known Limitations
+
+- This is a release candidate, not a production-stability guarantee.
+- Delivery is at-least-once, not exactly-once.
+- SDKs, route hot reload, and a full admin UI are not included yet.
+- Production token validation should replace the local static verifier.
+- Peer gateway authentication is token-based internal HTTP; mTLS is not
+  implemented yet.
+
 ## [v0.1.0] - 2026-06-05
 
 ### Added
