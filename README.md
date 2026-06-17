@@ -9,6 +9,11 @@ A high-performance message push gateway based on the `zinx` network framework.
 - Structured logging based on Zap
 - Pluggable route targets such as HTTP, gRPC, NSQ, Kafka, and NATS
 - Reliable downlink delivery with ACK, retry, and idempotency hooks
+- Two-node cluster delivery with Redis online routes and gateway peer push
+- Reconnect-safe delivery: disconnected clients keep messages pending until the
+  next bind flushes them
+- Prometheus metrics and Grafana dashboards for ingress, upstream, downlink,
+  cluster, retry, capacity, and load-test paths
 - Graceful shutdown with readiness drain and cluster route cleanup
 - MIT Licensed
 
@@ -47,10 +52,55 @@ bash scripts/e2e_cluster.sh
 
 It starts two local gateway processes sharing PostgreSQL and Redis, connects the
 test client to `gateway-b`, sends `/internal/push` to `gateway-a`, and verifies
-that peer push delivers the message across nodes.
+that peer push delivers the message across nodes. It also verifies debug
+route/session APIs, disconnect -> queued retry -> reconnect flush, NSQ upstream
+publishing, and cluster/retry metrics.
+
+The V2 cluster verifier is the fastest way to confirm the current release
+candidate behavior:
+
+```text
+gateway-a internal HTTP: http://127.0.0.1:18182
+gateway-b internal HTTP: http://127.0.0.1:18183
+client TCP target:       127.0.0.1:9902
+```
+
+Useful manual debug commands after starting the two-node stack:
+
+```bash
+go run ./cmd/devbackend route \
+  -internal-url http://127.0.0.1:18182 \
+  -internal-token dev-internal-token \
+  -client-id e2e-client \
+  -device-id e2e-device
+
+go run ./cmd/devbackend sessions \
+  -internal-url http://127.0.0.1:18183 \
+  -internal-token dev-internal-token \
+  -client-id e2e-client
+```
+
+`route` answers where the cluster would send a client/device. `sessions` answers
+which sessions are local to the gateway node you queried.
 
 Local service URLs and the manual workflow are documented in
 [deploy/local/README.md](deploy/local/README.md).
+
+## V2 Status
+
+V2 is in feature-complete release-candidate shape. Implemented behavior:
+
+- Shared Redis online route registry for `client_id + device_id`
+- Gateway peer push with `POST /internal/cluster/push`
+- PostgreSQL reliable downlink store with retry, ACK timeout, and claim leasing
+- Bind-time pending flush and reconnect-safe delivery
+- Internal debug APIs for route lookup and local sessions
+- Multi-node E2E and reconnect/retry metrics assertions
+- Load-test smoke and manual load-test GitHub Actions workflows
+
+Remaining release-prep work is quality-focused: final CI confirmation, optional
+baseline comparison as a GitHub Actions summary/warning, dashboard review, and
+release notes.
 
 ## Development
 
@@ -475,8 +525,11 @@ scrape-target details.
 - `docs`: Design and operation documents
 - `internal/adapter`: Upstream target adapters
 - `internal/auth`: Token verification interfaces and development verifier
+- `internal/capacity`: In-flight capacity limiters for protected paths
+- `internal/cluster`: Online route registries and cluster route types
 - `internal/config`: Z-Courier config loading and conversion
 - `internal/downlink`: Internal push API and online delivery service
+- `internal/metrics`: Prometheus metric definitions and helpers
 - `internal/pipeline`: Ingress gateway middleware chain
 - `internal/protocol`: Packet codec and protocol types
 - `internal/router`: MsgID route engine

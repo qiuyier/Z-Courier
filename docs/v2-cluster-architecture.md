@@ -165,8 +165,7 @@ This API is for gateway peers only. The current implementation protects it with
 
 ### Downlink Resolver
 
-V1 `downlink.Service` currently tries local online delivery only. V2 should
-split delivery into a resolver:
+V2 `downlink.Service` performs cluster-aware delivery:
 
 ```text
 1. Save message to shared store.
@@ -348,7 +347,7 @@ Response body:
 }
 ```
 
-Recommended status behavior:
+Current status behavior:
 
 ```text
 200 sent              local TCP send succeeded
@@ -380,6 +379,36 @@ Store.MarkDelivered(message_id, client_id, device_id, delivered_at)
 ```
 
 without calling the origin node.
+
+## Internal Debug APIs
+
+The internal HTTP server exposes two debugging endpoints protected by the same
+internal token as the downlink API:
+
+```text
+GET /internal/debug/route?client_id=...&device_id=...
+GET /internal/debug/sessions?client_id=...&limit=...
+```
+
+They answer different questions:
+
+```text
+/internal/debug/route
+  "Where would this node route this client/device?"
+  Checks the current node's local session table first, then the shared cluster
+  online registry when cluster mode is enabled.
+
+/internal/debug/sessions
+  "Which sessions are local to this gateway process?"
+  Reads only the current node's in-memory session manager. It does not list
+  cluster-wide online routes.
+```
+
+Example: if the client is connected to `gateway-b` and the query is sent to
+`gateway-a`, `/internal/debug/route` should return `local_session_found=false`
+and `cluster_route.gateway_node=gateway-b`. `/internal/debug/sessions` on
+`gateway-a` should return no local session for that client, while the same
+query against `gateway-b` should return the local session.
 
 ## Retry Worker
 
@@ -428,6 +457,11 @@ z_courier_downlink_cleanup_duration_seconds{result}
 
 Existing V1 metrics should continue to work.
 
+The cluster E2E verifier also checks that the reconnect/retry path produces
+observable metrics. When `-check-reconnect-retry` is enabled, `cmd/e2e` requires
+non-zero samples for queued downlink push, registry lookup, registry unbind,
+retry scan, retry claim duration, and successful peer push.
+
 ## Failure Rules
 
 Registry unavailable:
@@ -464,131 +498,65 @@ Store.MarkDelivered should be idempotent where possible.
 If the message exists and client/device match, delivered wins over sent.
 ```
 
-## Implementation Plan
+## E2E Coverage
 
-Current implementation status:
-
-```text
-Phase 1 is implemented: OnlineRegistry interface, in-memory registry, and
-cluster config parsing.
-
-Phase 2 bind/unbind hooks are implemented for cluster.enabled=true. The runtime
-supports both memory and Redis online registries: session bind writes the
-current route, and connection close removes the route only when session_id still
-matches. A cluster route refresher is also implemented: while a local session is
-alive, the gateway periodically refreshes or restores the shared route without
-overwriting a newer mismatched session.
-
-Peer Push API, the HTTP peer dispatcher, and cluster-aware downlink resolution
-are implemented. `/internal/push` now tries local delivery first, then looks up
-the online registry and calls the target gateway peer when the route points to a
-remote node.
-
-Multi-node E2E is implemented in scripts/e2e_cluster.sh. It starts gateway-a and
-gateway-b with shared PostgreSQL and Redis, connects the test client to
-gateway-b, waits longer than the test registry TTL, sends /internal/push to
-gateway-a, and verifies cross-node delivery.
-
-Store-level retry claiming is still a future phase.
-```
-
-### Phase 1: Interfaces And Config
-
-- Add `internal/cluster` package.
-- Add `OnlineRegistry` interface.
-- Add in-memory registry implementation.
-- Add cluster config parsing.
-- Keep default `cluster.enabled = false`.
-
-Acceptance:
+`scripts/e2e_cluster.sh` is the authoritative local cluster verifier. It starts
+two gateway processes with shared PostgreSQL and Redis:
 
 ```text
-go test ./...
-V1 e2e still passes
+gateway-a: TCP 9901, internal HTTP 18182
+gateway-b: TCP 9902, internal HTTP 18183
 ```
 
-### Phase 2: Bind/Unbind Registry Hooks
-
-- On session bind, write local route to registry.
-- On connection stop, remove route if session id matches.
-- Add registry touch or TTL refresh.
-
-Acceptance:
+The verifier currently covers:
 
 ```text
-single gateway writes and removes route entries
-stale unbind does not remove newer session entry
+offline push before bind -> pending -> bind flush -> delivered
+online push through gateway-a to client connected on gateway-b -> delivered
+debug route from gateway-a -> cluster route points to gateway-b
+debug sessions from gateway-b -> local session exists
+client disconnect -> local session gone
+push while disconnected -> pending with failed attempt metadata
+client reconnect -> pending flush -> delivered
+NSQ upstream publish path
+base gateway and cluster/retry metrics exposure
+reconnect/retry metrics have non-zero samples
 ```
 
-### Phase 3: Redis Registry
+The reconnect path intentionally uses a client disconnect instead of killing a
+gateway process. That keeps CI deterministic while still validating the core
+reliability rule: a message attempted while the client is not locally connected
+must remain pending and be delivered after the next bind.
 
-- Add Redis implementation.
-- Add Redis config.
-- Add tests with fake Redis or integration tests.
+## Current Implementation Status
 
-Acceptance:
+Implemented:
 
 ```text
-two gateway processes can see the same online route
-route TTL expires after disconnect or missed refresh
+OnlineRegistry interface
+in-memory and Redis online registries
+cluster config parsing
+session bind/unbind registry hooks
+route TTL refresh while local TCP sessions remain alive
+HTTP peer dispatcher
+POST /internal/cluster/push
+cluster-aware downlink resolver
+shared PostgreSQL reliable downlink store
+PostgreSQL retry claiming with FOR UPDATE SKIP LOCKED
+internal debug route/session APIs
+Prometheus cluster, retry, cleanup, capacity, and load-test-facing metrics
+multi-node E2E in scripts/e2e_cluster.sh
+GitHub Actions validation, E2E, and load-test smoke workflows
+manual load-test workflow and report generation
 ```
 
-### Phase 4: Peer Dispatch API
-
-- Add `POST /internal/cluster/push`.
-- Add peer HTTP client.
-- Add internal peer auth token.
-- Return `session_not_found` or `session_mismatch` so the caller can clean up a
-  stale route if the registry entry still matches.
-
-Acceptance:
+The V2 feature set is now in release-candidate shape. Further work before a
+tag should be release quality work rather than new core gateway behavior:
 
 ```text
-Gateway-B can ask Gateway-A to push to a local client
-Gateway-A does not persist duplicate message rows
+refresh README and local deployment docs
+run CI from a clean push
+review Grafana dashboard panels against current metric names
+wire optional load baseline comparison into GitHub Actions as summary/warning
+write release notes for the chosen version tag
 ```
-
-### Phase 5: Cluster Downlink Resolver
-
-- Modify `downlink.Service` or wrap it with cluster-aware delivery.
-- Try local delivery first.
-- Lookup registry for remote delivery.
-- Mark sent only after local or peer send succeeds.
-- Keep pending on miss or retryable failure.
-
-Acceptance:
-
-```text
-backend can call any node
-remote client receives downlink message
-client ACK marks shared message delivered
-```
-
-### Phase 6: Multi-Node E2E
-
-- Extend local Docker Compose with Redis.
-- Start two gateway processes on different TCP/internal ports.
-- Connect client to Gateway-A.
-- Send `/internal/push` to Gateway-B.
-- Verify client receives message and ACK persists as delivered.
-
-Acceptance:
-
-```text
-bash scripts/e2e_cluster.sh
-GitHub Actions runs cluster e2e
-```
-
-## First Code Change Recommendation
-
-Start with Phase 1:
-
-```text
-internal/cluster/
-  registry.go
-  memory_registry.go
-  registry_test.go
-```
-
-Then add config structs without wiring them into delivery yet. That keeps V1
-safe while giving V2 a clean extension point.
