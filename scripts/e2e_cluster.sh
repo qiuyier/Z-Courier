@@ -106,5 +106,9 @@ go run ./cmd/e2e \
   -device-id "e2e-cluster-device-$RUN_ID" \
   -online-push-delay 5s \
   -require-cluster-metrics \
+  -expect-route-node gateway-b \
+  -expect-route-internal-url http://127.0.0.1:18183 \
+  -expect-session-url http://127.0.0.1:18183 \
+  -expect-session-node gateway-b \
   -timeout 45s \
   "$@"

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -31,18 +32,22 @@ const (
 )
 
 type config struct {
-	GatewayHost           string
-	GatewayPort           int
-	InternalURL           string
-	MetricsURLs           []string
-	InternalToken         string
-	PostgresDSN           string
-	ClientID              string
-	DeviceID              string
-	Token                 string
-	Timeout               time.Duration
-	OnlinePushDelay       time.Duration
-	RequireClusterMetrics bool
+	GatewayHost            string
+	GatewayPort            int
+	InternalURL            string
+	MetricsURLs            []string
+	InternalToken          string
+	PostgresDSN            string
+	ClientID               string
+	DeviceID               string
+	Token                  string
+	Timeout                time.Duration
+	OnlinePushDelay        time.Duration
+	RequireClusterMetrics  bool
+	ExpectRouteNode        string
+	ExpectRouteInternalURL string
+	ExpectSessionURL       string
+	ExpectSessionNode      string
 }
 
 func main() {
@@ -73,9 +78,14 @@ func parseFlags() config {
 	flag.DurationVar(&cfg.Timeout, "timeout", 30*time.Second, "overall timeout")
 	flag.DurationVar(&cfg.OnlinePushDelay, "online-push-delay", 0, "delay before online downlink push after client bind")
 	flag.BoolVar(&cfg.RequireClusterMetrics, "require-cluster-metrics", false, "require cluster and retry metrics to be exposed")
+	flag.StringVar(&cfg.ExpectRouteNode, "expect-route-node", "", "expected cluster route gateway node via internal-url; empty disables debug route check")
+	flag.StringVar(&cfg.ExpectRouteInternalURL, "expect-route-internal-url", "", "expected cluster route internal URL")
+	flag.StringVar(&cfg.ExpectSessionURL, "expect-session-url", "", "gateway internal HTTP base URL expected to hold the local session; empty disables debug sessions check")
+	flag.StringVar(&cfg.ExpectSessionNode, "expect-session-node", "", "expected gateway node from expect-session-url")
 	flag.Parse()
 
 	cfg.InternalURL = strings.TrimRight(cfg.InternalURL, "/")
+	cfg.ExpectSessionURL = strings.TrimRight(cfg.ExpectSessionURL, "/")
 	cfg.MetricsURLs = parseMetricsURLs(metricsURLRaw, cfg.InternalURL+"/metrics")
 	return cfg
 }
@@ -139,6 +149,10 @@ func run(ctx context.Context, cfg config) error {
 	}
 	fmt.Println("client bound")
 
+	if err := checkDebugCluster(ctx, cfg); err != nil {
+		return err
+	}
+
 	if err := client.WaitDownlink(ctx, offlineMessageID); err != nil {
 		return fmt.Errorf("wait offline downlink flush: %w", err)
 	}
@@ -181,6 +195,228 @@ func run(ctx context.Context, cfg config) error {
 		return err
 	}
 	fmt.Println("metrics exposed")
+
+	return nil
+}
+
+type debugRouteResponse struct {
+	Code              string             `json:"code"`
+	GatewayNode       string             `json:"gateway_node"`
+	ClientID          string             `json:"client_id"`
+	DeviceID          string             `json:"device_id"`
+	LocalSessionFound bool               `json:"local_session_found"`
+	ClusterEnabled    bool               `json:"cluster_enabled"`
+	ClusterRouteFound bool               `json:"cluster_route_found"`
+	ClusterRoute      *debugClusterRoute `json:"cluster_route"`
+}
+
+type debugClusterRoute struct {
+	ClientID     string `json:"client_id"`
+	DeviceID     string `json:"device_id"`
+	SessionID    string `json:"session_id"`
+	GatewayNode  string `json:"gateway_node"`
+	InternalAddr string `json:"internal_addr"`
+	TokenID      string `json:"token_id"`
+}
+
+type debugSessionsResponse struct {
+	Code          string         `json:"code"`
+	GatewayNode   string         `json:"gateway_node"`
+	ClientID      string         `json:"client_id"`
+	Total         int            `json:"total"`
+	UniqueClients int            `json:"unique_clients"`
+	Sessions      []debugSession `json:"sessions"`
+}
+
+type debugSession struct {
+	SessionID   string `json:"session_id"`
+	ClientID    string `json:"client_id"`
+	DeviceID    string `json:"device_id"`
+	TokenID     string `json:"token_id"`
+	GatewayNode string `json:"gateway_node"`
+}
+
+func checkDebugCluster(ctx context.Context, cfg config) error {
+	checked := false
+	if cfg.ExpectRouteNode != "" {
+		if err := waitDebugRoute(ctx, cfg); err != nil {
+			return err
+		}
+		checked = true
+	}
+	if cfg.ExpectSessionURL != "" {
+		if err := waitDebugSessions(ctx, cfg); err != nil {
+			return err
+		}
+		checked = true
+	}
+	if checked {
+		fmt.Println("cluster debug route verified")
+	}
+
+	return nil
+}
+
+func waitDebugRoute(ctx context.Context, cfg config) error {
+	var lastErr error
+	err := waitUntil(ctx, func() (bool, error) {
+		resp, err := fetchDebugRoute(ctx, cfg)
+		if err != nil {
+			lastErr = err
+			return false, nil
+		}
+		if err := validateDebugRoute(cfg, resp); err != nil {
+			lastErr = err
+			return false, nil
+		}
+
+		return true, nil
+	})
+	if err != nil {
+		if lastErr != nil {
+			return fmt.Errorf("wait debug route: %w; last check: %v", err, lastErr)
+		}
+		return fmt.Errorf("wait debug route: %w", err)
+	}
+
+	return nil
+}
+
+func fetchDebugRoute(ctx context.Context, cfg config) (debugRouteResponse, error) {
+	query := url.Values{}
+	query.Set("client_id", cfg.ClientID)
+	query.Set("device_id", cfg.DeviceID)
+
+	var resp debugRouteResponse
+	if err := getInternalJSON(ctx, cfg.InternalURL, "/internal/debug/route?"+query.Encode(), cfg.InternalToken, &resp); err != nil {
+		return debugRouteResponse{}, err
+	}
+
+	return resp, nil
+}
+
+func validateDebugRoute(cfg config, resp debugRouteResponse) error {
+	if resp.Code != "ok" {
+		return fmt.Errorf("debug route code = %q, want ok", resp.Code)
+	}
+	if resp.LocalSessionFound {
+		return fmt.Errorf("debug route local_session_found = true, want false on %s", cfg.InternalURL)
+	}
+	if !resp.ClusterEnabled {
+		return fmt.Errorf("debug route cluster_enabled = false, want true")
+	}
+	if !resp.ClusterRouteFound || resp.ClusterRoute == nil {
+		return fmt.Errorf("debug route cluster route not found")
+	}
+	if resp.ClusterRoute.ClientID != cfg.ClientID || resp.ClusterRoute.DeviceID != cfg.DeviceID {
+		return fmt.Errorf("debug route target = %s/%s, want %s/%s", resp.ClusterRoute.ClientID, resp.ClusterRoute.DeviceID, cfg.ClientID, cfg.DeviceID)
+	}
+	if resp.ClusterRoute.GatewayNode != cfg.ExpectRouteNode {
+		return fmt.Errorf("debug route gateway_node = %q, want %q", resp.ClusterRoute.GatewayNode, cfg.ExpectRouteNode)
+	}
+	if cfg.ExpectRouteInternalURL != "" && resp.ClusterRoute.InternalAddr != cfg.ExpectRouteInternalURL {
+		return fmt.Errorf("debug route internal_addr = %q, want %q", resp.ClusterRoute.InternalAddr, cfg.ExpectRouteInternalURL)
+	}
+	if resp.ClusterRoute.SessionID == "" {
+		return fmt.Errorf("debug route session_id is empty")
+	}
+
+	return nil
+}
+
+func waitDebugSessions(ctx context.Context, cfg config) error {
+	var lastErr error
+	err := waitUntil(ctx, func() (bool, error) {
+		resp, err := fetchDebugSessions(ctx, cfg)
+		if err != nil {
+			lastErr = err
+			return false, nil
+		}
+		if err := validateDebugSessions(cfg, resp); err != nil {
+			lastErr = err
+			return false, nil
+		}
+
+		return true, nil
+	})
+	if err != nil {
+		if lastErr != nil {
+			return fmt.Errorf("wait debug sessions: %w; last check: %v", err, lastErr)
+		}
+		return fmt.Errorf("wait debug sessions: %w", err)
+	}
+
+	return nil
+}
+
+func fetchDebugSessions(ctx context.Context, cfg config) (debugSessionsResponse, error) {
+	query := url.Values{}
+	query.Set("client_id", cfg.ClientID)
+	query.Set("limit", "10")
+
+	var resp debugSessionsResponse
+	if err := getInternalJSON(ctx, cfg.ExpectSessionURL, "/internal/debug/sessions?"+query.Encode(), cfg.InternalToken, &resp); err != nil {
+		return debugSessionsResponse{}, err
+	}
+
+	return resp, nil
+}
+
+func validateDebugSessions(cfg config, resp debugSessionsResponse) error {
+	if resp.Code != "ok" {
+		return fmt.Errorf("debug sessions code = %q, want ok", resp.Code)
+	}
+	if cfg.ExpectSessionNode != "" && resp.GatewayNode != cfg.ExpectSessionNode {
+		return fmt.Errorf("debug sessions gateway_node = %q, want %q", resp.GatewayNode, cfg.ExpectSessionNode)
+	}
+	if resp.Total == 0 {
+		return fmt.Errorf("debug sessions total = 0, want local session")
+	}
+	if resp.UniqueClients == 0 {
+		return fmt.Errorf("debug sessions unique_clients = 0, want local client")
+	}
+	for _, found := range resp.Sessions {
+		if found.ClientID != cfg.ClientID || found.DeviceID != cfg.DeviceID {
+			continue
+		}
+		if cfg.ExpectSessionNode != "" && found.GatewayNode != cfg.ExpectSessionNode {
+			return fmt.Errorf("debug session gateway_node = %q, want %q", found.GatewayNode, cfg.ExpectSessionNode)
+		}
+		if found.SessionID == "" {
+			return fmt.Errorf("debug session session_id is empty")
+		}
+		return nil
+	}
+
+	return fmt.Errorf("debug sessions missing %s/%s in %d sessions", cfg.ClientID, cfg.DeviceID, len(resp.Sessions))
+}
+
+func getInternalJSON(ctx context.Context, baseURL, path, token string, target any) error {
+	requestCtx, cancel := context.WithTimeout(ctx, downlinkPushTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(requestCtx, http.MethodGet, baseURL+path, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set(downlink.InternalTokenHeader, token)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("GET %s%s status = %d, body = %s", baseURL, path, resp.StatusCode, string(respBody))
+	}
+	if err := sonic.Unmarshal(respBody, target); err != nil {
+		return err
+	}
 
 	return nil
 }
