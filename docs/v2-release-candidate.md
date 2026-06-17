@@ -218,7 +218,7 @@ go run ./cmd/loadcompare \
 
 ## Tagging Checklist
 
-Before creating `v2.0.0-rc.1`:
+Before creating `v0.2.0-rc.1`:
 
 1. Confirm local verification passes.
 2. Push the exact commit to `main`.
@@ -230,6 +230,6 @@ Before creating `v2.0.0-rc.1`:
 Suggested tag command:
 
 ```bash
-git tag -a v2.0.0-rc.1 -m "v2.0.0-rc.1"
-git push origin v2.0.0-rc.1
+git tag -a v0.2.0-rc.1 -m "v0.2.0-rc.1"
+git push origin v0.2.0-rc.1
 ```

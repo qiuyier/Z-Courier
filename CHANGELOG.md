@@ -5,7 +5,7 @@ All notable changes to Z-Courier are documented in this file.
 The format follows the spirit of Keep a Changelog, and this project uses
 semantic versioning after the first public MVP tag.
 
-## [v2.0.0-rc.1] - Unreleased
+## [v0.2.0-rc.1] - Unreleased
 
 ### Added
 
