@@ -48,6 +48,7 @@ type config struct {
 	ExpectRouteInternalURL string
 	ExpectSessionURL       string
 	ExpectSessionNode      string
+	CheckReconnectRetry    bool
 }
 
 func main() {
@@ -82,6 +83,7 @@ func parseFlags() config {
 	flag.StringVar(&cfg.ExpectRouteInternalURL, "expect-route-internal-url", "", "expected cluster route internal URL")
 	flag.StringVar(&cfg.ExpectSessionURL, "expect-session-url", "", "gateway internal HTTP base URL expected to hold the local session; empty disables debug sessions check")
 	flag.StringVar(&cfg.ExpectSessionNode, "expect-session-node", "", "expected gateway node from expect-session-url")
+	flag.BoolVar(&cfg.CheckReconnectRetry, "check-reconnect-retry", false, "disconnect the client, queue a downlink, then verify reconnect flushes it")
 	flag.Parse()
 
 	cfg.InternalURL = strings.TrimRight(cfg.InternalURL, "/")
@@ -128,6 +130,7 @@ func run(ctx context.Context, cfg config) error {
 	runID := time.Now().UnixNano()
 	offlineMessageID := fmt.Sprintf("e2e-%d-offline", runID)
 	onlineMessageID := fmt.Sprintf("e2e-%d-online", runID)
+	reconnectMessageID := fmt.Sprintf("e2e-%d-reconnect", runID)
 	upstreamMessageID := fmt.Sprintf("e2e-%d-upstream", runID)
 
 	fmt.Println("checking offline queue path")
@@ -142,7 +145,11 @@ func run(ctx context.Context, cfg config) error {
 	if err := client.Start(ctx); err != nil {
 		return err
 	}
-	defer client.Stop()
+	defer func() {
+		if client != nil {
+			client.Stop()
+		}
+	}()
 
 	if err := client.WaitAck(ctx, client.bindMessageID, protocol.AckAccepted); err != nil {
 		return fmt.Errorf("wait bind ack: %w", err)
@@ -181,6 +188,14 @@ func run(ctx context.Context, cfg config) error {
 		return fmt.Errorf("wait online message delivered status: %w", err)
 	}
 	fmt.Println("online message delivered")
+
+	if cfg.CheckReconnectRetry {
+		reconnected, err := checkReconnectRetry(ctx, cfg, db, client, reconnectMessageID)
+		if err != nil {
+			return err
+		}
+		client = reconnected
+	}
 
 	fmt.Println("checking NSQ upstream publish path")
 	if err := client.SendUpstream(upstreamMessageID, 2001, []byte("nsq-upstream")); err != nil {
@@ -255,6 +270,50 @@ func checkDebugCluster(ctx context.Context, cfg config) error {
 	}
 
 	return nil
+}
+
+func checkReconnectRetry(ctx context.Context, cfg config, db *sql.DB, client *e2eClient, messageID string) (*e2eClient, error) {
+	if cfg.ExpectSessionURL == "" {
+		return nil, fmt.Errorf("check reconnect retry requires expect-session-url")
+	}
+
+	fmt.Println("checking reconnect retry path")
+	client.Stop()
+	if err := waitDebugSessionsGone(ctx, cfg); err != nil {
+		return nil, fmt.Errorf("wait disconnected session cleanup: %w", err)
+	}
+
+	if err := pushDownlink(ctx, cfg, messageID, []byte("queued-while-disconnected"), http.StatusAccepted); err != nil {
+		return nil, fmt.Errorf("push reconnect retry downlink: %w", err)
+	}
+	if err := waitMessagePendingAttempt(ctx, db, messageID); err != nil {
+		return nil, fmt.Errorf("wait reconnect retry message pending: %w", err)
+	}
+	fmt.Println("reconnect retry message queued")
+
+	reconnected := newE2EClient(cfg)
+	if err := reconnected.Start(ctx); err != nil {
+		return nil, fmt.Errorf("reconnect client: %w", err)
+	}
+	if err := reconnected.WaitAck(ctx, reconnected.bindMessageID, protocol.AckAccepted); err != nil {
+		reconnected.Stop()
+		return nil, fmt.Errorf("wait reconnect bind ack: %w", err)
+	}
+	if err := waitDebugSessions(ctx, cfg); err != nil {
+		reconnected.Stop()
+		return nil, fmt.Errorf("wait reconnect local session: %w", err)
+	}
+	if err := reconnected.WaitDownlink(ctx, messageID); err != nil {
+		reconnected.Stop()
+		return nil, fmt.Errorf("wait reconnect retry downlink: %w", err)
+	}
+	if err := waitMessageStatus(ctx, db, messageID, string(downlink.MessageStatusDelivered)); err != nil {
+		reconnected.Stop()
+		return nil, fmt.Errorf("wait reconnect retry delivered status: %w", err)
+	}
+	fmt.Println("reconnect retry message delivered")
+
+	return reconnected, nil
 }
 
 func waitDebugRoute(ctx context.Context, cfg config) error {
@@ -349,6 +408,31 @@ func waitDebugSessions(ctx context.Context, cfg config) error {
 	return nil
 }
 
+func waitDebugSessionsGone(ctx context.Context, cfg config) error {
+	var lastErr error
+	err := waitUntil(ctx, func() (bool, error) {
+		resp, err := fetchDebugSessions(ctx, cfg)
+		if err != nil {
+			lastErr = err
+			return false, nil
+		}
+		if err := validateDebugSessionsGone(cfg, resp); err != nil {
+			lastErr = err
+			return false, nil
+		}
+
+		return true, nil
+	})
+	if err != nil {
+		if lastErr != nil {
+			return fmt.Errorf("wait debug sessions gone: %w; last check: %v", err, lastErr)
+		}
+		return fmt.Errorf("wait debug sessions gone: %w", err)
+	}
+
+	return nil
+}
+
 func fetchDebugSessions(ctx context.Context, cfg config) (debugSessionsResponse, error) {
 	query := url.Values{}
 	query.Set("client_id", cfg.ClientID)
@@ -389,6 +473,22 @@ func validateDebugSessions(cfg config, resp debugSessionsResponse) error {
 	}
 
 	return fmt.Errorf("debug sessions missing %s/%s in %d sessions", cfg.ClientID, cfg.DeviceID, len(resp.Sessions))
+}
+
+func validateDebugSessionsGone(cfg config, resp debugSessionsResponse) error {
+	if resp.Code != "ok" {
+		return fmt.Errorf("debug sessions code = %q, want ok", resp.Code)
+	}
+	if cfg.ExpectSessionNode != "" && resp.GatewayNode != cfg.ExpectSessionNode {
+		return fmt.Errorf("debug sessions gateway_node = %q, want %q", resp.GatewayNode, cfg.ExpectSessionNode)
+	}
+	for _, found := range resp.Sessions {
+		if found.ClientID == cfg.ClientID && found.DeviceID == cfg.DeviceID {
+			return fmt.Errorf("debug session %s/%s is still present", cfg.ClientID, cfg.DeviceID)
+		}
+	}
+
+	return nil
 }
 
 func getInternalJSON(ctx context.Context, baseURL, path, token string, target any) error {
@@ -508,6 +608,32 @@ WHERE message_id = $1
 			return false, err
 		}
 		if status != wantStatus {
+			return false, nil
+		}
+		return true, nil
+	})
+}
+
+func waitMessagePendingAttempt(ctx context.Context, db *sql.DB, messageID string) error {
+	return waitUntil(ctx, func() (bool, error) {
+		var status string
+		var attempts int
+		var lastError string
+		err := db.QueryRowContext(ctx, `
+SELECT status, attempts, last_error
+FROM z_courier_downlink_messages
+WHERE message_id = $1
+`, messageID).Scan(&status, &attempts, &lastError)
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		if status != string(downlink.MessageStatusPending) {
+			return false, nil
+		}
+		if attempts == 0 || strings.TrimSpace(lastError) == "" {
 			return false, nil
 		}
 		return true, nil
@@ -646,6 +772,9 @@ func (c *e2eClient) Stop() {
 	if c.client != nil {
 		c.client.Stop()
 	}
+	c.mu.Lock()
+	c.conn = nil
+	c.mu.Unlock()
 }
 
 func (c *e2eClient) SendUpstream(messageID string, msgID uint32, body []byte) error {

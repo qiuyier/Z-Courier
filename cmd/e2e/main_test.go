@@ -76,3 +76,46 @@ func TestValidateDebugSessions(t *testing.T) {
 		t.Fatalf("validateDebugSessions() error = %v", err)
 	}
 }
+
+func TestValidateDebugSessionsGone(t *testing.T) {
+	cfg := config{
+		ClientID:          "client-1",
+		DeviceID:          "device-1",
+		ExpectSessionNode: "gateway-b",
+	}
+	resp := debugSessionsResponse{
+		Code:          "ok",
+		GatewayNode:   "gateway-b",
+		ClientID:      "client-1",
+		Total:         0,
+		UniqueClients: 0,
+		Sessions:      []debugSession{},
+	}
+
+	if err := validateDebugSessionsGone(cfg, resp); err != nil {
+		t.Fatalf("validateDebugSessionsGone() error = %v", err)
+	}
+}
+
+func TestValidateDebugSessionsGoneRejectsStillPresentSession(t *testing.T) {
+	cfg := config{
+		ClientID:          "client-1",
+		DeviceID:          "device-1",
+		ExpectSessionNode: "gateway-b",
+	}
+	resp := debugSessionsResponse{
+		Code:        "ok",
+		GatewayNode: "gateway-b",
+		ClientID:    "client-1",
+		Sessions: []debugSession{{
+			SessionID:   "session-1",
+			ClientID:    "client-1",
+			DeviceID:    "device-1",
+			GatewayNode: "gateway-b",
+		}},
+	}
+
+	if err := validateDebugSessionsGone(cfg, resp); err == nil {
+		t.Fatal("validateDebugSessionsGone() error = nil, want still-present rejection")
+	}
+}

@@ -110,5 +110,6 @@ go run ./cmd/e2e \
   -expect-route-internal-url http://127.0.0.1:18183 \
   -expect-session-url http://127.0.0.1:18183 \
   -expect-session-node gateway-b \
+  -check-reconnect-retry \
   -timeout 45s \
   "$@"
