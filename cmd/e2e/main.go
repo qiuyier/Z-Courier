@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -689,7 +691,175 @@ func checkMetrics(ctx context.Context, cfg config) error {
 		}
 	}
 
+	if cfg.CheckReconnectRetry {
+		if err := checkReconnectRetryMetrics(string(body), cfg); err != nil {
+			return err
+		}
+	}
+
 	return nil
+}
+
+type metricExpectation struct {
+	Name   string
+	Labels map[string]string
+	Min    float64
+}
+
+func checkReconnectRetryMetrics(metricsText string, cfg config) error {
+	expectations := []metricExpectation{
+		{
+			Name:   "z_courier_downlink_push_total",
+			Labels: map[string]string{"msg_id": "2001", "result": "queued"},
+			Min:    1,
+		},
+		{
+			Name:   "z_courier_cluster_registry_lookup_total",
+			Labels: map[string]string{"result": "hit"},
+			Min:    1,
+		},
+		{
+			Name:   "z_courier_cluster_registry_unbind_total",
+			Labels: map[string]string{"result": "success"},
+			Min:    1,
+		},
+		{
+			Name:   "z_courier_downlink_retry_scan_total",
+			Labels: map[string]string{"result": "success"},
+			Min:    1,
+		},
+		{
+			Name: "z_courier_downlink_retry_claim_duration_seconds_count",
+			Min:  1,
+		},
+	}
+	if cfg.ExpectRouteNode != "" {
+		expectations = append(expectations, metricExpectation{
+			Name:   "z_courier_cluster_peer_push_total",
+			Labels: map[string]string{"target_node": cfg.ExpectRouteNode, "result": "success"},
+			Min:    1,
+		})
+	}
+
+	for _, expectation := range expectations {
+		value, found, err := sumMetricSamples(metricsText, expectation.Name, expectation.Labels)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return fmt.Errorf("reconnect retry metric %s%s not found", expectation.Name, formatMetricLabels(expectation.Labels))
+		}
+		if value < expectation.Min {
+			return fmt.Errorf("reconnect retry metric %s%s = %.4f, want >= %.4f", expectation.Name, formatMetricLabels(expectation.Labels), value, expectation.Min)
+		}
+	}
+
+	return nil
+}
+
+func sumMetricSamples(metricsText, name string, wantLabels map[string]string) (float64, bool, error) {
+	var sum float64
+	var found bool
+	for _, line := range strings.Split(metricsText, "\n") {
+		sampleName, labels, value, ok, err := parseMetricSample(line)
+		if err != nil {
+			return 0, false, err
+		}
+		if !ok || sampleName != name || !metricLabelsMatch(labels, wantLabels) {
+			continue
+		}
+
+		found = true
+		sum += value
+	}
+
+	return sum, found, nil
+}
+
+func parseMetricSample(line string) (string, map[string]string, float64, bool, error) {
+	line = strings.TrimSpace(line)
+	if line == "" || strings.HasPrefix(line, "#") {
+		return "", nil, 0, false, nil
+	}
+
+	var name string
+	labels := map[string]string{}
+	var valueRaw string
+	if braceStart := strings.IndexByte(line, '{'); braceStart >= 0 {
+		braceEnd := strings.IndexByte(line[braceStart:], '}')
+		if braceEnd < 0 {
+			return "", nil, 0, false, fmt.Errorf("invalid metric line: %s", line)
+		}
+		braceEnd += braceStart
+		name = line[:braceStart]
+		parsed, err := parseMetricLabels(line[braceStart+1 : braceEnd])
+		if err != nil {
+			return "", nil, 0, false, err
+		}
+		labels = parsed
+		valueRaw = strings.TrimSpace(line[braceEnd+1:])
+	} else {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			return "", nil, 0, false, fmt.Errorf("invalid metric line: %s", line)
+		}
+		name = fields[0]
+		valueRaw = fields[1]
+	}
+
+	fields := strings.Fields(valueRaw)
+	if len(fields) == 0 {
+		return "", nil, 0, false, fmt.Errorf("missing metric value: %s", line)
+	}
+	value, err := strconv.ParseFloat(fields[0], 64)
+	if err != nil {
+		return "", nil, 0, false, fmt.Errorf("parse metric value %q: %w", fields[0], err)
+	}
+
+	return name, labels, value, true, nil
+}
+
+func parseMetricLabels(raw string) (map[string]string, error) {
+	labels := map[string]string{}
+	if strings.TrimSpace(raw) == "" {
+		return labels, nil
+	}
+
+	for _, part := range strings.Split(raw, ",") {
+		key, value, ok := strings.Cut(part, "=")
+		if !ok {
+			return nil, fmt.Errorf("invalid metric label %q", part)
+		}
+		key = strings.TrimSpace(key)
+		value = strings.Trim(strings.TrimSpace(value), `"`)
+		labels[key] = value
+	}
+
+	return labels, nil
+}
+
+func metricLabelsMatch(got, want map[string]string) bool {
+	for key, wantValue := range want {
+		if got[key] != wantValue {
+			return false
+		}
+	}
+
+	return true
+}
+
+func formatMetricLabels(labels map[string]string) string {
+	if len(labels) == 0 {
+		return ""
+	}
+
+	parts := make([]string, 0, len(labels))
+	for key, value := range labels {
+		parts = append(parts, key+"="+strconv.Quote(value))
+	}
+	sort.Strings(parts)
+
+	return "{" + strings.Join(parts, ",") + "}"
 }
 
 func waitUntil(ctx context.Context, check func() (bool, error)) error {

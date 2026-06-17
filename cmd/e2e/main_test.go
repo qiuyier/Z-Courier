@@ -119,3 +119,46 @@ func TestValidateDebugSessionsGoneRejectsStillPresentSession(t *testing.T) {
 		t.Fatal("validateDebugSessionsGone() error = nil, want still-present rejection")
 	}
 }
+
+func TestSumMetricSamplesMatchesLabelsInAnyOrder(t *testing.T) {
+	metricsText := `
+# HELP z_courier_cluster_peer_push_total Total number of cluster peer push attempts.
+z_courier_cluster_peer_push_total{result="success",target_node="gateway-b"} 2
+z_courier_cluster_peer_push_total{result="failure",target_node="gateway-b"} 1
+`
+	value, found, err := sumMetricSamples(metricsText, "z_courier_cluster_peer_push_total", map[string]string{
+		"target_node": "gateway-b",
+		"result":      "success",
+	})
+	if err != nil {
+		t.Fatalf("sumMetricSamples() error = %v", err)
+	}
+	if !found || value != 2 {
+		t.Fatalf("sumMetricSamples() = value:%v found:%v, want 2 true", value, found)
+	}
+}
+
+func TestCheckReconnectRetryMetrics(t *testing.T) {
+	metricsText := `
+z_courier_downlink_push_total{msg_id="2001",result="queued"} 2
+z_courier_cluster_registry_lookup_total{result="hit"} 3
+z_courier_cluster_registry_unbind_total{result="success"} 1
+z_courier_downlink_retry_scan_total{result="success"} 4
+z_courier_downlink_retry_claim_duration_seconds_count{owner="gateway-a",result="success"} 4
+z_courier_cluster_peer_push_total{target_node="gateway-b",result="success"} 1
+`
+	err := checkReconnectRetryMetrics(metricsText, config{ExpectRouteNode: "gateway-b"})
+	if err != nil {
+		t.Fatalf("checkReconnectRetryMetrics() error = %v", err)
+	}
+}
+
+func TestCheckReconnectRetryMetricsRejectsMissingMetric(t *testing.T) {
+	metricsText := `
+z_courier_downlink_push_total{msg_id="2001",result="queued"} 1
+`
+	err := checkReconnectRetryMetrics(metricsText, config{ExpectRouteNode: "gateway-b"})
+	if err == nil {
+		t.Fatal("checkReconnectRetryMetrics() error = nil, want missing metric rejection")
+	}
+}
