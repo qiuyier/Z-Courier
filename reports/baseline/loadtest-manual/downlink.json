@@ -1,46 +1,46 @@
 {
   "mode": "downlink",
-  "clients": 2,
-  "messages_per_client": 1,
-  "http_concurrency": 2,
-  "duration": "1.005s",
-  "duration_ms": 1005,
-  "target_duration": "1s",
-  "rate": 5,
-  "qps": 4.970631436718557,
+  "clients": 100,
+  "messages_per_client": 10,
+  "http_concurrency": 50,
+  "duration": "1m0.003s",
+  "duration_ms": 60003,
+  "target_duration": "1m0s",
+  "rate": 100,
+  "qps": 99.72676480171374,
   "error_rate": 0,
   "counts": {
     "bind_accepted": 0,
     "bind_rejected": 0,
     "upstream_accepted": 0,
     "upstream_rejected": 0,
-    "downlink_success": 5,
+    "downlink_success": 5984,
     "downlink_rejected": 0,
     "send_errors": 0,
     "decode_errors": 0
   },
   "latency": {
     "downlink_http": {
-      "count": 5,
-      "min": "5.28ms",
-      "avg": "8.033ms",
-      "p50": "6.598ms",
-      "p95": "16.218ms",
-      "p99": "16.218ms",
-      "max": "16.218ms",
-      "min_ms": 5.280875,
-      "avg_ms": 8.033991,
-      "p50_ms": 6.598583,
-      "p95_ms": 16.218834,
-      "p99_ms": 16.218834,
-      "max_ms": 16.218834
+      "count": 5984,
+      "min": "1.319ms",
+      "avg": "4.119ms",
+      "p50": "3.173ms",
+      "p95": "7.574ms",
+      "p99": "20.698ms",
+      "max": "112.481ms",
+      "min_ms": 1.319042,
+      "avg_ms": 4.119161,
+      "p50_ms": 3.173458,
+      "p95_ms": 7.574541,
+      "p99_ms": 20.698042,
+      "max_ms": 112.481958
     }
   },
   "checks": [
     {
       "name": "min_qps",
       "passed": true,
-      "actual": 4.970631436718557,
+      "actual": 99.72676480171374,
       "expected": 1,
       "operator": ">="
     },
@@ -54,14 +54,14 @@
     {
       "name": "max_p95_ms",
       "passed": true,
-      "actual": 16.218834,
+      "actual": 7.574541,
       "expected": 5000,
       "operator": "<="
     },
     {
       "name": "max_p99_ms",
       "passed": true,
-      "actual": 16.218834,
+      "actual": 20.698042,
       "expected": 10000,
       "operator": "<="
     }
