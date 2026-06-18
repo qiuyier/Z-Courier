@@ -447,14 +447,29 @@ The first implementation should stay small but complete:
 - Prometheus metrics.
 - Example backend and example client.
 
-## Future Extensions
+## Roadmap
 
-- Cluster online route store based on Redis.
+Delivered through the V2 phase:
+
+- Redis cluster online route store.
+- Gateway-to-gateway downlink dispatch.
+- PostgreSQL-backed reliable delivery and retry state.
+- Cluster, retry, capacity, and cleanup observability.
+
+V3 priorities are tracked in
+[v3-auth-integration.md](v3-auth-integration.md):
+
+- Configuration-selectable static, HTTP, and JWT/JWKS token verification.
+- A consistent principal and verifier error contract.
+- Bounded auth caching, timeout, backpressure, and metrics.
+- Minimal Go protocol and backend integration SDKs.
+- Optional replay-resistant internal request signing.
+
+Later extensions:
+
 - gRPC forwarder adapter.
 - Kafka and NATS adapters.
 - Admin API and dashboard.
 - Hot-reloadable route configuration.
 - Multi-tenant isolation.
-- Gateway-to-gateway dispatch.
-- Persistent gateway-side delivery buffer.
 - OpenTelemetry tracing.

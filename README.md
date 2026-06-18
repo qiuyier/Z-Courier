@@ -31,6 +31,11 @@ Release history is tracked in [CHANGELOG.md](CHANGELOG.md).
 The current V2 release-candidate guide is
 [docs/v2-release-candidate.md](docs/v2-release-candidate.md).
 
+The next internal development phase is described in
+[docs/v3-auth-integration.md](docs/v3-auth-integration.md). V3 targets the
+`v0.3.x` release line and focuses on production authentication and integration
+SDKs.
+
 ## Quick Start
 
 Run the single-node integration verifier from the repository root:
@@ -103,9 +108,9 @@ git diff --check
 
 This is the same checklist used before cutting a V2 RC tag.
 
-## V2 Status
+## V2 Release Status
 
-V2 is in release-candidate shape. Implemented behavior:
+V2 was published as `v0.2.0-rc.1`. Implemented behavior:
 
 - Shared Redis online route registry for `client_id + device_id`
 - Gateway peer push with `POST /internal/cluster/push`
@@ -118,10 +123,9 @@ V2 is in release-candidate shape. Implemented behavior:
 GitHub Actions includes unit tests, local E2E, cluster E2E, load-test smoke, and
 non-blocking load-test baseline comparisons in workflow summaries.
 
-Before tagging, confirm CI is green for the exact commit, review
-[CHANGELOG.md](CHANGELOG.md), and use
-[docs/v2-release-candidate.md](docs/v2-release-candidate.md) as the final
-release checklist.
+The next implementation work is V3 auth foundation. See
+[docs/v3-auth-integration.md](docs/v3-auth-integration.md) for scope,
+compatibility rules, milestones, and completion criteria.
 
 ## Development
 
