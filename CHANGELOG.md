@@ -12,6 +12,12 @@ semantic versioning after the first public MVP tag.
 - V3 authentication and integration design with milestones for HTTP token
   verification, JWT/JWKS, auth caching and metrics, Go SDKs, and internal
   request hardening.
+- Configurable remote HTTP token verifier with typed status mapping, strict
+  response validation, timeout, redirect rejection, and in-flight protection.
+- Bounded SHA-256-keyed authentication cache with positive and deterministic
+  invalid-token caching, principal-expiry limits, and cache metrics.
+- Grafana panels for authentication request rate, success rate, latency,
+  in-flight verification, and cache activity.
 
 ## [v0.2.0-rc.1] - 2026-06-17
 

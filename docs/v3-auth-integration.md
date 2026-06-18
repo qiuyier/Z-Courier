@@ -79,18 +79,19 @@ The current fields remain the base contract:
 
 ```go
 type Principal struct {
-    ClientID string
-    TokenID  string
-    Subject  string
-    Scopes   []string
+    ClientID  string
+    TokenID   string
+    Subject   string
+    Scopes    []string
+    ExpiresAt time.Time
 }
 ```
 
-V3 may add issuer and expiry metadata when the implementation needs it:
+V3.2 adds expiry metadata for safe positive-cache lifetime. V3.3 may add issuer
+metadata for JWT/JWKS verification:
 
 ```go
-Issuer    string
-ExpiresAt time.Time
+Issuer string
 ```
 
 Rules:
@@ -167,7 +168,7 @@ auth:
   type: http
   http:
     url: http://backend:8080/internal/auth/verify
-    internal_token: ${ZCOURIER_AUTH_INTERNAL_TOKEN}
+    internal_token: replace-with-a-shared-secret
     timeout: 2s
     max_in_flight: 500
   cache:
@@ -361,6 +362,8 @@ Status: implemented.
 Exit criteria: existing V2 E2E and load-test smoke remain unchanged and green.
 
 ### V3.2 Remote HTTP Verification
+
+Status: implemented.
 
 - Implement `HTTPVerifier` with timeout and response validation.
 - Add max-in-flight protection.

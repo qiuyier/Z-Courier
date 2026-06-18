@@ -37,6 +37,14 @@ var (
 		[]string{"provider"},
 	)
 
+	authCache = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "z_courier_auth_cache_total",
+			Help: "Total number of authentication cache lookups.",
+		},
+		[]string{"provider", "result"},
+	)
+
 	ingressPackets = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "z_courier_ingress_packets_total",
@@ -304,6 +312,10 @@ func RecordAuthVerify(provider, result string, duration time.Duration) {
 
 func AddAuthInFlight(provider string, delta float64) {
 	authInFlight.WithLabelValues(nonEmpty(provider, "custom")).Add(delta)
+}
+
+func RecordAuthCache(provider, result string) {
+	authCache.WithLabelValues(nonEmpty(provider, "custom"), nonEmpty(result, "miss")).Inc()
 }
 
 func RecordIngressPacket(msgID uint32, result string) {

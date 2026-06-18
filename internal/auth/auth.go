@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"time"
 )
 
 const (
@@ -33,10 +34,11 @@ const (
 )
 
 type Principal struct {
-	ClientID string
-	TokenID  string
-	Subject  string
-	Scopes   []string
+	ClientID  string
+	TokenID   string
+	Subject   string
+	Scopes    []string
+	ExpiresAt time.Time
 }
 
 type Verifier interface {

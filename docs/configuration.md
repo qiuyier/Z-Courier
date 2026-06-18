@@ -76,24 +76,52 @@ auth:
         - gateway:dev
 ```
 
-`auth.type` selects the token verifier. V3.1 supports `static`; omitting `type`
-while providing `static_tokens` keeps existing configurations compatible. The
-`http` and `jwt` provider names are reserved for the next V3 milestones and
-currently cause startup validation to fail instead of silently falling back.
+`auth.type` selects the token verifier. Supported values are `static` and
+`http`; omitting `type` while providing `static_tokens` keeps existing
+configurations compatible. The `jwt` provider name is reserved for V3.3 and
+currently causes startup validation to fail instead of silently falling back.
 
 The static verifier is intended for local development and tests. Production
-deployments should use a verifier that matches the backend application's token
-semantics once the corresponding provider is available.
+deployments can use the HTTP verifier so the backend application remains the
+owner of token semantics:
+
+```yaml
+auth:
+  type: http
+  http:
+    url: http://backend:8080/internal/auth/verify
+    internal_token: replace-with-a-shared-secret
+    timeout: 2s
+    max_in_flight: 500
+  cache:
+    enabled: true
+    max_entries: 10000
+    positive_ttl: 30s
+    negative_ttl: 3s
+```
+
+The gateway sends `POST` with `Authorization: Bearer <client-token>` and
+`X-ZCourier-Internal-Token`. A successful backend response contains
+`client_id`, optional `token_id`, `subject`, `scopes`, and `expires_at` fields.
+HTTP `401` and `403` reject credentials; `429`, `5xx`, transport failures, and
+invalid responses are treated as provider unavailability. Verification timeout
+returns the retryable `auth_unavailable` ACK.
+
+The HTTP verifier does not follow redirects and never includes raw tokens in
+logs or metric labels. `max_in_flight` defaults to `500` and `timeout` defaults
+to `2s`. When caching is enabled, defaults are 10,000 entries, 30 seconds for
+successful verification, and 3 seconds for invalid tokens. Cache keys are
+SHA-256 digests; timeout and provider-unavailable results are never cached.
 
 The gateway does not trust `ClientID` from the packet until the token is
 verified. Session binding uses the `client_id` returned by the verifier.
 
 Authentication exports `z_courier_auth_verify_total`,
-`z_courier_auth_verify_duration_seconds`, and `z_courier_auth_inflight`, labeled
-only by provider and result. Token and client identifiers are never metric
-labels. The provisioned `Z-Courier Overview` Grafana dashboard displays auth
-request rate, success rate, p95/p99 verification latency, and in-flight
-verification count.
+`z_courier_auth_verify_duration_seconds`, `z_courier_auth_inflight`, and
+`z_courier_auth_cache_total`, labeled only by provider and bounded result
+values. Token and client identifiers are never metric labels. The provisioned
+`Z-Courier Overview` Grafana dashboard displays auth request rate, success rate,
+p95/p99 verification latency, in-flight verification count, and cache activity.
 
 ## Internal HTTP
 

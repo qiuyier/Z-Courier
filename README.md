@@ -7,14 +7,16 @@ A high-performance message push gateway based on the `zinx` network framework.
 - Lightweight and efficient message routing
 - Fast JSON serialization based on Sonic
 - Structured logging based on Zap
+- Pluggable static or remote HTTP authentication with bounded verification
+  caching, timeout, and in-flight protection
 - Built-in HTTP and NSQ upstream adapters, with adapter interfaces for gRPC,
   Kafka, NATS, and custom targets
 - Reliable downlink delivery with ACK, retry, and idempotency hooks
 - Two-node cluster delivery with Redis online routes and gateway peer push
 - Reconnect-safe delivery: disconnected clients keep messages pending until the
   next bind flushes them
-- Prometheus metrics and Grafana dashboards for ingress, upstream, downlink,
-  cluster, retry, capacity, and load-test paths
+- Prometheus metrics and Grafana dashboards for authentication, ingress,
+  upstream, downlink, cluster, retry, capacity, and load-test paths
 - Graceful shutdown with readiness drain and cluster route cleanup
 - MIT Licensed
 
@@ -123,8 +125,9 @@ V2 was published as `v0.2.0-rc.1`. Implemented behavior:
 GitHub Actions includes unit tests, local E2E, cluster E2E, load-test smoke, and
 non-blocking load-test baseline comparisons in workflow summaries.
 
-The next implementation work is V3 auth foundation. See
-[docs/v3-auth-integration.md](docs/v3-auth-integration.md) for scope,
+V3.1 auth foundations and V3.2 remote HTTP token verification are implemented.
+The next milestone is V3.3 local JWT/JWKS verification. See
+[docs/v3-auth-integration.md](docs/v3-auth-integration.md) for configuration,
 compatibility rules, milestones, and completion criteria.
 
 ## Development

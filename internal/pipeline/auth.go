@@ -79,9 +79,10 @@ func clonePrincipal(in *auth.Principal) *auth.Principal {
 	}
 
 	return &auth.Principal{
-		ClientID: in.ClientID,
-		TokenID:  in.TokenID,
-		Subject:  in.Subject,
-		Scopes:   append([]string(nil), in.Scopes...),
+		ClientID:  in.ClientID,
+		TokenID:   in.TokenID,
+		Subject:   in.Subject,
+		Scopes:    append([]string(nil), in.Scopes...),
+		ExpiresAt: in.ExpiresAt,
 	}
 }

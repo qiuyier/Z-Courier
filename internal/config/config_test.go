@@ -3,9 +3,13 @@ package config
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -831,6 +835,56 @@ auth:
 	}
 }
 
+func TestLoadServerConfigHTTPAuthProvider(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		if got := r.Header.Get("Authorization"); got != "Bearer token-a" {
+			t.Errorf("Authorization = %q", got)
+		}
+		if got := r.Header.Get(auth.InternalTokenHeader); got != "internal-secret" {
+			t.Errorf("internal token = %q", got)
+		}
+		_, _ = w.Write([]byte(`{"client_id":"client-a","token_id":"token-a"}`))
+	}))
+	defer server.Close()
+
+	path := writeConfig(t, fmt.Sprintf(`
+auth:
+  type: http
+  http:
+    url: %s
+    internal_token: internal-secret
+    timeout: 1s
+    max_in_flight: 10
+  cache:
+    enabled: true
+    max_entries: 100
+    positive_ttl: 1m
+    negative_ttl: 1s
+`, server.URL))
+
+	config, err := LoadServerConfig(path)
+	if err != nil {
+		t.Fatalf("LoadServerConfig() error = %v", err)
+	}
+	if got := auth.ProviderName(config.Verifier); got != auth.ProviderHTTP {
+		t.Fatalf("auth provider = %q, want %q", got, auth.ProviderHTTP)
+	}
+	for range 2 {
+		principal, verifyErr := config.Verifier.Verify(context.Background(), "token-a")
+		if verifyErr != nil {
+			t.Fatalf("Verify() error = %v", verifyErr)
+		}
+		if principal.ClientID != "client-a" {
+			t.Fatalf("principal = %+v", principal)
+		}
+	}
+	if got := requests.Load(); got != 1 {
+		t.Fatalf("HTTP verification requests = %d, want 1", got)
+	}
+}
+
 func TestLoadServerConfigRejectsInvalidAuthProvider(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -840,7 +894,13 @@ func TestLoadServerConfigRejectsInvalidAuthProvider(t *testing.T) {
 		{name: "unknown", config: "auth:\n  type: unknown\n", message: "unsupported auth provider"},
 		{name: "static without tokens", config: "auth:\n  type: static\n", message: "requires static_tokens"},
 		{name: "http without URL", config: "auth:\n  type: http\n", message: "requires auth.http.url"},
-		{name: "http reserved", config: "auth:\n  type: http\n  http:\n    url: http://backend.local/verify\n", message: "not implemented"},
+		{name: "http invalid URL", config: "auth:\n  type: http\n  http:\n    url: ftp://backend.local/verify\n", message: "absolute http or https URL"},
+		{name: "http invalid timeout", config: "auth:\n  type: http\n  http:\n    url: http://backend.local/verify\n    timeout: 0s\n", message: "auth.http.timeout"},
+		{name: "http invalid capacity", config: "auth:\n  type: http\n  http:\n    url: http://backend.local/verify\n    max_in_flight: -1\n", message: "max_in_flight"},
+		{name: "http without type", config: "auth:\n  http:\n    url: http://backend.local/verify\n", message: "auth.type is required"},
+		{name: "conflicting providers", config: "auth:\n  type: http\n  static_tokens: {}\n  http:\n    url: http://backend.local/verify\n", message: "conflicting provider configuration"},
+		{name: "negative cache size", config: "auth:\n  type: static\n  static_tokens: {}\n  cache:\n    enabled: true\n    max_entries: -1\n", message: "cache.max_entries"},
+		{name: "invalid cache ttl", config: "auth:\n  type: static\n  static_tokens: {}\n  cache:\n    enabled: true\n    positive_ttl: 0s\n", message: "cache.positive_ttl"},
 		{name: "jwt incomplete", config: "auth:\n  type: jwt\n", message: "requires issuer"},
 		{
 			name:    "jwt reserved",

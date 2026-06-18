@@ -35,6 +35,7 @@ type AuthConfig struct {
 	StaticTokens map[string]StaticTokenConfig `yaml:"static_tokens"`
 	HTTP         HTTPAuthConfig               `yaml:"http"`
 	JWT          JWTAuthConfig                `yaml:"jwt"`
+	Cache        AuthCacheConfig              `yaml:"cache"`
 }
 
 type StaticTokenConfig struct {
@@ -49,6 +50,13 @@ type HTTPAuthConfig struct {
 	InternalToken string `yaml:"internal_token"`
 	Timeout       string `yaml:"timeout"`
 	MaxInFlight   int    `yaml:"max_in_flight"`
+}
+
+type AuthCacheConfig struct {
+	Enabled     bool   `yaml:"enabled"`
+	MaxEntries  int    `yaml:"max_entries"`
+	PositiveTTL string `yaml:"positive_ttl"`
+	NegativeTTL string `yaml:"negative_ttl"`
 }
 
 type JWTAuthConfig struct {
@@ -264,23 +272,45 @@ func (c *File) ToServerConfig() (server.Config, error) {
 func toAuthVerifier(config AuthConfig) (auth.Verifier, bool, error) {
 	provider := strings.ToLower(strings.TrimSpace(config.Type))
 	if provider == "" {
-		if config.StaticTokens == nil {
+		hasHTTP := isHTTPAuthConfigSet(config.HTTP)
+		hasJWT := isJWTAuthConfigSet(config.JWT)
+		if config.StaticTokens == nil && !hasHTTP && !hasJWT {
 			return nil, false, nil
+		}
+		if config.StaticTokens == nil || hasHTTP || hasJWT {
+			return nil, false, fmt.Errorf("%w: auth.type is required when using a non-static provider", auth.ErrMisconfigured)
 		}
 		provider = auth.ProviderStatic
 	}
 
+	if err := validateAuthProviderConfig(provider, config); err != nil {
+		return nil, false, err
+	}
+
+	var verifier auth.Verifier
 	switch provider {
 	case auth.ProviderStatic:
 		if config.StaticTokens == nil {
 			return nil, false, fmt.Errorf("%w: static provider requires static_tokens", auth.ErrMisconfigured)
 		}
-		return auth.NewObservedVerifier(auth.NewStaticTokenVerifier(toPrincipals(config.StaticTokens))), true, nil
+		verifier = auth.NewStaticTokenVerifier(toPrincipals(config.StaticTokens))
 	case auth.ProviderHTTP:
 		if strings.TrimSpace(config.HTTP.URL) == "" {
 			return nil, false, fmt.Errorf("%w: http provider requires auth.http.url", auth.ErrMisconfigured)
 		}
-		return nil, false, fmt.Errorf("%w: auth provider %q is not implemented", auth.ErrMisconfigured, provider)
+		timeout, err := parseOptionalPositiveDuration(config.HTTP.Timeout)
+		if err != nil {
+			return nil, false, fmt.Errorf("%w: invalid auth.http.timeout: %v", auth.ErrMisconfigured, err)
+		}
+		verifier, err = auth.NewHTTPVerifier(auth.HTTPVerifierConfig{
+			URL:           config.HTTP.URL,
+			InternalToken: config.HTTP.InternalToken,
+			Timeout:       timeout,
+			MaxInFlight:   config.HTTP.MaxInFlight,
+		})
+		if err != nil {
+			return nil, false, err
+		}
 	case auth.ProviderJWT:
 		if strings.TrimSpace(config.JWT.Issuer) == "" ||
 			strings.TrimSpace(config.JWT.Audience) == "" ||
@@ -292,6 +322,82 @@ func toAuthVerifier(config AuthConfig) (auth.Verifier, bool, error) {
 	default:
 		return nil, false, fmt.Errorf("%w: unsupported auth provider %q", auth.ErrMisconfigured, provider)
 	}
+
+	cacheConfig, cacheEnabled, err := toAuthCacheConfig(config.Cache)
+	if err != nil {
+		return nil, false, err
+	}
+	if cacheEnabled {
+		verifier, err = auth.NewCachedVerifier(verifier, cacheConfig)
+		if err != nil {
+			return nil, false, err
+		}
+	}
+
+	return auth.NewObservedVerifier(verifier), true, nil
+}
+
+func validateAuthProviderConfig(provider string, config AuthConfig) error {
+	hasStatic := config.StaticTokens != nil
+	hasHTTP := isHTTPAuthConfigSet(config.HTTP)
+	hasJWT := isJWTAuthConfigSet(config.JWT)
+
+	conflict := false
+	switch provider {
+	case auth.ProviderStatic:
+		conflict = hasHTTP || hasJWT
+	case auth.ProviderHTTP:
+		conflict = hasStatic || hasJWT
+	case auth.ProviderJWT:
+		conflict = hasStatic || hasHTTP
+	}
+	if conflict {
+		return fmt.Errorf("%w: auth provider %q has conflicting provider configuration", auth.ErrMisconfigured, provider)
+	}
+	return nil
+}
+
+func isHTTPAuthConfigSet(config HTTPAuthConfig) bool {
+	return config.URL != "" || config.InternalToken != "" || config.Timeout != "" || config.MaxInFlight != 0
+}
+
+func isJWTAuthConfigSet(config JWTAuthConfig) bool {
+	return config.Issuer != "" || config.Audience != "" || config.JWKSURL != "" || len(config.Algorithms) > 0 ||
+		config.ClientIDClaim != "" || config.TokenIDClaim != "" || config.ScopesClaim != "" ||
+		config.ClockSkew != "" || config.RefreshInterval != ""
+}
+
+func toAuthCacheConfig(config AuthCacheConfig) (auth.CacheConfig, bool, error) {
+	if config.MaxEntries < 0 {
+		return auth.CacheConfig{}, false, fmt.Errorf("%w: auth.cache.max_entries must not be negative", auth.ErrMisconfigured)
+	}
+	positiveTTL, err := parseOptionalPositiveDuration(config.PositiveTTL)
+	if err != nil {
+		return auth.CacheConfig{}, false, fmt.Errorf("%w: invalid auth.cache.positive_ttl: %v", auth.ErrMisconfigured, err)
+	}
+	negativeTTL, err := parseOptionalPositiveDuration(config.NegativeTTL)
+	if err != nil {
+		return auth.CacheConfig{}, false, fmt.Errorf("%w: invalid auth.cache.negative_ttl: %v", auth.ErrMisconfigured, err)
+	}
+	if !config.Enabled {
+		return auth.CacheConfig{}, false, nil
+	}
+
+	maxEntries := config.MaxEntries
+	if maxEntries == 0 {
+		maxEntries = 10000
+	}
+	if positiveTTL == 0 {
+		positiveTTL = 30 * time.Second
+	}
+	if negativeTTL == 0 {
+		negativeTTL = 3 * time.Second
+	}
+	return auth.CacheConfig{
+		MaxEntries:  maxEntries,
+		PositiveTTL: positiveTTL,
+		NegativeTTL: negativeTTL,
+	}, true, nil
 }
 
 func toPrincipals(tokens map[string]StaticTokenConfig) map[string]auth.Principal {
