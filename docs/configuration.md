@@ -91,7 +91,9 @@ verified. Session binding uses the `client_id` returned by the verifier.
 Authentication exports `z_courier_auth_verify_total`,
 `z_courier_auth_verify_duration_seconds`, and `z_courier_auth_inflight`, labeled
 only by provider and result. Token and client identifiers are never metric
-labels.
+labels. The provisioned `Z-Courier Overview` Grafana dashboard displays auth
+request rate, success rate, p95/p99 verification latency, and in-flight
+verification count.
 
 ## Internal HTTP
 
