@@ -12,6 +12,31 @@ import (
 )
 
 var (
+	authVerify = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "z_courier_auth_verify_total",
+			Help: "Total number of client token verification attempts.",
+		},
+		[]string{"provider", "result"},
+	)
+
+	authVerifyDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "z_courier_auth_verify_duration_seconds",
+			Help:    "Duration of client token verification attempts in seconds.",
+			Buckets: []float64{0.0001, 0.0005, 0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5},
+		},
+		[]string{"provider", "result"},
+	)
+
+	authInFlight = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "z_courier_auth_inflight",
+			Help: "Current number of in-flight client token verification attempts.",
+		},
+		[]string{"provider"},
+	)
+
 	ingressPackets = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "z_courier_ingress_packets_total",
@@ -267,6 +292,18 @@ var (
 
 func Handler() http.Handler {
 	return promhttp.Handler()
+}
+
+func RecordAuthVerify(provider, result string, duration time.Duration) {
+	labels := []string{nonEmpty(provider, "custom"), nonEmpty(result, "error")}
+	authVerify.WithLabelValues(labels...).Inc()
+	if duration >= 0 {
+		authVerifyDuration.WithLabelValues(labels...).Observe(duration.Seconds())
+	}
+}
+
+func AddAuthInFlight(provider string, delta float64) {
+	authInFlight.WithLabelValues(nonEmpty(provider, "custom")).Add(delta)
 }
 
 func RecordIngressPacket(msgID uint32, result string) {

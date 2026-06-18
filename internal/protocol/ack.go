@@ -9,10 +9,11 @@ import (
 type AckCode string
 
 const (
-	AckAccepted     AckCode = "accepted"
-	AckDecodeFailed AckCode = "decode_failed"
-	AckUnauthorized AckCode = "unauthorized"
-	AckRejected     AckCode = "rejected"
+	AckAccepted        AckCode = "accepted"
+	AckDecodeFailed    AckCode = "decode_failed"
+	AckUnauthorized    AckCode = "unauthorized"
+	AckAuthUnavailable AckCode = "auth_unavailable"
+	AckRejected        AckCode = "rejected"
 )
 
 type Ack struct {

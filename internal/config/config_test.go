@@ -1,10 +1,15 @@
 package config
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/qiuyier/Z-Courier/internal/auth"
 )
 
 func TestResolvePath(t *testing.T) {
@@ -780,6 +785,80 @@ unknown_field: true
 	_, err := LoadServerConfig(path)
 	if err == nil {
 		t.Fatal("LoadServerConfig() error = nil, want error")
+	}
+}
+
+func TestLoadServerConfigExplicitStaticAuthProvider(t *testing.T) {
+	path := writeConfig(t, `
+auth:
+  type: static
+  static_tokens:
+    token-a:
+      client_id: client-a
+      token_id: token-a
+`)
+
+	config, err := LoadServerConfig(path)
+	if err != nil {
+		t.Fatalf("LoadServerConfig() error = %v", err)
+	}
+	if got := auth.ProviderName(config.Verifier); got != auth.ProviderStatic {
+		t.Fatalf("auth provider = %q, want %q", got, auth.ProviderStatic)
+	}
+	principal, err := config.Verifier.Verify(context.Background(), "token-a")
+	if err != nil {
+		t.Fatalf("Verify() error = %v", err)
+	}
+	if principal.ClientID != "client-a" {
+		t.Fatalf("principal client ID = %q, want client-a", principal.ClientID)
+	}
+}
+
+func TestLoadServerConfigLegacyStaticAuthProvider(t *testing.T) {
+	path := writeConfig(t, `
+auth:
+  static_tokens:
+    token-a:
+      client_id: client-a
+`)
+
+	config, err := LoadServerConfig(path)
+	if err != nil {
+		t.Fatalf("LoadServerConfig() error = %v", err)
+	}
+	if got := auth.ProviderName(config.Verifier); got != auth.ProviderStatic {
+		t.Fatalf("auth provider = %q, want %q", got, auth.ProviderStatic)
+	}
+}
+
+func TestLoadServerConfigRejectsInvalidAuthProvider(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  string
+		message string
+	}{
+		{name: "unknown", config: "auth:\n  type: unknown\n", message: "unsupported auth provider"},
+		{name: "static without tokens", config: "auth:\n  type: static\n", message: "requires static_tokens"},
+		{name: "http without URL", config: "auth:\n  type: http\n", message: "requires auth.http.url"},
+		{name: "http reserved", config: "auth:\n  type: http\n  http:\n    url: http://backend.local/verify\n", message: "not implemented"},
+		{name: "jwt incomplete", config: "auth:\n  type: jwt\n", message: "requires issuer"},
+		{
+			name:    "jwt reserved",
+			config:  "auth:\n  type: jwt\n  jwt:\n    issuer: https://issuer.local\n    audience: z-courier\n    jwks_url: https://issuer.local/.well-known/jwks.json\n    algorithms: [RS256]\n",
+			message: "not implemented",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := LoadServerConfig(writeConfig(t, test.config))
+			if !errors.Is(err, auth.ErrMisconfigured) {
+				t.Fatalf("LoadServerConfig() error = %v, want ErrMisconfigured", err)
+			}
+			if !strings.Contains(err.Error(), test.message) {
+				t.Fatalf("LoadServerConfig() error = %q, want substring %q", err, test.message)
+			}
+		})
 	}
 }
 

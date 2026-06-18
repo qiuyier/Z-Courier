@@ -46,6 +46,37 @@ func TestAuthHandlerRejectsInvalidToken(t *testing.T) {
 	}
 }
 
+func TestAuthHandlerMapsVerifierErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want protocol.AckCode
+	}{
+		{name: "invalid", err: auth.ErrInvalidToken, want: protocol.AckUnauthorized},
+		{name: "expired", err: auth.ErrExpiredToken, want: protocol.AckUnauthorized},
+		{name: "forbidden", err: auth.ErrForbidden, want: protocol.AckUnauthorized},
+		{name: "timeout", err: auth.ErrProviderTimeout, want: protocol.AckAuthUnavailable},
+		{name: "unavailable", err: auth.ErrProviderUnavailable, want: protocol.AckAuthUnavailable},
+		{name: "misconfigured", err: auth.ErrMisconfigured, want: protocol.AckRejected},
+		{name: "unknown", err: errors.New("unknown"), want: protocol.AckUnauthorized},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			handler := NewAuthHandler(fakeVerifier{err: test.err}, zap.NewNop())
+			ctx := &Context{
+				BaseContext: context.Background(),
+				Packet:      protocol.NewPacket(1000, nil),
+			}
+
+			code, _ := AckError(handler.Handle(ctx))
+			if code != test.want {
+				t.Fatalf("Ack code = %s, want %s", code, test.want)
+			}
+		})
+	}
+}
+
 func TestAuthHandlerRejectsEmptyPrincipal(t *testing.T) {
 	handler := NewAuthHandler(fakeVerifier{}, zap.NewNop())
 	ctx := &Context{

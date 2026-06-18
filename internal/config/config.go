@@ -31,7 +31,10 @@ type File struct {
 }
 
 type AuthConfig struct {
+	Type         string                       `yaml:"type"`
 	StaticTokens map[string]StaticTokenConfig `yaml:"static_tokens"`
+	HTTP         HTTPAuthConfig               `yaml:"http"`
+	JWT          JWTAuthConfig                `yaml:"jwt"`
 }
 
 type StaticTokenConfig struct {
@@ -39,6 +42,25 @@ type StaticTokenConfig struct {
 	TokenID  string   `yaml:"token_id"`
 	Subject  string   `yaml:"subject"`
 	Scopes   []string `yaml:"scopes"`
+}
+
+type HTTPAuthConfig struct {
+	URL           string `yaml:"url"`
+	InternalToken string `yaml:"internal_token"`
+	Timeout       string `yaml:"timeout"`
+	MaxInFlight   int    `yaml:"max_in_flight"`
+}
+
+type JWTAuthConfig struct {
+	Issuer          string   `yaml:"issuer"`
+	Audience        string   `yaml:"audience"`
+	JWKSURL         string   `yaml:"jwks_url"`
+	Algorithms      []string `yaml:"algorithms"`
+	ClientIDClaim   string   `yaml:"client_id_claim"`
+	TokenIDClaim    string   `yaml:"token_id_claim"`
+	ScopesClaim     string   `yaml:"scopes_claim"`
+	ClockSkew       string   `yaml:"clock_skew"`
+	RefreshInterval string   `yaml:"refresh_interval"`
 }
 
 type InternalHTTPConfig struct {
@@ -207,8 +229,12 @@ func (c *File) ToServerConfig() (server.Config, error) {
 	if len(c.RouteMsgIDs) > 0 {
 		out.RouteMsgIDs = append([]uint32(nil), c.RouteMsgIDs...)
 	}
-	if c.Auth.StaticTokens != nil {
-		out.Verifier = auth.NewStaticTokenVerifier(toPrincipals(c.Auth.StaticTokens))
+	verifier, configured, err := toAuthVerifier(c.Auth)
+	if err != nil {
+		return server.Config{}, err
+	}
+	if configured {
+		out.Verifier = verifier
 	}
 
 	if err := applyInternalHTTPConfig(&out, c.InternalHTTP); err != nil {
@@ -233,6 +259,39 @@ func (c *File) ToServerConfig() (server.Config, error) {
 	out.UpstreamRoutes = routes
 
 	return out, nil
+}
+
+func toAuthVerifier(config AuthConfig) (auth.Verifier, bool, error) {
+	provider := strings.ToLower(strings.TrimSpace(config.Type))
+	if provider == "" {
+		if config.StaticTokens == nil {
+			return nil, false, nil
+		}
+		provider = auth.ProviderStatic
+	}
+
+	switch provider {
+	case auth.ProviderStatic:
+		if config.StaticTokens == nil {
+			return nil, false, fmt.Errorf("%w: static provider requires static_tokens", auth.ErrMisconfigured)
+		}
+		return auth.NewObservedVerifier(auth.NewStaticTokenVerifier(toPrincipals(config.StaticTokens))), true, nil
+	case auth.ProviderHTTP:
+		if strings.TrimSpace(config.HTTP.URL) == "" {
+			return nil, false, fmt.Errorf("%w: http provider requires auth.http.url", auth.ErrMisconfigured)
+		}
+		return nil, false, fmt.Errorf("%w: auth provider %q is not implemented", auth.ErrMisconfigured, provider)
+	case auth.ProviderJWT:
+		if strings.TrimSpace(config.JWT.Issuer) == "" ||
+			strings.TrimSpace(config.JWT.Audience) == "" ||
+			strings.TrimSpace(config.JWT.JWKSURL) == "" ||
+			len(config.JWT.Algorithms) == 0 {
+			return nil, false, fmt.Errorf("%w: jwt provider requires issuer, audience, jwks_url, and algorithms", auth.ErrMisconfigured)
+		}
+		return nil, false, fmt.Errorf("%w: auth provider %q is not implemented", auth.ErrMisconfigured, provider)
+	default:
+		return nil, false, fmt.Errorf("%w: unsupported auth provider %q", auth.ErrMisconfigured, provider)
+	}
 }
 
 func toPrincipals(tokens map[string]StaticTokenConfig) map[string]auth.Principal {

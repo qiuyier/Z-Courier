@@ -348,11 +348,15 @@ SDK rules:
 
 ### V3.1 Auth Foundation
 
+Status: implemented.
+
 - Add `auth.type` and provider-specific config structures.
 - Preserve old `static_tokens` configuration compatibility.
 - Add typed auth errors and pipeline ACK mapping.
 - Add verifier metrics wrapper.
 - Add config and compatibility tests.
+- Reserve `http` and `jwt` configuration with fail-fast validation until their
+  implementations land in V3.2 and V3.3.
 
 Exit criteria: existing V2 E2E and load-test smoke remain unchanged and green.
 

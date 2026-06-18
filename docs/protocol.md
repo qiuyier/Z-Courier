@@ -121,6 +121,8 @@ Common codes:
 - `accepted`: gateway accepted the packet.
 - `rejected`: gateway rejected the packet.
 - `unauthorized`: token verification failed.
+- `auth_unavailable`: the authentication provider timed out or is temporarily
+  unavailable; clients may retry with backoff.
 - `rate_limited`: the rate limiter rejected the packet.
 - `decode_failed`: the binary envelope could not be decoded.
 

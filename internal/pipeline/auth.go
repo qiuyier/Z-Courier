@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/qiuyier/Z-Courier/internal/auth"
@@ -40,7 +41,7 @@ func (h *AuthHandler) Handle(ctx *Context) error {
 			zap.String("trace_id", ctx.Packet.TraceID),
 			zap.Error(err),
 		)
-		return Reject(protocol.AckUnauthorized, err)
+		return Reject(authAckCode(err), err)
 	}
 	if principal == nil || principal.ClientID == "" {
 		return Reject(protocol.AckUnauthorized, fmt.Errorf("auth verifier returned empty principal"))
@@ -59,6 +60,17 @@ func (h *AuthHandler) Handle(ctx *Context) error {
 
 	ctx.Principal = clonePrincipal(principal)
 	return nil
+}
+
+func authAckCode(err error) protocol.AckCode {
+	switch {
+	case errors.Is(err, auth.ErrProviderTimeout), errors.Is(err, auth.ErrProviderUnavailable):
+		return protocol.AckAuthUnavailable
+	case errors.Is(err, auth.ErrMisconfigured):
+		return protocol.AckRejected
+	default:
+		return protocol.AckUnauthorized
+	}
 }
 
 func clonePrincipal(in *auth.Principal) *auth.Principal {

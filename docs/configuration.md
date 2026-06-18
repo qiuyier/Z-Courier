@@ -67,6 +67,7 @@ forwarded upstream.
 
 ```yaml
 auth:
+  type: static
   static_tokens:
     dev-token:
       client_id: dev-client
@@ -75,11 +76,22 @@ auth:
         - gateway:dev
 ```
 
-The static verifier is for local development and tests. In production, replace
-it with a verifier that matches the backend application's token semantics.
+`auth.type` selects the token verifier. V3.1 supports `static`; omitting `type`
+while providing `static_tokens` keeps existing configurations compatible. The
+`http` and `jwt` provider names are reserved for the next V3 milestones and
+currently cause startup validation to fail instead of silently falling back.
+
+The static verifier is intended for local development and tests. Production
+deployments should use a verifier that matches the backend application's token
+semantics once the corresponding provider is available.
 
 The gateway does not trust `ClientID` from the packet until the token is
 verified. Session binding uses the `client_id` returned by the verifier.
+
+Authentication exports `z_courier_auth_verify_total`,
+`z_courier_auth_verify_duration_seconds`, and `z_courier_auth_inflight`, labeled
+only by provider and result. Token and client identifiers are never metric
+labels.
 
 ## Internal HTTP
 

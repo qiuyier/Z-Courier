@@ -10,6 +10,10 @@ type StaticTokenVerifier struct {
 	tokens map[string]Principal
 }
 
+func (*StaticTokenVerifier) Provider() string {
+	return ProviderStatic
+}
+
 func NewStaticTokenVerifier(tokens map[string]Principal) *StaticTokenVerifier {
 	copied := make(map[string]Principal, len(tokens))
 	for token, principal := range tokens {

@@ -123,13 +123,13 @@ type ClusterPeerConfig struct {
 func DefaultConfig() Config {
 	return Config{
 		RouteMsgIDs: []uint32{protocol.MsgIDBind},
-		Verifier: auth.NewStaticTokenVerifier(map[string]auth.Principal{
+		Verifier: auth.NewObservedVerifier(auth.NewStaticTokenVerifier(map[string]auth.Principal{
 			"dev-token": {
 				ClientID: "dev-client",
 				TokenID:  "dev-token",
 				Scopes:   []string{"gateway:dev"},
 			},
-		}),
+		})),
 		Sessions:                   session.NewManager(),
 		GatewayNode:                "local",
 		Cluster:                    DefaultClusterConfig(),
