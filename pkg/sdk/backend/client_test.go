@@ -3,6 +3,7 @@ package backend
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/bytedance/sonic"
+	"github.com/qiuyier/Z-Courier/pkg/sdk/signing"
 )
 
 func TestNewClientRejectsInvalidConfiguration(t *testing.T) {
@@ -21,12 +23,57 @@ func TestNewClientRejectsInvalidConfiguration(t *testing.T) {
 		{BaseURL: "http://gateway:18182?token=secret"},
 		{BaseURL: "http://gateway:18182", Timeout: -time.Second},
 		{BaseURL: "http://gateway:18182", MaxResponseBodySize: -1},
+		{BaseURL: "http://gateway:18182", InternalToken: "token", HMAC: &HMACConfig{KeyID: "key", Secret: testHMACSecret}},
+		{BaseURL: "http://gateway:18182", HMAC: &HMACConfig{KeyID: "key", Secret: []byte("short")}},
 	}
 
 	for _, config := range tests {
 		if _, err := NewClient(config); !errors.Is(err, ErrInvalidConfig) {
 			t.Fatalf("NewClient(%+v) error = %v, want ErrInvalidConfig", config, err)
 		}
+	}
+}
+
+func TestClientSignsRequestsWithHMAC(t *testing.T) {
+	verifier, err := signing.NewVerifier(signing.VerifierConfig{
+		Keys: map[string][]byte{"backend-1": testHMACSecret},
+	})
+	if err != nil {
+		t.Fatalf("NewVerifier() error = %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("ReadAll() error = %v", err)
+		}
+		if err := verifier.Verify(r, body); err != nil {
+			t.Errorf("Verify() error = %v", err)
+		}
+		if got := r.Header.Get(InternalTokenHeader); got != "" {
+			t.Errorf("internal token = %q, want empty in HMAC mode", got)
+		}
+		writeTestJSON(t, w, http.StatusAccepted, PushResponse{Code: "ok", DeliveryState: DeliveryStateQueued})
+	}))
+	defer server.Close()
+
+	client, err := NewClient(Config{
+		BaseURL: server.URL,
+		HMAC: &HMACConfig{
+			KeyID:  "backend-1",
+			Secret: testHMACSecret,
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	if _, err := client.Push(context.Background(), PushRequest{
+		ClientID: "client-1",
+		DeviceID: "device-1",
+		MsgID:    2001,
+		Body:     []byte("hello"),
+	}); err != nil {
+		t.Fatalf("Push() error = %v", err)
 	}
 }
 
@@ -390,3 +437,5 @@ type roundTripperFunc func(*http.Request) (*http.Response, error)
 func (function roundTripperFunc) RoundTrip(request *http.Request) (*http.Response, error) {
 	return function(request)
 }
+
+var testHMACSecret = []byte("0123456789abcdef0123456789abcdef")

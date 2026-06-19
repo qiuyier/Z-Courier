@@ -18,6 +18,8 @@ var (
 	ErrResponseTooLarge = errors.New("backend: gateway response too large")
 	// ErrRedirect means the gateway attempted to redirect an internal request.
 	ErrRedirect = errors.New("backend: redirects are disabled")
+	// ErrSigning means an HMAC signature could not be generated.
+	ErrSigning = errors.New("backend: request signing failed")
 )
 
 // APIError describes a non-2xx gateway response.

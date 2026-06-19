@@ -414,10 +414,16 @@ HTTP requests, and protocol users do not need to duplicate the binary codec.
 
 ### V3.5 Internal Request Hardening
 
-- Add optional timestamped HMAC signatures for internal HTTP requests.
-- Reject expired timestamps and replayed nonces.
-- Document deployment-level TLS or mTLS termination.
-- Add security metrics without high-cardinality labels.
+Status: in progress. Backend-to-gateway signing is implemented; cluster peer
+signing remains next.
+
+- Adds optional timestamped HMAC signatures for backend-facing internal HTTP
+  requests and the Go backend SDK.
+- Rejects expired timestamps, body/path/query tampering, and replayed nonces.
+- Documents deployment-level TLS or mTLS termination and cross-language
+  canonicalization.
+- Adds bounded nonce storage and low-cardinality signature-result metrics.
+- Migrate cluster peer push from its separate token to the signing protocol.
 
 Exit criteria: shared-token mode remains available for simple deployments, and
 operators can opt into replay-resistant signed internal requests.

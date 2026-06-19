@@ -149,6 +149,14 @@ var (
 		[]string{"path"},
 	)
 
+	internalHTTPSignature = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "z_courier_internal_http_signature_total",
+			Help: "Total number of internal HTTP HMAC verification attempts.",
+		},
+		[]string{"result"},
+	)
+
 	downlinkAck = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "z_courier_downlink_ack_total",
@@ -383,6 +391,10 @@ func AddInternalHTTPInFlight(path string, delta float64) {
 
 func RecordInternalHTTPOverloadRejected(path string) {
 	internalHTTPOverloadRejected.WithLabelValues(nonEmpty(path, "unknown")).Inc()
+}
+
+func RecordInternalHTTPSignature(result string) {
+	internalHTTPSignature.WithLabelValues(nonEmpty(result, "unknown")).Inc()
 }
 
 func RecordDownlinkAck(msgID uint32, result string) {

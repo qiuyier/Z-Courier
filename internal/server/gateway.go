@@ -94,8 +94,20 @@ func New(config Config, logger *zap.Logger) (*Gateway, error) {
 		closeWithLog(authVerifierCloser, logger, "authentication verifier")
 		return nil, err
 	}
-
 	health := &gatewayHealth{}
+	internalHTTP, err := newInternalHTTPServer(config, logger, downlinkService, health, clusterRegistry)
+	if err != nil {
+		closeWithLog(downlinkCloser, logger, "downlink store")
+		if upstream != nil {
+			_ = upstream.Close()
+		}
+		if clusterRegistryCloser != nil {
+			_ = clusterRegistryCloser.Close()
+		}
+		closeWithLog(authVerifierCloser, logger, "authentication verifier")
+		return nil, err
+	}
+
 	gateway := &Gateway{
 		server:                 zServer,
 		sessions:               config.Sessions,
@@ -104,7 +116,7 @@ func New(config Config, logger *zap.Logger) (*Gateway, error) {
 		clusterRegistry:        clusterRegistry,
 		clusterRegistryCloser:  clusterRegistryCloser,
 		authVerifierCloser:     authVerifierCloser,
-		internalHTTP:           newInternalHTTPServer(config, logger, downlinkService, health, clusterRegistry),
+		internalHTTP:           internalHTTP,
 		upstream:               upstream,
 		downlink:               downlinkService,
 		downlinkCloser:         downlinkCloser,

@@ -12,6 +12,8 @@ import (
 	"github.com/qiuyier/Z-Courier/internal/cluster"
 	"github.com/qiuyier/Z-Courier/internal/downlink"
 	"github.com/qiuyier/Z-Courier/internal/session"
+	sdkbackend "github.com/qiuyier/Z-Courier/pkg/sdk/backend"
+	"github.com/qiuyier/Z-Courier/pkg/sdk/signing"
 	"go.uber.org/zap"
 )
 
@@ -29,7 +31,7 @@ func TestInternalHTTPRegistersPeerPushWhenClusterEnabled(t *testing.T) {
 		},
 	})
 
-	server := newInternalHTTPServer(config, zap.NewNop(), service, &gatewayHealth{}, nil)
+	server := mustInternalHTTPServer(t, config, service, &gatewayHealth{}, nil)
 	if server == nil {
 		t.Fatal("newInternalHTTPServer() = nil")
 	}
@@ -49,7 +51,7 @@ func TestInternalHTTPDoesNotRegisterPeerPushWhenClusterDisabled(t *testing.T) {
 		InternalHTTPAddr: "127.0.0.1:18080",
 	})
 
-	server := newInternalHTTPServer(config, zap.NewNop(), service, &gatewayHealth{}, nil)
+	server := mustInternalHTTPServer(t, config, service, &gatewayHealth{}, nil)
 	if server == nil {
 		t.Fatal("newInternalHTTPServer() = nil")
 	}
@@ -63,6 +65,17 @@ func TestInternalHTTPDoesNotRegisterPeerPushWhenClusterDisabled(t *testing.T) {
 	}
 }
 
+func TestInternalHTTPRejectsUnknownProgrammaticAuthMode(t *testing.T) {
+	service := downlink.NewService(testSessionFinder{}, testConnectionFinder{})
+	config := normalizeConfig(Config{
+		InternalHTTPAddr: "127.0.0.1:18080",
+		InternalHTTPAuth: InternalHTTPAuthConfig{Mode: "unknown"},
+	})
+	if _, err := newInternalHTTPServer(config, zap.NewNop(), service, &gatewayHealth{}, nil); err == nil {
+		t.Fatal("newInternalHTTPServer() error = nil, want unsupported auth mode error")
+	}
+}
+
 func TestInternalHTTPRegistersMessageAdminRoutes(t *testing.T) {
 	service := downlink.NewService(testSessionFinder{}, testConnectionFinder{}, downlink.WithStore(downlink.NewMemoryStore()))
 	config := normalizeConfig(Config{
@@ -70,7 +83,7 @@ func TestInternalHTTPRegistersMessageAdminRoutes(t *testing.T) {
 		InternalToken:    "secret",
 	})
 
-	server := newInternalHTTPServer(config, zap.NewNop(), service, &gatewayHealth{}, nil)
+	server := mustInternalHTTPServer(t, config, service, &gatewayHealth{}, nil)
 	if server == nil {
 		t.Fatal("newInternalHTTPServer() = nil")
 	}
@@ -106,7 +119,7 @@ func TestInternalHTTPHealthAndReady(t *testing.T) {
 		InternalHTTPAddr: "127.0.0.1:18080",
 	})
 
-	server := newInternalHTTPServer(config, zap.NewNop(), service, health, nil)
+	server := mustInternalHTTPServer(t, config, service, health, nil)
 	if server == nil {
 		t.Fatal("newInternalHTTPServer() = nil")
 	}
@@ -131,6 +144,146 @@ func TestInternalHTTPHealthAndReady(t *testing.T) {
 	server.Handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("/readyz draining status = %d, want %d", rec.Code, http.StatusServiceUnavailable)
+	}
+}
+
+func TestInternalHTTPHMACAcceptsSignedRequestAndRejectsReplay(t *testing.T) {
+	service := downlink.NewService(testSessionFinder{}, testConnectionFinder{}, downlink.WithStore(downlink.NewMemoryStore()))
+	config := normalizeConfig(Config{
+		InternalHTTPAddr: "127.0.0.1:18080",
+		InternalHTTPAuth: InternalHTTPAuthConfig{
+			Mode: InternalHTTPAuthModeHMAC,
+			HMAC: InternalHTTPHMACConfig{
+				Keys: map[string][]byte{"backend-1": internalHMACTestSecret},
+			},
+		},
+	})
+	server := mustInternalHTTPServer(t, config, service, &gatewayHealth{}, nil)
+	signer, err := signing.NewSigner(signing.SignerConfig{KeyID: "backend-1", Secret: internalHMACTestSecret})
+	if err != nil {
+		t.Fatalf("NewSigner() error = %v", err)
+	}
+
+	body := []byte(`{"client_id":"client-1","device_id":"device-1","msg_id":2001,"body":"aGVsbG8="}`)
+	req := httptest.NewRequest(http.MethodPost, "/internal/push", strings.NewReader(string(body)))
+	req.Header.Set("Content-Type", "application/json")
+	if err := signer.Sign(req, body); err != nil {
+		t.Fatalf("Sign() error = %v", err)
+	}
+	rec := httptest.NewRecorder()
+	server.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("signed request status = %d, want %d, body = %s", rec.Code, http.StatusAccepted, rec.Body.String())
+	}
+
+	replay := httptest.NewRequest(http.MethodPost, "/internal/push", strings.NewReader(string(body)))
+	replay.Header = req.Header.Clone()
+	replayRec := httptest.NewRecorder()
+	server.Handler.ServeHTTP(replayRec, replay)
+	if replayRec.Code != http.StatusUnauthorized {
+		t.Fatalf("replay status = %d, want %d, body = %s", replayRec.Code, http.StatusUnauthorized, replayRec.Body.String())
+	}
+
+	tampered := httptest.NewRequest(http.MethodPost, "/internal/push", strings.NewReader(`{"client_id":"other"}`))
+	tampered.Header = req.Header.Clone()
+	tamperedRec := httptest.NewRecorder()
+	server.Handler.ServeHTTP(tamperedRec, tampered)
+	if tamperedRec.Code != http.StatusUnauthorized {
+		t.Fatalf("tampered status = %d, want %d, body = %s", tamperedRec.Code, http.StatusUnauthorized, tamperedRec.Body.String())
+	}
+}
+
+func TestInternalHTTPHMACBackendSDKIntegration(t *testing.T) {
+	service := downlink.NewService(testSessionFinder{}, testConnectionFinder{}, downlink.WithStore(downlink.NewMemoryStore()))
+	config := normalizeConfig(Config{
+		InternalHTTPAddr: "127.0.0.1:18080",
+		InternalHTTPAuth: InternalHTTPAuthConfig{
+			Mode: InternalHTTPAuthModeHMAC,
+			HMAC: InternalHTTPHMACConfig{
+				Keys: map[string][]byte{"backend-1": internalHMACTestSecret},
+			},
+		},
+	})
+	internalServer := mustInternalHTTPServer(t, config, service, &gatewayHealth{}, nil)
+	httpServer := httptest.NewServer(internalServer.Handler)
+	defer httpServer.Close()
+
+	client, err := sdkbackend.NewClient(sdkbackend.Config{
+		BaseURL: httpServer.URL,
+		HMAC: &sdkbackend.HMACConfig{
+			KeyID:  "backend-1",
+			Secret: internalHMACTestSecret,
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	response, err := client.Push(context.Background(), sdkbackend.PushRequest{
+		ClientID:  "client-1",
+		DeviceID:  "device-1",
+		MsgID:     2001,
+		MessageID: "message-1",
+		Body:      []byte("hello"),
+	})
+	if err != nil {
+		t.Fatalf("Push() error = %v", err)
+	}
+	if response.Code != "ok" || response.DeliveryState != sdkbackend.DeliveryStateQueued {
+		t.Fatalf("response = %+v, want queued", response)
+	}
+}
+
+func TestInternalHTTPHMACLeavesPublicAndPeerRoutesOutsideMiddleware(t *testing.T) {
+	service := downlink.NewService(testSessionFinder{}, testConnectionFinder{})
+	config := normalizeConfig(Config{
+		GatewayNode:      "gateway-a",
+		InternalHTTPAddr: "127.0.0.1:18080",
+		InternalHTTPAuth: InternalHTTPAuthConfig{
+			Mode: InternalHTTPAuthModeHMAC,
+			HMAC: InternalHTTPHMACConfig{
+				Keys: map[string][]byte{"backend-1": internalHMACTestSecret},
+			},
+		},
+		Cluster: ClusterConfig{
+			Enabled: true,
+			Peer:    ClusterPeerConfig{Token: "peer-token"},
+		},
+	})
+	server := mustInternalHTTPServer(t, config, service, &gatewayHealth{}, nil)
+
+	healthReq := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	healthRec := httptest.NewRecorder()
+	server.Handler.ServeHTTP(healthRec, healthReq)
+	if healthRec.Code != http.StatusOK {
+		t.Fatalf("health status = %d, want %d", healthRec.Code, http.StatusOK)
+	}
+
+	peerReq := httptest.NewRequest(http.MethodPost, downlink.PeerPushPath, strings.NewReader(`{}`))
+	peerReq.Header.Set(downlink.InternalTokenHeader, "peer-token")
+	peerRec := httptest.NewRecorder()
+	server.Handler.ServeHTTP(peerRec, peerReq)
+	if peerRec.Code != http.StatusBadRequest {
+		t.Fatalf("peer status = %d, want %d, body = %s", peerRec.Code, http.StatusBadRequest, peerRec.Body.String())
+	}
+}
+
+func TestInternalHTTPHMACRequiresSignature(t *testing.T) {
+	service := downlink.NewService(testSessionFinder{}, testConnectionFinder{}, downlink.WithStore(downlink.NewMemoryStore()))
+	config := normalizeConfig(Config{
+		InternalHTTPAddr: "127.0.0.1:18080",
+		InternalHTTPAuth: InternalHTTPAuthConfig{
+			Mode: InternalHTTPAuthModeHMAC,
+			HMAC: InternalHTTPHMACConfig{
+				Keys: map[string][]byte{"backend-1": internalHMACTestSecret},
+			},
+		},
+	})
+	server := mustInternalHTTPServer(t, config, service, &gatewayHealth{}, nil)
+	req := httptest.NewRequest(http.MethodGet, "/internal/messages", nil)
+	rec := httptest.NewRecorder()
+	server.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
 	}
 }
 
@@ -173,7 +326,7 @@ func TestInternalHTTPDebugRouteReturnsLocalSessionAndClusterRoute(t *testing.T) 
 		},
 	})
 
-	server := newInternalHTTPServer(config, zap.NewNop(), service, &gatewayHealth{}, registry)
+	server := mustInternalHTTPServer(t, config, service, &gatewayHealth{}, registry)
 	req := httptest.NewRequest(http.MethodGet, "/internal/debug/route?client_id=client-1&device_id=device-1", nil)
 	req.Header.Set(downlink.InternalTokenHeader, "secret")
 	rec := httptest.NewRecorder()
@@ -207,7 +360,7 @@ func TestInternalHTTPDebugRouteRequiresToken(t *testing.T) {
 		InternalToken:    "secret",
 	})
 
-	server := newInternalHTTPServer(config, zap.NewNop(), service, &gatewayHealth{}, nil)
+	server := mustInternalHTTPServer(t, config, service, &gatewayHealth{}, nil)
 	req := httptest.NewRequest(http.MethodGet, "/internal/debug/route?client_id=client-1&device_id=device-1", nil)
 	rec := httptest.NewRecorder()
 	server.Handler.ServeHTTP(rec, req)
@@ -237,7 +390,7 @@ func TestInternalHTTPDebugSessionsListsLocalSessions(t *testing.T) {
 		InternalToken:    "secret",
 	})
 
-	server := newInternalHTTPServer(config, zap.NewNop(), service, &gatewayHealth{}, nil)
+	server := mustInternalHTTPServer(t, config, service, &gatewayHealth{}, nil)
 	req := httptest.NewRequest(http.MethodGet, "/internal/debug/sessions?client_id=client-1&limit=1", nil)
 	req.Header.Set(downlink.InternalTokenHeader, "secret")
 	rec := httptest.NewRecorder()
@@ -258,3 +411,17 @@ func TestInternalHTTPDebugSessionsListsLocalSessions(t *testing.T) {
 		t.Fatalf("first session = %+v, want session-1", resp.Sessions[0])
 	}
 }
+
+func mustInternalHTTPServer(t *testing.T, config Config, service *downlink.Service, health *gatewayHealth, registry cluster.OnlineRegistry) *http.Server {
+	t.Helper()
+	server, err := newInternalHTTPServer(config, zap.NewNop(), service, health, registry)
+	if err != nil {
+		t.Fatalf("newInternalHTTPServer() error = %v", err)
+	}
+	if server == nil {
+		t.Fatal("newInternalHTTPServer() = nil")
+	}
+	return server
+}
+
+var internalHMACTestSecret = []byte("0123456789abcdef0123456789abcdef")

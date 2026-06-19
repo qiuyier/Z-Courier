@@ -173,6 +173,9 @@ upstream:
 	if config.InternalToken != "internal-a" {
 		t.Fatalf("InternalToken = %q, want internal-a", config.InternalToken)
 	}
+	if config.InternalHTTPAuth.Mode != "token" {
+		t.Fatalf("InternalHTTPAuth Mode = %q, want token", config.InternalHTTPAuth.Mode)
+	}
 	if config.InternalMaxRequestBodySize != 12345 {
 		t.Fatalf("InternalMaxRequestBodySize = %d, want 12345", config.InternalMaxRequestBodySize)
 	}
@@ -534,6 +537,62 @@ internal_http:
 	_, err := LoadServerConfig(path)
 	if err == nil {
 		t.Fatal("LoadServerConfig() error = nil, want error")
+	}
+}
+
+func TestLoadServerConfigInternalHTTPHMAC(t *testing.T) {
+	path := writeConfig(t, `
+internal_http:
+  auth:
+    mode: hmac
+    hmac:
+      keys:
+        backend-1: 0123456789abcdef0123456789abcdef
+        backend-previous: abcdef0123456789abcdef0123456789
+      max_clock_skew: 20s
+      nonce_ttl: 45s
+      max_nonce_entries: 1234
+`)
+
+	config, err := LoadServerConfig(path)
+	if err != nil {
+		t.Fatalf("LoadServerConfig() error = %v", err)
+	}
+	if config.InternalHTTPAuth.Mode != "hmac" || config.InternalToken != "" {
+		t.Fatalf("internal HTTP auth = %+v token=%q, want HMAC without token", config.InternalHTTPAuth, config.InternalToken)
+	}
+	if len(config.InternalHTTPAuth.HMAC.Keys) != 2 || string(config.InternalHTTPAuth.HMAC.Keys["backend-1"]) != "0123456789abcdef0123456789abcdef" {
+		t.Fatalf("HMAC keys = %v", config.InternalHTTPAuth.HMAC.Keys)
+	}
+	if config.InternalHTTPAuth.HMAC.MaxClockSkew != 20*time.Second || config.InternalHTTPAuth.HMAC.NonceTTL != 45*time.Second {
+		t.Fatalf("HMAC durations = skew %v nonce TTL %v", config.InternalHTTPAuth.HMAC.MaxClockSkew, config.InternalHTTPAuth.HMAC.NonceTTL)
+	}
+	if config.InternalHTTPAuth.HMAC.MaxNonceEntries != 1234 {
+		t.Fatalf("MaxNonceEntries = %d, want 1234", config.InternalHTTPAuth.HMAC.MaxNonceEntries)
+	}
+}
+
+func TestLoadServerConfigRejectsInvalidInternalHTTPHMAC(t *testing.T) {
+	tests := []struct {
+		name   string
+		config string
+	}{
+		{name: "unsupported mode", config: "internal_http:\n  auth:\n    mode: mtls\n"},
+		{name: "missing keys", config: "internal_http:\n  auth:\n    mode: hmac\n"},
+		{name: "token conflict", config: "internal_http:\n  token: secret\n  auth:\n    mode: hmac\n    hmac:\n      keys:\n        key: 0123456789abcdef0123456789abcdef\n"},
+		{name: "short secret", config: "internal_http:\n  auth:\n    mode: hmac\n    hmac:\n      keys:\n        key: short\n"},
+		{name: "short nonce TTL", config: "internal_http:\n  auth:\n    mode: hmac\n    hmac:\n      keys:\n        key: 0123456789abcdef0123456789abcdef\n      max_clock_skew: 30s\n      nonce_ttl: 30s\n"},
+		{name: "mode required", config: "internal_http:\n  auth:\n    hmac:\n      keys:\n        key: 0123456789abcdef0123456789abcdef\n"},
+		{name: "token mode conflict", config: "internal_http:\n  auth:\n    mode: token\n    hmac:\n      keys:\n        key: 0123456789abcdef0123456789abcdef\n"},
+		{name: "negative entries", config: "internal_http:\n  auth:\n    mode: hmac\n    hmac:\n      keys:\n        key: 0123456789abcdef0123456789abcdef\n      max_nonce_entries: -1\n"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := LoadServerConfig(writeConfig(t, test.config)); err == nil {
+				t.Fatal("LoadServerConfig() error = nil, want error")
+			}
+		})
 	}
 }
 

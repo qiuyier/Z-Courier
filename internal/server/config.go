@@ -9,6 +9,12 @@ import (
 	"github.com/qiuyier/Z-Courier/internal/pipeline"
 	"github.com/qiuyier/Z-Courier/internal/protocol"
 	"github.com/qiuyier/Z-Courier/internal/session"
+	"github.com/qiuyier/Z-Courier/pkg/sdk/signing"
+)
+
+const (
+	InternalHTTPAuthModeToken = "token"
+	InternalHTTPAuthModeHMAC  = "hmac"
 )
 
 type Config struct {
@@ -21,6 +27,7 @@ type Config struct {
 	DisableInternalHTTP        bool
 	InternalHTTPAddr           string
 	InternalToken              string
+	InternalHTTPAuth           InternalHTTPAuthConfig
 	InternalMaxRequestBodySize int64
 	InternalPushMaxInFlight    int
 	UpstreamRoutes             []UpstreamRouteConfig
@@ -29,6 +36,18 @@ type Config struct {
 	DownlinkStorage            DownlinkStorageConfig
 	DownlinkDelivery           DownlinkDeliveryConfig
 	DownlinkRetention          DownlinkRetentionConfig
+}
+
+type InternalHTTPAuthConfig struct {
+	Mode string
+	HMAC InternalHTTPHMACConfig
+}
+
+type InternalHTTPHMACConfig struct {
+	Keys            map[string][]byte
+	MaxClockSkew    time.Duration
+	NonceTTL        time.Duration
+	MaxNonceEntries int
 }
 
 type UpstreamRouteConfig struct {
@@ -130,11 +149,19 @@ func DefaultConfig() Config {
 				Scopes:   []string{"gateway:dev"},
 			},
 		})),
-		Sessions:                   session.NewManager(),
-		GatewayNode:                "local",
-		Cluster:                    DefaultClusterConfig(),
-		InternalHTTPAddr:           "127.0.0.1:18080",
-		InternalToken:              "dev-internal-token",
+		Sessions:         session.NewManager(),
+		GatewayNode:      "local",
+		Cluster:          DefaultClusterConfig(),
+		InternalHTTPAddr: "127.0.0.1:18080",
+		InternalToken:    "dev-internal-token",
+		InternalHTTPAuth: InternalHTTPAuthConfig{
+			Mode: InternalHTTPAuthModeToken,
+			HMAC: InternalHTTPHMACConfig{
+				MaxClockSkew:    signing.DefaultMaxClockSkew,
+				NonceTTL:        signing.DefaultNonceTTL,
+				MaxNonceEntries: signing.DefaultMaxNonceEntries,
+			},
+		},
 		InternalMaxRequestBodySize: 10 << 20,
 		InternalPushMaxInFlight:    1000,
 		DownlinkStorage: DownlinkStorageConfig{
@@ -226,8 +253,22 @@ func normalizeConfig(config Config) Config {
 	if config.InternalHTTPAddr == "" {
 		config.InternalHTTPAddr = defaults.InternalHTTPAddr
 	}
-	if config.InternalToken == "" {
+	if config.InternalHTTPAuth.Mode == "" {
+		config.InternalHTTPAuth.Mode = defaults.InternalHTTPAuth.Mode
+	}
+	if config.InternalHTTPAuth.Mode == InternalHTTPAuthModeHMAC {
+		config.InternalToken = ""
+	} else if config.InternalToken == "" {
 		config.InternalToken = defaults.InternalToken
+	}
+	if config.InternalHTTPAuth.HMAC.MaxClockSkew <= 0 {
+		config.InternalHTTPAuth.HMAC.MaxClockSkew = defaults.InternalHTTPAuth.HMAC.MaxClockSkew
+	}
+	if config.InternalHTTPAuth.HMAC.NonceTTL <= 0 {
+		config.InternalHTTPAuth.HMAC.NonceTTL = defaults.InternalHTTPAuth.HMAC.NonceTTL
+	}
+	if config.InternalHTTPAuth.HMAC.MaxNonceEntries <= 0 {
+		config.InternalHTTPAuth.HMAC.MaxNonceEntries = defaults.InternalHTTPAuth.HMAC.MaxNonceEntries
 	}
 	if config.InternalMaxRequestBodySize == 0 {
 		config.InternalMaxRequestBodySize = defaults.InternalMaxRequestBodySize

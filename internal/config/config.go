@@ -10,6 +10,7 @@ import (
 	"github.com/qiuyier/Z-Courier/internal/auth"
 	"github.com/qiuyier/Z-Courier/internal/pipeline"
 	"github.com/qiuyier/Z-Courier/internal/server"
+	"github.com/qiuyier/Z-Courier/pkg/sdk/signing"
 	"gopkg.in/yaml.v3"
 )
 
@@ -74,11 +75,24 @@ type JWTAuthConfig struct {
 }
 
 type InternalHTTPConfig struct {
-	Enabled            *bool   `yaml:"enabled"`
-	Addr               *string `yaml:"addr"`
-	Token              *string `yaml:"token"`
-	MaxRequestBodySize *int64  `yaml:"max_request_body_size"`
-	MaxInFlight        int     `yaml:"max_in_flight"`
+	Enabled            *bool                  `yaml:"enabled"`
+	Addr               *string                `yaml:"addr"`
+	Token              *string                `yaml:"token"`
+	Auth               InternalHTTPAuthConfig `yaml:"auth"`
+	MaxRequestBodySize *int64                 `yaml:"max_request_body_size"`
+	MaxInFlight        int                    `yaml:"max_in_flight"`
+}
+
+type InternalHTTPAuthConfig struct {
+	Mode string                 `yaml:"mode"`
+	HMAC InternalHTTPHMACConfig `yaml:"hmac"`
+}
+
+type InternalHTTPHMACConfig struct {
+	Keys            map[string]string `yaml:"keys"`
+	MaxClockSkew    string            `yaml:"max_clock_skew"`
+	NonceTTL        string            `yaml:"nonce_ttl"`
+	MaxNonceEntries int               `yaml:"max_nonce_entries"`
 }
 
 type ClusterConfig struct {
@@ -475,7 +489,82 @@ func applyInternalHTTPConfig(out *server.Config, config InternalHTTPConfig) erro
 		out.InternalPushMaxInFlight = config.MaxInFlight
 	}
 
+	mode := strings.ToLower(strings.TrimSpace(config.Auth.Mode))
+	if mode == "" {
+		if internalHTTPHMACConfigSet(config.Auth.HMAC) {
+			return fmt.Errorf("config: internal_http.auth.mode is required when HMAC settings are present")
+		}
+		mode = server.InternalHTTPAuthModeToken
+	}
+	switch mode {
+	case server.InternalHTTPAuthModeToken:
+		if internalHTTPHMACConfigSet(config.Auth.HMAC) {
+			return fmt.Errorf("config: internal_http.auth.hmac conflicts with token mode")
+		}
+		out.InternalHTTPAuth.Mode = mode
+	case server.InternalHTTPAuthModeHMAC:
+		if config.Token != nil && *config.Token != "" {
+			return fmt.Errorf("config: internal_http.token conflicts with HMAC mode")
+		}
+		hmacConfig, err := toInternalHTTPHMACConfig(config.Auth.HMAC)
+		if err != nil {
+			return err
+		}
+		out.InternalToken = ""
+		out.InternalHTTPAuth = server.InternalHTTPAuthConfig{Mode: mode, HMAC: hmacConfig}
+	default:
+		return fmt.Errorf("config: unsupported internal_http.auth.mode %q", config.Auth.Mode)
+	}
+
 	return nil
+}
+
+func toInternalHTTPHMACConfig(config InternalHTTPHMACConfig) (server.InternalHTTPHMACConfig, error) {
+	maxClockSkew, err := parseOptionalPositiveDuration(config.MaxClockSkew)
+	if err != nil {
+		return server.InternalHTTPHMACConfig{}, fmt.Errorf("config: internal_http.auth.hmac.max_clock_skew: %w", err)
+	}
+	if maxClockSkew == 0 {
+		maxClockSkew = signing.DefaultMaxClockSkew
+	}
+	nonceTTL, err := parseOptionalPositiveDuration(config.NonceTTL)
+	if err != nil {
+		return server.InternalHTTPHMACConfig{}, fmt.Errorf("config: internal_http.auth.hmac.nonce_ttl: %w", err)
+	}
+	if nonceTTL == 0 {
+		nonceTTL = signing.DefaultNonceTTL
+	}
+	if config.MaxNonceEntries < 0 {
+		return server.InternalHTTPHMACConfig{}, fmt.Errorf("config: internal_http.auth.hmac.max_nonce_entries must not be negative")
+	}
+	maxNonceEntries := config.MaxNonceEntries
+	if maxNonceEntries == 0 {
+		maxNonceEntries = signing.DefaultMaxNonceEntries
+	}
+
+	keys := make(map[string][]byte, len(config.Keys))
+	for keyID, secret := range config.Keys {
+		keys[keyID] = []byte(secret)
+	}
+	verifierConfig := signing.VerifierConfig{
+		Keys:            keys,
+		MaxClockSkew:    maxClockSkew,
+		NonceTTL:        nonceTTL,
+		MaxNonceEntries: maxNonceEntries,
+	}
+	if _, err := signing.NewVerifier(verifierConfig); err != nil {
+		return server.InternalHTTPHMACConfig{}, fmt.Errorf("config: internal_http.auth.hmac: %w", err)
+	}
+	return server.InternalHTTPHMACConfig{
+		Keys:            keys,
+		MaxClockSkew:    maxClockSkew,
+		NonceTTL:        nonceTTL,
+		MaxNonceEntries: maxNonceEntries,
+	}, nil
+}
+
+func internalHTTPHMACConfigSet(config InternalHTTPHMACConfig) bool {
+	return len(config.Keys) > 0 || config.MaxClockSkew != "" || config.NonceTTL != "" || config.MaxNonceEntries != 0
 }
 
 func applyClusterConfig(out *server.Config, config ClusterConfig) error {

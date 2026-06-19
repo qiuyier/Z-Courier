@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/bytedance/sonic"
+	"github.com/qiuyier/Z-Courier/pkg/sdk/signing"
 )
 
 const (
@@ -31,15 +32,23 @@ const (
 type Config struct {
 	BaseURL             string
 	InternalToken       string
+	HMAC                *HMACConfig
 	HTTPClient          *http.Client
 	Timeout             time.Duration
 	MaxResponseBodySize int64
+}
+
+// HMACConfig enables replay-resistant internal request signing.
+type HMACConfig struct {
+	KeyID  string
+	Secret []byte
 }
 
 // Client calls one gateway node's internal HTTP API.
 type Client struct {
 	baseURL             string
 	internalToken       string
+	signer              *signing.Signer
 	httpClient          *http.Client
 	timeout             time.Duration
 	maxResponseBodySize int64
@@ -70,6 +79,20 @@ func NewClient(config Config) (*Client, error) {
 		maxResponseBodySize = defaultMaxResponseBodySize
 	}
 
+	var signer *signing.Signer
+	if config.HMAC != nil {
+		if config.InternalToken != "" {
+			return nil, fmt.Errorf("%w: internal token and HMAC cannot both be configured", ErrInvalidConfig)
+		}
+		signer, err = signing.NewSigner(signing.SignerConfig{
+			KeyID:  config.HMAC.KeyID,
+			Secret: config.HMAC.Secret,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("%w: HMAC: %v", ErrInvalidConfig, err)
+		}
+	}
+
 	httpClient := &http.Client{}
 	if config.HTTPClient != nil {
 		clone := *config.HTTPClient
@@ -82,6 +105,7 @@ func NewClient(config Config) (*Client, error) {
 	return &Client{
 		baseURL:             baseURL,
 		internalToken:       config.InternalToken,
+		signer:              signer,
 		httpClient:          httpClient,
 		timeout:             timeout,
 		maxResponseBodySize: maxResponseBodySize,
@@ -194,12 +218,14 @@ func (c *Client) doJSON(ctx context.Context, method, path string, query url.Valu
 	}
 
 	var body io.Reader
+	var requestBody []byte
 	if input != nil {
 		data, err := sonic.Marshal(input)
 		if err != nil {
 			return fmt.Errorf("%w: encode request: %v", ErrInvalidArgument, err)
 		}
-		body = bytes.NewReader(data)
+		requestBody = data
+		body = bytes.NewReader(requestBody)
 	}
 
 	requestContext, cancel := context.WithTimeout(ctx, c.timeout)
@@ -215,6 +241,11 @@ func (c *Client) doJSON(ctx context.Context, method, path string, query url.Valu
 	}
 	if c.internalToken != "" {
 		request.Header.Set(InternalTokenHeader, c.internalToken)
+	}
+	if c.signer != nil {
+		if err := c.signer.Sign(request, requestBody); err != nil {
+			return fmt.Errorf("%w: %v", ErrSigning, err)
+		}
 	}
 
 	response, err := c.httpClient.Do(request)

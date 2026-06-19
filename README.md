@@ -18,6 +18,8 @@ A high-performance message push gateway based on the `zinx` network framework.
 - Prometheus metrics and Grafana dashboards for authentication, ingress,
   upstream, downlink, cluster, retry, capacity, and load-test paths
 - Public Go SDKs for stable protocol encoding and backend downlink/message APIs
+- Optional timestamped HMAC authentication and replay protection for internal
+  backend requests
 - Graceful shutdown with readiness drain and cluster route cleanup
 - MIT Licensed
 

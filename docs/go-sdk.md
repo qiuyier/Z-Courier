@@ -135,6 +135,25 @@ if err != nil {
 }
 ```
 
+For replay-resistant HMAC mode, configure credentials instead of
+`InternalToken`:
+
+```go
+client, err := backend.NewClient(backend.Config{
+    BaseURL: "https://gateway.internal:18182",
+    HMAC: &backend.HMACConfig{
+        KeyID:  "backend-2026-01",
+        Secret: []byte(os.Getenv("ZCOURIER_INTERNAL_HMAC_SECRET")),
+    },
+    Timeout: 3 * time.Second,
+})
+```
+
+The client generates a cryptographically random nonce and signs the exact JSON
+bytes sent on every request. Token and HMAC configuration are mutually
+exclusive. See [internal-http-signing.md](internal-http-signing.md) for the
+canonical cross-language contract and key-rotation procedure.
+
 Push an opaque downlink message:
 
 ```go
@@ -192,7 +211,7 @@ their cause, so `errors.Is(err, context.DeadlineExceeded)` and
 `errors.Is(err, context.Canceled)` continue to work. The client defaults to a
 10-second request timeout and a 1 MiB response limit; both are configurable.
 Redirects are rejected to prevent forwarding `X-ZCourier-Internal-Token` to a
-different address.
+different address or changing the signed request target.
 
 The public backend request and response types are canonical. Gateway handlers
 reuse them through internal aliases, which keeps SDK JSON fields synchronized

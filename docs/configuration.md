@@ -211,6 +211,8 @@ internal_http:
   enabled: true
   addr: 127.0.0.1:18080
   token: dev-internal-token
+  auth:
+    mode: token
   max_request_body_size: 10485760
   max_in_flight: 1000
 ```
@@ -218,7 +220,9 @@ internal_http:
 - `enabled`: starts or disables internal HTTP endpoints.
 - `addr`: listen address for `/internal/push`, `/metrics`, `/healthz`, and
   `/readyz`.
-- `token`: value required in the `X-ZCourier-Internal-Token` header.
+- `auth.mode`: `token` by default, or `hmac` for replay-resistant signed
+  backend requests.
+- `token`: value required in `X-ZCourier-Internal-Token` when mode is `token`.
 - `max_request_body_size`: maximum JSON request size in bytes.
 - `max_in_flight`: maximum concurrent `/internal/push` and
   `/internal/push/batch` requests. Requests above this limit return `429`.
@@ -227,6 +231,32 @@ internal_http:
 returns `200` while the gateway can receive traffic and `503` after graceful
 shutdown begins. Use `/readyz` for load balancer or Kubernetes readiness
 checks.
+
+For HMAC mode, remove `token` and configure one or more rotation-friendly key
+IDs:
+
+```yaml
+internal_http:
+  enabled: true
+  addr: 127.0.0.1:18080
+  auth:
+    mode: hmac
+    hmac:
+      keys:
+        backend-2026-01: ${ZCOURIER_INTERNAL_HMAC_SECRET}
+      max_clock_skew: 30s
+      nonce_ttl: 1m
+      max_nonce_entries: 10000
+  max_request_body_size: 10485760
+  max_in_flight: 1000
+```
+
+`nonce_ttl` must be at least twice `max_clock_skew`, and every secret must be at
+least 32 bytes. HMAC and token settings are mutually exclusive. Environment
+variable expansion is shown as a deployment-template convention; Z-Courier's
+YAML loader does not expand `${...}` itself. The exact cross-language signing
+contract and TLS requirements are documented in
+[internal-http-signing.md](internal-http-signing.md).
 
 ## Cluster
 

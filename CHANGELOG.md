@@ -25,6 +25,9 @@ semantic versioning after the first public MVP tag.
 - Public `pkg/sdk/backend` Go client for downlink push, batch, message status,
   list, requeue, and discard operations with typed errors, context deadlines,
   response limits, and canonical JSON contract types shared by the gateway.
+- Optional backend-to-gateway HMAC-SHA256 request signing with timestamp and
+  bounded nonce replay protection, multi-key rotation, SDK integration,
+  low-cardinality verification metrics, and a cross-language canonical format.
 - Grafana panels for authentication request rate, success rate, latency,
   in-flight verification, cache activity, and JWKS refresh health.
 
