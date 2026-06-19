@@ -10,11 +10,34 @@ import (
 	"github.com/aceld/zinx/ziface"
 	"github.com/qiuyier/Z-Courier/internal/cluster"
 	"github.com/qiuyier/Z-Courier/internal/downlink"
+	"github.com/qiuyier/Z-Courier/pkg/sdk/signing"
 )
 
 func newDownlinkService(config Config, connManager ziface.IConnManager, registry cluster.OnlineRegistry) (*downlink.Service, io.Closer, error) {
 	if config.DisableInternalHTTP || config.InternalHTTPAddr == "" {
 		return nil, nil, nil
+	}
+
+	var peerDispatcher downlink.PeerDispatcher
+	if registry != nil {
+		peerConfig := downlink.HTTPPeerDispatcherConfig{
+			Token:               config.Cluster.Peer.Token,
+			Timeout:             config.Cluster.Peer.Timeout,
+			MaxResponseBodySize: config.InternalMaxRequestBodySize,
+		}
+		if config.Cluster.Peer.Auth.Mode == ClusterPeerAuthModeHMAC {
+			secret := config.Cluster.Peer.Auth.HMAC.Keys[config.Cluster.Peer.Auth.HMAC.KeyID]
+			peerConfig.Token = ""
+			peerConfig.HMAC = &signing.SignerConfig{
+				KeyID:  config.Cluster.Peer.Auth.HMAC.KeyID,
+				Secret: secret,
+			}
+		}
+		var err error
+		peerDispatcher, err = downlink.NewHTTPPeerDispatcher(peerConfig)
+		if err != nil {
+			return nil, nil, fmt.Errorf("cluster peer dispatcher: %w", err)
+		}
 	}
 
 	store, closer, err := newDownlinkStore(config)
@@ -34,13 +57,9 @@ func newDownlinkService(config Config, connManager ziface.IConnManager, registry
 	)
 	if registry != nil {
 		options = append(options, downlink.WithClusterDelivery(downlink.ClusterDeliveryConfig{
-			GatewayNode: config.GatewayNode,
-			Registry:    registry,
-			PeerDispatcher: downlink.NewHTTPPeerDispatcher(downlink.HTTPPeerDispatcherConfig{
-				Token:               config.Cluster.Peer.Token,
-				Timeout:             config.Cluster.Peer.Timeout,
-				MaxResponseBodySize: config.InternalMaxRequestBodySize,
-			}),
+			GatewayNode:    config.GatewayNode,
+			Registry:       registry,
+			PeerDispatcher: peerDispatcher,
 		}))
 	}
 

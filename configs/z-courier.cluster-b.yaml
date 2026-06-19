@@ -42,8 +42,16 @@ cluster:
       read_timeout: 1s
       write_timeout: 1s
   peer:
-    token: dev-cluster-token
     timeout: 2s
+    auth:
+      mode: hmac
+      hmac:
+        key_id: e2e-cluster-2026-01
+        keys:
+          e2e-cluster-2026-01: dev-cluster-hmac-secret-0123456789abcdef
+        max_clock_skew: 30s
+        nonce_ttl: 1m
+        max_nonce_entries: 10000
 
 downlink:
   storage:

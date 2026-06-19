@@ -76,6 +76,22 @@ func TestInternalHTTPRejectsUnknownProgrammaticAuthMode(t *testing.T) {
 	}
 }
 
+func TestInternalHTTPRejectsUnknownProgrammaticPeerAuthMode(t *testing.T) {
+	service := downlink.NewService(testSessionFinder{}, testConnectionFinder{})
+	config := normalizeConfig(Config{
+		InternalHTTPAddr: "127.0.0.1:18080",
+		Cluster: ClusterConfig{
+			Enabled: true,
+			Peer: ClusterPeerConfig{
+				Auth: ClusterPeerAuthConfig{Mode: "unknown"},
+			},
+		},
+	})
+	if _, err := newInternalHTTPServer(config, zap.NewNop(), service, &gatewayHealth{}, nil); err == nil {
+		t.Fatal("newInternalHTTPServer() error = nil, want unsupported peer auth mode error")
+	}
+}
+
 func TestInternalHTTPRegistersMessageAdminRoutes(t *testing.T) {
 	service := downlink.NewService(testSessionFinder{}, testConnectionFinder{}, downlink.WithStore(downlink.NewMemoryStore()))
 	config := normalizeConfig(Config{
@@ -287,6 +303,69 @@ func TestInternalHTTPHMACRequiresSignature(t *testing.T) {
 	}
 }
 
+func TestInternalHTTPPeerHMACAcceptsSignatureAndRejectsReplay(t *testing.T) {
+	service := downlink.NewService(testSessionFinder{}, testConnectionFinder{})
+	config := normalizeConfig(Config{
+		GatewayNode:      "gateway-a",
+		InternalHTTPAddr: "127.0.0.1:18080",
+		Cluster: ClusterConfig{
+			Enabled: true,
+			Peer: ClusterPeerConfig{
+				Auth: ClusterPeerAuthConfig{
+					Mode: ClusterPeerAuthModeHMAC,
+					HMAC: ClusterPeerHMACConfig{
+						KeyID: "gateway-2026-01",
+						Keys:  map[string][]byte{"gateway-2026-01": peerHMACTestSecret},
+					},
+				},
+			},
+		},
+	})
+	server := mustInternalHTTPServer(t, config, service, &gatewayHealth{}, nil)
+	signer, err := signing.NewSigner(signing.SignerConfig{KeyID: "gateway-2026-01", Secret: peerHMACTestSecret})
+	if err != nil {
+		t.Fatalf("NewSigner() error = %v", err)
+	}
+
+	body := []byte(`{}`)
+	req := httptest.NewRequest(http.MethodPost, downlink.PeerPushPath, strings.NewReader(string(body)))
+	if err := signer.Sign(req, body); err != nil {
+		t.Fatalf("Sign() error = %v", err)
+	}
+	rec := httptest.NewRecorder()
+	server.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("signed status = %d, want %d, body = %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+
+	replay := httptest.NewRequest(http.MethodPost, downlink.PeerPushPath, strings.NewReader(string(body)))
+	replay.Header = req.Header.Clone()
+	replayRec := httptest.NewRecorder()
+	server.Handler.ServeHTTP(replayRec, replay)
+	if replayRec.Code != http.StatusUnauthorized {
+		t.Fatalf("replay status = %d, want %d, body = %s", replayRec.Code, http.StatusUnauthorized, replayRec.Body.String())
+	}
+
+	unsigned := httptest.NewRequest(http.MethodPost, downlink.PeerPushPath, strings.NewReader(string(body)))
+	unsignedRec := httptest.NewRecorder()
+	server.Handler.ServeHTTP(unsignedRec, unsigned)
+	if unsignedRec.Code != http.StatusUnauthorized {
+		t.Fatalf("unsigned status = %d, want %d", unsignedRec.Code, http.StatusUnauthorized)
+	}
+
+	tamperBase := httptest.NewRequest(http.MethodPost, downlink.PeerPushPath, strings.NewReader(string(body)))
+	if err := signer.Sign(tamperBase, body); err != nil {
+		t.Fatalf("Sign(tamper) error = %v", err)
+	}
+	tampered := httptest.NewRequest(http.MethodPost, downlink.PeerPushPath, strings.NewReader(`{"msg_id":2001}`))
+	tampered.Header = tamperBase.Header.Clone()
+	tamperedRec := httptest.NewRecorder()
+	server.Handler.ServeHTTP(tamperedRec, tampered)
+	if tamperedRec.Code != http.StatusUnauthorized {
+		t.Fatalf("tampered status = %d, want %d", tamperedRec.Code, http.StatusUnauthorized)
+	}
+}
+
 func TestInternalHTTPDebugRouteReturnsLocalSessionAndClusterRoute(t *testing.T) {
 	sessions := session.NewManager()
 	now := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
@@ -425,3 +504,4 @@ func mustInternalHTTPServer(t *testing.T, config Config, service *downlink.Servi
 }
 
 var internalHMACTestSecret = []byte("0123456789abcdef0123456789abcdef")
+var peerHMACTestSecret = []byte("cluster-peer-secret-0123456789abcdef")

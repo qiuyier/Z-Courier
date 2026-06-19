@@ -11,6 +11,7 @@ import (
 
 	"github.com/bytedance/sonic"
 	"github.com/qiuyier/Z-Courier/internal/cluster"
+	"github.com/qiuyier/Z-Courier/pkg/sdk/signing"
 )
 
 const PeerPushPath = "/internal/cluster/push"
@@ -24,12 +25,14 @@ type HTTPPeerDispatcherConfig struct {
 	Timeout             time.Duration
 	MaxResponseBodySize int64
 	Client              *http.Client
+	HMAC                *signing.SignerConfig
 }
 
 type HTTPPeerDispatcher struct {
 	token               string
 	client              *http.Client
 	maxResponseBodySize int64
+	signer              *signing.Signer
 }
 
 type PeerPushHTTPError struct {
@@ -48,7 +51,19 @@ func (e *PeerPushHTTPError) Error() string {
 	return fmt.Sprintf("peer push failed: status=%d code=%s", e.StatusCode, e.Code)
 }
 
-func NewHTTPPeerDispatcher(config HTTPPeerDispatcherConfig) *HTTPPeerDispatcher {
+func NewHTTPPeerDispatcher(config HTTPPeerDispatcherConfig) (*HTTPPeerDispatcher, error) {
+	if config.Token != "" && config.HMAC != nil {
+		return nil, fmt.Errorf("peer dispatcher token and HMAC cannot both be configured")
+	}
+	var signer *signing.Signer
+	if config.HMAC != nil {
+		var err error
+		signer, err = signing.NewSigner(*config.HMAC)
+		if err != nil {
+			return nil, fmt.Errorf("peer dispatcher HMAC: %w", err)
+		}
+	}
+
 	client := config.Client
 	if client == nil {
 		client = &http.Client{
@@ -69,7 +84,8 @@ func NewHTTPPeerDispatcher(config HTTPPeerDispatcherConfig) *HTTPPeerDispatcher 
 		token:               config.Token,
 		client:              client,
 		maxResponseBodySize: maxResponseBodySize,
-	}
+		signer:              signer,
+	}, nil
 }
 
 func (d *HTTPPeerDispatcher) Push(ctx context.Context, target cluster.RouteEntry, req PeerPushRequest) (*PeerPushResponse, error) {
@@ -104,6 +120,11 @@ func (d *HTTPPeerDispatcher) Push(ctx context.Context, target cluster.RouteEntry
 	httpReq.Header.Set("Content-Type", "application/json")
 	if d.token != "" {
 		httpReq.Header.Set(InternalTokenHeader, d.token)
+	}
+	if d.signer != nil {
+		if err := d.signer.Sign(httpReq, body); err != nil {
+			return nil, fmt.Errorf("sign peer request: %w", err)
+		}
 	}
 
 	resp, err := d.client.Do(httpReq)

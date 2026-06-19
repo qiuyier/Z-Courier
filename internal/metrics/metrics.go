@@ -272,6 +272,14 @@ var (
 		[]string{"target_node", "result"},
 	)
 
+	clusterPeerSignature = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "z_courier_cluster_peer_signature_total",
+			Help: "Total number of cluster peer HMAC verification attempts.",
+		},
+		[]string{"result"},
+	)
+
 	clusterStaleRoutes = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "z_courier_cluster_stale_routes_total",
@@ -456,6 +464,10 @@ func RecordClusterPeerPush(targetNode, result string, duration time.Duration) {
 	if duration >= 0 {
 		clusterPeerPushDuration.WithLabelValues(labels...).Observe(duration.Seconds())
 	}
+}
+
+func RecordClusterPeerSignature(result string) {
+	clusterPeerSignature.WithLabelValues(nonEmpty(result, "unknown")).Inc()
 }
 
 func RecordClusterStaleRoute(reason string) {

@@ -28,6 +28,9 @@ semantic versioning after the first public MVP tag.
 - Optional backend-to-gateway HMAC-SHA256 request signing with timestamp and
   bounded nonce replay protection, multi-key rotation, SDK integration,
   low-cardinality verification metrics, and a cross-language canonical format.
+- Optional gateway-to-gateway peer HMAC signing with an independent key ring,
+  bounded replay protection, token-mode compatibility, E2E coverage, and
+  dedicated verification metrics.
 - Grafana panels for authentication request rate, success rate, latency,
   in-flight verification, cache activity, and JWKS refresh health.
 

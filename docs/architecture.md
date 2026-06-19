@@ -345,9 +345,9 @@ Internal APIs such as `/internal/push` should require stronger trust controls:
 - Timestamp and nonce to prevent replay.
 - IP allowlist where appropriate.
 
-Backend-facing internal APIs support an optional canonical HMAC-SHA256 mode
-with bounded local nonce replay protection. The wire contract and deployment
-limits are documented in
+Backend-facing internal APIs and cluster peer push support optional canonical
+HMAC-SHA256 modes with separate key rings and bounded local nonce replay
+protection. The wire contract and deployment limits are documented in
 [internal-http-signing.md](internal-http-signing.md).
 
 ## Rate Limiting and Backpressure

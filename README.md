@@ -19,7 +19,7 @@ A high-performance message push gateway based on the `zinx` network framework.
   upstream, downlink, cluster, retry, capacity, and load-test paths
 - Public Go SDKs for stable protocol encoding and backend downlink/message APIs
 - Optional timestamped HMAC authentication and replay protection for internal
-  backend requests
+  backend requests and gateway peer push, with separate key rings
 - Graceful shutdown with readiness drain and cluster route cleanup
 - MIT Licensed
 

@@ -72,10 +72,14 @@ func (h *internalHMACHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *internalHMACHandler) readBody(w http.ResponseWriter, r *http.Request) ([]byte, error) {
+	return readHMACBody(w, r, h.maxRequestBodySize)
+}
+
+func readHMACBody(w http.ResponseWriter, r *http.Request, maxRequestBodySize int64) ([]byte, error) {
 	if r.Body == nil {
 		return nil, nil
 	}
-	reader := http.MaxBytesReader(w, r.Body, h.maxRequestBodySize)
+	reader := http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 	body, err := io.ReadAll(reader)
 	_ = reader.Close()
 	if err != nil {

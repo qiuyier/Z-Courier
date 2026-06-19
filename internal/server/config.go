@@ -137,6 +137,25 @@ type ClusterRedisConfig struct {
 type ClusterPeerConfig struct {
 	Token   string
 	Timeout time.Duration
+	Auth    ClusterPeerAuthConfig
+}
+
+const (
+	ClusterPeerAuthModeToken = "token"
+	ClusterPeerAuthModeHMAC  = "hmac"
+)
+
+type ClusterPeerAuthConfig struct {
+	Mode string
+	HMAC ClusterPeerHMACConfig
+}
+
+type ClusterPeerHMACConfig struct {
+	KeyID           string
+	Keys            map[string][]byte
+	MaxClockSkew    time.Duration
+	NonceTTL        time.Duration
+	MaxNonceEntries int
 }
 
 func DefaultConfig() Config {
@@ -207,6 +226,14 @@ func DefaultClusterConfig() ClusterConfig {
 		},
 		Peer: ClusterPeerConfig{
 			Timeout: 2 * time.Second,
+			Auth: ClusterPeerAuthConfig{
+				Mode: ClusterPeerAuthModeToken,
+				HMAC: ClusterPeerHMACConfig{
+					MaxClockSkew:    signing.DefaultMaxClockSkew,
+					NonceTTL:        signing.DefaultNonceTTL,
+					MaxNonceEntries: signing.DefaultMaxNonceEntries,
+				},
+			},
 		},
 	}
 }
@@ -249,6 +276,21 @@ func normalizeConfig(config Config) Config {
 	}
 	if config.Cluster.Peer.Timeout <= 0 {
 		config.Cluster.Peer.Timeout = defaults.Cluster.Peer.Timeout
+	}
+	if config.Cluster.Peer.Auth.Mode == "" {
+		config.Cluster.Peer.Auth.Mode = defaults.Cluster.Peer.Auth.Mode
+	}
+	if config.Cluster.Peer.Auth.Mode == ClusterPeerAuthModeHMAC {
+		config.Cluster.Peer.Token = ""
+	}
+	if config.Cluster.Peer.Auth.HMAC.MaxClockSkew <= 0 {
+		config.Cluster.Peer.Auth.HMAC.MaxClockSkew = defaults.Cluster.Peer.Auth.HMAC.MaxClockSkew
+	}
+	if config.Cluster.Peer.Auth.HMAC.NonceTTL <= 0 {
+		config.Cluster.Peer.Auth.HMAC.NonceTTL = defaults.Cluster.Peer.Auth.HMAC.NonceTTL
+	}
+	if config.Cluster.Peer.Auth.HMAC.MaxNonceEntries <= 0 {
+		config.Cluster.Peer.Auth.HMAC.MaxNonceEntries = defaults.Cluster.Peer.Auth.HMAC.MaxNonceEntries
 	}
 	if config.InternalHTTPAddr == "" {
 		config.InternalHTTPAddr = defaults.InternalHTTPAddr

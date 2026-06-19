@@ -121,8 +121,22 @@ type ClusterRedisConfig struct {
 }
 
 type ClusterPeerConfig struct {
-	Token   string `yaml:"token"`
-	Timeout string `yaml:"timeout"`
+	Token   string                `yaml:"token"`
+	Timeout string                `yaml:"timeout"`
+	Auth    ClusterPeerAuthConfig `yaml:"auth"`
+}
+
+type ClusterPeerAuthConfig struct {
+	Mode string                `yaml:"mode"`
+	HMAC ClusterPeerHMACConfig `yaml:"hmac"`
+}
+
+type ClusterPeerHMACConfig struct {
+	KeyID           string            `yaml:"key_id"`
+	Keys            map[string]string `yaml:"keys"`
+	MaxClockSkew    string            `yaml:"max_clock_skew"`
+	NonceTTL        string            `yaml:"nonce_ttl"`
+	MaxNonceEntries int               `yaml:"max_nonce_entries"`
 }
 
 type UpstreamConfig struct {
@@ -641,8 +655,8 @@ func applyClusterConfig(out *server.Config, config ClusterConfig) error {
 		out.Cluster.Registry.Redis.WriteTimeout = writeTimeout
 	}
 
-	if config.Peer.Token != "" {
-		out.Cluster.Peer.Token = config.Peer.Token
+	if err := applyClusterPeerAuthConfig(&out.Cluster.Peer, config.Peer); err != nil {
+		return err
 	}
 	peerTimeout, err := parseOptionalPositiveDuration(config.Peer.Timeout)
 	if err != nil {
@@ -660,6 +674,97 @@ func applyClusterConfig(out *server.Config, config ClusterConfig) error {
 	}
 
 	return nil
+}
+
+func applyClusterPeerAuthConfig(out *server.ClusterPeerConfig, config ClusterPeerConfig) error {
+	mode := strings.ToLower(strings.TrimSpace(config.Auth.Mode))
+	if mode == "" {
+		if clusterPeerHMACConfigSet(config.Auth.HMAC) {
+			return fmt.Errorf("config: cluster.peer.auth.mode is required when HMAC settings are present")
+		}
+		mode = server.ClusterPeerAuthModeToken
+	}
+
+	switch mode {
+	case server.ClusterPeerAuthModeToken:
+		if clusterPeerHMACConfigSet(config.Auth.HMAC) {
+			return fmt.Errorf("config: cluster.peer.auth.hmac conflicts with token mode")
+		}
+		out.Auth.Mode = mode
+		if config.Token != "" {
+			out.Token = config.Token
+		}
+	case server.ClusterPeerAuthModeHMAC:
+		if config.Token != "" {
+			return fmt.Errorf("config: cluster.peer.token conflicts with HMAC mode")
+		}
+		hmacConfig, err := toClusterPeerHMACConfig(config.Auth.HMAC)
+		if err != nil {
+			return err
+		}
+		out.Token = ""
+		out.Auth = server.ClusterPeerAuthConfig{Mode: mode, HMAC: hmacConfig}
+	default:
+		return fmt.Errorf("config: unsupported cluster.peer.auth.mode %q", config.Auth.Mode)
+	}
+	return nil
+}
+
+func toClusterPeerHMACConfig(config ClusterPeerHMACConfig) (server.ClusterPeerHMACConfig, error) {
+	maxClockSkew, err := parseOptionalPositiveDuration(config.MaxClockSkew)
+	if err != nil {
+		return server.ClusterPeerHMACConfig{}, fmt.Errorf("config: cluster.peer.auth.hmac.max_clock_skew: %w", err)
+	}
+	if maxClockSkew == 0 {
+		maxClockSkew = signing.DefaultMaxClockSkew
+	}
+	nonceTTL, err := parseOptionalPositiveDuration(config.NonceTTL)
+	if err != nil {
+		return server.ClusterPeerHMACConfig{}, fmt.Errorf("config: cluster.peer.auth.hmac.nonce_ttl: %w", err)
+	}
+	if nonceTTL == 0 {
+		nonceTTL = signing.DefaultNonceTTL
+	}
+	if config.MaxNonceEntries < 0 {
+		return server.ClusterPeerHMACConfig{}, fmt.Errorf("config: cluster.peer.auth.hmac.max_nonce_entries must not be negative")
+	}
+	maxNonceEntries := config.MaxNonceEntries
+	if maxNonceEntries == 0 {
+		maxNonceEntries = signing.DefaultMaxNonceEntries
+	}
+
+	keys := make(map[string][]byte, len(config.Keys))
+	for keyID, secret := range config.Keys {
+		keys[keyID] = []byte(secret)
+	}
+	verifierConfig := signing.VerifierConfig{
+		Keys:            keys,
+		MaxClockSkew:    maxClockSkew,
+		NonceTTL:        nonceTTL,
+		MaxNonceEntries: maxNonceEntries,
+	}
+	if _, err := signing.NewVerifier(verifierConfig); err != nil {
+		return server.ClusterPeerHMACConfig{}, fmt.Errorf("config: cluster.peer.auth.hmac: %w", err)
+	}
+	secret, ok := keys[config.KeyID]
+	if !ok {
+		return server.ClusterPeerHMACConfig{}, fmt.Errorf("config: cluster.peer.auth.hmac.key_id %q is not present in keys", config.KeyID)
+	}
+	if _, err := signing.NewSigner(signing.SignerConfig{KeyID: config.KeyID, Secret: secret}); err != nil {
+		return server.ClusterPeerHMACConfig{}, fmt.Errorf("config: cluster.peer.auth.hmac signer: %w", err)
+	}
+
+	return server.ClusterPeerHMACConfig{
+		KeyID:           config.KeyID,
+		Keys:            keys,
+		MaxClockSkew:    maxClockSkew,
+		NonceTTL:        nonceTTL,
+		MaxNonceEntries: maxNonceEntries,
+	}, nil
+}
+
+func clusterPeerHMACConfigSet(config ClusterPeerHMACConfig) bool {
+	return config.KeyID != "" || len(config.Keys) > 0 || config.MaxClockSkew != "" || config.NonceTTL != "" || config.MaxNonceEntries != 0
 }
 
 func applyDownlinkConfig(out *server.Config, config DownlinkConfig) error {

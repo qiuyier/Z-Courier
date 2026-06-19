@@ -38,6 +38,8 @@ cluster:
   peer:
     token: dev-cluster-token
     timeout: 2s
+    auth:
+      mode: token
 
 downlink:
   storage:

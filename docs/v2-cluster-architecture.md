@@ -160,8 +160,10 @@ It calls the target gateway internal API:
 POST /internal/cluster/push
 ```
 
-This API is for gateway peers only. The current implementation protects it with
-`cluster.peer.token` in the `X-ZCourier-Internal-Token` header.
+This API is for gateway peers only. Token mode protects it with
+`cluster.peer.token` in the `X-ZCourier-Internal-Token` header. V3.5 also
+supports timestamped HMAC-SHA256 signatures with a separate peer key ring and
+nonce replay protection.
 
 ### Downlink Resolver
 
@@ -202,6 +204,8 @@ cluster:
   peer:
     token: dev-cluster-token
     timeout: 2s
+    auth:
+      mode: token
 ```
 
 Compatibility rule:
@@ -352,7 +356,7 @@ Current status behavior:
 ```text
 200 sent              local TCP send succeeded
 404 session_not_found route is stale or client disconnected
-401 unauthorized      peer token invalid
+401 unauthorized      peer token or HMAC signature invalid
 429 rate_limited      peer protection rejected request
 5xx retryable failure target gateway had an internal error
 ```

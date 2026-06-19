@@ -1,8 +1,9 @@
 # Internal HTTP HMAC Signing
 
-Z-Courier can authenticate backend-to-gateway internal HTTP requests with a
-timestamped HMAC-SHA256 signature. HMAC mode detects body, path, query, and
-method tampering and rejects a valid signed request when its nonce is replayed.
+Z-Courier can authenticate backend-to-gateway and gateway-to-gateway internal
+HTTP requests with a timestamped HMAC-SHA256 signature. HMAC mode detects body,
+path, query, and method tampering and rejects a valid signed request when its
+nonce is replayed.
 
 HMAC authenticates requests but does not encrypt them. Production deployments
 must still use TLS, mTLS, or a trusted encrypted service-mesh connection.
@@ -87,7 +88,7 @@ not cluster-global in this first version.
 The gateway accepts multiple key IDs. Rotate without downtime:
 
 1. Add the new key to the gateway and deploy.
-2. Switch backend SDK clients to the new key ID.
+2. Switch backend SDK clients or the gateway peer `key_id` to the new key ID.
 3. Wait longer than the maximum request lifetime and deployment overlap.
 4. Remove the old key from the gateway.
 
@@ -96,8 +97,17 @@ environment when producing the final configuration file.
 
 ## Protected Paths
 
-HMAC mode currently protects backend-facing `/internal/*` APIs, including
-push, message administration, and debug routes. `/healthz`, `/readyz`, and
-`/metrics` remain unsigned for probes and Prometheus. Cluster peer push keeps
-its separate peer token during the first V3.5 stage and will adopt the same
-signing protocol in the next stage.
+Backend HMAC mode protects backend-facing `/internal/*` APIs, including push,
+message administration, and debug routes. Cluster peer HMAC mode independently
+protects `POST /internal/cluster/push`. Backend and peer authentication use
+separate key rings and nonce stores even though they share this wire protocol.
+`/healthz`, `/readyz`, and `/metrics` remain unsigned for probes and Prometheus.
+
+## Observability
+
+Backend verification exports
+`z_courier_internal_http_signature_total{result=...}`. Peer verification exports
+`z_courier_cluster_peer_signature_total{result=...}`. Results use a bounded set
+such as `success`, `replay`, `expired`, and `invalid_signature`; secrets, key IDs,
+and caller identifiers are never metric labels. The provisioned Grafana
+dashboard displays both request rates.

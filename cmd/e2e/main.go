@@ -682,6 +682,7 @@ func checkMetrics(ctx context.Context, cfg config) error {
 		for _, name := range []string{
 			"z_courier_cluster_registry_lookup_total",
 			"z_courier_cluster_peer_push_total",
+			"z_courier_cluster_peer_signature_total",
 			"z_courier_downlink_retry_scan_total",
 			"z_courier_downlink_retry_claim_duration_seconds",
 		} {
@@ -737,6 +738,11 @@ func checkReconnectRetryMetrics(metricsText string, cfg config) error {
 		expectations = append(expectations, metricExpectation{
 			Name:   "z_courier_cluster_peer_push_total",
 			Labels: map[string]string{"target_node": cfg.ExpectRouteNode, "result": "success"},
+			Min:    1,
+		})
+		expectations = append(expectations, metricExpectation{
+			Name:   "z_courier_cluster_peer_signature_total",
+			Labels: map[string]string{"result": "success"},
 			Min:    1,
 		})
 	}

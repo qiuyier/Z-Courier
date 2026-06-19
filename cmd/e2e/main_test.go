@@ -146,6 +146,7 @@ z_courier_cluster_registry_unbind_total{result="success"} 1
 z_courier_downlink_retry_scan_total{result="success"} 4
 z_courier_downlink_retry_claim_duration_seconds_count{owner="gateway-a",result="success"} 4
 z_courier_cluster_peer_push_total{target_node="gateway-b",result="success"} 1
+z_courier_cluster_peer_signature_total{result="success"} 1
 `
 	err := checkReconnectRetryMetrics(metricsText, config{ExpectRouteNode: "gateway-b"})
 	if err != nil {

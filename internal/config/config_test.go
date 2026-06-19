@@ -224,6 +224,9 @@ upstream:
 	if config.Cluster.Peer.Token != "cluster-token" {
 		t.Fatalf("Cluster Peer Token = %q", config.Cluster.Peer.Token)
 	}
+	if config.Cluster.Peer.Auth.Mode != "token" {
+		t.Fatalf("Cluster Peer Auth Mode = %q, want token", config.Cluster.Peer.Auth.Mode)
+	}
 	if config.Cluster.Peer.Timeout != 1500*time.Millisecond {
 		t.Fatalf("Cluster Peer Timeout = %v, want 1500ms", config.Cluster.Peer.Timeout)
 	}
@@ -585,6 +588,66 @@ func TestLoadServerConfigRejectsInvalidInternalHTTPHMAC(t *testing.T) {
 		{name: "mode required", config: "internal_http:\n  auth:\n    hmac:\n      keys:\n        key: 0123456789abcdef0123456789abcdef\n"},
 		{name: "token mode conflict", config: "internal_http:\n  auth:\n    mode: token\n    hmac:\n      keys:\n        key: 0123456789abcdef0123456789abcdef\n"},
 		{name: "negative entries", config: "internal_http:\n  auth:\n    mode: hmac\n    hmac:\n      keys:\n        key: 0123456789abcdef0123456789abcdef\n      max_nonce_entries: -1\n"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := LoadServerConfig(writeConfig(t, test.config)); err == nil {
+				t.Fatal("LoadServerConfig() error = nil, want error")
+			}
+		})
+	}
+}
+
+func TestLoadServerConfigClusterPeerHMAC(t *testing.T) {
+	path := writeConfig(t, `
+cluster:
+  peer:
+    auth:
+      mode: hmac
+      hmac:
+        key_id: gateway-current
+        keys:
+          gateway-current: cluster-peer-secret-0123456789abcdef
+          gateway-previous: previous-peer-secret-0123456789abcdef
+        max_clock_skew: 20s
+        nonce_ttl: 45s
+        max_nonce_entries: 2345
+`)
+
+	config, err := LoadServerConfig(path)
+	if err != nil {
+		t.Fatalf("LoadServerConfig() error = %v", err)
+	}
+	peer := config.Cluster.Peer
+	if peer.Auth.Mode != "hmac" || peer.Token != "" {
+		t.Fatalf("peer auth = %+v token=%q, want HMAC without token", peer.Auth, peer.Token)
+	}
+	if peer.Auth.HMAC.KeyID != "gateway-current" || len(peer.Auth.HMAC.Keys) != 2 {
+		t.Fatalf("peer HMAC identity = %+v", peer.Auth.HMAC)
+	}
+	if peer.Auth.HMAC.MaxClockSkew != 20*time.Second || peer.Auth.HMAC.NonceTTL != 45*time.Second {
+		t.Fatalf("peer HMAC durations = skew %v nonce TTL %v", peer.Auth.HMAC.MaxClockSkew, peer.Auth.HMAC.NonceTTL)
+	}
+	if peer.Auth.HMAC.MaxNonceEntries != 2345 {
+		t.Fatalf("peer MaxNonceEntries = %d, want 2345", peer.Auth.HMAC.MaxNonceEntries)
+	}
+}
+
+func TestLoadServerConfigRejectsInvalidClusterPeerHMAC(t *testing.T) {
+	tests := []struct {
+		name   string
+		config string
+	}{
+		{name: "unsupported mode", config: "cluster:\n  peer:\n    auth:\n      mode: mtls\n"},
+		{name: "missing keys", config: "cluster:\n  peer:\n    auth:\n      mode: hmac\n      hmac:\n        key_id: gateway\n"},
+		{name: "missing signer key", config: "cluster:\n  peer:\n    auth:\n      mode: hmac\n      hmac:\n        key_id: missing\n        keys:\n          gateway: cluster-peer-secret-0123456789abcdef\n"},
+		{name: "token conflict", config: "cluster:\n  peer:\n    token: secret\n    auth:\n      mode: hmac\n      hmac:\n        key_id: gateway\n        keys:\n          gateway: cluster-peer-secret-0123456789abcdef\n"},
+		{name: "short secret", config: "cluster:\n  peer:\n    auth:\n      mode: hmac\n      hmac:\n        key_id: gateway\n        keys:\n          gateway: short\n"},
+		{name: "short nonce TTL", config: "cluster:\n  peer:\n    auth:\n      mode: hmac\n      hmac:\n        key_id: gateway\n        keys:\n          gateway: cluster-peer-secret-0123456789abcdef\n        max_clock_skew: 30s\n        nonce_ttl: 30s\n"},
+		{name: "mode required", config: "cluster:\n  peer:\n    auth:\n      hmac:\n        key_id: gateway\n        keys:\n          gateway: cluster-peer-secret-0123456789abcdef\n"},
+		{name: "token mode conflict", config: "cluster:\n  peer:\n    auth:\n      mode: token\n      hmac:\n        key_id: gateway\n        keys:\n          gateway: cluster-peer-secret-0123456789abcdef\n"},
+		{name: "negative entries", config: "cluster:\n  peer:\n    auth:\n      mode: hmac\n      hmac:\n        key_id: gateway\n        keys:\n          gateway: cluster-peer-secret-0123456789abcdef\n        max_nonce_entries: -1\n"},
 	}
 
 	for _, test := range tests {

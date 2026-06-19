@@ -72,13 +72,30 @@ func newInternalHTTPServer(config Config, logger *zap.Logger, service *downlink.
 	mux.Handle("/internal/debug/route", newDebugRouteHandler(handlerConfig, registry))
 	mux.Handle("/internal/debug/sessions", newDebugSessionsHandler(handlerConfig))
 	if config.Cluster.Enabled {
-		mux.Handle(downlink.PeerPushPath, downlink.NewPeerHandler(downlink.PeerHandlerConfig{
+		switch config.Cluster.Peer.Auth.Mode {
+		case ClusterPeerAuthModeToken, ClusterPeerAuthModeHMAC:
+		default:
+			return nil, fmt.Errorf("unsupported cluster peer auth mode %q", config.Cluster.Peer.Auth.Mode)
+		}
+		peerToken := config.Cluster.Peer.Token
+		if config.Cluster.Peer.Auth.Mode == ClusterPeerAuthModeHMAC {
+			peerToken = ""
+		}
+		var peerHandler http.Handler = downlink.NewPeerHandler(downlink.PeerHandlerConfig{
 			Service:            service,
 			GatewayNode:        config.GatewayNode,
-			PeerToken:          config.Cluster.Peer.Token,
+			PeerToken:          peerToken,
 			MaxRequestBodySize: config.InternalMaxRequestBodySize,
 			Logger:             logger,
-		}))
+		})
+		if config.Cluster.Peer.Auth.Mode == ClusterPeerAuthModeHMAC {
+			var err error
+			peerHandler, err = newPeerHMACHandler(peerHandler, config.Cluster.Peer.Auth.HMAC, config.InternalMaxRequestBodySize, logger)
+			if err != nil {
+				return nil, fmt.Errorf("cluster peer HMAC: %w", err)
+			}
+		}
+		mux.Handle(downlink.PeerPushPath, peerHandler)
 	}
 	mux.Handle("/metrics", metrics.Handler())
 

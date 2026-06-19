@@ -414,8 +414,7 @@ HTTP requests, and protocol users do not need to duplicate the binary codec.
 
 ### V3.5 Internal Request Hardening
 
-Status: in progress. Backend-to-gateway signing is implemented; cluster peer
-signing remains next.
+Status: implemented.
 
 - Adds optional timestamped HMAC signatures for backend-facing internal HTTP
   requests and the Go backend SDK.
@@ -423,7 +422,8 @@ signing remains next.
 - Documents deployment-level TLS or mTLS termination and cross-language
   canonicalization.
 - Adds bounded nonce storage and low-cardinality signature-result metrics.
-- Migrate cluster peer push from its separate token to the signing protocol.
+- Adds a separate gateway peer key ring and applies the same signing protocol to
+  cluster peer push without granting backend keys gateway-node authority.
 
 Exit criteria: shared-token mode remains available for simple deployments, and
 operators can opt into replay-resistant signed internal requests.

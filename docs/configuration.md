@@ -280,6 +280,8 @@ cluster:
   peer:
     token: dev-cluster-token
     timeout: 2s
+    auth:
+      mode: token
 ```
 
 - `enabled`: enables V2 online route registration. `false` keeps local-only
@@ -296,9 +298,40 @@ cluster:
   the route by rebinding the current session.
 - `registry.redis`: Redis registry connection settings. `addr` should point to
   the Redis TCP address reachable from the gateway process.
-- `peer.token`: token required by `POST /internal/cluster/push`.
+- `peer.auth.mode`: `token` by default, or `hmac` for signed, replay-resistant
+  gateway-to-gateway requests.
+- `peer.token`: token required by `POST /internal/cluster/push` when peer auth
+  mode is `token`.
 - `peer.timeout`: gateway-to-gateway HTTP push timeout used by the peer
   dispatcher.
+
+For HMAC peer authentication, remove `peer.token`. Each node selects its
+outbound signing key with `key_id` and accepts inbound signatures from every key
+in `keys`:
+
+```yaml
+cluster:
+  peer:
+    timeout: 2s
+    auth:
+      mode: hmac
+      hmac:
+        key_id: gateway-a-2026-01
+        keys:
+          gateway-a-2026-01: ${GATEWAY_A_PEER_HMAC_SECRET}
+          gateway-b-2026-01: ${GATEWAY_B_PEER_HMAC_SECRET}
+        max_clock_skew: 30s
+        nonce_ttl: 1m
+        max_nonce_entries: 10000
+```
+
+Configure the same accepted key ring on each gateway, but select that node's
+own `key_id`. Peer keys must be separate from backend internal-HTTP keys so a
+compromised backend credential cannot impersonate a gateway node. The selected
+`key_id` must exist in `keys`; secrets require at least 32 bytes, and
+`nonce_ttl` must be at least twice `max_clock_skew`.
+The `${...}` values above are deployment-template placeholders; as with
+internal HTTP HMAC configuration, Z-Courier does not expand them itself.
 
 When cluster mode is enabled, Z-Courier writes `client_id + device_id` online
 routes after session binding and removes them on connection close only when the
@@ -321,7 +354,8 @@ nodes.
 
 The local cluster verifier uses `configs/z-courier.cluster-a.yaml` and
 `configs/z-courier.cluster-b.yaml` with the same Redis key prefix and
-PostgreSQL DSN:
+PostgreSQL DSN. Those two integration configurations use HMAC peer
+authentication, while the default single-node configuration keeps token mode:
 
 ```bash
 bash scripts/e2e_cluster.sh

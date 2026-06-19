@@ -10,7 +10,10 @@ import (
 
 	"github.com/bytedance/sonic"
 	"github.com/qiuyier/Z-Courier/internal/cluster"
+	"github.com/qiuyier/Z-Courier/pkg/sdk/signing"
 )
+
+var peerHMACTestSecret = []byte("cluster-peer-secret-0123456789abcdef")
 
 func TestHTTPPeerDispatcherPushOK(t *testing.T) {
 	var gotReq PeerPushRequest
@@ -39,10 +42,13 @@ func TestHTTPPeerDispatcherPushOK(t *testing.T) {
 	}))
 	defer server.Close()
 
-	dispatcher := NewHTTPPeerDispatcher(HTTPPeerDispatcherConfig{
+	dispatcher, err := NewHTTPPeerDispatcher(HTTPPeerDispatcherConfig{
 		Token:  "secret",
 		Client: server.Client(),
 	})
+	if err != nil {
+		t.Fatalf("NewHTTPPeerDispatcher() error = %v", err)
+	}
 	resp, err := dispatcher.Push(context.Background(), cluster.RouteEntry{
 		ClientID:     "client-1",
 		DeviceID:     "device-1",
@@ -74,7 +80,10 @@ func TestHTTPPeerDispatcherReturnsHTTPError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	dispatcher := NewHTTPPeerDispatcher(HTTPPeerDispatcherConfig{Client: server.Client()})
+	dispatcher, err := NewHTTPPeerDispatcher(HTTPPeerDispatcherConfig{Client: server.Client()})
+	if err != nil {
+		t.Fatalf("NewHTTPPeerDispatcher() error = %v", err)
+	}
 	resp, err := dispatcher.Push(context.Background(), cluster.RouteEntry{
 		ClientID:     "client-1",
 		DeviceID:     "device-1",
@@ -94,5 +103,59 @@ func TestHTTPPeerDispatcherReturnsHTTPError(t *testing.T) {
 	}
 	if httpErr.StatusCode != http.StatusNotFound || httpErr.Code != "session_mismatch" {
 		t.Fatalf("http error = %+v", httpErr)
+	}
+}
+
+func TestHTTPPeerDispatcherSignsExactRequestBody(t *testing.T) {
+	verifier, err := signing.NewVerifier(signing.VerifierConfig{
+		Keys: map[string][]byte{"gateway-2026-01": peerHMACTestSecret},
+	})
+	if err != nil {
+		t.Fatalf("NewVerifier() error = %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read request: %v", err)
+		}
+		if got := r.Header.Get(InternalTokenHeader); got != "" {
+			t.Fatalf("token header = %q, want empty", got)
+		}
+		if err := verifier.Verify(r, body); err != nil {
+			t.Fatalf("Verify() error = %v", err)
+		}
+		writeJSON(w, http.StatusOK, PeerPushResponse{Code: "ok", DeliveryState: DeliveryStateSent})
+	}))
+	defer server.Close()
+
+	dispatcher, err := NewHTTPPeerDispatcher(HTTPPeerDispatcherConfig{
+		HMAC:   &signing.SignerConfig{KeyID: "gateway-2026-01", Secret: peerHMACTestSecret},
+		Client: server.Client(),
+	})
+	if err != nil {
+		t.Fatalf("NewHTTPPeerDispatcher() error = %v", err)
+	}
+	response, err := dispatcher.Push(context.Background(), cluster.RouteEntry{
+		ClientID:     "client-1",
+		DeviceID:     "device-1",
+		SessionID:    "session-1",
+		InternalAddr: server.URL,
+	}, PeerPushRequest{OriginNode: "gateway-a", MsgID: 2001, Body: []byte("hello")})
+	if err != nil {
+		t.Fatalf("Push() error = %v", err)
+	}
+	if response.Code != "ok" {
+		t.Fatalf("response = %+v, want ok", response)
+	}
+}
+
+func TestNewHTTPPeerDispatcherRejectsConflictingAuth(t *testing.T) {
+	_, err := NewHTTPPeerDispatcher(HTTPPeerDispatcherConfig{
+		Token: "peer-token",
+		HMAC:  &signing.SignerConfig{KeyID: "gateway-2026-01", Secret: peerHMACTestSecret},
+	})
+	if err == nil {
+		t.Fatal("NewHTTPPeerDispatcher() error = nil, want conflict")
 	}
 }
