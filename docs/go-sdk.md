@@ -58,7 +58,7 @@ connect directly to the gateway must use a compatible Zinx client transport
 and pass the bytes returned by `protocol.Encode` as the Zinx message body.
 
 Backend applications that only push downlink messages do not need a TCP client;
-the upcoming `pkg/sdk/backend` package wraps the gateway's internal HTTP API.
+use the `pkg/sdk/backend` package described below.
 
 ### Reserved Message IDs
 
@@ -114,9 +114,92 @@ detected even if encoder and decoder are modified together.
 - Existing constants, field order, byte order, and error identities must remain
   covered by compatibility tests.
 
-## Planned Packages
+## Backend Package
+
+Import the backend HTTP client:
+
+```go
+import "github.com/qiuyier/Z-Courier/pkg/sdk/backend"
+```
+
+Create one reusable client per gateway endpoint:
+
+```go
+client, err := backend.NewClient(backend.Config{
+    BaseURL:       "http://gateway:18182",
+    InternalToken: os.Getenv("ZCOURIER_INTERNAL_TOKEN"),
+    Timeout:       3 * time.Second,
+})
+if err != nil {
+    return err
+}
+```
+
+Push an opaque downlink message:
+
+```go
+response, err := client.Push(ctx, backend.PushRequest{
+    ClientID:    "client-1",
+    DeviceID:    "device-1",
+    MsgID:       2001,
+    MessageID:   "order-event-42",
+    TraceID:     "trace-42",
+    AckRequired: true,
+    Body:        payload,
+})
+if err != nil {
+    return err
+}
+
+switch response.DeliveryState {
+case backend.DeliveryStateSent:
+    // The message was written to an online client connection.
+case backend.DeliveryStateQueued:
+    // The reliable store accepted it for later delivery.
+}
+```
+
+The client also provides:
+
+```go
+batch, err := client.PushBatch(ctx, backend.BatchPushRequest{Messages: messages})
+message, err := client.GetMessage(ctx, "order-event-42")
+failed, err := client.ListMessages(ctx, backend.ListMessagesRequest{
+    Status: backend.MessageStatusFailed,
+    Limit:  100,
+})
+message, err := client.Requeue(ctx, "order-event-42")
+message, err := client.Discard(ctx, "order-event-42", "operator decision")
+```
+
+`PushBatch` treats HTTP `207 Multi-Status` as a decoded result, not as a method
+error. Check `batch.Failed` and each item in `batch.Results` for partial or total
+item failure.
+
+Non-2xx responses return `*backend.APIError`. Use `errors.Is(err,
+backend.ErrAPI)`, `errors.As`, and `APIError.Retryable` instead of parsing error
+strings:
+
+```go
+var apiError *backend.APIError
+if errors.As(err, &apiError) && apiError.Retryable() {
+    // Apply bounded backoff. Reuse MessageID to preserve idempotency.
+}
+```
+
+Transport and context failures return `*backend.RequestError` while preserving
+their cause, so `errors.Is(err, context.DeadlineExceeded)` and
+`errors.Is(err, context.Canceled)` continue to work. The client defaults to a
+10-second request timeout and a 1 MiB response limit; both are configurable.
+Redirects are rejected to prevent forwarding `X-ZCourier-Internal-Token` to a
+different address.
+
+The public backend request and response types are canonical. Gateway handlers
+reuse them through internal aliases, which keeps SDK JSON fields synchronized
+with the server contract.
+
+## Planned Package
 
 ```text
-pkg/sdk/backend  internal HTTP push, batch, status, requeue, and discard client
 pkg/sdk/client   AUTH/BIND, send, receive, reconnect, and downlink ACK helper
 ```

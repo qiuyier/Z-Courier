@@ -400,11 +400,13 @@ JWKS key rotation without restart.
 
 ### V3.4 Go Integration SDK
 
-Status: in progress. `pkg/sdk/protocol` is implemented; `pkg/sdk/backend` is
-next.
+Status: implemented.
 
-- Publish protocol and backend SDK packages. The protocol package is complete.
-- Add SDK examples and compatibility tests.
+- Publishes canonical protocol and backend SDK packages.
+- Adds backend push, batch, status, list, requeue, and discard APIs with
+  context cancellation, bounded responses, redirect rejection, and typed
+  errors.
+- Adds SDK examples and protocol/downlink compatibility tests.
 - Decide the high-level client reconnect contract before implementing it.
 
 Exit criteria: a Go backend can push and inspect messages without hand-writing

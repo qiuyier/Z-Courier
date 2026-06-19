@@ -468,7 +468,8 @@ V3 priorities are tracked in
 - Configuration-selectable static, HTTP, and JWT/JWKS token verification.
 - A consistent principal and verifier error contract.
 - Bounded auth caching, timeout, backpressure, and metrics.
-- Minimal Go protocol and backend integration SDKs.
+- Minimal Go protocol and backend integration SDKs. Both are implemented under
+  `pkg/sdk`; the high-level reconnecting client SDK remains a later extension.
 - Optional replay-resistant internal request signing.
 
 Later extensions:

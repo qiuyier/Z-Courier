@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"time"
+
+	sdkbackend "github.com/qiuyier/Z-Courier/pkg/sdk/backend"
 )
 
 const (
-	DeliveryStateSent   = "sent"
-	DeliveryStateQueued = "queued"
+	DeliveryStateSent   = sdkbackend.DeliveryStateSent
+	DeliveryStateQueued = sdkbackend.DeliveryStateQueued
 )
 
 type RetryResult struct {
@@ -35,14 +37,14 @@ type RetentionPolicy struct {
 	Limit        int
 }
 
-type MessageStatus string
+type MessageStatus = sdkbackend.MessageStatus
 
 const (
-	MessageStatusPending   MessageStatus = "pending"
-	MessageStatusSent      MessageStatus = "sent"
-	MessageStatusDelivered MessageStatus = "delivered"
-	MessageStatusFailed    MessageStatus = "failed"
-	MessageStatusDiscarded MessageStatus = "discarded"
+	MessageStatusPending   = sdkbackend.MessageStatusPending
+	MessageStatusSent      = sdkbackend.MessageStatusSent
+	MessageStatusDelivered = sdkbackend.MessageStatusDelivered
+	MessageStatusFailed    = sdkbackend.MessageStatusFailed
+	MessageStatusDiscarded = sdkbackend.MessageStatusDiscarded
 )
 
 type Message struct {

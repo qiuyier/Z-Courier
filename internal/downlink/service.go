@@ -662,12 +662,7 @@ func validatePushRequest(req PushRequest) error {
 }
 
 func validMessageStatus(status MessageStatus) bool {
-	switch status {
-	case MessageStatusPending, MessageStatusSent, MessageStatusDelivered, MessageStatusFailed, MessageStatusDiscarded:
-		return true
-	default:
-		return false
-	}
+	return status.Valid()
 }
 
 func isStalePeerRouteError(err error) bool {

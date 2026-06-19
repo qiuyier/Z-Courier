@@ -11,8 +11,6 @@ import (
 	"go.uber.org/zap"
 )
 
-const InternalTokenHeader = "X-ZCourier-Internal-Token"
-
 type HandlerConfig struct {
 	Service            *Service
 	InternalToken      string

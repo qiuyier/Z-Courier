@@ -22,6 +22,9 @@ semantic versioning after the first public MVP tag.
 - Public `pkg/sdk/protocol` Go package with canonical packet encoding, reserved
   MsgIDs, ACK helpers, exported errors, golden wire-format coverage, and an
   internal compatibility facade.
+- Public `pkg/sdk/backend` Go client for downlink push, batch, message status,
+  list, requeue, and discard operations with typed errors, context deadlines,
+  response limits, and canonical JSON contract types shared by the gateway.
 - Grafana panels for authentication request rate, success rate, latency,
   in-flight verification, cache activity, and JWKS refresh health.
 
