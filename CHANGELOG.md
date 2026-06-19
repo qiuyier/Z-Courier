@@ -19,6 +19,9 @@ semantic versioning after the first public MVP tag.
 - Local JWT verification with explicit asymmetric algorithm allowlists,
   issuer/audience/time checks, strict JWKS parsing, background refresh, key
   rotation, stale-key fallback, and unknown-key refresh protection.
+- Public `pkg/sdk/protocol` Go package with canonical packet encoding, reserved
+  MsgIDs, ACK helpers, exported errors, golden wire-format coverage, and an
+  internal compatibility facade.
 - Grafana panels for authentication request rate, success rate, latency,
   in-flight verification, cache activity, and JWKS refresh health.
 

@@ -17,6 +17,7 @@ A high-performance message push gateway based on the `zinx` network framework.
   next bind flushes them
 - Prometheus metrics and Grafana dashboards for authentication, ingress,
   upstream, downlink, cluster, retry, capacity, and load-test paths
+- Public Go protocol SDK with stable packet, codec, reserved MsgID, and ACK APIs
 - Graceful shutdown with readiness drain and cluster route cleanup
 - MIT Licensed
 
@@ -126,8 +127,9 @@ GitHub Actions includes unit tests, local E2E, cluster E2E, load-test smoke, and
 non-blocking load-test baseline comparisons in workflow summaries.
 
 V3.1 auth foundations, V3.2 remote HTTP token verification, and V3.3 local
-JWT/JWKS verification are implemented. The next milestone is V3.4 Go
-integration SDKs. See
+JWT/JWKS verification are implemented. V3.4 Go integration SDK work is in
+progress, beginning with the public protocol package documented in
+[docs/go-sdk.md](docs/go-sdk.md). See
 [docs/v3-auth-integration.md](docs/v3-auth-integration.md) for configuration,
 compatibility rules, milestones, and completion criteria.
 

@@ -428,7 +428,7 @@ internal/downlink/           internal push APIs and delivery queue
 internal/auth/               token verification interfaces
 internal/ratelimit/          rate limiting implementations
 internal/observability/      logs, metrics, tracing
-pkg/sdk/                     optional client/backend SDK types
+pkg/sdk/                     public protocol and integration SDK packages
 pkg/errors/                  public error codes
 docs/                        design and operation documents
 ```

@@ -400,7 +400,10 @@ JWKS key rotation without restart.
 
 ### V3.4 Go Integration SDK
 
-- Publish protocol and backend SDK packages.
+Status: in progress. `pkg/sdk/protocol` is implemented; `pkg/sdk/backend` is
+next.
+
+- Publish protocol and backend SDK packages. The protocol package is complete.
 - Add SDK examples and compatibility tests.
 - Decide the high-level client reconnect contract before implementing it.
 

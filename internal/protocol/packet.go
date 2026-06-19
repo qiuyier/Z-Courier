@@ -1,58 +1,36 @@
+// Package protocol preserves the original internal import path while the
+// canonical wire implementation lives in pkg/sdk/protocol.
 package protocol
 
-import "bytes"
+import sdkprotocol "github.com/qiuyier/Z-Courier/pkg/sdk/protocol"
 
 const (
-	Magic           uint16 = 0x5A43
-	Version         uint8  = 1
-	FixedHeaderSize        = 41
-
-	DefaultMaxBodySize = 4 << 20
+	Magic              = sdkprotocol.Magic
+	Version            = sdkprotocol.Version
+	FixedHeaderSize    = sdkprotocol.FixedHeaderSize
+	DefaultMaxBodySize = sdkprotocol.DefaultMaxBodySize
 )
 
 const (
-	MsgIDAck         uint32 = 1
-	MsgIDDownlinkAck uint32 = 2
-	MsgIDBind        uint32 = 1000
+	MsgIDAck         = sdkprotocol.MsgIDAck
+	MsgIDDownlinkAck = sdkprotocol.MsgIDDownlinkAck
+	MsgIDBind        = sdkprotocol.MsgIDBind
 )
 
-type Flags uint16
+type Flags = sdkprotocol.Flags
 
 const (
-	FlagAckRequired Flags = 1 << iota
-	FlagCompressed
+	FlagAckRequired = sdkprotocol.FlagAckRequired
+	FlagCompressed  = sdkprotocol.FlagCompressed
 )
 
-type Header struct {
-	Version   uint8
-	Flags     Flags
-	MsgID     uint32
-	Seq       uint64
-	Timestamp int64
-}
-
-type Packet struct {
-	Header
-
-	ClientID  string
-	DeviceID  string
-	SessionID string
-	MessageID string
-	TraceID   string
-	Token     string
-	Body      []byte
-}
+type Header = sdkprotocol.Header
+type Packet = sdkprotocol.Packet
 
 func NewPacket(msgID uint32, body []byte) *Packet {
-	return &Packet{
-		Header: Header{
-			Version: Version,
-			MsgID:   msgID,
-		},
-		Body: cloneBytes(body),
-	}
+	return sdkprotocol.NewPacket(msgID, body)
 }
 
-func cloneBytes(in []byte) []byte {
-	return bytes.Clone(in)
+func IsReservedMsgID(msgID uint32) bool {
+	return sdkprotocol.IsReservedMsgID(msgID)
 }
