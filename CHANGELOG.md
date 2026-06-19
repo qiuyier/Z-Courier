@@ -7,6 +7,10 @@ semantic versioning after the first public MVP tag.
 
 ## [Unreleased]
 
+No unreleased changes.
+
+## [v0.3.0] - 2026-06-20
+
 ### Added
 
 - V3 authentication and integration design with milestones for HTTP token
@@ -32,7 +36,47 @@ semantic versioning after the first public MVP tag.
   bounded replay protection, token-mode compatibility, E2E coverage, and
   dedicated verification metrics.
 - Grafana panels for authentication request rate, success rate, latency,
-  in-flight verification, cache activity, and JWKS refresh health.
+  in-flight verification, cache activity, JWKS refresh health, and internal
+  request signature results.
+
+### Changed
+
+- Authentication provider selection is configuration-driven while legacy
+  `auth.static_tokens` files remain compatible.
+- The two-node integration verifier now exercises HMAC-signed cluster peer push
+  and requires successful peer signature metrics.
+
+### Security
+
+- Raw authentication tokens are not used as cache keys; bounded cache entries
+  use SHA-256 digests.
+- JWT mode accepts only explicitly configured asymmetric algorithms and keeps
+  private signing keys outside the gateway.
+- Internal HMAC modes cover method, path, canonical query, and exact body bytes,
+  then enforce timestamp and nonce replay checks.
+
+### Verified
+
+- `actionlint`
+- `go test ./...`
+- focused race tests for signing, downlink, server, and configuration packages
+- `go vet ./...`
+- `bash scripts/e2e.sh`
+- `bash scripts/e2e_cluster.sh`
+- `bash scripts/loadtest_smoke.sh`
+
+### Known Limitations
+
+- Delivery remains at-least-once; clients must de-duplicate by `MessageID`.
+- HMAC authenticates requests but does not encrypt them; production internal
+  traffic still requires TLS, mTLS, or an encrypted service mesh.
+- Nonce replay caches are process-local rather than shared across gateway nodes.
+- SDK support is currently Go-first; other language SDKs are not included.
+
+## [v0.2.0] - 2026-06-18
+
+- Promoted the tested `v0.2.0-rc.1` commit to the stable `v0.2.0` tag without
+  code changes.
 
 ## [v0.2.0-rc.1] - 2026-06-17
 

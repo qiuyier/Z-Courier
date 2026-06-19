@@ -1,16 +1,16 @@
 # V3 Authentication And Integration Design
 
-V3 is the third internal development phase of Z-Courier. It is expected to
-produce the `v0.3.x` release line; it does not imply a SemVer `v3.0.0` release.
+V3 is the third internal development phase of Z-Courier. It produces the
+`v0.3.x` release line; it does not imply a SemVer `v3.0.0` release.
 
-The V2 release candidate proved reliable single-node and cluster delivery. V3
+The V2 release proved reliable single-node and cluster delivery. V3
 focuses on the next integration blocker for open-source users: replacing local
 static tokens without modifying gateway core code, while keeping gateway and
 backend identity semantics consistent.
 
 ## Problem Statement
 
-The current authentication path already has a useful abstraction:
+At the start of V3, the authentication path already had a useful abstraction:
 
 ```go
 type Verifier interface {
@@ -18,12 +18,12 @@ type Verifier interface {
 }
 ```
 
-The ingress pipeline depends on this interface, but file configuration always
-constructs `StaticTokenVerifier`. This is appropriate for tests and examples,
+The ingress pipeline depended on this interface, but file configuration always
+constructed `StaticTokenVerifier`. That was appropriate for tests and examples,
 not for production integration.
 
-V3 must let an operator select a verifier through configuration and must define
-one stable principal contract that every verifier returns.
+V3 now lets an operator select a verifier through configuration and defines one
+stable principal contract that every verifier returns.
 
 ## Goals
 
@@ -430,7 +430,9 @@ operators can opt into replay-resistant signed internal requests.
 
 ## V3 Completion Criteria
 
-V3 is complete when:
+Status: complete for `v0.3.0`.
+
+Completion evidence:
 
 - Static, HTTP, and JWT verifier modes are configuration-selectable.
 - Gateway and backend share one documented principal contract.
@@ -441,9 +443,5 @@ V3 is complete when:
 - The first Go SDK packages are documented and tested.
 - A third-party project can integrate without modifying gateway core code.
 
-## Recommended First Task
-
-Start with V3.1 only. It creates the provider configuration and typed error
-foundation while keeping `StaticTokenVerifier` as the active implementation.
-That gives the HTTP and JWT implementations a stable place to plug in without
-mixing several risk areas in the first change.
+The release checklist, compatibility notes, and known boundaries are maintained
+in [v3-release.md](v3-release.md).

@@ -33,13 +33,13 @@ V2 cluster design is tracked in
 
 Release history is tracked in [CHANGELOG.md](CHANGELOG.md).
 
-The current V2 release-candidate guide is
+The historical V2 release-candidate guide is
 [docs/v2-release-candidate.md](docs/v2-release-candidate.md).
 
-The next internal development phase is described in
-[docs/v3-auth-integration.md](docs/v3-auth-integration.md). V3 targets the
-`v0.3.x` release line and focuses on production authentication and integration
-SDKs.
+The completed V3 authentication and integration phase is described in
+[docs/v3-auth-integration.md](docs/v3-auth-integration.md). Its `v0.3.0`
+release and upgrade checklist is in
+[docs/v3-release.md](docs/v3-release.md).
 
 ## Quick Start
 
@@ -66,12 +66,12 @@ bash scripts/e2e_cluster.sh
 
 It starts two local gateway processes sharing PostgreSQL and Redis, connects the
 test client to `gateway-b`, sends `/internal/push` to `gateway-a`, and verifies
-that peer push delivers the message across nodes. It also verifies debug
-route/session APIs, disconnect -> queued retry -> reconnect flush, NSQ upstream
-publishing, and cluster/retry metrics.
+that HMAC-signed peer push delivers the message across nodes. It also verifies
+debug route/session APIs, disconnect -> queued retry -> reconnect flush, NSQ
+upstream publishing, and cluster/retry/signature metrics.
 
-The V2 cluster verifier is the fastest way to confirm the current release
-candidate behavior:
+The cluster verifier is the fastest way to confirm the current multi-node
+behavior:
 
 ```text
 gateway-a internal HTTP: http://127.0.0.1:18182
@@ -100,22 +100,26 @@ which sessions are local to the gateway node you queried.
 Local service URLs and the manual workflow are documented in
 [deploy/local/README.md](deploy/local/README.md).
 
-For a full release-candidate check, run:
+For a full release check, run:
 
 ```bash
 actionlint
-go test ./...
+go test -count=1 -timeout=120s ./...
+go test -race -count=1 -timeout=90s \
+  ./pkg/sdk/signing ./internal/auth ./internal/downlink \
+  ./internal/server ./internal/config
+go vet ./...
 bash scripts/e2e.sh
 bash scripts/e2e_cluster.sh
 bash scripts/loadtest_smoke.sh
 git diff --check
 ```
 
-This is the same checklist used before cutting a V2 RC tag.
+This is the checklist used before creating a version tag.
 
-## V2 Release Status
+## Release Status
 
-V2 was published as `v0.2.0-rc.1`. Implemented behavior:
+V2 was published as `v0.2.0`. Implemented behavior:
 
 - Shared Redis online route registry for `client_id + device_id`
 - Gateway peer push with `POST /internal/cluster/push`
@@ -128,12 +132,12 @@ V2 was published as `v0.2.0-rc.1`. Implemented behavior:
 GitHub Actions includes unit tests, local E2E, cluster E2E, load-test smoke, and
 non-blocking load-test baseline comparisons in workflow summaries.
 
-V3.1 auth foundations, V3.2 remote HTTP token verification, V3.3 local
-JWT/JWKS verification, and V3.4 Go integration SDKs are implemented. The
-public protocol and backend packages are documented in
-[docs/go-sdk.md](docs/go-sdk.md). See
-[docs/v3-auth-integration.md](docs/v3-auth-integration.md) for configuration,
-compatibility rules, milestones, and completion criteria.
+The V3 implementation for `v0.3.0` is complete. It adds configurable static,
+remote HTTP, and local JWT/JWKS verification; bounded auth caching and metrics;
+public protocol and backend Go SDKs; and optional HMAC signing for backend and
+cluster peer internal requests. See [docs/go-sdk.md](docs/go-sdk.md),
+[docs/v3-auth-integration.md](docs/v3-auth-integration.md), and
+[docs/v3-release.md](docs/v3-release.md).
 
 ## Development
 

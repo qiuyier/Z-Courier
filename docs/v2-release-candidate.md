@@ -1,7 +1,11 @@
 # V2 Release Candidate Guide
 
-This document describes what the current Z-Courier V2 release candidate means,
-how to verify it, and where the known boundaries are.
+This is a historical snapshot of the `v0.2.0-rc.1` release process. The RC was
+later promoted to `v0.2.0`; current V3 release guidance is maintained in
+[v3-release.md](v3-release.md).
+
+This document describes what the Z-Courier V2 release candidate meant, how it
+was verified, and where its known boundaries were.
 
 V2 keeps the core middleware rule: the gateway owns connection access,
 metadata-based routing, delivery coordination, reliability state, and
