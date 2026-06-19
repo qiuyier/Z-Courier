@@ -76,10 +76,9 @@ auth:
         - gateway:dev
 ```
 
-`auth.type` selects the token verifier. Supported values are `static` and
-`http`; omitting `type` while providing `static_tokens` keeps existing
-configurations compatible. The `jwt` provider name is reserved for V3.3 and
-currently causes startup validation to fail instead of silently falling back.
+`auth.type` selects the token verifier. Supported values are `static`, `http`,
+and `jwt`; omitting `type` while providing `static_tokens` keeps existing
+configurations compatible.
 
 The static verifier is intended for local development and tests. Production
 deployments can use the HTTP verifier so the backend application remains the
@@ -113,15 +112,97 @@ to `2s`. When caching is enabled, defaults are 10,000 entries, 30 seconds for
 successful verification, and 3 seconds for invalid tokens. Cache keys are
 SHA-256 digests; timeout and provider-unavailable results are never cached.
 
+For deployments whose identity provider issues signed JWTs, the gateway can
+verify tokens locally without an authentication request per connection:
+
+```yaml
+auth:
+  type: jwt
+  jwt:
+    issuer: https://identity.example.com
+    audience: z-courier
+    jwks_url: https://identity.example.com/.well-known/jwks.json
+    algorithms: [RS256, ES256]
+    client_id_claim: client_id
+    token_id_claim: jti
+    scopes_claim: scope
+    clock_skew: 30s
+    refresh_interval: 5m
+    fetch_timeout: 2s
+    max_response_body_size: 1048576
+  cache:
+    enabled: true
+    max_entries: 10000
+    positive_ttl: 30s
+    negative_ttl: 3s
+```
+
+### JWKS Ownership And Deployment
+
+Z-Courier does not generate signing keys or issue JWTs. The service that issues
+the JWT owns the private key and must expose the corresponding public keys as a
+JWKS document. For a monolithic backend, a conventional endpoint is:
+
+```http
+GET /.well-known/jwks.json
+```
+
+Example response:
+
+```json
+{
+  "keys": [
+    {
+      "kty": "RSA",
+      "kid": "key-2026-01",
+      "use": "sig",
+      "alg": "RS256",
+      "n": "base64url-encoded-modulus",
+      "e": "AQAB"
+    }
+  ]
+}
+```
+
+Only public-key material belongs in this response. The private key remains in
+the token-issuing service. When using an external identity provider, configure
+the JWKS URL published by that provider instead of implementing this endpoint.
+
+In Docker Compose, `jwks_url` is resolved from inside the gateway container.
+Use the backend service name on the shared Docker network:
+
+```yaml
+jwks_url: http://backend:8080/.well-known/jwks.json
+```
+
+Do not use `127.0.0.1` unless the JWKS server runs in the same container as the
+gateway; inside the gateway container, that address refers to the gateway
+container itself. For a gateway process running directly on the host, a host
+address such as `http://127.0.0.1:8080/.well-known/jwks.json` is valid.
+
+The repository's default and integration configurations currently use
+`static_tokens`, so they do not fetch a JWKS. Public-key loading starts only
+when `auth.type` is set to `jwt`.
+
+JWT mode requires `iss`, `aud`, `exp`, the configured client ID claim, a
+matching `kid`, and a valid signature. Only explicitly allowed asymmetric
+RSA, RSA-PSS, ECDSA, and Ed25519 algorithms are accepted; HMAC and `none` are
+rejected. The gateway must load a valid JWKS before startup completes. It then
+refreshes keys in the background and once on an unknown `kid`; refresh failures
+preserve the last valid key set, while repeated unknown-key requests are
+throttled to prevent a JWKS refresh storm.
+
 The gateway does not trust `ClientID` from the packet until the token is
 verified. Session binding uses the `client_id` returned by the verifier.
 
 Authentication exports `z_courier_auth_verify_total`,
 `z_courier_auth_verify_duration_seconds`, `z_courier_auth_inflight`, and
-`z_courier_auth_cache_total`, labeled only by provider and bounded result
-values. Token and client identifiers are never metric labels. The provisioned
-`Z-Courier Overview` Grafana dashboard displays auth request rate, success rate,
-p95/p99 verification latency, in-flight verification count, and cache activity.
+`z_courier_auth_cache_total`, `z_courier_auth_jwks_refresh_total`, and
+`z_courier_auth_jwks_refresh_duration_seconds`, labeled only by provider or
+bounded result values. Token and client identifiers are never metric labels.
+The provisioned `Z-Courier Overview` Grafana dashboard displays auth request
+rate, success rate, p95/p99 verification latency, in-flight verification count,
+cache activity, and JWKS refresh health.
 
 ## Internal HTTP
 

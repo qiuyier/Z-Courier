@@ -34,7 +34,7 @@ type CachedVerifier struct {
 
 	mu       sync.Mutex
 	sequence uint64
-	entries  map[[sha256.Size]byte]cacheEntry弥陀佛，无弥陀佛，佛佛，南无弥佛
+	entries  map[[sha256.Size]byte]cacheEntry
 }
 
 type cacheEntry struct {
@@ -78,6 +78,16 @@ func (v *CachedVerifier) Provider() string {
 		return ProviderCustom
 	}
 	return v.provider
+}
+
+func (v *CachedVerifier) Close() error {
+	if v == nil || v.delegate == nil {
+		return nil
+	}
+	if closer, ok := v.delegate.(interface{ Close() error }); ok {
+		return closer.Close()
+	}
+	return nil
 }
 
 func (v *CachedVerifier) Verify(ctx context.Context, token string) (*Principal, error) {

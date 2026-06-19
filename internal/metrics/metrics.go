@@ -45,6 +45,23 @@ var (
 		[]string{"provider", "result"},
 	)
 
+	authJWKSRefresh = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "z_courier_auth_jwks_refresh_total",
+			Help: "Total number of JWT JWKS refresh attempts.",
+		},
+		[]string{"result"},
+	)
+
+	authJWKSRefreshDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "z_courier_auth_jwks_refresh_duration_seconds",
+			Help:    "Duration of JWT JWKS refresh attempts in seconds.",
+			Buckets: []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5},
+		},
+		[]string{"result"},
+	)
+
 	ingressPackets = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "z_courier_ingress_packets_total",
@@ -316,6 +333,14 @@ func AddAuthInFlight(provider string, delta float64) {
 
 func RecordAuthCache(provider, result string) {
 	authCache.WithLabelValues(nonEmpty(provider, "custom"), nonEmpty(result, "miss")).Inc()
+}
+
+func RecordAuthJWKSRefresh(result string, duration time.Duration) {
+	result = nonEmpty(result, "error")
+	authJWKSRefresh.WithLabelValues(result).Inc()
+	if duration >= 0 {
+		authJWKSRefreshDuration.WithLabelValues(result).Observe(duration.Seconds())
+	}
 }
 
 func RecordIngressPacket(msgID uint32, result string) {

@@ -123,6 +123,21 @@ func TestNewCachedVerifierRejectsInvalidConfig(t *testing.T) {
 	}
 }
 
+func TestCachedVerifierClosesDelegate(t *testing.T) {
+	delegate := &closableVerifier{}
+	verifier := newTestCachedVerifier(t, delegate, testCacheConfig())
+	closer, ok := verifier.(interface{ Close() error })
+	if !ok {
+		t.Fatal("cached verifier does not implement Close")
+	}
+	if err := closer.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if delegate.closeCalls != 1 {
+		t.Fatalf("delegate close calls = %d, want 1", delegate.closeCalls)
+	}
+}
+
 func newTestCachedVerifier(t *testing.T, delegate Verifier, config CacheConfig) Verifier {
 	t.Helper()
 	verifier, err := NewCachedVerifier(delegate, config)
@@ -144,6 +159,16 @@ type countingVerifier struct {
 	principal *Principal
 	err       error
 	calls     int
+}
+
+type closableVerifier struct {
+	countingVerifier
+	closeCalls int
+}
+
+func (v *closableVerifier) Close() error {
+	v.closeCalls++
+	return nil
 }
 
 func (*countingVerifier) Provider() string {

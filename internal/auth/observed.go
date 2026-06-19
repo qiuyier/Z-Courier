@@ -34,6 +34,16 @@ func (v *ObservedVerifier) Provider() string {
 	return v.provider
 }
 
+func (v *ObservedVerifier) Close() error {
+	if v == nil || v.delegate == nil {
+		return nil
+	}
+	if closer, ok := v.delegate.(interface{ Close() error }); ok {
+		return closer.Close()
+	}
+	return nil
+}
+
 func (v *ObservedVerifier) Verify(ctx context.Context, token string) (*Principal, error) {
 	if v == nil || v.delegate == nil {
 		return nil, ErrMisconfigured

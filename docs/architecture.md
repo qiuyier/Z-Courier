@@ -394,6 +394,12 @@ z_courier_downlink_cleanup_total
 z_courier_downlink_cleanup_deleted_total
 z_courier_downlink_cleanup_duration_seconds
 z_courier_rate_limit_rejected_total
+z_courier_auth_verify_total
+z_courier_auth_verify_duration_seconds
+z_courier_auth_inflight
+z_courier_auth_cache_total
+z_courier_auth_jwks_refresh_total
+z_courier_auth_jwks_refresh_duration_seconds
 ```
 
 The first Prometheus scrape endpoint is exposed on the internal HTTP server at

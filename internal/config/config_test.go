@@ -2,8 +2,13 @@ package config
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	jwtlib "github.com/golang-jwt/jwt/v5"
 	"github.com/qiuyier/Z-Courier/internal/auth"
 )
 
@@ -885,6 +891,75 @@ auth:
 	}
 }
 
+func TestLoadServerConfigJWTAuthProvider(t *testing.T) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate RSA key: %v", err)
+	}
+	jwks := configTestRSAJWKS(t, &privateKey.PublicKey, "config-key")
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		_, _ = w.Write(jwks)
+	}))
+	defer server.Close()
+
+	path := writeConfig(t, fmt.Sprintf(`
+auth:
+  type: jwt
+  jwt:
+    issuer: https://identity.example.test
+    audience: z-courier
+    jwks_url: %s
+    algorithms: [RS256]
+    client_id_claim: cid
+    token_id_claim: tid
+    scopes_claim: permissions
+    clock_skew: 30s
+    refresh_interval: 1h
+    fetch_timeout: 1s
+    max_response_body_size: 65536
+  cache:
+    enabled: true
+    max_entries: 100
+    positive_ttl: 1m
+    negative_ttl: 1s
+`, server.URL))
+
+	config, err := LoadServerConfig(path)
+	if err != nil {
+		t.Fatalf("LoadServerConfig() error = %v", err)
+	}
+	if closer, ok := config.Verifier.(interface{ Close() error }); ok {
+		defer closer.Close()
+	}
+	if got := auth.ProviderName(config.Verifier); got != auth.ProviderJWT {
+		t.Fatalf("auth provider = %q, want %q", got, auth.ProviderJWT)
+	}
+	token := jwtlib.NewWithClaims(jwtlib.SigningMethodRS256, jwtlib.MapClaims{
+		"iss": "https://identity.example.test", "aud": "z-courier",
+		"exp": time.Now().Add(time.Hour).Unix(), "cid": "client-a",
+		"tid": "token-a", "permissions": []string{"push", "status"},
+	})
+	token.Header["kid"] = "config-key"
+	signed, err := token.SignedString(privateKey)
+	if err != nil {
+		t.Fatalf("sign JWT: %v", err)
+	}
+	for range 2 {
+		principal, verifyErr := config.Verifier.Verify(context.Background(), signed)
+		if verifyErr != nil {
+			t.Fatalf("Verify() error = %v", verifyErr)
+		}
+		if principal.ClientID != "client-a" || principal.TokenID != "token-a" || len(principal.Scopes) != 2 {
+			t.Fatalf("principal = %+v", principal)
+		}
+	}
+	if got := requests.Load(); got != 1 {
+		t.Fatalf("JWKS requests = %d, want 1", got)
+	}
+}
+
 func TestLoadServerConfigRejectsInvalidAuthProvider(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -902,11 +977,10 @@ func TestLoadServerConfigRejectsInvalidAuthProvider(t *testing.T) {
 		{name: "negative cache size", config: "auth:\n  type: static\n  static_tokens: {}\n  cache:\n    enabled: true\n    max_entries: -1\n", message: "cache.max_entries"},
 		{name: "invalid cache ttl", config: "auth:\n  type: static\n  static_tokens: {}\n  cache:\n    enabled: true\n    positive_ttl: 0s\n", message: "cache.positive_ttl"},
 		{name: "jwt incomplete", config: "auth:\n  type: jwt\n", message: "requires issuer"},
-		{
-			name:    "jwt reserved",
-			config:  "auth:\n  type: jwt\n  jwt:\n    issuer: https://issuer.local\n    audience: z-courier\n    jwks_url: https://issuer.local/.well-known/jwks.json\n    algorithms: [RS256]\n",
-			message: "not implemented",
-		},
+		{name: "jwt symmetric algorithm", config: "auth:\n  type: jwt\n  jwt:\n    issuer: https://issuer.local\n    audience: z-courier\n    jwks_url: https://issuer.local/.well-known/jwks.json\n    algorithms: [HS256]\n", message: "unsupported for JWKS"},
+		{name: "jwt invalid clock skew", config: "auth:\n  type: jwt\n  jwt:\n    issuer: https://issuer.local\n    audience: z-courier\n    jwks_url: https://issuer.local/.well-known/jwks.json\n    algorithms: [RS256]\n    clock_skew: -1s\n", message: "clock_skew"},
+		{name: "jwt invalid refresh", config: "auth:\n  type: jwt\n  jwt:\n    issuer: https://issuer.local\n    audience: z-courier\n    jwks_url: https://issuer.local/.well-known/jwks.json\n    algorithms: [RS256]\n    refresh_interval: 0s\n", message: "refresh_interval"},
+		{name: "jwt invalid body size", config: "auth:\n  type: jwt\n  jwt:\n    issuer: https://issuer.local\n    audience: z-courier\n    jwks_url: https://issuer.local/.well-known/jwks.json\n    algorithms: [RS256]\n    max_response_body_size: -1\n", message: "max_response_body_size"},
 	}
 
 	for _, test := range tests {
@@ -920,6 +994,19 @@ func TestLoadServerConfigRejectsInvalidAuthProvider(t *testing.T) {
 			}
 		})
 	}
+}
+
+func configTestRSAJWKS(t *testing.T, key *rsa.PublicKey, keyID string) []byte {
+	t.Helper()
+	body, err := json.Marshal(map[string]any{"keys": []any{map[string]any{
+		"kty": "RSA", "kid": keyID, "use": "sig", "alg": "RS256",
+		"n": base64.RawURLEncoding.EncodeToString(key.N.Bytes()),
+		"e": base64.RawURLEncoding.EncodeToString(big.NewInt(int64(key.E)).Bytes()),
+	}}})
+	if err != nil {
+		t.Fatalf("marshal JWKS: %v", err)
+	}
+	return body
 }
 
 func writeConfig(t *testing.T, content string) string {

@@ -7,8 +7,8 @@ A high-performance message push gateway based on the `zinx` network framework.
 - Lightweight and efficient message routing
 - Fast JSON serialization based on Sonic
 - Structured logging based on Zap
-- Pluggable static or remote HTTP authentication with bounded verification
-  caching, timeout, and in-flight protection
+- Pluggable static, remote HTTP, or local JWT/JWKS authentication with bounded
+  verification caching, timeout, key rotation, and in-flight protection
 - Built-in HTTP and NSQ upstream adapters, with adapter interfaces for gRPC,
   Kafka, NATS, and custom targets
 - Reliable downlink delivery with ACK, retry, and idempotency hooks
@@ -125,8 +125,9 @@ V2 was published as `v0.2.0-rc.1`. Implemented behavior:
 GitHub Actions includes unit tests, local E2E, cluster E2E, load-test smoke, and
 non-blocking load-test baseline comparisons in workflow summaries.
 
-V3.1 auth foundations and V3.2 remote HTTP token verification are implemented.
-The next milestone is V3.3 local JWT/JWKS verification. See
+V3.1 auth foundations, V3.2 remote HTTP token verification, and V3.3 local
+JWT/JWKS verification are implemented. The next milestone is V3.4 Go
+integration SDKs. See
 [docs/v3-auth-integration.md](docs/v3-auth-integration.md) for configuration,
 compatibility rules, milestones, and completion criteria.
 

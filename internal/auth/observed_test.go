@@ -47,10 +47,35 @@ func TestNewObservedVerifierHandlesNilAndDoubleWrap(t *testing.T) {
 	}
 }
 
+func TestObservedVerifierClosesDelegate(t *testing.T) {
+	delegate := &closableStubVerifier{}
+	verifier := NewObservedVerifier(delegate)
+	closer, ok := verifier.(interface{ Close() error })
+	if !ok {
+		t.Fatal("observed verifier does not implement Close")
+	}
+	if err := closer.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if delegate.closeCalls != 1 {
+		t.Fatalf("delegate close calls = %d, want 1", delegate.closeCalls)
+	}
+}
+
 type stubVerifier struct {
 	principal *Principal
 	err       error
 	token     string
+}
+
+type closableStubVerifier struct {
+	stubVerifier
+	closeCalls int
+}
+
+func (v *closableStubVerifier) Close() error {
+	v.closeCalls++
+	return nil
 }
 
 func (*stubVerifier) Provider() string {

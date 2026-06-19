@@ -16,8 +16,11 @@ semantic versioning after the first public MVP tag.
   response validation, timeout, redirect rejection, and in-flight protection.
 - Bounded SHA-256-keyed authentication cache with positive and deterministic
   invalid-token caching, principal-expiry limits, and cache metrics.
+- Local JWT verification with explicit asymmetric algorithm allowlists,
+  issuer/audience/time checks, strict JWKS parsing, background refresh, key
+  rotation, stale-key fallback, and unknown-key refresh protection.
 - Grafana panels for authentication request rate, success rate, latency,
-  in-flight verification, and cache activity.
+  in-flight verification, cache activity, and JWKS refresh health.
 
 ## [v0.2.0-rc.1] - 2026-06-17
 

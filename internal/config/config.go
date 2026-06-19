@@ -60,15 +60,17 @@ type AuthCacheConfig struct {
 }
 
 type JWTAuthConfig struct {
-	Issuer          string   `yaml:"issuer"`
-	Audience        string   `yaml:"audience"`
-	JWKSURL         string   `yaml:"jwks_url"`
-	Algorithms      []string `yaml:"algorithms"`
-	ClientIDClaim   string   `yaml:"client_id_claim"`
-	TokenIDClaim    string   `yaml:"token_id_claim"`
-	ScopesClaim     string   `yaml:"scopes_claim"`
-	ClockSkew       string   `yaml:"clock_skew"`
-	RefreshInterval string   `yaml:"refresh_interval"`
+	Issuer              string   `yaml:"issuer"`
+	Audience            string   `yaml:"audience"`
+	JWKSURL             string   `yaml:"jwks_url"`
+	Algorithms          []string `yaml:"algorithms"`
+	ClientIDClaim       string   `yaml:"client_id_claim"`
+	TokenIDClaim        string   `yaml:"token_id_claim"`
+	ScopesClaim         string   `yaml:"scopes_claim"`
+	ClockSkew           string   `yaml:"clock_skew"`
+	RefreshInterval     string   `yaml:"refresh_interval"`
+	FetchTimeout        string   `yaml:"fetch_timeout"`
+	MaxResponseBodySize int64    `yaml:"max_response_body_size"`
 }
 
 type InternalHTTPConfig struct {
@@ -237,14 +239,6 @@ func (c *File) ToServerConfig() (server.Config, error) {
 	if len(c.RouteMsgIDs) > 0 {
 		out.RouteMsgIDs = append([]uint32(nil), c.RouteMsgIDs...)
 	}
-	verifier, configured, err := toAuthVerifier(c.Auth)
-	if err != nil {
-		return server.Config{}, err
-	}
-	if configured {
-		out.Verifier = verifier
-	}
-
 	if err := applyInternalHTTPConfig(&out, c.InternalHTTP); err != nil {
 		return server.Config{}, err
 	}
@@ -266,6 +260,16 @@ func (c *File) ToServerConfig() (server.Config, error) {
 	}
 	out.UpstreamRoutes = routes
 
+	// JWT verifier construction performs the initial JWKS fetch and starts its
+	// refresh worker, so keep it after every other fallible conversion.
+	verifier, configured, err := toAuthVerifier(c.Auth)
+	if err != nil {
+		return server.Config{}, err
+	}
+	if configured {
+		out.Verifier = verifier
+	}
+
 	return out, nil
 }
 
@@ -284,6 +288,10 @@ func toAuthVerifier(config AuthConfig) (auth.Verifier, bool, error) {
 	}
 
 	if err := validateAuthProviderConfig(provider, config); err != nil {
+		return nil, false, err
+	}
+	cacheConfig, cacheEnabled, err := toAuthCacheConfig(config.Cache)
+	if err != nil {
 		return nil, false, err
 	}
 
@@ -318,20 +326,47 @@ func toAuthVerifier(config AuthConfig) (auth.Verifier, bool, error) {
 			len(config.JWT.Algorithms) == 0 {
 			return nil, false, fmt.Errorf("%w: jwt provider requires issuer, audience, jwks_url, and algorithms", auth.ErrMisconfigured)
 		}
-		return nil, false, fmt.Errorf("%w: auth provider %q is not implemented", auth.ErrMisconfigured, provider)
+		clockSkew, err := parseOptionalNonNegativeDuration(config.JWT.ClockSkew)
+		if err != nil {
+			return nil, false, fmt.Errorf("%w: invalid auth.jwt.clock_skew: %v", auth.ErrMisconfigured, err)
+		}
+		refreshInterval, err := parseOptionalPositiveDuration(config.JWT.RefreshInterval)
+		if err != nil {
+			return nil, false, fmt.Errorf("%w: invalid auth.jwt.refresh_interval: %v", auth.ErrMisconfigured, err)
+		}
+		fetchTimeout, err := parseOptionalPositiveDuration(config.JWT.FetchTimeout)
+		if err != nil {
+			return nil, false, fmt.Errorf("%w: invalid auth.jwt.fetch_timeout: %v", auth.ErrMisconfigured, err)
+		}
+		verifier, err = auth.NewJWTVerifier(auth.JWTVerifierConfig{
+			Issuer:              config.JWT.Issuer,
+			Audience:            config.JWT.Audience,
+			JWKSURL:             config.JWT.JWKSURL,
+			Algorithms:          config.JWT.Algorithms,
+			ClientIDClaim:       config.JWT.ClientIDClaim,
+			TokenIDClaim:        config.JWT.TokenIDClaim,
+			ScopesClaim:         config.JWT.ScopesClaim,
+			ClockSkew:           clockSkew,
+			RefreshInterval:     refreshInterval,
+			FetchTimeout:        fetchTimeout,
+			MaxResponseBodySize: config.JWT.MaxResponseBodySize,
+		})
+		if err != nil {
+			return nil, false, err
+		}
 	default:
 		return nil, false, fmt.Errorf("%w: unsupported auth provider %q", auth.ErrMisconfigured, provider)
 	}
 
-	cacheConfig, cacheEnabled, err := toAuthCacheConfig(config.Cache)
-	if err != nil {
-		return nil, false, err
-	}
 	if cacheEnabled {
-		verifier, err = auth.NewCachedVerifier(verifier, cacheConfig)
+		cachedVerifier, err := auth.NewCachedVerifier(verifier, cacheConfig)
 		if err != nil {
+			if closer, ok := verifier.(interface{ Close() error }); ok {
+				_ = closer.Close()
+			}
 			return nil, false, err
 		}
+		verifier = cachedVerifier
 	}
 
 	return auth.NewObservedVerifier(verifier), true, nil
@@ -364,7 +399,8 @@ func isHTTPAuthConfigSet(config HTTPAuthConfig) bool {
 func isJWTAuthConfigSet(config JWTAuthConfig) bool {
 	return config.Issuer != "" || config.Audience != "" || config.JWKSURL != "" || len(config.Algorithms) > 0 ||
 		config.ClientIDClaim != "" || config.TokenIDClaim != "" || config.ScopesClaim != "" ||
-		config.ClockSkew != "" || config.RefreshInterval != ""
+		config.ClockSkew != "" || config.RefreshInterval != "" || config.FetchTimeout != "" ||
+		config.MaxResponseBodySize != 0
 }
 
 func toAuthCacheConfig(config AuthCacheConfig) (auth.CacheConfig, bool, error) {
@@ -865,6 +901,17 @@ func parseOptionalPositiveDuration(raw string) (time.Duration, error) {
 	}
 	if raw != "" && duration <= 0 {
 		return 0, fmt.Errorf("must be greater than 0")
+	}
+	return duration, nil
+}
+
+func parseOptionalNonNegativeDuration(raw string) (time.Duration, error) {
+	duration, err := parseOptionalDuration(raw)
+	if err != nil {
+		return 0, err
+	}
+	if duration < 0 {
+		return 0, fmt.Errorf("must not be negative")
 	}
 	return duration, nil
 }

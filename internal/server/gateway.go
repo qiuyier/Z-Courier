@@ -36,6 +36,7 @@ type Gateway struct {
 
 	clusterRegistry          cluster.OnlineRegistry
 	clusterRegistryCloser    io.Closer
+	authVerifierCloser       io.Closer
 	internalHTTP             *http.Server
 	upstream                 *router.Engine
 	downlink                 *downlink.Service
@@ -61,13 +62,16 @@ func New(config Config, logger *zap.Logger) (*Gateway, error) {
 	}
 
 	config = normalizeConfig(config)
+	authVerifierCloser, _ := config.Verifier.(io.Closer)
 	msgIDs, err := registeredMsgIDs(config)
 	if err != nil {
+		closeWithLog(authVerifierCloser, logger, "authentication verifier")
 		return nil, err
 	}
 	upstream, err :=
 		newUpstreamEngine(config)
 	if err != nil {
+		closeWithLog(authVerifierCloser, logger, "authentication verifier")
 		return nil, err
 	}
 	clusterRegistry, clusterRegistryCloser, err := newClusterRegistry(config)
@@ -75,6 +79,7 @@ func New(config Config, logger *zap.Logger) (*Gateway, error) {
 		if upstream != nil {
 			_ = upstream.Close()
 		}
+		closeWithLog(authVerifierCloser, logger, "authentication verifier")
 		return nil, err
 	}
 	zServer := znet.NewServer()
@@ -86,6 +91,7 @@ func New(config Config, logger *zap.Logger) (*Gateway, error) {
 		if clusterRegistryCloser != nil {
 			_ = clusterRegistryCloser.Close()
 		}
+		closeWithLog(authVerifierCloser, logger, "authentication verifier")
 		return nil, err
 	}
 
@@ -97,6 +103,7 @@ func New(config Config, logger *zap.Logger) (*Gateway, error) {
 		health:                 health,
 		clusterRegistry:        clusterRegistry,
 		clusterRegistryCloser:  clusterRegistryCloser,
+		authVerifierCloser:     authVerifierCloser,
 		internalHTTP:           newInternalHTTPServer(config, logger, downlinkService, health, clusterRegistry),
 		upstream:               upstream,
 		downlink:               downlinkService,
@@ -186,6 +193,7 @@ func (g *Gateway) Shutdown(ctx context.Context) error {
 
 		g.shutdownClusterRouteRefresher()
 		g.shutdownZinxServer()
+		g.shutdownAuthVerifier()
 		unbound := g.unbindAllClusterRoutes(ctx)
 		g.shutdownInternalHTTPWithContext(ctx)
 		g.shutdownDownlinkCleanupWorker()
@@ -294,6 +302,25 @@ func (g *Gateway) shutdownUpstream() {
 
 	if err := g.upstream.Close(); err != nil {
 		g.logger.Warn("failed to shutdown upstream routes cleanly", zap.Error(err))
+	}
+}
+
+func (g *Gateway) shutdownAuthVerifier() {
+	if g.authVerifierCloser == nil {
+		return
+	}
+	if err := g.authVerifierCloser.Close(); err != nil {
+		g.shutdownErr = errors.Join(g.shutdownErr, err)
+		g.logger.Warn("failed to shutdown authentication verifier cleanly", zap.Error(err))
+	}
+}
+
+func closeWithLog(closer io.Closer, logger *zap.Logger, resource string) {
+	if closer == nil {
+		return
+	}
+	if err := closer.Close(); err != nil {
+		logger.Warn("failed to close resource after gateway construction error", zap.String("resource", resource), zap.Error(err))
 	}
 }
 

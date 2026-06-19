@@ -6,6 +6,7 @@ require (
 	github.com/aceld/zinx v1.2.7
 	github.com/alicebob/miniredis/v2 v2.38.0
 	github.com/bytedance/sonic v1.15.1
+	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/gorilla/websocket v1.5.0
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/nsqio/go-nsq v1.1.0

@@ -87,12 +87,9 @@ type Principal struct {
 }
 ```
 
-V3.2 adds expiry metadata for safe positive-cache lifetime. V3.3 may add issuer
-metadata for JWT/JWKS verification:
-
-```go
-Issuer string
-```
+V3.2 adds expiry metadata for safe positive-cache lifetime. V3.3 maps JWT
+issuer validation into verifier policy without expanding the principal
+contract.
 
 Rules:
 
@@ -223,6 +220,8 @@ auth:
     scopes_claim: scope
     clock_skew: 30s
     refresh_interval: 5m
+    fetch_timeout: 2s
+    max_response_body_size: 1048576
   cache:
     enabled: true
     max_entries: 10000
@@ -230,9 +229,18 @@ auth:
     negative_ttl: 3s
 ```
 
-JWT verification must validate issuer, audience, expiry, not-before time, and
-an explicit algorithm allowlist. It must not trust the token header to choose
-an unrestricted algorithm.
+JWT verification validates issuer, audience, expiry, not-before time, and an
+explicit asymmetric algorithm allowlist. It does not trust the token header to
+choose an unrestricted algorithm. Startup requires an initial valid JWKS;
+background refresh failures preserve the last valid key set, and an unknown
+`kid` triggers a rate-limited immediate refresh for normal key rotation.
+
+The JWT issuer owns the private signing keys and publishes only their public
+keys through `jwks_url`. Z-Courier consumes that endpoint and does not issue
+tokens or generate signing keys. Container deployments must use a JWKS address
+reachable from the gateway container, normally the backend or identity-provider
+service name rather than `127.0.0.1`. Operational examples are documented in
+[configuration.md](configuration.md#jwks-ownership-and-deployment).
 
 ## Verifier Construction
 
@@ -376,10 +384,16 @@ returned `ClientID` without core-code changes.
 
 ### V3.3 JWT/JWKS Verification
 
-- Select a maintained JWT/JWK library after a focused dependency review.
-- Implement issuer, audience, time, and algorithm checks.
-- Add JWKS refresh, key rotation, and stale-key tests.
-- Add JWT verifier metrics and documentation.
+Status: implemented.
+
+- Uses `github.com/golang-jwt/jwt/v5` for JWT parsing, claim checks, and
+  signature verification, with a strict local JWKS public-key loader.
+- Implements issuer, audience, expiry, not-before, client claim, and explicit
+  asymmetric algorithm checks.
+- Adds background JWKS refresh, immediate unknown-key refresh, refresh
+  throttling, key rotation, and stale-key fallback tests.
+- Adds JWKS refresh metrics, Grafana panels, configuration, and operations
+  documentation.
 
 Exit criteria: the gateway verifies signed tokens locally and survives normal
 JWKS key rotation without restart.
