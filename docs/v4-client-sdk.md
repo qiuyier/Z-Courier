@@ -115,7 +115,7 @@ wire bytes.
 Both SDKs expose the same observable lifecycle:
 
 ```text
-disconnected -> connecting -> binding -> ready -> closing -> disconnected
+disconnected -> connecting -> binding -> ready -> closing -> closed
                          \-> reconnect_wait -> connecting
 ```
 

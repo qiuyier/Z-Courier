@@ -15,6 +15,10 @@ semantic versioning after the first public MVP tag.
 - Initial `pkg/sdk/client` transport framing with bounded big-endian Zinx frame
   encoding, fragmented TCP stream reads, outer/inner MsgID validation, typed
   errors, and shared cross-language fixture coverage.
+- Initial high-level Go client lifecycle with validated configuration, static or
+  dynamic token providers, context-aware TCP dialing, AUTH/BIND negotiation,
+  canonical binding identity, pre-ACK packet buffering, and interruptible
+  shutdown.
 
 ## [v0.3.0] - 2026-06-20
 

@@ -217,8 +217,35 @@ The public backend request and response types are canonical. Gateway handlers
 reuse them through internal aliases, which keeps SDK JSON fields synchronized
 with the server contract.
 
-## Planned Package
+## Client Package (V4 In Progress)
 
-```text
-pkg/sdk/client   AUTH/BIND, send, receive, reconnect, and downlink ACK helper
+The high-level TCP client is being built under `pkg/sdk/client`. Its first
+usable stage owns the Zinx outer frame, validates configuration, opens a native
+Go TCP connection, and completes AUTH/BIND without exposing Zinx interfaces:
+
+```go
+gateway, err := client.New(client.Config{
+    Address:  "gateway:8999",
+    ClientID: "client-1",
+    DeviceID: "device-1",
+    Token:    os.Getenv("ZCOURIER_CLIENT_TOKEN"),
+})
+if err != nil {
+    return err
+}
+defer gateway.Close()
+
+if err := gateway.Connect(ctx); err != nil {
+    return err
+}
+
+binding := gateway.Binding()
+// binding.ClientID is the canonical identity accepted from the token.
 ```
+
+Use `TokenProvider` instead of `Token` when credentials must be refreshed for
+each connection attempt. The two options are mutually exclusive.
+
+This V4 stage does not yet expose business-message send, receive handlers,
+delivery ACK, or automatic reconnect. Those APIs will be added before the
+client package is declared complete for `v0.4.0`.

@@ -3,6 +3,32 @@ package client
 import "errors"
 
 var (
+	// ErrInvalidConfig means a required client setting is missing or conflicts
+	// with another setting.
+	ErrInvalidConfig = errors.New("client: invalid configuration")
+	// ErrClientClosed means the Client has been permanently closed.
+	ErrClientClosed = errors.New("client: closed")
+	// ErrConnectTimeout means the token lookup or network dial exceeded the
+	// configured connect timeout.
+	ErrConnectTimeout = errors.New("client: connect timeout")
+	// ErrTokenUnavailable means the configured token provider failed or returned
+	// an empty credential.
+	ErrTokenUnavailable = errors.New("client: token unavailable")
+	// ErrBindTimeout means AUTH/BIND did not complete before its deadline.
+	ErrBindTimeout = errors.New("client: bind timeout")
+	// ErrAuthenticationFailed means the gateway rejected the credential.
+	ErrAuthenticationFailed = errors.New("client: authentication failed")
+	// ErrAuthenticationUnavailable means the gateway could not reach its
+	// authentication provider.
+	ErrAuthenticationUnavailable = errors.New("client: authentication unavailable")
+	// ErrBindRejected means the gateway rejected AUTH/BIND for another reason.
+	ErrBindRejected = errors.New("client: bind rejected")
+	// ErrUnexpectedBindAck means the bind ACK is malformed or does not match the
+	// active bind request.
+	ErrUnexpectedBindAck = errors.New("client: unexpected bind acknowledgment")
+	// ErrPendingBeforeReadyOverflow means too many non-ACK packets arrived before
+	// AUTH/BIND completed.
+	ErrPendingBeforeReadyOverflow = errors.New("client: pending packets before ready overflow")
 	// ErrFrameTooShort means the outer eight-byte frame header was incomplete.
 	ErrFrameTooShort = errors.New("client: frame header too short")
 	// ErrFrameTooLarge means the declared payload exceeds the configured limit.
