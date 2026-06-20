@@ -41,6 +41,10 @@ The completed V3 authentication and integration phase is described in
 release and upgrade checklist is in
 [docs/v3-release.md](docs/v3-release.md).
 
+V4 client SDK and cross-language protocol work is specified in
+[docs/v4-client-sdk.md](docs/v4-client-sdk.md). The first non-Go SDK will be
+PHP, with shared wire fixtures and live gateway E2E coverage.
+
 ## Quick Start
 
 Run the single-node integration verifier from the repository root:
@@ -138,6 +142,11 @@ public protocol and backend Go SDKs; and optional HMAC signing for backend and
 cluster peer internal requests. See [docs/go-sdk.md](docs/go-sdk.md),
 [docs/v3-auth-integration.md](docs/v3-auth-integration.md), and
 [docs/v3-release.md](docs/v3-release.md).
+
+V4 targets `v0.4.0` and is now in development. It adds a high-level Go client,
+a PHP protocol/client SDK, shared cross-language golden fixtures, and SDK E2E
+coverage. The scope and completion criteria are defined in
+[docs/v4-client-sdk.md](docs/v4-client-sdk.md).
 
 ## Development
 

@@ -7,7 +7,11 @@ semantic versioning after the first public MVP tag.
 
 ## [Unreleased]
 
-No unreleased changes.
+### Added
+
+- V4 client SDK design covering the Zinx outer transport frame, the existing
+  inner packet, shared cross-language protocol fixtures, a high-level Go
+  client, and the first PHP protocol/client SDK.
 
 ## [v0.3.0] - 2026-06-20
 
