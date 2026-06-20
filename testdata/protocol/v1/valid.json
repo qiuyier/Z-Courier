@@ -1,0 +1,149 @@
+{
+  "schema_version": 1,
+  "wire_version": 1,
+  "vectors": [
+    {
+      "name": "golden_packet",
+      "packet": {
+        "version": 1,
+        "flags": 1,
+        "msg_id": 1001,
+        "seq": "42",
+        "timestamp": "1760000000000",
+        "client_id": "client-1",
+        "device_id": "device-1",
+        "session_id": "session-1",
+        "message_id": "message-1",
+        "trace_id": "trace-1",
+        "token": "token-1",
+        "body_hex": "68656c6c6f"
+      },
+      "inner_hex": "5a43010001000003e9000000000000002a00000199c82cc00000080008000900090007000700000005636c69656e742d316465766963652d3173657373696f6e2d316d6573736167652d3174726163652d31746f6b656e2d3168656c6c6f",
+      "frame_hex": "000003e90000005e5a43010001000003e9000000000000002a00000199c82cc00000080008000900090007000700000005636c69656e742d316465766963652d3173657373696f6e2d316d6573736167652d3174726163652d31746f6b656e2d3168656c6c6f"
+    },
+    {
+      "name": "empty_bind",
+      "packet": {
+        "version": 1,
+        "flags": 0,
+        "msg_id": 1000,
+        "seq": "0",
+        "timestamp": "0",
+        "client_id": "",
+        "device_id": "",
+        "session_id": "",
+        "message_id": "",
+        "trace_id": "",
+        "token": "",
+        "body_hex": ""
+      },
+      "inner_hex": "5a43010000000003e80000000000000000000000000000000000000000000000000000000000000000",
+      "frame_hex": "000003e8000000295a43010000000003e80000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "name": "utf8_metadata",
+      "packet": {
+        "version": 1,
+        "flags": 1,
+        "msg_id": 2001,
+        "seq": "7",
+        "timestamp": "1760000000123",
+        "client_id": "\u5ba2\u6237-1",
+        "device_id": "\u8bbe\u5907-\ud83d\udcf1",
+        "session_id": "\u4f1a\u8bdd",
+        "message_id": "\u6d88\u606f-1",
+        "trace_id": "\u8ffd\u8e2a-1",
+        "token": "\u4ee4\u724c",
+        "body_hex": "7b22e69687e69cac223a22e4bda0e5a5bd227d"
+      },
+      "inner_hex": "5a43010001000007d1000000000000000700000199c82cc07b0008000b000600080008000600000013e5aea2e688b72d31e8aebee5a4872df09f93b1e4bc9ae8af9de6b688e681af2d31e8bfbde8b8aa2d31e4bba4e7898c7b22e69687e69cac223a22e4bda0e5a5bd227d",
+      "frame_hex": "000007d10000006b5a43010001000007d1000000000000000700000199c82cc07b0008000b000600080008000600000013e5aea2e688b72d31e8aebee5a4872df09f93b1e4bc9ae8af9de6b688e681af2d31e8bfbde8b8aa2d31e4bba4e7898c7b22e69687e69cac223a22e4bda0e5a5bd227d"
+    },
+    {
+      "name": "binary_body_all_flags",
+      "packet": {
+        "version": 1,
+        "flags": 3,
+        "msg_id": 2002,
+        "seq": "255",
+        "timestamp": "1760000000999",
+        "client_id": "binary-client",
+        "device_id": "device-0",
+        "session_id": "",
+        "message_id": "binary-1",
+        "trace_id": "trace-binary",
+        "token": "token-binary",
+        "body_hex": "00010200ff7f80"
+      },
+      "inner_hex": "5a43010003000007d200000000000000ff00000199c82cc3e7000d000800000008000c000c0000000762696e6172792d636c69656e746465766963652d3062696e6172792d3174726163652d62696e617279746f6b656e2d62696e61727900010200ff7f80",
+      "frame_hex": "000007d2000000655a43010003000007d200000000000000ff00000199c82cc3e7000d000800000008000c000c0000000762696e6172792d636c69656e746465766963652d3062696e6172792d3174726163652d62696e617279746f6b656e2d62696e61727900010200ff7f80"
+    },
+    {
+      "name": "gateway_ack",
+      "packet": {
+        "version": 1,
+        "flags": 0,
+        "msg_id": 1,
+        "seq": "11",
+        "timestamp": "1760000001000",
+        "client_id": "client-1",
+        "device_id": "device-1",
+        "session_id": "session-1",
+        "message_id": "bind-1",
+        "trace_id": "trace-bind",
+        "token": "",
+        "body_hex": "7b22636f6465223a226163636570746564222c226d73675f6964223a313030302c226d6573736167655f6964223a2262696e642d31227d"
+      },
+      "inner_hex": "5a4301000000000001000000000000000b00000199c82cc3e80008000800090006000a000000000037636c69656e742d316465766963652d3173657373696f6e2d3162696e642d3174726163652d62696e647b22636f6465223a226163636570746564222c226d73675f6964223a313030302c226d6573736167655f6964223a2262696e642d31227d",
+      "frame_hex": "00000001000000895a4301000000000001000000000000000b00000199c82cc3e80008000800090006000a000000000037636c69656e742d316465766963652d3173657373696f6e2d3162696e642d3174726163652d62696e647b22636f6465223a226163636570746564222c226d73675f6964223a313030302c226d6573736167655f6964223a2262696e642d31227d"
+    },
+    {
+      "name": "downlink_ack",
+      "packet": {
+        "version": 1,
+        "flags": 0,
+        "msg_id": 2,
+        "seq": "12",
+        "timestamp": "1760000002000",
+        "client_id": "client-1",
+        "device_id": "device-1",
+        "session_id": "session-1",
+        "message_id": "delivery-1",
+        "trace_id": "trace-delivery",
+        "token": "token-1",
+        "body_hex": "7b226d6573736167655f6964223a2264656c69766572792d31222c22636f6465223a2264656c697665726564227d"
+      },
+      "inner_hex": "5a4301000000000002000000000000000c00000199c82cc7d0000800080009000a000e00070000002e636c69656e742d316465766963652d3173657373696f6e2d3164656c69766572792d3174726163652d64656c6976657279746f6b656e2d317b226d6573736167655f6964223a2264656c69766572792d31222c22636f6465223a2264656c697665726564227d",
+      "frame_hex": "000000020000008f5a4301000000000002000000000000000c00000199c82cc7d0000800080009000a000e00070000002e636c69656e742d316465766963652d3173657373696f6e2d3164656c69766572792d3174726163652d64656c6976657279746f6b656e2d317b226d6573736167655f6964223a2264656c69766572792d31222c22636f6465223a2264656c697665726564227d"
+    }
+  ],
+  "generated_vectors": [
+    {
+      "name": "max_client_id",
+      "packet": {
+        "version": 1,
+        "flags": 0,
+        "msg_id": 2003,
+        "seq": "1",
+        "timestamp": "1760000003000",
+        "client_id": "",
+        "device_id": "",
+        "session_id": "",
+        "message_id": "boundary-1",
+        "trace_id": "",
+        "token": "",
+        "body_hex": ""
+      },
+      "expansion": {
+        "field": "client_id",
+        "byte_hex": "61",
+        "count": 65535
+      },
+      "inner_length": 65586,
+      "frame_length": 65594,
+      "inner_sha256": "0129169bcc6eb44a81d19695599d4c05dc429420f31fb13fe1889c2599eb57a3",
+      "frame_sha256": "b1d182f985fc6825ce8e7a515af77d6a698f5dd24e924f1359c2e06931fafdfe"
+    }
+  ]
+}
+

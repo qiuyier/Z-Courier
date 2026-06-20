@@ -93,9 +93,10 @@ Reserved message IDs remain:
 
 ## Shared Protocol Fixtures
 
-Language-neutral fixtures will live under `testdata/protocol/v1`. Each valid
-fixture contains packet fields, inner packet hex, and complete outer frame hex.
-Initial cases cover:
+Language-neutral fixtures will live under `testdata/protocol/v1`. Byte-sized
+valid fixtures contain packet fields, inner packet hex, and complete outer
+frame hex. Large boundary fixtures use deterministic expansion recipes plus
+length and SHA-256 checks to avoid bloating the repository. Initial cases cover:
 
 - The existing Go golden packet.
 - Empty strings and an empty body.
@@ -258,4 +259,3 @@ V4 is complete only when:
 - Public APIs and supported PHP runtimes are documented.
 - Existing gateway unit, race, single-node E2E, cluster E2E, and load-test smoke
   checks remain green.
-

@@ -1,0 +1,100 @@
+{
+  "schema_version": 1,
+  "vectors": [
+    {
+      "name": "packet_too_short",
+      "scope": "inner",
+      "source": "empty_bind",
+      "mutation": {"type": "truncate_to", "count": 40},
+      "expected_error": "packet_too_short"
+    },
+    {
+      "name": "invalid_magic",
+      "scope": "inner",
+      "source": "empty_bind",
+      "mutation": {"type": "replace_hex", "offset": 0, "hex": "0000"},
+      "expected_error": "invalid_magic"
+    },
+    {
+      "name": "unsupported_version",
+      "scope": "inner",
+      "source": "empty_bind",
+      "mutation": {"type": "replace_hex", "offset": 2, "hex": "02"},
+      "expected_error": "unsupported_version"
+    },
+    {
+      "name": "truncated_variable_data",
+      "scope": "inner",
+      "source": "golden_packet",
+      "mutation": {"type": "truncate_tail", "count": 1},
+      "expected_error": "length_mismatch"
+    },
+    {
+      "name": "trailing_inner_byte",
+      "scope": "inner",
+      "source": "empty_bind",
+      "mutation": {"type": "append_hex", "hex": "00"},
+      "expected_error": "length_mismatch"
+    },
+    {
+      "name": "body_exceeds_configured_limit",
+      "scope": "inner",
+      "source": "golden_packet",
+      "max_body_size": 4,
+      "expected_error": "body_too_large"
+    },
+    {
+      "name": "outer_header_too_short",
+      "scope": "frame",
+      "source": "empty_bind",
+      "mutation": {"type": "truncate_to", "count": 7},
+      "expected_error": "frame_too_short"
+    },
+    {
+      "name": "outer_inner_msg_id_mismatch",
+      "scope": "frame",
+      "source": "golden_packet",
+      "mutation": {"type": "replace_hex", "offset": 0, "hex": "000003ea"},
+      "expected_error": "outer_inner_msg_id_mismatch"
+    },
+    {
+      "name": "truncated_outer_payload",
+      "scope": "frame",
+      "source": "golden_packet",
+      "mutation": {"type": "truncate_tail", "count": 1},
+      "expected_error": "frame_length_mismatch"
+    },
+    {
+      "name": "incorrect_outer_payload_length",
+      "scope": "frame",
+      "source": "golden_packet",
+      "mutation": {"type": "replace_hex", "offset": 4, "hex": "0000005f"},
+      "expected_error": "frame_length_mismatch"
+    }
+  ],
+  "generated_vectors": [
+    {
+      "name": "oversized_client_id",
+      "packet": {
+        "version": 1,
+        "flags": 0,
+        "msg_id": 2003,
+        "seq": "1",
+        "timestamp": "1760000003000",
+        "client_id": "",
+        "device_id": "",
+        "session_id": "",
+        "message_id": "boundary-1",
+        "trace_id": "",
+        "token": "",
+        "body_hex": ""
+      },
+      "expansion": {
+        "field": "client_id",
+        "byte_hex": "61",
+        "count": 65536
+      },
+      "expected_error": "field_too_large"
+    }
+  ]
+}
