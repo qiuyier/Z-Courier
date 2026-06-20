@@ -12,6 +12,9 @@ semantic versioning after the first public MVP tag.
 - V4 client SDK design covering the Zinx outer transport frame, the existing
   inner packet, shared cross-language protocol fixtures, a high-level Go
   client, and the first PHP protocol/client SDK.
+- Initial `pkg/sdk/client` transport framing with bounded big-endian Zinx frame
+  encoding, fragmented TCP stream reads, outer/inner MsgID validation, typed
+  errors, and shared cross-language fixture coverage.
 
 ## [v0.3.0] - 2026-06-20
 
