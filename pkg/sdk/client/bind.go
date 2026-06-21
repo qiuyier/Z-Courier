@@ -101,9 +101,13 @@ func (client *Client) waitForBindAck(connection net.Conn, bindMessageID string) 
 }
 
 func newBindMessageID() (string, error) {
+	return newMessageID("zc-bind-")
+}
+
+func newMessageID(prefix string) (string, error) {
 	var random [16]byte
 	if _, err := rand.Read(random[:]); err != nil {
-		return "", fmt.Errorf("client: generate bind message ID: %w", err)
+		return "", fmt.Errorf("client: generate message ID: %w", err)
 	}
-	return "zc-bind-" + hex.EncodeToString(random[:]), nil
+	return prefix + hex.EncodeToString(random[:]), nil
 }

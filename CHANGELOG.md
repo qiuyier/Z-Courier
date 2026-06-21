@@ -19,6 +19,9 @@ semantic versioning after the first public MVP tag.
   dynamic token providers, context-aware TCP dialing, AUTH/BIND negotiation,
   canonical binding identity, pre-ACK packet buffering, and interruptible
   shutdown.
+- Persistent Go client read loop with concurrency-safe business sends, bounded
+  inbound delivery, MessageID-based ACK correlation, typed ACK failures, raw
+  receive, and deterministic pending-send failure on disconnect.
 
 ## [v0.3.0] - 2026-06-20
 

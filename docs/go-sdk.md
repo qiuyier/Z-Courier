@@ -53,9 +53,8 @@ limit. Decoder errors support `errors.Is` with the exported `Err*` values.
 
 The protocol package encodes the inner Z-Courier packet only. It does not open
 TCP connections and does not encode the outer Zinx message frame used by the
-current gateway listener. Until `pkg/sdk/client` is available, callers that
-connect directly to the gateway must use a compatible Zinx client transport
-and pass the bytes returned by `protocol.Encode` as the Zinx message body.
+current gateway listener. Use `pkg/sdk/client` for a high-level TCP client, or
+implement the documented outer frame when integrating another language.
 
 Backend applications that only push downlink messages do not need a TCP client;
 use the `pkg/sdk/backend` package described below.
@@ -219,9 +218,9 @@ with the server contract.
 
 ## Client Package (V4 In Progress)
 
-The high-level TCP client is being built under `pkg/sdk/client`. Its first
-usable stage owns the Zinx outer frame, validates configuration, opens a native
-Go TCP connection, and completes AUTH/BIND without exposing Zinx interfaces:
+The high-level TCP client under `pkg/sdk/client` owns the Zinx outer frame,
+validates configuration, opens a native Go TCP connection, completes AUTH/BIND,
+and keeps a persistent read loop without exposing Zinx interfaces:
 
 ```go
 gateway, err := client.New(client.Config{
@@ -246,6 +245,45 @@ binding := gateway.Binding()
 Use `TokenProvider` instead of `Token` when credentials must be refreshed for
 each connection attempt. The two options are mutually exclusive.
 
-This V4 stage does not yet expose business-message send, receive handlers,
-delivery ACK, or automatic reconnect. Those APIs will be added before the
-client package is declared complete for `v0.4.0`.
+Send an opaque business message and wait for its correlated gateway ACK:
+
+```go
+result, err := gateway.Send(ctx, client.SendRequest{
+    MsgID:       2001,
+    Body:        payload,
+    AckRequired: true,
+})
+if err != nil {
+    return err
+}
+
+// result.MessageID is generated when the request leaves it empty.
+// result.Ack is non-nil because AckRequired was true.
+```
+
+`Send` is safe for concurrent callers. Socket writes are serialized while ACK
+waits remain concurrent and are correlated by `MessageID`, so ACK arrival order
+does not need to match send order. `WriteTimeout` and `AckTimeout` default to
+five seconds and can be configured independently. Explicit `MessageID` values
+must be unique among in-flight ACK waits. Setting either `AckRequired` or
+`protocol.FlagAckRequired` requests and waits for an ACK.
+
+Receive the next non-ACK gateway packet:
+
+```go
+packet, err := gateway.Receive(ctx)
+if err != nil {
+    return err
+}
+// packet.Body remains opaque application data.
+```
+
+The bounded `InboundBuffer` prevents an application that stops receiving from
+growing memory without limit. Overflow closes the active connection and is
+reported through `LastError`, supporting `errors.Is` with both
+`client.ErrInboundOverflow` and `client.ErrConnectionClosed`.
+
+This V4 stage deliberately exposes raw receive rather than pretending delivery
+is complete: it does not yet send `MsgID = 2` delivery ACKs, dispatch callbacks,
+de-duplicate downlink messages, or reconnect automatically. Those behaviors
+will be added before the client package is declared complete for `v0.4.0`.

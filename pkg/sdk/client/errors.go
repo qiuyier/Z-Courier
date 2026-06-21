@@ -8,6 +8,10 @@ var (
 	ErrInvalidConfig = errors.New("client: invalid configuration")
 	// ErrClientClosed means the Client has been permanently closed.
 	ErrClientClosed = errors.New("client: closed")
+	// ErrNotReady means an operation requires an accepted AUTH/BIND connection.
+	ErrNotReady = errors.New("client: not ready")
+	// ErrConnectionClosed means the active gateway connection ended.
+	ErrConnectionClosed = errors.New("client: connection closed")
 	// ErrConnectTimeout means the token lookup or network dial exceeded the
 	// configured connect timeout.
 	ErrConnectTimeout = errors.New("client: connect timeout")
@@ -29,6 +33,20 @@ var (
 	// ErrPendingBeforeReadyOverflow means too many non-ACK packets arrived before
 	// AUTH/BIND completed.
 	ErrPendingBeforeReadyOverflow = errors.New("client: pending packets before ready overflow")
+	// ErrInboundOverflow means the application did not receive packets quickly
+	// enough to stay within the configured inbound buffer.
+	ErrInboundOverflow = errors.New("client: inbound packet buffer overflow")
+	// ErrReservedMsgID means Send was called with a protocol-owned message ID.
+	ErrReservedMsgID = errors.New("client: reserved message ID")
+	// ErrDuplicateMessageID means another ACK-required Send already uses the
+	// same MessageID.
+	ErrDuplicateMessageID = errors.New("client: duplicate message ID")
+	// ErrAckTimeout means a requested gateway ACK did not arrive in time.
+	ErrAckTimeout = errors.New("client: acknowledgment timeout")
+	// ErrAckRejected means the gateway returned a non-success ACK.
+	ErrAckRejected = errors.New("client: acknowledgment rejected")
+	// ErrUnexpectedAck means an ACK matching a pending request was malformed.
+	ErrUnexpectedAck = errors.New("client: unexpected acknowledgment")
 	// ErrFrameTooShort means the outer eight-byte frame header was incomplete.
 	ErrFrameTooShort = errors.New("client: frame header too short")
 	// ErrFrameTooLarge means the declared payload exceeds the configured limit.

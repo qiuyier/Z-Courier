@@ -20,10 +20,16 @@ type Client struct {
 	mu                 sync.RWMutex
 	state              State
 	closed             bool
-	connection         net.Conn
+	runtime            *connectionRuntime
+	nextRuntimeID      uint64
 	activeCancel       context.CancelFunc
 	binding            Binding
+	lastError          error
 	pendingBeforeReady []*protocol.Packet
+
+	waitersMu sync.Mutex
+	waiters   map[string]*ackWaiter
+	writeGate chan struct{}
 
 	sequence atomic.Uint64
 }
@@ -35,8 +41,10 @@ func New(config Config) (*Client, error) {
 		return nil, err
 	}
 	return &Client{
-		config: normalized,
-		state:  StateDisconnected,
+		config:    normalized,
+		state:     StateDisconnected,
+		waiters:   make(map[string]*ackWaiter),
+		writeGate: make(chan struct{}, 1),
 	}, nil
 }
 
@@ -60,6 +68,14 @@ func (client *Client) Binding() Binding {
 	return client.binding
 }
 
+// LastError returns the most recent active-connection failure. A new Connect
+// attempt clears it.
+func (client *Client) LastError() error {
+	client.mu.RLock()
+	defer client.mu.RUnlock()
+	return client.lastError
+}
+
 // Connect opens a TCP connection, performs AUTH/BIND, and waits until the
 // gateway accepts the binding. Concurrent calls are serialized.
 func (client *Client) Connect(ctx context.Context) error {
@@ -80,23 +96,24 @@ func (client *Client) Connect(ctx context.Context) error {
 		client.failConnection(nil)
 		return err
 	}
-	if err := client.installConnection(connection); err != nil {
+	runtime, err := client.installConnection(connection)
+	if err != nil {
 		_ = connection.Close()
 		return err
 	}
 
 	bindPacket, err := client.newBindPacket(token)
 	if err != nil {
-		client.failConnection(connection)
+		client.failConnection(runtime)
 		return err
 	}
 	binding, err := client.performBind(ctx, connection, bindPacket)
 	if err != nil {
-		client.failConnection(connection)
+		client.failConnection(runtime)
 		return err
 	}
-	if err := client.completeBinding(binding); err != nil {
-		client.failConnection(connection)
+	if err := client.completeBinding(runtime, binding, token); err != nil {
+		client.failConnection(runtime)
 		return err
 	}
 	return nil
@@ -114,16 +131,18 @@ func (client *Client) Close() error {
 	client.state = StateClosing
 	cancel := client.activeCancel
 	client.activeCancel = nil
-	connection := client.connection
-	client.connection = nil
+	runtime := client.runtime
+	client.runtime = nil
 	client.mu.Unlock()
 
 	if cancel != nil {
 		cancel()
 	}
 	var closeErr error
-	if connection != nil {
-		closeErr = connection.Close()
+	if runtime != nil {
+		runtime.finish(ErrClientClosed)
+		client.failAckWaiters(runtime.id, ErrClientClosed)
+		closeErr = runtime.connection.Close()
 		if errors.Is(closeErr, net.ErrClosed) {
 			closeErr = nil
 		}
@@ -132,6 +151,7 @@ func (client *Client) Close() error {
 	client.mu.Lock()
 	client.state = StateClosed
 	client.binding = Binding{}
+	client.lastError = ErrClientClosed
 	client.pendingBeforeReady = nil
 	client.mu.Unlock()
 	return closeErr
@@ -148,6 +168,7 @@ func (client *Client) beginConnect() (bool, error) {
 	}
 	client.state = StateConnecting
 	client.binding = Binding{}
+	client.lastError = nil
 	client.pendingBeforeReady = nil
 	return false, nil
 }
@@ -192,15 +213,17 @@ func (client *Client) connectTransport(ctx context.Context) (string, net.Conn, e
 	return token, connection, nil
 }
 
-func (client *Client) installConnection(connection net.Conn) error {
+func (client *Client) installConnection(connection net.Conn) (*connectionRuntime, error) {
 	client.mu.Lock()
 	defer client.mu.Unlock()
 	if client.closed {
-		return ErrClientClosed
+		return nil, ErrClientClosed
 	}
-	client.connection = connection
+	client.nextRuntimeID++
+	runtime := newConnectionRuntime(client.nextRuntimeID, connection, client.config.inboundBuffer)
+	client.runtime = runtime
 	client.state = StateBinding
-	return nil
+	return runtime, nil
 }
 
 func (client *Client) performBind(ctx context.Context, connection net.Conn, packet *protocol.Packet) (Binding, error) {
@@ -253,17 +276,24 @@ func (client *Client) performBind(ctx context.Context, connection net.Conn, pack
 	return binding, nil
 }
 
-func (client *Client) completeBinding(binding Binding) error {
+func (client *Client) completeBinding(runtime *connectionRuntime, binding Binding, token string) error {
 	client.mu.Lock()
-	defer client.mu.Unlock()
 	if client.closed {
+		client.mu.Unlock()
 		return ErrClientClosed
 	}
-	if client.connection == nil {
+	if client.runtime != runtime {
+		client.mu.Unlock()
 		return fmt.Errorf("client: connection disappeared during bind")
 	}
+	runtime.token = token
 	client.binding = binding
 	client.state = StateReady
+	pending := client.pendingBeforeReady
+	client.pendingBeforeReady = nil
+	client.mu.Unlock()
+
+	go client.readLoop(runtime, pending)
 	return nil
 }
 
@@ -277,12 +307,12 @@ func (client *Client) bufferBeforeReady(packet *protocol.Packet) error {
 	return nil
 }
 
-func (client *Client) failConnection(connection net.Conn) {
-	if connection != nil {
-		_ = connection.Close()
+func (client *Client) failConnection(runtime *connectionRuntime) {
+	if runtime != nil {
+		client.terminateRuntime(runtime, ErrConnectionClosed)
+		return
 	}
 	client.mu.Lock()
-	client.connection = nil
 	client.activeCancel = nil
 	client.binding = Binding{}
 	client.pendingBeforeReady = nil

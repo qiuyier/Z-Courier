@@ -13,7 +13,10 @@ import (
 const (
 	defaultConnectTimeout        = 5 * time.Second
 	defaultBindTimeout           = 5 * time.Second
+	defaultWriteTimeout          = 5 * time.Second
+	defaultAckTimeout            = 5 * time.Second
 	defaultMaxPendingBeforeReady = 128
+	defaultInboundBuffer         = 128
 )
 
 // TokenProvider returns the credential used for the next AUTH/BIND attempt.
@@ -39,9 +42,12 @@ type Config struct {
 	Dialer                Dialer
 	ConnectTimeout        time.Duration
 	BindTimeout           time.Duration
+	WriteTimeout          time.Duration
+	AckTimeout            time.Duration
 	MaxFramePayloadSize   uint32
 	MaxBodySize           uint32
 	MaxPendingBeforeReady int
+	InboundBuffer         int
 }
 
 type normalizedConfig struct {
@@ -53,9 +59,12 @@ type normalizedConfig struct {
 	dialer                Dialer
 	connectTimeout        time.Duration
 	bindTimeout           time.Duration
+	writeTimeout          time.Duration
+	ackTimeout            time.Duration
 	maxFramePayloadSize   uint32
 	maxBodySize           uint32
 	maxPendingBeforeReady int
+	inboundBuffer         int
 }
 
 func normalizeConfig(config Config) (normalizedConfig, error) {
@@ -80,8 +89,17 @@ func normalizeConfig(config Config) (normalizedConfig, error) {
 	if config.BindTimeout < 0 {
 		return normalizedConfig{}, fmt.Errorf("%w: bind timeout cannot be negative", ErrInvalidConfig)
 	}
+	if config.WriteTimeout < 0 {
+		return normalizedConfig{}, fmt.Errorf("%w: write timeout cannot be negative", ErrInvalidConfig)
+	}
+	if config.AckTimeout < 0 {
+		return normalizedConfig{}, fmt.Errorf("%w: ACK timeout cannot be negative", ErrInvalidConfig)
+	}
 	if config.MaxPendingBeforeReady < 0 {
 		return normalizedConfig{}, fmt.Errorf("%w: max pending before ready cannot be negative", ErrInvalidConfig)
+	}
+	if config.InboundBuffer < 0 {
+		return normalizedConfig{}, fmt.Errorf("%w: inbound buffer cannot be negative", ErrInvalidConfig)
 	}
 
 	network := config.Network
@@ -100,6 +118,14 @@ func normalizeConfig(config Config) (normalizedConfig, error) {
 	if bindTimeout == 0 {
 		bindTimeout = defaultBindTimeout
 	}
+	writeTimeout := config.WriteTimeout
+	if writeTimeout == 0 {
+		writeTimeout = defaultWriteTimeout
+	}
+	ackTimeout := config.AckTimeout
+	if ackTimeout == 0 {
+		ackTimeout = defaultAckTimeout
+	}
 	maxFramePayloadSize := config.MaxFramePayloadSize
 	if maxFramePayloadSize == 0 {
 		maxFramePayloadSize = DefaultMaxFramePayloadSize
@@ -111,6 +137,10 @@ func normalizeConfig(config Config) (normalizedConfig, error) {
 	maxPendingBeforeReady := config.MaxPendingBeforeReady
 	if maxPendingBeforeReady == 0 {
 		maxPendingBeforeReady = defaultMaxPendingBeforeReady
+	}
+	inboundBuffer := config.InboundBuffer
+	if inboundBuffer == 0 {
+		inboundBuffer = defaultInboundBuffer
 	}
 
 	tokenProvider := config.TokenProvider
@@ -130,8 +160,11 @@ func normalizeConfig(config Config) (normalizedConfig, error) {
 		dialer:                dialer,
 		connectTimeout:        connectTimeout,
 		bindTimeout:           bindTimeout,
+		writeTimeout:          writeTimeout,
+		ackTimeout:            ackTimeout,
 		maxFramePayloadSize:   maxFramePayloadSize,
 		maxBodySize:           maxBodySize,
 		maxPendingBeforeReady: maxPendingBeforeReady,
+		inboundBuffer:         inboundBuffer,
 	}, nil
 }

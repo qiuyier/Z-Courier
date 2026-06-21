@@ -34,7 +34,10 @@ func TestNewValidatesConfig(t *testing.T) {
 		}},
 		{name: "negative connect timeout", mutate: func(config *Config) { config.ConnectTimeout = -time.Second }},
 		{name: "negative bind timeout", mutate: func(config *Config) { config.BindTimeout = -time.Second }},
+		{name: "negative write timeout", mutate: func(config *Config) { config.WriteTimeout = -time.Second }},
+		{name: "negative ACK timeout", mutate: func(config *Config) { config.AckTimeout = -time.Second }},
 		{name: "negative pending limit", mutate: func(config *Config) { config.MaxPendingBeforeReady = -1 }},
+		{name: "negative inbound buffer", mutate: func(config *Config) { config.InboundBuffer = -1 }},
 	}
 
 	for _, test := range tests {
@@ -92,11 +95,14 @@ func TestConnectBindsAndBuffersPacketsArrivingBeforeAck(t *testing.T) {
 	if binding := client.Binding(); binding != (Binding{ClientID: "canonical-client", DeviceID: "device-1", SessionID: "session-1"}) {
 		t.Fatalf("Binding() = %+v", binding)
 	}
-	client.mu.RLock()
-	pendingCount := len(client.pendingBeforeReady)
-	client.mu.RUnlock()
-	if pendingCount != 1 {
-		t.Fatalf("pending before ready = %d, want 1", pendingCount)
+	receiveCtx, cancelReceive := context.WithTimeout(context.Background(), time.Second)
+	pending, err := client.Receive(receiveCtx)
+	cancelReceive()
+	if err != nil {
+		t.Fatalf("Receive(pending before ACK) error = %v", err)
+	}
+	if pending.MessageID != "pending-1" || string(pending.Body) != "pending-before-ack" {
+		t.Fatalf("pending packet = %+v", pending)
 	}
 
 	if err := client.Connect(context.Background()); err != nil {
@@ -111,6 +117,9 @@ func TestConnectBindsAndBuffersPacketsArrivingBeforeAck(t *testing.T) {
 	}
 	if client.State() != StateClosed {
 		t.Fatalf("closed state = %s", client.State())
+	}
+	if !errors.Is(client.LastError(), ErrClientClosed) {
+		t.Fatalf("LastError() = %v, want ErrClientClosed", client.LastError())
 	}
 	if err := client.Close(); err != nil {
 		t.Fatalf("second Close() error = %v", err)
@@ -385,8 +394,17 @@ func newTestClient(t *testing.T, dialer Dialer, overrides Config) *Client {
 	if overrides.BindTimeout != 0 {
 		config.BindTimeout = overrides.BindTimeout
 	}
+	if overrides.WriteTimeout != 0 {
+		config.WriteTimeout = overrides.WriteTimeout
+	}
+	if overrides.AckTimeout != 0 {
+		config.AckTimeout = overrides.AckTimeout
+	}
 	if overrides.MaxPendingBeforeReady != 0 {
 		config.MaxPendingBeforeReady = overrides.MaxPendingBeforeReady
+	}
+	if overrides.InboundBuffer != 0 {
+		config.InboundBuffer = overrides.InboundBuffer
 	}
 	client, err := New(config)
 	if err != nil {
