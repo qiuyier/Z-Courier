@@ -9,3 +9,5 @@ reports/*
 !reports/baseline/**/
 !reports/baseline/**/README.md
 !reports/baseline/**/*.json
+/sdk/php/vendor/
+/sdk/php/composer.lock

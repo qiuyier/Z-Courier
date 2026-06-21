@@ -17,3 +17,9 @@ strings so JSON parsers cannot silently lose 64-bit precision.
 An implementation passes conformance when it produces the valid bytes exactly
 and rejects every invalid vector with the corresponding error category.
 
+The Go and PHP implementations consume these files directly:
+
+```bash
+go test ./pkg/sdk/protocol ./pkg/sdk/client
+php sdk/php/tests/run.php
+```

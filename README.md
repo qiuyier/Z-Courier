@@ -17,7 +17,9 @@ A high-performance message push gateway based on the `zinx` network framework.
   next bind flushes them
 - Prometheus metrics and Grafana dashboards for authentication, ingress,
   upstream, downlink, cluster, retry, capacity, and load-test paths
-- Public Go SDKs for stable protocol encoding and backend downlink/message APIs
+- Public Go SDKs for protocol encoding, persistent client connections, and
+  backend downlink/message APIs
+- Composer-compatible PHP protocol SDK with binary-safe packet/frame codecs
 - Optional timestamped HMAC authentication and replay protection for internal
   backend requests and gateway peer push, with separate key rings
 - Graceful shutdown with readiness drain and cluster route cleanup
@@ -158,6 +160,12 @@ Run tests:
 
 ```bash
 go test ./...
+```
+
+Run the PHP protocol conformance suite without third-party dependencies:
+
+```bash
+php sdk/php/tests/run.php
 ```
 
 Run a small upstream load test against a local gateway:
@@ -571,6 +579,7 @@ scrape-target details.
 - `cmd/devclient`: Public Go SDK-based client for manual end-to-end testing
 - `cmd/sdke2e`: Automated live-gateway verifier for the public Go client SDK
 - `cmd/devbackend`: Development backend and internal API debugging CLI
+- `sdk/php`: Composer-compatible PHP protocol and client SDK
 - `configs`: Z-Courier gateway configuration
 - `conf`: Zinx runtime configuration
 - `deploy`: Local deployment examples such as monitoring

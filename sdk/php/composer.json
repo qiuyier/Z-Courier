@@ -1,0 +1,17 @@
+{
+  "name": "z-courier/sdk",
+  "description": "Protocol and client SDK for Z-Courier",
+  "type": "library",
+  "license": "MIT",
+  "require": {
+    "php": ">=8.2"
+  },
+  "autoload": {
+    "psr-4": {
+      "ZCourier\\": "src/"
+    }
+  },
+  "scripts": {
+    "test": "php tests/run.php"
+  }
+}

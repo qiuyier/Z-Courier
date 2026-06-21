@@ -31,6 +31,10 @@ semantic versioning after the first public MVP tag.
 - Public Go SDK-backed development client and live gateway E2E coverage for
   bind, upstream ACK, downlink automatic ACK, connection replacement,
   reconnect with a fresh session, and continued traffic after reconnect.
+- Composer-compatible PHP 8.2 protocol SDK with immutable packet and ACK value
+  objects, binary-safe inner and outer codecs, incremental TCP frame parsing,
+  typed conformance errors, full 64-bit decimal handling, and shared Go/PHP
+  fixture verification.
 
 ### Changed
 
