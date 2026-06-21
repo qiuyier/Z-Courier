@@ -364,3 +364,26 @@ application must decide whether retrying a business message is safe and should
 reuse its `MessageID` when idempotency is required. An initial `Connect` failure
 is returned directly; automatic reconnect starts only after a previously ready
 connection is lost.
+
+### Live Gateway Verification
+
+Run the single-node verifier from the repository root:
+
+```bash
+bash scripts/e2e.sh
+```
+
+In addition to the gateway's original queue, NSQ, and metrics checks, the script
+runs `cmd/sdke2e` entirely through the public `pkg/sdk/client` and
+`pkg/sdk/backend` APIs. It verifies:
+
+- AUTH/BIND and canonical session identity
+- upstream send with correlated accepted ACK
+- backend downlink push and automatic `MsgID = 2` delivery ACK
+- gateway-side replacement of an existing device connection
+- automatic reconnect with a new `SessionID`
+- successful upstream and downlink traffic after reconnect
+
+`cmd/devclient` also uses `pkg/sdk/client` and remains the interactive tool for
+manual connection, upstream, and downlink testing. The automated verifier is
+part of the existing GitHub Actions E2E job through `scripts/e2e.sh`.

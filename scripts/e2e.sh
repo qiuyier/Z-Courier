@@ -79,3 +79,7 @@ wait_http "gateway readiness" "http://127.0.0.1:18082/readyz"
 go run ./cmd/e2e \
   -device-id "e2e-device-$RUN_ID" \
   "$@"
+
+echo "running public Go SDK integration verifier..."
+go run ./cmd/sdke2e \
+  -device-id "sdk-e2e-device-$RUN_ID"

@@ -61,6 +61,8 @@ validates:
 - online push and client delivery ACK
 - upstream forwarding to NSQ
 - Prometheus metrics exposure
+- public Go SDK bind, upstream ACK, downlink automatic ACK, reconnect, and
+  continued delivery after reconnect
 
 Run the two-node cluster verifier:
 
@@ -469,12 +471,12 @@ Run the development client in another terminal:
 go run ./cmd/devclient
 ```
 
-The client sends one `MsgID = 1000` AUTH/BIND packet with `dev-token` and
-`device-1`, then prints ACK and downlink packets. With both gateway and
-devclient running, the `curl` command above should make the client print a
-`MsgID = 2001` packet whose body is `hello`. Because the request sets
-`ack_required: true`, the development client also sends a `MsgID = 2` delivery
-ACK back to the gateway.
+The development client uses the public `pkg/sdk/client` package. It connects
+with `dev-token`, performs `MsgID = 1000` AUTH/BIND for `device-1`, and prints
+the accepted canonical binding. With both gateway and devclient running, the
+`curl` command above should make the client print a `MsgID = 2001` packet whose
+body is `hello`. Because the request sets `ack_required: true`, the SDK also
+sends a `MsgID = 2` delivery ACK back to the gateway automatically.
 
 To test upstream forwarding, start the development backend:
 
@@ -566,7 +568,8 @@ scrape-target details.
 
 ## Project Structure
 - `cmd/gateway`: Gateway entry point
-- `cmd/devclient`: Development client for manual end-to-end testing
+- `cmd/devclient`: Public Go SDK-based client for manual end-to-end testing
+- `cmd/sdke2e`: Automated live-gateway verifier for the public Go client SDK
 - `cmd/devbackend`: Development backend and internal API debugging CLI
 - `configs`: Z-Courier gateway configuration
 - `conf`: Zinx runtime configuration

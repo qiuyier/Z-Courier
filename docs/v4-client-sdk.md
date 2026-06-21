@@ -227,9 +227,13 @@ so ReactPHP or Swoole adapters can be added later without replacing the codec.
 
 ### V4.2 High-Level Go Client
 
+Status: complete.
+
 - Implement framing, lifecycle, bind, send, ACK correlation, and downlink ACK.
 - Migrate `cmd/devclient` to the public client package.
 - Add reconnect and race tests.
+- Exercise bind, upstream, downlink ACK, connection replacement, reconnect, and
+  continued traffic against a live gateway in the single-node E2E workflow.
 
 ### V4.3 PHP Protocol And Client SDK
 

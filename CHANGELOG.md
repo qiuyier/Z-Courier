@@ -28,6 +28,14 @@ semantic versioning after the first public MVP tag.
 - Opt-in Go client reconnect with bounded exponential backoff and jitter, fresh
   token and AUTH/BIND per attempt, readiness waiting, retry classification,
   cancellation on close, and no implicit replay of failed business sends.
+- Public Go SDK-backed development client and live gateway E2E coverage for
+  bind, upstream ACK, downlink automatic ACK, connection replacement,
+  reconnect with a fresh session, and continued traffic after reconnect.
+
+### Changed
+
+- `cmd/devclient` now uses `pkg/sdk/client` instead of directly depending on
+  Zinx and manually implementing framing, bind, receive, and delivery ACK.
 
 ## [v0.3.0] - 2026-06-20
 
