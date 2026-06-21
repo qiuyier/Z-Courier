@@ -107,18 +107,28 @@ func (client *Client) terminateRuntime(runtime *connectionRuntime, cause error) 
 		client.failAckWaiters(runtime.id, failure)
 	}
 
+	startReconnect := false
 	client.mu.Lock()
 	if client.runtime == runtime {
 		client.runtime = nil
 		client.binding = Binding{}
 		client.lastError = failure
 		if client.closed {
-			client.state = StateClosed
+			client.setStateLocked(StateClosed)
+		} else if client.config.reconnect.enabled {
+			client.setStateLocked(StateReconnectWait)
+			if !client.reconnectRunning {
+				client.reconnectRunning = true
+				startReconnect = true
+			}
 		} else {
-			client.state = StateDisconnected
+			client.setStateLocked(StateDisconnected)
 		}
 	}
 	client.mu.Unlock()
+	if startReconnect {
+		go client.reconnectLoop(failure)
+	}
 }
 
 func connectionFailure(cause error) error {
@@ -131,8 +141,8 @@ func connectionFailure(cause error) error {
 	return fmt.Errorf("%w: %w", ErrConnectionClosed, cause)
 }
 
-// Receive returns the next non-ACK packet from the active connection. V4's
-// current raw receive API does not automatically acknowledge downlink delivery.
+// Receive returns the next non-ACK packet from the active connection. Raw
+// consumers can acknowledge delivery with AcknowledgeDownlink.
 func (client *Client) Receive(ctx context.Context) (*protocol.Packet, error) {
 	if ctx == nil {
 		return nil, fmt.Errorf("%w: context is nil", ErrInvalidConfig)

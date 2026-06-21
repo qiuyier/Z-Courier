@@ -318,5 +318,49 @@ ACK-required `MessageID` values; duplicate deliveries skip the handler and
 re-send the delivery ACK. `DownlinkDedupCapacity` defaults to 10,000. This table
 is process-local and is not a substitute for durable application de-duplication.
 
-Automatic reconnect is still pending. It will be added before the client
-package is declared complete for `v0.4.0`.
+### Automatic Reconnect
+
+Automatic reconnect is opt-in. Configure a policy before calling `Connect`:
+
+```go
+gateway, err := client.New(client.Config{
+    Address:  "gateway:8999",
+    ClientID: "client-1",
+    DeviceID: "device-1",
+    TokenProvider: refreshClientToken,
+    Reconnect: &client.ReconnectConfig{
+        InitialDelay: 500 * time.Millisecond,
+        MaxDelay:     30 * time.Second,
+        Multiplier:   2,
+        Jitter:       0.2,
+        MaxAttempts:  10,
+    },
+})
+```
+
+When an established socket is lost, the client enters `StateReconnectWait`,
+applies bounded exponential backoff, obtains a fresh token, and performs a new
+AUTH/BIND. `MaxAttempts = 0` retries without an attempt limit. A nil `Reconnect`
+configuration keeps the previous disconnected behavior.
+
+Use `WaitReady` when work must pause until the current Connect or reconnect
+finishes:
+
+```go
+if err := gateway.WaitReady(ctx); err != nil {
+    return err
+}
+```
+
+Network failures, timeouts, token-provider failures, and temporary auth-service
+failures are retryable. Credential rejection, bind rejection, malformed bind
+ACKs, and `Close` stop the loop. Exhausting `MaxAttempts` returns a
+`*client.ReconnectError` supporting `errors.Is(err,
+client.ErrReconnectExhausted)` and preserving the final cause.
+
+Reconnect restores transport and identity only. Pending sends from the lost
+connection fail deterministically and are never replayed automatically. The
+application must decide whether retrying a business message is safe and should
+reuse its `MessageID` when idempotency is required. An initial `Connect` failure
+is returned directly; automatic reconnect starts only after a previously ready
+connection is lost.

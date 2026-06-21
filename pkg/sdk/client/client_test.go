@@ -413,6 +413,7 @@ func newTestClient(t *testing.T, dialer Dialer, overrides Config) *Client {
 		config.DownlinkDedupCapacity = overrides.DownlinkDedupCapacity
 	}
 	config.OnDownlinkError = overrides.OnDownlinkError
+	config.Reconnect = overrides.Reconnect
 	client, err := New(config)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)

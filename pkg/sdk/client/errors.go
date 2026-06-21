@@ -55,6 +55,8 @@ var (
 	ErrInvalidDownlink = errors.New("client: invalid downlink packet")
 	// ErrDownlinkHandler means the application handler failed or panicked.
 	ErrDownlinkHandler = errors.New("client: downlink handler failed")
+	// ErrReconnectExhausted means automatic reconnect reached MaxAttempts.
+	ErrReconnectExhausted = errors.New("client: reconnect attempts exhausted")
 	// ErrFrameTooShort means the outer eight-byte frame header was incomplete.
 	ErrFrameTooShort = errors.New("client: frame header too short")
 	// ErrFrameTooLarge means the declared payload exceeds the configured limit.

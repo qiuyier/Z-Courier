@@ -25,6 +25,9 @@ semantic versioning after the first public MVP tag.
 - Go client downlink handlers with automatic or manual `MsgID=2` delivery ACK,
   bounded process-local LRU de-duplication, panic-safe error reporting, and
   handler cancellation during shutdown.
+- Opt-in Go client reconnect with bounded exponential backoff and jitter, fresh
+  token and AUTH/BIND per attempt, readiness waiting, retry classification,
+  cancellation on close, and no implicit replay of failed business sends.
 
 ## [v0.3.0] - 2026-06-20
 

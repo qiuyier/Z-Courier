@@ -19,10 +19,14 @@ type Client struct {
 	connectMu          sync.Mutex
 	mu                 sync.RWMutex
 	state              State
+	stateChanged       chan struct{}
 	closed             bool
 	runtime            *connectionRuntime
 	nextRuntimeID      uint64
 	activeCancel       context.CancelFunc
+	lifecycleContext   context.Context
+	lifecycleCancel    context.CancelFunc
+	reconnectRunning   bool
 	binding            Binding
 	lastError          error
 	pendingBeforeReady []*protocol.Packet
@@ -41,12 +45,16 @@ func New(config Config) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
+	lifecycleContext, lifecycleCancel := context.WithCancel(context.Background())
 	return &Client{
-		config:    normalized,
-		state:     StateDisconnected,
-		waiters:   make(map[string]*ackWaiter),
-		writeGate: make(chan struct{}, 1),
-		deduper:   newMessageDeduper(normalized.downlinkDedupCapacity),
+		config:           normalized,
+		state:            StateDisconnected,
+		stateChanged:     make(chan struct{}),
+		lifecycleContext: lifecycleContext,
+		lifecycleCancel:  lifecycleCancel,
+		waiters:          make(map[string]*ackWaiter),
+		writeGate:        make(chan struct{}, 1),
+		deduper:          newMessageDeduper(normalized.downlinkDedupCapacity),
 	}, nil
 }
 
@@ -70,8 +78,8 @@ func (client *Client) Binding() Binding {
 	return client.binding
 }
 
-// LastError returns the most recent active-connection failure. A new Connect
-// attempt clears it.
+// LastError returns the most recent connection or reconnect failure. A
+// successful Connect or reconnect clears it.
 func (client *Client) LastError() error {
 	client.mu.RLock()
 	defer client.mu.RUnlock()
@@ -86,16 +94,26 @@ func (client *Client) Connect(ctx context.Context) error {
 	}
 
 	client.connectMu.Lock()
-	defer client.connectMu.Unlock()
-
-	alreadyReady, err := client.beginConnect()
+	alreadyReady, reconnecting, err := client.beginConnect()
 	if err != nil || alreadyReady {
+		client.connectMu.Unlock()
 		return err
 	}
+	if reconnecting {
+		client.connectMu.Unlock()
+		return client.WaitReady(ctx)
+	}
+	err = client.connectOnce(ctx)
+	if err != nil {
+		client.finishConnectFailure(err)
+	}
+	client.connectMu.Unlock()
+	return err
+}
 
+func (client *Client) connectOnce(ctx context.Context) error {
 	token, connection, err := client.connectTransport(ctx)
 	if err != nil {
-		client.failConnection(nil)
 		return err
 	}
 	runtime, err := client.installConnection(connection)
@@ -106,16 +124,16 @@ func (client *Client) Connect(ctx context.Context) error {
 
 	bindPacket, err := client.newBindPacket(token)
 	if err != nil {
-		client.failConnection(runtime)
+		client.abortConnectionAttempt(runtime, err)
 		return err
 	}
 	binding, err := client.performBind(ctx, connection, bindPacket)
 	if err != nil {
-		client.failConnection(runtime)
+		client.abortConnectionAttempt(runtime, err)
 		return err
 	}
 	if err := client.completeBinding(runtime, binding, token); err != nil {
-		client.failConnection(runtime)
+		client.abortConnectionAttempt(runtime, err)
 		return err
 	}
 	return nil
@@ -130,9 +148,10 @@ func (client *Client) Close() error {
 		return nil
 	}
 	client.closed = true
-	client.state = StateClosing
+	client.setStateLocked(StateClosing)
 	cancel := client.activeCancel
 	client.activeCancel = nil
+	lifecycleCancel := client.lifecycleCancel
 	runtime := client.runtime
 	client.runtime = nil
 	client.mu.Unlock()
@@ -140,6 +159,7 @@ func (client *Client) Close() error {
 	if cancel != nil {
 		cancel()
 	}
+	lifecycleCancel()
 	var closeErr error
 	if runtime != nil {
 		runtime.finish(ErrClientClosed)
@@ -151,7 +171,8 @@ func (client *Client) Close() error {
 	}
 
 	client.mu.Lock()
-	client.state = StateClosed
+	client.reconnectRunning = false
+	client.setStateLocked(StateClosed)
 	client.binding = Binding{}
 	client.lastError = ErrClientClosed
 	client.pendingBeforeReady = nil
@@ -159,20 +180,23 @@ func (client *Client) Close() error {
 	return closeErr
 }
 
-func (client *Client) beginConnect() (bool, error) {
+func (client *Client) beginConnect() (bool, bool, error) {
 	client.mu.Lock()
 	defer client.mu.Unlock()
 	if client.closed {
-		return false, ErrClientClosed
+		return false, false, ErrClientClosed
 	}
 	if client.state == StateReady {
-		return true, nil
+		return true, false, nil
 	}
-	client.state = StateConnecting
+	if client.reconnectRunning {
+		return false, true, nil
+	}
+	client.setStateLocked(StateConnecting)
 	client.binding = Binding{}
 	client.lastError = nil
 	client.pendingBeforeReady = nil
-	return false, nil
+	return false, false, nil
 }
 
 func (client *Client) connectTransport(ctx context.Context) (string, net.Conn, error) {
@@ -224,7 +248,7 @@ func (client *Client) installConnection(connection net.Conn) (*connectionRuntime
 	client.nextRuntimeID++
 	runtime := newConnectionRuntime(client.nextRuntimeID, connection, client.config.inboundBuffer)
 	client.runtime = runtime
-	client.state = StateBinding
+	client.setStateLocked(StateBinding)
 	return runtime, nil
 }
 
@@ -290,7 +314,8 @@ func (client *Client) completeBinding(runtime *connectionRuntime, binding Bindin
 	}
 	runtime.token = token
 	client.binding = binding
-	client.state = StateReady
+	client.lastError = nil
+	client.setStateLocked(StateReady)
 	pending := client.pendingBeforeReady
 	client.pendingBeforeReady = nil
 	client.mu.Unlock()
@@ -312,21 +337,45 @@ func (client *Client) bufferBeforeReady(packet *protocol.Packet) error {
 	return nil
 }
 
-func (client *Client) failConnection(runtime *connectionRuntime) {
-	if runtime != nil {
-		client.terminateRuntime(runtime, ErrConnectionClosed)
-		return
+func (client *Client) abortConnectionAttempt(runtime *connectionRuntime, cause error) {
+	failure := cause
+	if failure == nil {
+		failure = ErrConnectionClosed
+	}
+	if runtime.finish(failure) {
+		_ = runtime.connection.Close()
+		client.failAckWaiters(runtime.id, failure)
 	}
 	client.mu.Lock()
+	if client.runtime == runtime {
+		client.runtime = nil
+		client.binding = Binding{}
+		client.pendingBeforeReady = nil
+	}
+	client.mu.Unlock()
+}
+
+func (client *Client) finishConnectFailure(err error) {
+	client.mu.Lock()
+	defer client.mu.Unlock()
 	client.activeCancel = nil
 	client.binding = Binding{}
 	client.pendingBeforeReady = nil
+	client.lastError = err
 	if client.closed {
-		client.state = StateClosed
+		client.setStateLocked(StateClosed)
 	} else {
-		client.state = StateDisconnected
+		client.setStateLocked(StateDisconnected)
 	}
-	client.mu.Unlock()
+}
+
+func (client *Client) setStateLocked(state State) {
+	if client.state == state {
+		return
+	}
+	client.state = state
+	close(client.stateChanged)
+	client.stateChanged = make(chan struct{})
 }
 
 func (client *Client) setActiveCancel(cancel context.CancelFunc) bool {

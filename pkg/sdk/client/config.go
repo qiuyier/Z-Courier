@@ -18,6 +18,10 @@ const (
 	defaultMaxPendingBeforeReady = 128
 	defaultInboundBuffer         = 128
 	defaultDownlinkDedupCapacity = 10_000
+	defaultReconnectInitialDelay = 250 * time.Millisecond
+	defaultReconnectMaxDelay     = 30 * time.Second
+	defaultReconnectMultiplier   = 2.0
+	defaultReconnectJitter       = 0.2
 )
 
 // TokenProvider returns the credential used for the next AUTH/BIND attempt.
@@ -27,6 +31,17 @@ type TokenProvider func(context.Context) (string, error)
 // Dialer opens a network connection. *net.Dialer satisfies this interface.
 type Dialer interface {
 	DialContext(ctx context.Context, network, address string) (net.Conn, error)
+}
+
+// ReconnectConfig enables bounded exponential backoff after an established
+// connection is lost. MaxAttempts counts reconnect attempts; zero means no
+// attempt limit.
+type ReconnectConfig struct {
+	InitialDelay time.Duration
+	MaxDelay     time.Duration
+	Multiplier   float64
+	Jitter       float64
+	MaxAttempts  int
 }
 
 // Config configures a Client.
@@ -62,6 +77,9 @@ type Config struct {
 	// OnDownlinkError observes handler and automatic ACK failures. It must return
 	// promptly and must not panic.
 	OnDownlinkError func(error)
+
+	// Reconnect enables automatic reconnect when non-nil.
+	Reconnect *ReconnectConfig
 }
 
 type normalizedConfig struct {
@@ -83,6 +101,16 @@ type normalizedConfig struct {
 	manualDownlinkAck     bool
 	downlinkDedupCapacity int
 	onDownlinkError       func(error)
+	reconnect             normalizedReconnectConfig
+}
+
+type normalizedReconnectConfig struct {
+	enabled      bool
+	initialDelay time.Duration
+	maxDelay     time.Duration
+	multiplier   float64
+	jitter       float64
+	maxAttempts  int
 }
 
 func normalizeConfig(config Config) (normalizedConfig, error) {
@@ -121,6 +149,10 @@ func normalizeConfig(config Config) (normalizedConfig, error) {
 	}
 	if config.DownlinkDedupCapacity < 0 {
 		return normalizedConfig{}, fmt.Errorf("%w: downlink dedup capacity cannot be negative", ErrInvalidConfig)
+	}
+	reconnect, err := normalizeReconnectConfig(config.Reconnect)
+	if err != nil {
+		return normalizedConfig{}, err
 	}
 
 	network := config.Network
@@ -195,5 +227,59 @@ func normalizeConfig(config Config) (normalizedConfig, error) {
 		manualDownlinkAck:     config.ManualDownlinkAck,
 		downlinkDedupCapacity: downlinkDedupCapacity,
 		onDownlinkError:       config.OnDownlinkError,
+		reconnect:             reconnect,
+	}, nil
+}
+
+func normalizeReconnectConfig(config *ReconnectConfig) (normalizedReconnectConfig, error) {
+	if config == nil {
+		return normalizedReconnectConfig{}, nil
+	}
+	if config.InitialDelay < 0 {
+		return normalizedReconnectConfig{}, fmt.Errorf("%w: reconnect initial delay cannot be negative", ErrInvalidConfig)
+	}
+	if config.MaxDelay < 0 {
+		return normalizedReconnectConfig{}, fmt.Errorf("%w: reconnect max delay cannot be negative", ErrInvalidConfig)
+	}
+	if config.Multiplier < 0 {
+		return normalizedReconnectConfig{}, fmt.Errorf("%w: reconnect multiplier cannot be negative", ErrInvalidConfig)
+	}
+	if config.Jitter < 0 || config.Jitter > 1 {
+		return normalizedReconnectConfig{}, fmt.Errorf("%w: reconnect jitter must be between 0 and 1", ErrInvalidConfig)
+	}
+	if config.MaxAttempts < 0 {
+		return normalizedReconnectConfig{}, fmt.Errorf("%w: reconnect max attempts cannot be negative", ErrInvalidConfig)
+	}
+
+	initialDelay := config.InitialDelay
+	if initialDelay == 0 {
+		initialDelay = defaultReconnectInitialDelay
+	}
+	maxDelay := config.MaxDelay
+	if maxDelay == 0 {
+		maxDelay = defaultReconnectMaxDelay
+	}
+	if maxDelay < initialDelay {
+		return normalizedReconnectConfig{}, fmt.Errorf("%w: reconnect max delay cannot be less than initial delay", ErrInvalidConfig)
+	}
+	multiplier := config.Multiplier
+	if multiplier == 0 {
+		multiplier = defaultReconnectMultiplier
+	}
+	if multiplier < 1 {
+		return normalizedReconnectConfig{}, fmt.Errorf("%w: reconnect multiplier must be at least 1", ErrInvalidConfig)
+	}
+	jitter := config.Jitter
+	if jitter == 0 {
+		jitter = defaultReconnectJitter
+	}
+
+	return normalizedReconnectConfig{
+		enabled:      true,
+		initialDelay: initialDelay,
+		maxDelay:     maxDelay,
+		multiplier:   multiplier,
+		jitter:       jitter,
+		maxAttempts:  config.MaxAttempts,
 	}, nil
 }

@@ -8,6 +8,7 @@ const (
 	StateConnecting
 	StateBinding
 	StateReady
+	StateReconnectWait
 	StateClosing
 	StateClosed
 )
@@ -22,6 +23,8 @@ func (state State) String() string {
 		return "binding"
 	case StateReady:
 		return "ready"
+	case StateReconnectWait:
+		return "reconnect_wait"
 	case StateClosing:
 		return "closing"
 	case StateClosed:
