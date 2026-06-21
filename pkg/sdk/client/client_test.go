@@ -38,6 +38,7 @@ func TestNewValidatesConfig(t *testing.T) {
 		{name: "negative ACK timeout", mutate: func(config *Config) { config.AckTimeout = -time.Second }},
 		{name: "negative pending limit", mutate: func(config *Config) { config.MaxPendingBeforeReady = -1 }},
 		{name: "negative inbound buffer", mutate: func(config *Config) { config.InboundBuffer = -1 }},
+		{name: "negative downlink dedup capacity", mutate: func(config *Config) { config.DownlinkDedupCapacity = -1 }},
 	}
 
 	for _, test := range tests {
@@ -406,6 +407,12 @@ func newTestClient(t *testing.T, dialer Dialer, overrides Config) *Client {
 	if overrides.InboundBuffer != 0 {
 		config.InboundBuffer = overrides.InboundBuffer
 	}
+	config.DownlinkHandler = overrides.DownlinkHandler
+	config.ManualDownlinkAck = overrides.ManualDownlinkAck
+	if overrides.DownlinkDedupCapacity != 0 {
+		config.DownlinkDedupCapacity = overrides.DownlinkDedupCapacity
+	}
+	config.OnDownlinkError = overrides.OnDownlinkError
 	client, err := New(config)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)

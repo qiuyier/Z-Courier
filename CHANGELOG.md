@@ -22,6 +22,9 @@ semantic versioning after the first public MVP tag.
 - Persistent Go client read loop with concurrency-safe business sends, bounded
   inbound delivery, MessageID-based ACK correlation, typed ACK failures, raw
   receive, and deterministic pending-send failure on disconnect.
+- Go client downlink handlers with automatic or manual `MsgID=2` delivery ACK,
+  bounded process-local LRU de-duplication, panic-safe error reporting, and
+  handler cancellation during shutdown.
 
 ## [v0.3.0] - 2026-06-20
 

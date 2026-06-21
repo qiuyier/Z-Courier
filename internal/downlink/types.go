@@ -1,6 +1,9 @@
 package downlink
 
-import sdkbackend "github.com/qiuyier/Z-Courier/pkg/sdk/backend"
+import (
+	sdkbackend "github.com/qiuyier/Z-Courier/pkg/sdk/backend"
+	sdkprotocol "github.com/qiuyier/Z-Courier/pkg/sdk/protocol"
+)
 
 const InternalTokenHeader = sdkbackend.InternalTokenHeader
 
@@ -39,9 +42,6 @@ type PeerPushResponse struct {
 	TraceID       string `json:"trace_id,omitempty"`
 }
 
-type ClientAckRequest struct {
-	MessageID string `json:"message_id"`
-	Code      string `json:"code"`
-}
+type ClientAckRequest = sdkprotocol.DeliveryAck
 
-const ClientAckCodeDelivered = "delivered"
+const ClientAckCodeDelivered = sdkprotocol.DeliveryAckDelivered

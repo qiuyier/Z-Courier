@@ -276,6 +276,12 @@ if err != nil {
     return err
 }
 // packet.Body remains opaque application data.
+
+if packet.Flags&protocol.FlagAckRequired != 0 {
+    if _, err := gateway.AcknowledgeDownlink(ctx, packet); err != nil {
+        return err
+    }
+}
 ```
 
 The bounded `InboundBuffer` prevents an application that stops receiving from
@@ -283,7 +289,34 @@ growing memory without limit. Overflow closes the active connection and is
 reported through `LastError`, supporting `errors.Is` with both
 `client.ErrInboundOverflow` and `client.ErrConnectionClosed`.
 
-This V4 stage deliberately exposes raw receive rather than pretending delivery
-is complete: it does not yet send `MsgID = 2` delivery ACKs, dispatch callbacks,
-de-duplicate downlink messages, or reconnect automatically. Those behaviors
-will be added before the client package is declared complete for `v0.4.0`.
+For callback-based processing, configure `DownlinkHandler` before connecting:
+
+```go
+gateway, err := client.New(client.Config{
+    Address:  "gateway:8999",
+    ClientID: "client-1",
+    DeviceID: "device-1",
+    Token:    os.Getenv("ZCOURIER_CLIENT_TOKEN"),
+    DownlinkHandler: func(ctx context.Context, packet *protocol.Packet) error {
+        return processDownlink(ctx, packet.MessageID, packet.Body)
+    },
+    OnDownlinkError: func(err error) {
+        log.Printf("downlink failed: %v", err)
+    },
+})
+```
+
+When the handler succeeds, ACK-required packets are confirmed with `MsgID = 2`.
+When it returns an error or panics, no delivery ACK is sent and
+`OnDownlinkError` is called. A configured handler owns packet consumption, so
+`Receive` returns `ErrReceiveUnavailable` instead of racing the callback.
+
+Set `ManualDownlinkAck` when business state must be committed before delivery
+is confirmed. The handler can then call `AcknowledgeDownlink` itself. The
+client's bounded LRU de-duplication table records successfully handled
+ACK-required `MessageID` values; duplicate deliveries skip the handler and
+re-send the delivery ACK. `DownlinkDedupCapacity` defaults to 10,000. This table
+is process-local and is not a substitute for durable application de-duplication.
+
+Automatic reconnect is still pending. It will be added before the client
+package is declared complete for `v0.4.0`.

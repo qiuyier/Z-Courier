@@ -16,6 +16,8 @@ type connectionRuntime struct {
 	token      string
 	inbound    chan *protocol.Packet
 	done       chan struct{}
+	context    context.Context
+	cancel     context.CancelFunc
 
 	finishOnce sync.Once
 	errMu      sync.RWMutex
@@ -23,11 +25,14 @@ type connectionRuntime struct {
 }
 
 func newConnectionRuntime(id uint64, connection net.Conn, inboundBuffer int) *connectionRuntime {
+	runtimeContext, cancel := context.WithCancel(context.Background())
 	return &connectionRuntime{
 		id:         id,
 		connection: connection,
 		inbound:    make(chan *protocol.Packet, inboundBuffer),
 		done:       make(chan struct{}),
+		context:    runtimeContext,
+		cancel:     cancel,
 	}
 }
 
@@ -40,6 +45,7 @@ func (runtime *connectionRuntime) finish(err error) bool {
 		runtime.errMu.Lock()
 		runtime.err = err
 		runtime.errMu.Unlock()
+		runtime.cancel()
 		close(runtime.done)
 		finished = true
 	})
@@ -130,6 +136,9 @@ func connectionFailure(cause error) error {
 func (client *Client) Receive(ctx context.Context) (*protocol.Packet, error) {
 	if ctx == nil {
 		return nil, fmt.Errorf("%w: context is nil", ErrInvalidConfig)
+	}
+	if client.config.downlinkHandler != nil {
+		return nil, ErrReceiveUnavailable
 	}
 	runtime, err := client.readyRuntime()
 	if err != nil {

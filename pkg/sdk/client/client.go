@@ -30,6 +30,7 @@ type Client struct {
 	waitersMu sync.Mutex
 	waiters   map[string]*ackWaiter
 	writeGate chan struct{}
+	deduper   *messageDeduper
 
 	sequence atomic.Uint64
 }
@@ -45,6 +46,7 @@ func New(config Config) (*Client, error) {
 		state:     StateDisconnected,
 		waiters:   make(map[string]*ackWaiter),
 		writeGate: make(chan struct{}, 1),
+		deduper:   newMessageDeduper(normalized.downlinkDedupCapacity),
 	}, nil
 }
 
@@ -293,6 +295,9 @@ func (client *Client) completeBinding(runtime *connectionRuntime, binding Bindin
 	client.pendingBeforeReady = nil
 	client.mu.Unlock()
 
+	if client.config.downlinkHandler != nil {
+		go client.downlinkLoop(runtime)
+	}
 	go client.readLoop(runtime, pending)
 	return nil
 }

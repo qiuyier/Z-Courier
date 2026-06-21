@@ -17,6 +17,7 @@ const (
 	defaultAckTimeout            = 5 * time.Second
 	defaultMaxPendingBeforeReady = 128
 	defaultInboundBuffer         = 128
+	defaultDownlinkDedupCapacity = 10_000
 )
 
 // TokenProvider returns the credential used for the next AUTH/BIND attempt.
@@ -48,6 +49,19 @@ type Config struct {
 	MaxBodySize           uint32
 	MaxPendingBeforeReady int
 	InboundBuffer         int
+
+	// DownlinkHandler consumes non-ACK gateway packets. When it is configured,
+	// Receive is disabled so a packet cannot be consumed by two APIs.
+	DownlinkHandler DownlinkHandler
+	// ManualDownlinkAck prevents successful handlers from automatically sending
+	// a delivered ACK. Applications can call AcknowledgeDownlink after durable
+	// business processing completes.
+	ManualDownlinkAck bool
+	// DownlinkDedupCapacity bounds handled MessageIDs retained in memory.
+	DownlinkDedupCapacity int
+	// OnDownlinkError observes handler and automatic ACK failures. It must return
+	// promptly and must not panic.
+	OnDownlinkError func(error)
 }
 
 type normalizedConfig struct {
@@ -65,6 +79,10 @@ type normalizedConfig struct {
 	maxBodySize           uint32
 	maxPendingBeforeReady int
 	inboundBuffer         int
+	downlinkHandler       DownlinkHandler
+	manualDownlinkAck     bool
+	downlinkDedupCapacity int
+	onDownlinkError       func(error)
 }
 
 func normalizeConfig(config Config) (normalizedConfig, error) {
@@ -100,6 +118,9 @@ func normalizeConfig(config Config) (normalizedConfig, error) {
 	}
 	if config.InboundBuffer < 0 {
 		return normalizedConfig{}, fmt.Errorf("%w: inbound buffer cannot be negative", ErrInvalidConfig)
+	}
+	if config.DownlinkDedupCapacity < 0 {
+		return normalizedConfig{}, fmt.Errorf("%w: downlink dedup capacity cannot be negative", ErrInvalidConfig)
 	}
 
 	network := config.Network
@@ -142,6 +163,10 @@ func normalizeConfig(config Config) (normalizedConfig, error) {
 	if inboundBuffer == 0 {
 		inboundBuffer = defaultInboundBuffer
 	}
+	downlinkDedupCapacity := config.DownlinkDedupCapacity
+	if downlinkDedupCapacity == 0 {
+		downlinkDedupCapacity = defaultDownlinkDedupCapacity
+	}
 
 	tokenProvider := config.TokenProvider
 	if tokenProvider == nil {
@@ -166,5 +191,9 @@ func normalizeConfig(config Config) (normalizedConfig, error) {
 		maxBodySize:           maxBodySize,
 		maxPendingBeforeReady: maxPendingBeforeReady,
 		inboundBuffer:         inboundBuffer,
+		downlinkHandler:       config.DownlinkHandler,
+		manualDownlinkAck:     config.ManualDownlinkAck,
+		downlinkDedupCapacity: downlinkDedupCapacity,
+		onDownlinkError:       config.OnDownlinkError,
 	}, nil
 }

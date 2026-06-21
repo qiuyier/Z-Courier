@@ -19,4 +19,7 @@ var (
 	ErrFieldTooLarge = errors.New("protocol: field too large")
 	// ErrInvalidAck means an ACK packet or body is invalid.
 	ErrInvalidAck = errors.New("protocol: invalid ack")
+	// ErrInvalidDeliveryAck means a downlink delivery ACK packet or body is
+	// invalid.
+	ErrInvalidDeliveryAck = errors.New("protocol: invalid delivery acknowledgment")
 )

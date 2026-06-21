@@ -47,6 +47,14 @@ var (
 	ErrAckRejected = errors.New("client: acknowledgment rejected")
 	// ErrUnexpectedAck means an ACK matching a pending request was malformed.
 	ErrUnexpectedAck = errors.New("client: unexpected acknowledgment")
+	// ErrReceiveUnavailable means a configured downlink handler owns packet
+	// consumption for the active Client.
+	ErrReceiveUnavailable = errors.New("client: receive unavailable with downlink handler")
+	// ErrInvalidDownlink means a packet cannot be acknowledged as a delivered
+	// downlink message.
+	ErrInvalidDownlink = errors.New("client: invalid downlink packet")
+	// ErrDownlinkHandler means the application handler failed or panicked.
+	ErrDownlinkHandler = errors.New("client: downlink handler failed")
 	// ErrFrameTooShort means the outer eight-byte frame header was incomplete.
 	ErrFrameTooShort = errors.New("client: frame header too short")
 	// ErrFrameTooLarge means the declared payload exceeds the configured limit.

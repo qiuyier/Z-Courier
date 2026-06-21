@@ -102,34 +102,38 @@ func (client *Client) Send(ctx context.Context, request SendRequest) (SendResult
 	packet.Token = runtime.token
 
 	result := SendResult{MessageID: messageID}
-	var waiter *ackWaiter
-	if ackRequired {
-		waiter = &ackWaiter{
-			runtimeID: runtime.id,
-			msgID:     request.MsgID,
-			result:    make(chan ackResult, 1),
-		}
-		if err := client.registerAckWaiter(messageID, waiter); err != nil {
+	if !ackRequired {
+		if err := client.writePacket(ctx, runtime, packet); err != nil {
 			return result, err
 		}
-		defer client.unregisterAckWaiter(messageID, waiter)
-	}
-
-	if err := client.writePacket(ctx, runtime, packet); err != nil {
-		return result, err
-	}
-	if waiter == nil {
 		return result, nil
 	}
 
-	waitCtx, cancel := context.WithTimeout(ctx, client.config.ackTimeout)
-	defer cancel()
-	ack, err := client.waitForAck(waitCtx, ctx, runtime, waiter)
+	ack, err := client.writeAndWaitAck(ctx, runtime, packet)
 	if err != nil {
 		return result, err
 	}
 	result.Ack = ack
 	return result, nil
+}
+
+func (client *Client) writeAndWaitAck(ctx context.Context, runtime *connectionRuntime, packet *protocol.Packet) (*protocol.Ack, error) {
+	waiter := &ackWaiter{
+		runtimeID: runtime.id,
+		msgID:     packet.MsgID,
+		result:    make(chan ackResult, 1),
+	}
+	if err := client.registerAckWaiter(packet.MessageID, waiter); err != nil {
+		return nil, err
+	}
+	defer client.unregisterAckWaiter(packet.MessageID, waiter)
+
+	if err := client.writePacket(ctx, runtime, packet); err != nil {
+		return nil, err
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, client.config.ackTimeout)
+	defer cancel()
+	return client.waitForAck(waitCtx, ctx, runtime, waiter)
 }
 
 func (client *Client) sendSnapshot() (*connectionRuntime, Binding, error) {

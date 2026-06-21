@@ -22,7 +22,10 @@ func TestSendReceivesImmediateAck(t *testing.T) {
 		if err := validateBusinessPacket(packet, "message-1"); err != nil {
 			return err
 		}
-		return writeGatewayAck(connection, packet, protocol.AckAccepted, "")
+		if err := writeGatewayAck(connection, packet, protocol.AckAccepted, ""); err != nil {
+			return err
+		}
+		return waitForPeerClose(connection)
 	})
 
 	result, err := client.Send(context.Background(), SendRequest{
@@ -49,7 +52,10 @@ func TestSendWaitsWhenAckRequiredFlagIsSet(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		return writeGatewayAck(connection, packet, protocol.AckAccepted, "")
+		if err := writeGatewayAck(connection, packet, protocol.AckAccepted, ""); err != nil {
+			return err
+		}
+		return waitForPeerClose(connection)
 	})
 
 	result, err := client.Send(context.Background(), SendRequest{
@@ -88,7 +94,7 @@ func TestConcurrentSendCorrelatesOutOfOrderAcks(t *testing.T) {
 				return err
 			}
 		}
-		return nil
+		return waitForPeerClose(connection)
 	})
 
 	type sendOutcome struct {
@@ -135,7 +141,10 @@ func TestSendMapsRejectedAck(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		return writeGatewayAck(connection, packet, protocol.AckRejected, "route overloaded")
+		if err := writeGatewayAck(connection, packet, protocol.AckRejected, "route overloaded"); err != nil {
+			return err
+		}
+		return waitForPeerClose(connection)
 	})
 
 	_, err := client.Send(context.Background(), SendRequest{
@@ -166,7 +175,10 @@ func TestSendRejectsDuplicatePendingMessageID(t *testing.T) {
 		}
 		firstReceived <- packet
 		<-releaseAck
-		return writeGatewayAck(connection, packet, protocol.AckAccepted, "")
+		if err := writeGatewayAck(connection, packet, protocol.AckAccepted, ""); err != nil {
+			return err
+		}
+		return waitForPeerClose(connection)
 	})
 
 	firstDone := make(chan error, 1)
