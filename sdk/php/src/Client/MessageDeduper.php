@@ -31,8 +31,6 @@ final class MessageDeduper
             return;
         }
         $oldest = array_key_first($this->entries);
-        if ($oldest !== null) {
-            unset($this->entries[$oldest]);
-        }
+        unset($this->entries[$oldest]);
     }
 }

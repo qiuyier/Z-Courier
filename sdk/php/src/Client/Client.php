@@ -246,7 +246,7 @@ final class Client
 
     public function acknowledgeDownlink(Packet $packet): Ack
     {
-        $this->ensureReady();
+        $binding = $this->ensureReady();
         $target = $this->downlinkTarget($packet);
         $this->deduper->mark($target['messageId']);
 
@@ -258,9 +258,9 @@ final class Client
             flags: Packet::FLAG_ACK_REQUIRED,
             sequence: (string) $this->sequence,
             timestamp: (string) (int) floor(microtime(true) * 1000),
-            clientId: $this->binding->clientId,
-            deviceId: $this->binding->deviceId,
-            sessionId: $this->binding->sessionId,
+            clientId: $binding->clientId,
+            deviceId: $binding->deviceId,
+            sessionId: $binding->sessionId,
             messageId: $messageId,
             traceId: $target['traceId'] !== '' ? $target['traceId'] : $target['messageId'],
             token: $this->token,
@@ -368,7 +368,7 @@ final class Client
         }
     }
 
-    private function ensureReady(): void
+    private function ensureReady(): Binding
     {
         if ($this->state === State::Closed || $this->state === State::Closing) {
             throw new ClientException(ClientException::CLOSED, 'client is closed');
@@ -376,6 +376,7 @@ final class Client
         if ($this->state !== State::Ready || $this->binding === null || !is_resource($this->stream)) {
             throw new ClientException(ClientException::NOT_READY, 'client is not ready');
         }
+        return $this->binding;
     }
 
     /** @return array{msgId: int, messageId: string, traceId: string} */
@@ -602,10 +603,10 @@ final class Client
         }
 
         while (true) {
-            $chunk = @fread($this->stream, $this->config->readChunkSize);
+            $chunk = @fread($this->stream, max(1, $this->config->readChunkSize));
             if ($chunk === false || $chunk === '') {
                 $metadata = stream_get_meta_data($this->stream);
-                if (($metadata['timed_out'] ?? false) === true) {
+                if ($metadata['timed_out']) {
                     throw new ClientException($timeoutKind, $timeoutMessage);
                 }
                 if (feof($this->stream)) {
