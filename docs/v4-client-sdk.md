@@ -237,8 +237,9 @@ Status: complete.
 
 ### V4.3 PHP Protocol And Client SDK
 
-Status: in progress. The protocol foundation and shared fixture conformance are
-complete; the blocking high-level client remains pending.
+Status: in progress. The protocol foundation, shared fixture conformance, and
+blocking TCP AUTH/BIND lifecycle are complete. Business sends, downlink
+handling, and reconnect remain pending.
 
 - Add Composer metadata, protocol codec, frame parser, and typed exceptions.
 - Implement the blocking high-level client and callback model.

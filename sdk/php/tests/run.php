@@ -4,12 +4,33 @@ declare(strict_types=1);
 
 require __DIR__ . '/bootstrap.php';
 
+use ZCourier\Client\Client as GatewayClient;
+use ZCourier\Client\Config as ClientConfig;
+use ZCourier\Client\Connector;
+use ZCourier\Client\State;
+use ZCourier\Exception\BindException;
+use ZCourier\Exception\ClientException;
 use ZCourier\Exception\ProtocolException;
 use ZCourier\Protocol\Ack;
 use ZCourier\Protocol\Codec;
 use ZCourier\Protocol\FrameCodec;
 use ZCourier\Protocol\FrameParser;
 use ZCourier\Protocol\Packet;
+
+final class PairConnector implements Connector
+{
+    /** @param resource $stream */
+    public function __construct(private mixed $stream)
+    {
+    }
+
+    public function connect(string $address, float $timeout): mixed
+    {
+        $stream = $this->stream;
+        $this->stream = null;
+        return $stream;
+    }
+}
 
 $root = dirname(__DIR__, 3);
 $valid = loadJson($root . '/testdata/protocol/v1/valid.json');
@@ -115,7 +136,70 @@ $integerBoundaryDecoded = Codec::decode(Codec::encode($integerBoundaryPacket));
 assertSame('18446744073709551615', $integerBoundaryDecoded->sequence, 'uint64 maximum');
 assertSame('-9223372036854775808', $integerBoundaryDecoded->timestamp, 'int64 minimum');
 
-echo "PHP protocol conformance passed: {$assertions} assertions\n";
+echo "protocol fixtures passed\n";
+echo "testing accepted bind...\n";
+[$serverPid, $connector] = startBindServer('accepted');
+$client = new GatewayClient(new ClientConfig(
+    address: 'socket-pair',
+    clientId: 'claimed-client',
+    deviceId: 'device-1',
+    token: 'token-1',
+    connector: $connector,
+));
+assertSame(State::Disconnected, $client->state(), 'new client state');
+$binding = $client->connect();
+assertSame(State::Ready, $client->state(), 'bound client state');
+assertSame(true, $client->ready(), 'bound client readiness');
+assertSame('canonical-client', $binding->clientId, 'canonical client ID');
+assertSame('device-1', $binding->deviceId, 'bound device ID');
+assertSame('php-session-1', $binding->sessionId, 'bound session ID');
+assertSame($binding, $client->connect(), 'second connect reuses binding');
+$client->close();
+$client->close();
+assertSame(State::Closed, $client->state(), 'closed client state');
+assertClientError(ClientException::CLOSED, static fn () => $client->connect(), 'connect after close');
+finishBindServer($serverPid, 'accepted bind server');
+
+echo "testing rejected bind...\n";
+[$serverPid, $connector] = startBindServer('unauthorized');
+$client = new GatewayClient(new ClientConfig(
+    address: 'socket-pair',
+    clientId: 'claimed-client',
+    deviceId: 'device-1',
+    token: 'token-1',
+    connector: $connector,
+));
+assertClientError(ClientException::AUTHENTICATION_FAILED, static fn () => $client->connect(), 'unauthorized bind');
+assertSame(State::Disconnected, $client->state(), 'rejected client state');
+assertSame(true, $client->lastError() instanceof BindException, 'rejected bind error type');
+finishBindServer($serverPid, 'unauthorized bind server');
+
+echo "testing malformed bind ACK...\n";
+[$serverPid, $connector] = startBindServer('missing_session');
+$client = new GatewayClient(new ClientConfig(
+    address: 'socket-pair',
+    clientId: 'claimed-client',
+    deviceId: 'device-1',
+    token: 'token-1',
+    connector: $connector,
+));
+assertClientError(ClientException::UNEXPECTED_BIND_ACK, static fn () => $client->connect(), 'missing session bind');
+finishBindServer($serverPid, 'missing session bind server');
+
+echo "testing bind timeout...\n";
+[$serverPid, $connector] = startBindServer('timeout');
+$client = new GatewayClient(new ClientConfig(
+    address: 'socket-pair',
+    clientId: 'claimed-client',
+    deviceId: 'device-1',
+    token: 'token-1',
+    connector: $connector,
+    bindTimeout: 0.05,
+));
+assertClientError(ClientException::BIND_TIMEOUT, static fn () => $client->connect(), 'bind timeout');
+finishBindServer($serverPid, 'timeout bind server');
+
+echo "PHP SDK tests passed: {$assertions} assertions\n";
 
 /** @return array<string, mixed> */
 function loadJson(string $path): array
@@ -237,6 +321,129 @@ function assertProtocolError(string $expectedKind, callable $callback, string $l
     }
     throw new RuntimeException("{$label}: expected protocol error {$expectedKind}");
 }
+
+function assertClientError(string $expectedKind, callable $callback, string $label): void
+{
+    global $assertions;
+    try {
+        $callback();
+    } catch (ClientException $exception) {
+        $assertions++;
+        if ($exception->kind !== $expectedKind) {
+            throw new RuntimeException(
+                "{$label}: error kind is {$exception->kind}; expected {$expectedKind}",
+                0,
+                $exception,
+            );
+        }
+        return;
+    } catch (Throwable $throwable) {
+        throw new RuntimeException("{$label}: unexpected exception " . $throwable::class, 0, $throwable);
+    }
+    throw new RuntimeException("{$label}: expected client error {$expectedKind}");
+}
+
+/** @return array{int, Connector} */
+function startBindServer(string $mode): array
+{
+    if (!function_exists('pcntl_fork')) {
+        throw new RuntimeException('PHP client stream tests require the pcntl extension');
+    }
+    $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
+    if ($pair === false) {
+        throw new RuntimeException("cannot create {$mode} socket pair");
+    }
+    $pid = pcntl_fork();
+    if ($pid === -1) {
+        throw new RuntimeException("cannot fork {$mode} bind server");
+    }
+    if ($pid === 0) {
+        fclose($pair[0]);
+        try {
+            serveBind($pair[1], $mode);
+            fclose($pair[1]);
+            exit(0);
+        } catch (Throwable $error) {
+            fwrite(STDERR, "{$mode} bind server: {$error->getMessage()}\n");
+            exit(1);
+        }
+    }
+    fclose($pair[1]);
+    return [$pid, new PairConnector($pair[0])];
+}
+
+function finishBindServer(int $pid, string $label): void
+{
+    $waited = pcntl_waitpid($pid, $status);
+    if ($waited !== $pid) {
+        throw new RuntimeException("{$label}: cannot wait for child process");
+    }
+    assertSame(0, pcntl_wexitstatus($status), "{$label} exit code");
+}
+
+/** @param resource $connection */
+function serveBind(mixed $connection, string $mode): void
+{
+    stream_set_timeout($connection, 5);
+    $parser = new FrameParser();
+    $bind = null;
+    while ($bind === null) {
+        $chunk = fread($connection, 8192);
+        if ($chunk === false || $chunk === '') {
+            throw new RuntimeException('connection closed before bind');
+        }
+        $packets = $parser->push($chunk);
+        if ($packets !== []) {
+            $bind = $packets[0];
+        }
+    }
+    if (
+        $bind->msgId !== Packet::MSG_ID_BIND
+        || $bind->flags !== Packet::FLAG_ACK_REQUIRED
+        || $bind->clientId !== 'claimed-client'
+        || $bind->deviceId !== 'device-1'
+        || $bind->token !== 'token-1'
+        || $bind->messageId === ''
+        || $bind->traceId !== $bind->messageId
+    ) {
+        throw new RuntimeException('invalid bind packet');
+    }
+    if ($mode === 'timeout') {
+        usleep(500_000);
+        return;
+    }
+
+    $code = $mode === 'unauthorized' ? Ack::UNAUTHORIZED : Ack::ACCEPTED;
+    $sessionId = $mode === 'missing_session' ? '' : 'php-session-1';
+    $reason = $mode === 'unauthorized' ? 'invalid test token' : '';
+    $ack = new Ack($code, Packet::MSG_ID_BIND, $bind->messageId, $reason);
+    $packet = new Packet(
+        msgId: Packet::MSG_ID_ACK,
+        body: $ack->toJson(),
+        sequence: $bind->sequence,
+        timestamp: (string) (int) floor(microtime(true) * 1000),
+        clientId: 'canonical-client',
+        deviceId: $bind->deviceId,
+        sessionId: $sessionId,
+        messageId: $bind->messageId,
+        traceId: $bind->traceId,
+    );
+    $data = FrameCodec::encode($packet);
+    while ($data !== '') {
+        $written = fwrite($connection, $data);
+        if ($written === false || $written === 0) {
+            throw new RuntimeException('write bind ACK failed');
+        }
+        $data = substr($data, $written);
+    }
+    while (!feof($connection)) {
+        $chunk = fread($connection, 1024);
+        if ($chunk === false) {
+            return;
+        }
+    }
+}
+
 
 function assertSame(mixed $expected, mixed $actual, string $label): void
 {

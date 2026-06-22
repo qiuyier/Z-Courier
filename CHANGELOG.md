@@ -35,6 +35,10 @@ semantic versioning after the first public MVP tag.
   objects, binary-safe inner and outer codecs, incremental TCP frame parsing,
   typed conformance errors, full 64-bit decimal handling, and shared Go/PHP
   fixture verification.
+- Initial PHP blocking client lifecycle with validated configuration, static or
+  callback token providers, native stream connections, AUTH/BIND negotiation,
+  canonical binding identity, stable typed failures, timeouts, and idempotent
+  close behavior.
 
 ### Changed
 
