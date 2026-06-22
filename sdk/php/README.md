@@ -99,8 +99,57 @@ errors use stable `ClientException::$kind` values.
 
 The blocking client serializes sends. Packets arriving while an ACK is pending
 are retained in a bounded inbound queue rather than mistaken for the ACK.
-Receiving and acknowledging those downlink packets, callback dispatch, and
-automatic reconnect are added in the following V4.3 stages.
+
+### Downlink Messages
+
+Use `run()` for automatic callback dispatch. A successful callback sends the
+`MsgID = 2` delivered ACK. A callback exception is reported through `onError`
+and leaves the message unacknowledged so the gateway can retry it:
+
+```php
+<?php
+
+use ZCourier\Exception\DownlinkException;
+use ZCourier\Protocol\Packet;
+
+$client->run(
+    handler: static function (Packet $packet): void {
+        processMessage($packet->messageId, $packet->body);
+    },
+    onError: static function (DownlinkException $error): void {
+        error_log($error->getMessage());
+    },
+);
+```
+
+For durable workflows, enable manual ACK and acknowledge only after the local
+transaction commits:
+
+```php
+$client->run(
+    handler: static function (Packet $packet) use ($client): void {
+        persistMessage($packet->messageId, $packet->body);
+        $client->acknowledgeDownlink($packet);
+    },
+    manualAck: true,
+);
+```
+
+`receive($timeout)` is the lower-level alternative for applications that own
+their receive loop. It returns one non-ACK packet; call
+`acknowledgeDownlink()` for an ACK-required business packet after processing.
+A `null` timeout blocks indefinitely, while a positive timeout throws
+`ClientException` with kind `receive_timeout` without disconnecting the client.
+
+The callback loop suppresses duplicate ACK-required downlinks with a bounded
+process-local LRU keyed by `MessageID` and re-acknowledges the duplicate. Its
+default capacity is `10000` and can be changed with
+`Config::$downlinkDedupCapacity`. The cache is lost on process restart and does
+not provide durable exactly-once processing. Important business handlers must
+also enforce a database uniqueness constraint or equivalent persistent
+idempotency check on `MessageID` before sending the delivered ACK.
+
+Automatic reconnect is added in the following V4.3 stage.
 
 ## Verify
 

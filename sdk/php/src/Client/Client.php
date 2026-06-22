@@ -8,8 +8,10 @@ use Throwable;
 use ZCourier\Exception\AckException;
 use ZCourier\Exception\BindException;
 use ZCourier\Exception\ClientException;
+use ZCourier\Exception\DownlinkException;
 use ZCourier\Exception\ProtocolException;
 use ZCourier\Protocol\Ack;
+use ZCourier\Protocol\DeliveryAck;
 use ZCourier\Protocol\FrameCodec;
 use ZCourier\Protocol\FrameParser;
 use ZCourier\Protocol\Packet;
@@ -30,10 +32,12 @@ final class Client
     private array $pendingBeforeReady = [];
     private int $sequence = 0;
     private string $token = '';
+    private MessageDeduper $deduper;
 
     public function __construct(private readonly Config $config)
     {
         $this->parser = new FrameParser($config->maxFramePayloadSize, $config->maxBodySize);
+        $this->deduper = new MessageDeduper($config->downlinkDedupCapacity);
     }
 
     public function state(): State
@@ -195,6 +199,233 @@ final class Client
                 $this->disconnect($error);
             }
             throw $error;
+        }
+    }
+
+    public function receive(?float $timeout = null): Packet
+    {
+        $this->ensureReady();
+        if ($timeout !== null && $timeout <= 0) {
+            throw new ClientException(ClientException::INVALID_REQUEST, 'receive timeout must be greater than zero');
+        }
+
+        try {
+            $this->setReadTimeout($timeout ?? 0.0);
+            while (true) {
+                if ($this->inboundQueue !== []) {
+                    /** @var Packet $packet */
+                    $packet = array_shift($this->inboundQueue);
+                } else {
+                    $packet = $this->readPacket(
+                        ClientException::RECEIVE_TIMEOUT,
+                        'timed out waiting for a downlink packet',
+                    );
+                }
+                if ($packet->msgId !== Packet::MSG_ID_ACK) {
+                    return $packet;
+                }
+            }
+        } catch (ProtocolException $error) {
+            $mapped = new ClientException(
+                ClientException::IO_ERROR,
+                'invalid frame while receiving a downlink: ' . $error->getMessage(),
+                $error,
+            );
+            $this->disconnect($mapped);
+            throw $mapped;
+        } catch (ClientException $error) {
+            if (in_array($error->kind, [ClientException::IO_ERROR, ClientException::INBOUND_OVERFLOW], true)) {
+                $this->disconnect($error);
+            }
+            throw $error;
+        } finally {
+            if (is_resource($this->stream)) {
+                $this->setReadTimeout(0.0);
+            }
+        }
+    }
+
+    public function acknowledgeDownlink(Packet $packet): Ack
+    {
+        $this->ensureReady();
+        $target = $this->downlinkTarget($packet);
+        $this->deduper->mark($target['messageId']);
+
+        $messageId = 'zc-dack-' . bin2hex(random_bytes(16));
+        $this->sequence++;
+        $deliveryAck = new Packet(
+            msgId: Packet::MSG_ID_DOWNLINK_ACK,
+            body: (new DeliveryAck($target['messageId']))->toJson(),
+            flags: Packet::FLAG_ACK_REQUIRED,
+            sequence: (string) $this->sequence,
+            timestamp: (string) (int) floor(microtime(true) * 1000),
+            clientId: $this->binding->clientId,
+            deviceId: $this->binding->deviceId,
+            sessionId: $this->binding->sessionId,
+            messageId: $messageId,
+            traceId: $target['traceId'] !== '' ? $target['traceId'] : $target['messageId'],
+            token: $this->token,
+        );
+
+        try {
+            $this->writeAll(FrameCodec::encode($deliveryAck, $this->config->maxFramePayloadSize));
+            $this->setReadTimeout($this->config->ackTimeout);
+            try {
+                return $this->waitForBusinessAck(Packet::MSG_ID_DOWNLINK_ACK, $messageId);
+            } finally {
+                if (is_resource($this->stream)) {
+                    $this->setReadTimeout(0.0);
+                }
+            }
+        } catch (ProtocolException $error) {
+            $mapped = new ClientException(
+                ClientException::IO_ERROR,
+                'invalid frame while waiting for delivery ACK acceptance: ' . $error->getMessage(),
+                $error,
+            );
+            $this->disconnect($mapped);
+            throw $mapped;
+        } catch (ClientException $error) {
+            if (in_array($error->kind, [ClientException::IO_ERROR, ClientException::INBOUND_OVERFLOW], true)) {
+                $this->disconnect($error);
+            }
+            throw $error;
+        }
+    }
+
+    /**
+     * @param callable(Packet): mixed $handler
+     * @param null|callable(DownlinkException): mixed $onError
+     */
+    public function run(
+        callable $handler,
+        bool $manualAck = false,
+        ?callable $onError = null,
+        ?int $maxMessages = null,
+    ): void {
+        if ($maxMessages !== null && $maxMessages <= 0) {
+            throw new ClientException(ClientException::INVALID_REQUEST, 'max messages must be greater than zero');
+        }
+
+        $received = 0;
+        while ($maxMessages === null || $received < $maxMessages) {
+            $packet = $this->receive();
+            $received++;
+            $target = $this->tryDownlinkTarget($packet);
+            if ($target !== null && $this->deduper->contains($target['messageId'])) {
+                try {
+                    $this->acknowledgeDownlink($packet);
+                } catch (Throwable $error) {
+                    $this->reportDownlinkError(
+                        $onError,
+                        ClientException::AUTO_ACK_FAILED,
+                        'ack_duplicate',
+                        $packet,
+                        $error,
+                    );
+                }
+                continue;
+            }
+
+            try {
+                $handler($packet);
+            } catch (Throwable $error) {
+                $this->reportDownlinkError(
+                    $onError,
+                    ClientException::HANDLER_FAILED,
+                    'handle',
+                    $packet,
+                    $error,
+                );
+                continue;
+            }
+            if ($target === null || $manualAck) {
+                continue;
+            }
+
+            try {
+                $this->acknowledgeDownlink($packet);
+            } catch (Throwable $error) {
+                $this->reportDownlinkError(
+                    $onError,
+                    ClientException::AUTO_ACK_FAILED,
+                    'ack',
+                    $packet,
+                    $error,
+                );
+            }
+        }
+    }
+
+    private function ensureReady(): void
+    {
+        if ($this->state === State::Closed || $this->state === State::Closing) {
+            throw new ClientException(ClientException::CLOSED, 'client is closed');
+        }
+        if ($this->state !== State::Ready || $this->binding === null || !is_resource($this->stream)) {
+            throw new ClientException(ClientException::NOT_READY, 'client is not ready');
+        }
+    }
+
+    /** @return array{msgId: int, messageId: string, traceId: string} */
+    private function downlinkTarget(Packet $packet): array
+    {
+        if (
+            Packet::isReservedMsgId($packet->msgId)
+            || ($packet->flags & Packet::FLAG_ACK_REQUIRED) === 0
+            || $packet->messageId === ''
+        ) {
+            throw new ClientException(
+                ClientException::INVALID_DOWNLINK,
+                'downlink must use a business MsgID, require an ACK, and include a message ID',
+            );
+        }
+        return [
+            'msgId' => $packet->msgId,
+            'messageId' => $packet->messageId,
+            'traceId' => $packet->traceId,
+        ];
+    }
+
+    /** @return null|array{msgId: int, messageId: string, traceId: string} */
+    private function tryDownlinkTarget(Packet $packet): ?array
+    {
+        try {
+            return $this->downlinkTarget($packet);
+        } catch (ClientException) {
+            return null;
+        }
+    }
+
+    /** @param null|callable(DownlinkException): mixed $onError */
+    private function reportDownlinkError(
+        ?callable $onError,
+        string $kind,
+        string $operation,
+        Packet $packet,
+        Throwable $error,
+    ): void {
+        if ($onError === null) {
+            return;
+        }
+        $downlinkError = new DownlinkException(
+            $kind,
+            $operation,
+            $packet->msgId,
+            $packet->messageId,
+            sprintf(
+                'downlink %s failed: msg_id=%d message_id=%s: %s',
+                $operation,
+                $packet->msgId,
+                $packet->messageId,
+                $error->getMessage(),
+            ),
+            $error,
+        );
+        try {
+            $onError($downlinkError);
+        } catch (Throwable) {
+            // Error callbacks must not stop the receive loop.
         }
     }
 

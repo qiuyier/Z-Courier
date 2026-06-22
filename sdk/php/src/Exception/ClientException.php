@@ -25,6 +25,10 @@ class ClientException extends RuntimeException
     public const ACK_TIMEOUT = 'ack_timeout';
     public const ACK_REJECTED = 'ack_rejected';
     public const UNEXPECTED_ACK = 'unexpected_ack';
+    public const RECEIVE_TIMEOUT = 'receive_timeout';
+    public const INVALID_DOWNLINK = 'invalid_downlink';
+    public const HANDLER_FAILED = 'handler_failed';
+    public const AUTO_ACK_FAILED = 'auto_ack_failed';
     public const IO_ERROR = 'io_error';
 
     public function __construct(

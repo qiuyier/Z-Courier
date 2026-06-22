@@ -19,6 +19,7 @@ final class ProtocolException extends RuntimeException
     public const FRAME_LENGTH_MISMATCH = 'frame_length_mismatch';
     public const OUTER_INNER_MSG_ID_MISMATCH = 'outer_inner_msg_id_mismatch';
     public const INVALID_ACK = 'invalid_ack';
+    public const INVALID_DELIVERY_ACK = 'invalid_delivery_ack';
     public const INVALID_INTEGER = 'invalid_integer';
 
     public function __construct(

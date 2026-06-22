@@ -29,6 +29,7 @@ final readonly class Config
         public int $maxPendingBeforeReady = 128,
         public int $inboundBuffer = 128,
         public int $readChunkSize = 8192,
+        public int $downlinkDedupCapacity = 10000,
     ) {
         if (trim($address) === '' || trim($clientId) === '' || trim($deviceId) === '') {
             throw new ClientException(
@@ -50,6 +51,7 @@ final readonly class Config
             || $maxBodySize < 0
             || $maxPendingBeforeReady <= 0
             || $inboundBuffer <= 0
+            || $downlinkDedupCapacity <= 0
             || $readChunkSize <= 0
         ) {
             throw new ClientException(ClientException::INVALID_CONFIG, 'buffer and size limits are invalid');

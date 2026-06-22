@@ -42,6 +42,9 @@ semantic versioning after the first public MVP tag.
 - PHP business sends with canonical bound identity, generated message and trace
   identifiers, optional ACK waiting, MessageID correlation, typed rejection and
   timeout failures, and bounded preservation of interleaved downlink packets.
+- PHP downlink receive and callback APIs with automatic or manual `MsgID=2`
+  delivery ACK, callback failure isolation, receive timeouts that preserve the
+  connection, and bounded process-local LRU de-duplication by MessageID.
 
 ### Changed
 

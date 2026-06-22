@@ -7,14 +7,17 @@ require __DIR__ . '/bootstrap.php';
 use ZCourier\Client\Client as GatewayClient;
 use ZCourier\Client\Config as ClientConfig;
 use ZCourier\Client\Connector;
+use ZCourier\Client\MessageDeduper;
 use ZCourier\Client\SendRequest;
 use ZCourier\Client\State;
 use ZCourier\Exception\AckException;
 use ZCourier\Exception\BindException;
 use ZCourier\Exception\ClientException;
+use ZCourier\Exception\DownlinkException;
 use ZCourier\Exception\ProtocolException;
 use ZCourier\Protocol\Ack;
 use ZCourier\Protocol\Codec;
+use ZCourier\Protocol\DeliveryAck;
 use ZCourier\Protocol\FrameCodec;
 use ZCourier\Protocol\FrameParser;
 use ZCourier\Protocol\Packet;
@@ -129,6 +132,12 @@ assertSame(Ack::ACCEPTED, $ack->code, 'ACK code');
 assertSame(Packet::MSG_ID_BIND, $ack->msgId, 'ACK origin MsgID');
 assertSame('bind-1', $ack->messageId, 'ACK message ID');
 
+$deliveryAck = new DeliveryAck('downlink-1');
+$deliveryAckPacket = new Packet(Packet::MSG_ID_DOWNLINK_ACK, $deliveryAck->toJson());
+$decodedDeliveryAck = DeliveryAck::fromPacket($deliveryAckPacket);
+assertSame(DeliveryAck::DELIVERED, $decodedDeliveryAck->code, 'delivery ACK code');
+assertSame('downlink-1', $decodedDeliveryAck->messageId, 'delivery ACK message ID');
+
 $integerBoundaryPacket = new Packet(
     msgId: 2001,
     sequence: '18446744073709551615',
@@ -137,6 +146,15 @@ $integerBoundaryPacket = new Packet(
 $integerBoundaryDecoded = Codec::decode(Codec::encode($integerBoundaryPacket));
 assertSame('18446744073709551615', $integerBoundaryDecoded->sequence, 'uint64 maximum');
 assertSame('-9223372036854775808', $integerBoundaryDecoded->timestamp, 'int64 minimum');
+
+$deduper = new MessageDeduper(2);
+$deduper->mark('oldest');
+$deduper->mark('recent');
+assertSame(true, $deduper->contains('oldest'), 'deduper refreshes a hit');
+$deduper->mark('newest');
+assertSame(false, $deduper->contains('recent'), 'deduper evicts least recently used entry');
+assertSame(true, $deduper->contains('oldest'), 'deduper keeps refreshed entry');
+assertSame(true, $deduper->contains('newest'), 'deduper keeps newest entry');
 
 echo "protocol fixtures passed\n";
 echo "testing accepted bind...\n";
@@ -264,6 +282,10 @@ $result = $client->send(new SendRequest(
     ackRequired: true,
 ));
 assertSame(Ack::ACCEPTED, $result->ack?->code, 'ACK after interleaved downlink');
+$interleaved = $client->receive(1.0);
+assertSame(2002, $interleaved->msgId, 'interleaved downlink MsgID');
+assertSame('downlink-before-ack', $interleaved->messageId, 'interleaved downlink message ID');
+assertSame('interleaved-downlink', $interleaved->body, 'interleaved downlink body');
 $client->close();
 finishBindServer($serverPid, 'interleaved downlink server');
 
@@ -318,6 +340,159 @@ assertClientError(
 assertSame(true, $client->ready(), 'client remains ready after ACK timeout');
 $client->close();
 finishBindServer($serverPid, 'business ACK timeout server');
+
+echo "testing receive timeout...\n";
+[$serverPid, $connector] = startBindServer('receive_timeout');
+$client = new GatewayClient(new ClientConfig(
+    address: 'socket-pair',
+    clientId: 'claimed-client',
+    deviceId: 'device-1',
+    token: 'token-1',
+    connector: $connector,
+));
+$client->connect();
+assertClientError(
+    ClientException::RECEIVE_TIMEOUT,
+    static fn () => $client->receive(0.05),
+    'downlink receive timeout',
+);
+assertSame(true, $client->ready(), 'client remains ready after receive timeout');
+$client->close();
+finishBindServer($serverPid, 'receive timeout server');
+
+echo "testing manual downlink ACK...\n";
+[$serverPid, $connector] = startBindServer('downlink_manual');
+$client = new GatewayClient(new ClientConfig(
+    address: 'socket-pair',
+    clientId: 'claimed-client',
+    deviceId: 'device-1',
+    token: 'token-1',
+    connector: $connector,
+));
+$client->connect();
+$downlink = $client->receive(1.0);
+assertSame(2001, $downlink->msgId, 'manual downlink MsgID');
+assertSame('manual-downlink', $downlink->body, 'manual downlink body');
+$deliveryResult = $client->acknowledgeDownlink($downlink);
+assertSame(Ack::ACCEPTED, $deliveryResult->code, 'manual delivery ACK accepted');
+assertSame(Packet::MSG_ID_DOWNLINK_ACK, $deliveryResult->msgId, 'manual delivery ACK MsgID');
+$client->close();
+finishBindServer($serverPid, 'manual downlink ACK server');
+
+echo "testing automatic downlink ACK...\n";
+[$serverPid, $connector] = startBindServer('downlink_auto');
+$client = new GatewayClient(new ClientConfig(
+    address: 'socket-pair',
+    clientId: 'claimed-client',
+    deviceId: 'device-1',
+    token: 'token-1',
+    connector: $connector,
+));
+$client->connect();
+$handled = [];
+$client->run(
+    static function (Packet $packet) use (&$handled): void {
+        $handled[] = $packet->messageId;
+    },
+    maxMessages: 1,
+);
+assertSame(['auto-1'], $handled, 'automatic downlink handler calls');
+$client->close();
+finishBindServer($serverPid, 'automatic downlink ACK server');
+
+echo "testing rejected automatic downlink ACK...\n";
+[$serverPid, $connector] = startBindServer('downlink_ack_rejected');
+$client = new GatewayClient(new ClientConfig(
+    address: 'socket-pair',
+    clientId: 'claimed-client',
+    deviceId: 'device-1',
+    token: 'token-1',
+    connector: $connector,
+));
+$client->connect();
+$reported = [];
+$client->run(
+    static function (): void {
+    },
+    onError: static function (DownlinkException $error) use (&$reported): void {
+        $reported[] = $error;
+    },
+    maxMessages: 1,
+);
+assertSame(1, count($reported), 'rejected automatic ACK error count');
+assertSame(ClientException::AUTO_ACK_FAILED, $reported[0]->kind, 'rejected automatic ACK error kind');
+assertSame('ack', $reported[0]->operation, 'rejected automatic ACK operation');
+assertSame(true, $client->ready(), 'client remains ready after rejected delivery ACK');
+$client->close();
+finishBindServer($serverPid, 'rejected automatic downlink ACK server');
+
+echo "testing duplicate downlink suppression...\n";
+[$serverPid, $connector] = startBindServer('downlink_duplicate');
+$client = new GatewayClient(new ClientConfig(
+    address: 'socket-pair',
+    clientId: 'claimed-client',
+    deviceId: 'device-1',
+    token: 'token-1',
+    connector: $connector,
+    downlinkDedupCapacity: 2,
+));
+$client->connect();
+$handledCount = 0;
+$client->run(
+    static function () use (&$handledCount): void {
+        $handledCount++;
+    },
+    maxMessages: 2,
+);
+assertSame(1, $handledCount, 'duplicate downlink handler call count');
+$client->close();
+finishBindServer($serverPid, 'duplicate downlink server');
+
+echo "testing failed downlink handler...\n";
+[$serverPid, $connector] = startBindServer('downlink_handler_failed');
+$client = new GatewayClient(new ClientConfig(
+    address: 'socket-pair',
+    clientId: 'claimed-client',
+    deviceId: 'device-1',
+    token: 'token-1',
+    connector: $connector,
+));
+$client->connect();
+$reported = [];
+$client->run(
+    static function (): void {
+        throw new RuntimeException('database write failed');
+    },
+    onError: static function (DownlinkException $error) use (&$reported): void {
+        $reported[] = $error;
+    },
+    maxMessages: 1,
+);
+assertSame(1, count($reported), 'failed handler error count');
+assertSame(ClientException::HANDLER_FAILED, $reported[0]->kind, 'failed handler error kind');
+assertSame('handle', $reported[0]->operation, 'failed handler operation');
+assertSame('handler-failed-1', $reported[0]->messageId, 'failed handler message ID');
+$client->close();
+finishBindServer($serverPid, 'failed downlink handler server');
+
+echo "testing invalid manual downlink ACK...\n";
+[$serverPid, $connector] = startBindServer('downlink_invalid');
+$client = new GatewayClient(new ClientConfig(
+    address: 'socket-pair',
+    clientId: 'claimed-client',
+    deviceId: 'device-1',
+    token: 'token-1',
+    connector: $connector,
+));
+$client->connect();
+$invalidDownlink = $client->receive(1.0);
+assertClientError(
+    ClientException::INVALID_DOWNLINK,
+    static fn () => $client->acknowledgeDownlink($invalidDownlink),
+    'invalid downlink ACK target',
+);
+$client->close();
+finishBindServer($serverPid, 'invalid downlink server');
 
 $client = new GatewayClient(new ClientConfig(
     address: 'not-connected',
@@ -592,7 +767,100 @@ function serveBind(mixed $connection, string $mode): void
         }
     }
 
+    if ($mode === 'receive_timeout') {
+        usleep(200_000);
+    }
+
+    if (str_starts_with($mode, 'downlink_')) {
+        $messageId = match ($mode) {
+            'downlink_manual' => 'manual-1',
+            'downlink_auto' => 'auto-1',
+            'downlink_ack_rejected' => 'ack-rejected-1',
+            'downlink_duplicate' => 'duplicate-1',
+            'downlink_handler_failed' => 'handler-failed-1',
+            'downlink_invalid' => 'invalid-1',
+            default => throw new RuntimeException("unknown downlink mode {$mode}"),
+        };
+        $ackRequired = $mode !== 'downlink_invalid';
+        $downlink = testDownlink($messageId, $ackRequired);
+        writeServerPacket($connection, $downlink);
+
+        if ($mode === 'downlink_handler_failed') {
+            assertNoServerPacket($connection);
+        } elseif ($mode !== 'downlink_invalid') {
+            readAndRespondToDeliveryAck(
+                $connection,
+                $parser,
+                $downlink,
+                $mode === 'downlink_ack_rejected' ? Ack::REJECTED : Ack::ACCEPTED,
+            );
+            if ($mode === 'downlink_duplicate') {
+                writeServerPacket($connection, $downlink);
+                readAndRespondToDeliveryAck($connection, $parser, $downlink);
+            }
+        }
+    }
+
     waitForClientClose($connection);
+}
+
+function testDownlink(string $messageId, bool $ackRequired = true): Packet
+{
+    return new Packet(
+        msgId: 2001,
+        body: match ($messageId) {
+            'manual-1' => 'manual-downlink',
+            default => "body-{$messageId}",
+        },
+        flags: $ackRequired ? Packet::FLAG_ACK_REQUIRED : 0,
+        sequence: '99',
+        timestamp: (string) (int) floor(microtime(true) * 1000),
+        clientId: 'canonical-client',
+        deviceId: 'device-1',
+        sessionId: 'php-session-1',
+        messageId: $messageId,
+        traceId: "trace-{$messageId}",
+    );
+}
+
+/** @param resource $connection */
+function readAndRespondToDeliveryAck(
+    mixed $connection,
+    FrameParser $parser,
+    Packet $downlink,
+    string $code = Ack::ACCEPTED,
+): void
+{
+    $packet = readServerPacket($connection, $parser);
+    if (
+        $packet->msgId !== Packet::MSG_ID_DOWNLINK_ACK
+        || ($packet->flags & Packet::FLAG_ACK_REQUIRED) === 0
+        || !str_starts_with($packet->messageId, 'zc-dack-')
+        || $packet->messageId === $downlink->messageId
+        || $packet->traceId !== $downlink->traceId
+        || $packet->clientId !== 'canonical-client'
+        || $packet->deviceId !== 'device-1'
+        || $packet->sessionId !== 'php-session-1'
+        || $packet->token !== 'token-1'
+    ) {
+        throw new RuntimeException('invalid delivery ACK packet');
+    }
+    $deliveryAck = DeliveryAck::fromPacket($packet);
+    if ($deliveryAck->code !== DeliveryAck::DELIVERED || $deliveryAck->messageId !== $downlink->messageId) {
+        throw new RuntimeException('invalid delivery ACK body');
+    }
+    $reason = $code === Ack::ACCEPTED ? '' : 'delivery ACK rejected for test';
+    writeServerAck($connection, $packet, $code, $reason, 'php-session-1');
+}
+
+/** @param resource $connection */
+function assertNoServerPacket(mixed $connection): void
+{
+    stream_set_timeout($connection, 0, 200_000);
+    $chunk = fread($connection, 8192);
+    if (is_string($chunk) && $chunk !== '') {
+        throw new RuntimeException('handler failure unexpectedly sent a delivery ACK');
+    }
 }
 
 /** @param resource $connection */
