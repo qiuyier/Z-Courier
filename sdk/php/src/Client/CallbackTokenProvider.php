@@ -8,8 +8,10 @@ use Closure;
 
 final readonly class CallbackTokenProvider implements TokenProvider
 {
+    /** @var Closure(): mixed */
     private Closure $callback;
 
+    /** @param callable(): mixed $callback */
     public function __construct(callable $callback)
     {
         $this->callback = Closure::fromCallable($callback);

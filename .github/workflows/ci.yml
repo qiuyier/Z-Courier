@@ -45,6 +45,12 @@ jobs:
       - name: Lint PHP SDK
         run: find sdk/php -name '*.php' -print0 | xargs -0 -n1 php -l
 
+      - name: Install PHP SDK development tools
+        run: composer --working-dir=sdk/php install --no-interaction --prefer-dist
+
+      - name: Analyse PHP SDK
+        run: composer --working-dir=sdk/php analyse
+
       - name: Validate shell scripts
         run: bash -n scripts/*.sh
 

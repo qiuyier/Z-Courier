@@ -51,6 +51,8 @@ semantic versioning after the first public MVP tag.
 - Live PHP SDK gateway E2E coverage for bind, NSQ-routed upstream ACK, reliable
   downlink delivery ACK, connection replacement, fresh-session reconnect, and
   continued bidirectional traffic, with PHP 8.2 checks in GitHub Actions.
+- Maximum-level PHPStan analysis for the PHP 8.2 SDK source, enforced in CI
+  without an ignore baseline.
 
 ### Changed
 

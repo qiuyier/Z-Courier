@@ -199,6 +199,15 @@ With Composer installed, the equivalent command is:
 composer --working-dir=sdk/php test
 ```
 
+Run maximum-level PHPStan analysis against the public SDK source:
+
+```bash
+composer --working-dir=sdk/php install
+composer --working-dir=sdk/php analyse
+```
+
+The analysis targets PHP 8.2 and does not use an ignore baseline.
+
 Run the live-gateway verifier from the repository root. It starts the existing
 local integration stack and checks bind, upstream ACK, automatic downlink ACK,
 connection replacement, reconnect with a fresh SessionID, and continued
