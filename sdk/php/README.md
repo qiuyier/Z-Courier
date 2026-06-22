@@ -62,6 +62,7 @@ the canonical identity accepted by the gateway:
 
 use ZCourier\Client\Client;
 use ZCourier\Client\Config;
+use ZCourier\Client\SendRequest;
 
 $client = new Client(new Config(
     address: '127.0.0.1:8999',
@@ -73,6 +74,13 @@ $client = new Client(new Config(
 try {
     $binding = $client->connect();
     printf("connected session=%s\n", $binding->sessionId);
+
+    $result = $client->send(new SendRequest(
+        msgId: 2001,
+        body: '{"action":"ping"}',
+        ackRequired: true,
+    ));
+    printf("accepted message=%s\n", $result->messageId);
 } finally {
     $client->close();
 }
@@ -82,9 +90,17 @@ Use `CallbackTokenProvider` when each connection attempt must fetch or refresh
 credentials. `ClientException::$kind` provides stable error categories, while
 `BindException` also exposes the gateway ACK code and reason.
 
-This stage covers connection, AUTH/BIND, state observation, timeout handling,
-and safe idempotent close. Business sends, downlink callbacks, and reconnect
-are added in the following V4.3 stages.
+`send()` fills the canonical client, device, session, token, sequence,
+timestamp, MessageID, and TraceID fields. An empty MessageID is generated with
+the `zc-msg-` prefix. Setting either `ackRequired` or
+`Packet::FLAG_ACK_REQUIRED` waits for the matching ACK and returns it in
+`SendResult`. Rejected ACKs throw `AckException`; timeout and malformed ACK
+errors use stable `ClientException::$kind` values.
+
+The blocking client serializes sends. Packets arriving while an ACK is pending
+are retained in a bounded inbound queue rather than mistaken for the ACK.
+Receiving and acknowledging those downlink packets, callback dispatch, and
+automatic reconnect are added in the following V4.3 stages.
 
 ## Verify
 

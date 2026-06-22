@@ -7,7 +7,9 @@ require __DIR__ . '/bootstrap.php';
 use ZCourier\Client\Client as GatewayClient;
 use ZCourier\Client\Config as ClientConfig;
 use ZCourier\Client\Connector;
+use ZCourier\Client\SendRequest;
 use ZCourier\Client\State;
+use ZCourier\Exception\AckException;
 use ZCourier\Exception\BindException;
 use ZCourier\Exception\ClientException;
 use ZCourier\Exception\ProtocolException;
@@ -199,6 +201,137 @@ $client = new GatewayClient(new ClientConfig(
 assertClientError(ClientException::BIND_TIMEOUT, static fn () => $client->connect(), 'bind timeout');
 finishBindServer($serverPid, 'timeout bind server');
 
+echo "testing business send ACK...\n";
+[$serverPid, $connector] = startBindServer('send_accepted');
+$client = new GatewayClient(new ClientConfig(
+    address: 'socket-pair',
+    clientId: 'claimed-client',
+    deviceId: 'device-1',
+    token: 'token-1',
+    connector: $connector,
+));
+$client->connect();
+assertClientError(
+    ClientException::RESERVED_MSG_ID,
+    static fn () => $client->send(new SendRequest(Packet::MSG_ID_BIND)),
+    'reserved business MsgID',
+);
+$result = $client->send(new SendRequest(
+    msgId: 2001,
+    body: 'send_accepted',
+    messageId: 'send_accepted',
+    flags: Packet::FLAG_ACK_REQUIRED,
+));
+assertSame('send_accepted', $result->messageId, 'send result message ID');
+assertSame(Ack::ACCEPTED, $result->ack?->code, 'send result ACK code');
+assertSame(2001, $result->ack?->msgId, 'send result ACK MsgID');
+$client->close();
+finishBindServer($serverPid, 'business ACK server');
+
+echo "testing send without ACK...\n";
+[$serverPid, $connector] = startBindServer('send_no_ack');
+$client = new GatewayClient(new ClientConfig(
+    address: 'socket-pair',
+    clientId: 'claimed-client',
+    deviceId: 'device-1',
+    token: 'token-1',
+    connector: $connector,
+));
+$client->connect();
+$result = $client->send(new SendRequest(
+    msgId: 2001,
+    body: 'send_no_ack',
+));
+assertSame(null, $result->ack, 'send without ACK result');
+assertSame(true, str_starts_with($result->messageId, 'zc-msg-'), 'generated message ID prefix');
+$client->close();
+finishBindServer($serverPid, 'no ACK server');
+
+echo "testing downlink before business ACK...\n";
+[$serverPid, $connector] = startBindServer('send_downlink_before_ack');
+$client = new GatewayClient(new ClientConfig(
+    address: 'socket-pair',
+    clientId: 'claimed-client',
+    deviceId: 'device-1',
+    token: 'token-1',
+    connector: $connector,
+));
+$client->connect();
+$result = $client->send(new SendRequest(
+    msgId: 2001,
+    body: 'send_downlink_before_ack',
+    messageId: 'send_downlink_before_ack',
+    ackRequired: true,
+));
+assertSame(Ack::ACCEPTED, $result->ack?->code, 'ACK after interleaved downlink');
+$client->close();
+finishBindServer($serverPid, 'interleaved downlink server');
+
+echo "testing rejected business ACK...\n";
+[$serverPid, $connector] = startBindServer('send_rejected');
+$client = new GatewayClient(new ClientConfig(
+    address: 'socket-pair',
+    clientId: 'claimed-client',
+    deviceId: 'device-1',
+    token: 'token-1',
+    connector: $connector,
+));
+$client->connect();
+$ackError = assertClientError(
+    ClientException::ACK_REJECTED,
+    static fn () => $client->send(new SendRequest(
+        msgId: 2001,
+        body: 'send_rejected',
+        messageId: 'send_rejected',
+        ackRequired: true,
+    )),
+    'rejected business ACK',
+);
+assertSame(true, $ackError instanceof AckException, 'rejected ACK error type');
+assertSame('route overloaded', $ackError instanceof AckException ? $ackError->ack->reason : '', 'rejected ACK reason');
+assertSame(true, $client->ready(), 'client remains ready after rejected ACK');
+assertSame(true, $client->lastError() === null, 'rejected ACK is not a connection failure');
+$client->close();
+finishBindServer($serverPid, 'rejected business ACK server');
+
+echo "testing business ACK timeout...\n";
+[$serverPid, $connector] = startBindServer('send_timeout');
+$client = new GatewayClient(new ClientConfig(
+    address: 'socket-pair',
+    clientId: 'claimed-client',
+    deviceId: 'device-1',
+    token: 'token-1',
+    connector: $connector,
+    ackTimeout: 0.05,
+));
+$client->connect();
+assertClientError(
+    ClientException::ACK_TIMEOUT,
+    static fn () => $client->send(new SendRequest(
+        msgId: 2001,
+        body: 'send_timeout',
+        messageId: 'send_timeout',
+        ackRequired: true,
+    )),
+    'business ACK timeout',
+);
+assertSame(true, $client->ready(), 'client remains ready after ACK timeout');
+$client->close();
+finishBindServer($serverPid, 'business ACK timeout server');
+
+$client = new GatewayClient(new ClientConfig(
+    address: 'not-connected',
+    clientId: 'claimed-client',
+    deviceId: 'device-1',
+    token: 'token-1',
+));
+assertClientError(
+    ClientException::NOT_READY,
+    static fn () => $client->send(new SendRequest(2001)),
+    'send before connect',
+);
+$client->close();
+
 echo "PHP SDK tests passed: {$assertions} assertions\n";
 
 /** @return array<string, mixed> */
@@ -322,7 +455,7 @@ function assertProtocolError(string $expectedKind, callable $callback, string $l
     throw new RuntimeException("{$label}: expected protocol error {$expectedKind}");
 }
 
-function assertClientError(string $expectedKind, callable $callback, string $label): void
+function assertClientError(string $expectedKind, callable $callback, string $label): ClientException
 {
     global $assertions;
     try {
@@ -336,7 +469,7 @@ function assertClientError(string $expectedKind, callable $callback, string $lab
                 $exception,
             );
         }
-        return;
+        return $exception;
     } catch (Throwable $throwable) {
         throw new RuntimeException("{$label}: unexpected exception " . $throwable::class, 0, $throwable);
     }
@@ -386,17 +519,7 @@ function serveBind(mixed $connection, string $mode): void
 {
     stream_set_timeout($connection, 5);
     $parser = new FrameParser();
-    $bind = null;
-    while ($bind === null) {
-        $chunk = fread($connection, 8192);
-        if ($chunk === false || $chunk === '') {
-            throw new RuntimeException('connection closed before bind');
-        }
-        $packets = $parser->push($chunk);
-        if ($packets !== []) {
-            $bind = $packets[0];
-        }
-    }
+    $bind = readServerPacket($connection, $parser);
     if (
         $bind->msgId !== Packet::MSG_ID_BIND
         || $bind->flags !== Packet::FLAG_ACK_REQUIRED
@@ -416,26 +539,115 @@ function serveBind(mixed $connection, string $mode): void
     $code = $mode === 'unauthorized' ? Ack::UNAUTHORIZED : Ack::ACCEPTED;
     $sessionId = $mode === 'missing_session' ? '' : 'php-session-1';
     $reason = $mode === 'unauthorized' ? 'invalid test token' : '';
-    $ack = new Ack($code, Packet::MSG_ID_BIND, $bind->messageId, $reason);
-    $packet = new Packet(
+    writeServerAck($connection, $bind, $code, $reason, $sessionId);
+
+    if (str_starts_with($mode, 'send_')) {
+        $business = readServerPacket($connection, $parser);
+        if (
+            $business->msgId !== 2001
+            || $business->body !== $mode
+            || $business->clientId !== 'canonical-client'
+            || $business->deviceId !== 'device-1'
+            || $business->sessionId !== 'php-session-1'
+            || $business->token !== 'token-1'
+            || $business->sequence !== '2'
+        ) {
+            throw new RuntimeException('invalid business packet');
+        }
+        if ($mode === 'send_no_ack') {
+            if (!str_starts_with($business->messageId, 'zc-msg-') || $business->traceId !== $business->messageId) {
+                throw new RuntimeException('invalid generated message identity');
+            }
+        } elseif ($business->messageId !== $mode || $business->traceId !== $mode) {
+            throw new RuntimeException('invalid explicit message identity');
+        }
+        $ackRequired = $mode !== 'send_no_ack';
+        if ((($business->flags & Packet::FLAG_ACK_REQUIRED) !== 0) !== $ackRequired) {
+            throw new RuntimeException('invalid business ACK-required flag');
+        }
+
+        if ($mode === 'send_timeout') {
+            usleep(500_000);
+            return;
+        }
+        if ($mode === 'send_downlink_before_ack') {
+            $downlink = new Packet(
+                msgId: 2002,
+                body: 'interleaved-downlink',
+                flags: Packet::FLAG_ACK_REQUIRED,
+                sequence: '99',
+                timestamp: (string) (int) floor(microtime(true) * 1000),
+                clientId: 'canonical-client',
+                deviceId: 'device-1',
+                sessionId: 'php-session-1',
+                messageId: 'downlink-before-ack',
+                traceId: 'downlink-before-ack',
+            );
+            writeServerPacket($connection, $downlink);
+        }
+        if ($mode === 'send_rejected') {
+            writeServerAck($connection, $business, Ack::REJECTED, 'route overloaded', 'php-session-1');
+        } elseif ($ackRequired) {
+            writeServerAck($connection, $business, Ack::ACCEPTED, '', 'php-session-1');
+        }
+    }
+
+    waitForClientClose($connection);
+}
+
+/** @param resource $connection */
+function readServerPacket(mixed $connection, FrameParser $parser): Packet
+{
+    while (true) {
+        $chunk = fread($connection, 8192);
+        if ($chunk === false || $chunk === '') {
+            throw new RuntimeException('connection closed before packet arrived');
+        }
+        $packets = $parser->push($chunk);
+        if ($packets !== []) {
+            return $packets[0];
+        }
+    }
+}
+
+/** @param resource $connection */
+function writeServerAck(
+    mixed $connection,
+    Packet $origin,
+    string $code,
+    string $reason,
+    string $sessionId,
+): void {
+    $ack = new Ack($code, $origin->msgId, $origin->messageId, $reason);
+    writeServerPacket($connection, new Packet(
         msgId: Packet::MSG_ID_ACK,
         body: $ack->toJson(),
-        sequence: $bind->sequence,
+        sequence: $origin->sequence,
         timestamp: (string) (int) floor(microtime(true) * 1000),
-        clientId: 'canonical-client',
-        deviceId: $bind->deviceId,
+        clientId: $origin->msgId === Packet::MSG_ID_BIND ? 'canonical-client' : $origin->clientId,
+        deviceId: $origin->deviceId,
         sessionId: $sessionId,
-        messageId: $bind->messageId,
-        traceId: $bind->traceId,
-    );
+        messageId: $origin->messageId,
+        traceId: $origin->traceId,
+    ));
+}
+
+/** @param resource $connection */
+function writeServerPacket(mixed $connection, Packet $packet): void
+{
     $data = FrameCodec::encode($packet);
     while ($data !== '') {
         $written = fwrite($connection, $data);
         if ($written === false || $written === 0) {
-            throw new RuntimeException('write bind ACK failed');
+            throw new RuntimeException('write packet failed');
         }
         $data = substr($data, $written);
     }
+}
+
+/** @param resource $connection */
+function waitForClientClose(mixed $connection): void
+{
     while (!feof($connection)) {
         $chunk = fread($connection, 1024);
         if ($chunk === false) {

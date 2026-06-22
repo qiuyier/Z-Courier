@@ -39,6 +39,9 @@ semantic versioning after the first public MVP tag.
   callback token providers, native stream connections, AUTH/BIND negotiation,
   canonical binding identity, stable typed failures, timeouts, and idempotent
   close behavior.
+- PHP business sends with canonical bound identity, generated message and trace
+  identifiers, optional ACK waiting, MessageID correlation, typed rejection and
+  timeout failures, and bounded preservation of interleaved downlink packets.
 
 ### Changed
 

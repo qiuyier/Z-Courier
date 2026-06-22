@@ -23,9 +23,11 @@ final readonly class Config
         public float $connectTimeout = 5.0,
         public float $bindTimeout = 5.0,
         public float $writeTimeout = 5.0,
+        public float $ackTimeout = 5.0,
         public int $maxFramePayloadSize = FrameCodec::DEFAULT_MAX_PAYLOAD_SIZE,
         public int $maxBodySize = Packet::DEFAULT_MAX_BODY_SIZE,
         public int $maxPendingBeforeReady = 128,
+        public int $inboundBuffer = 128,
         public int $readChunkSize = 8192,
     ) {
         if (trim($address) === '' || trim($clientId) === '' || trim($deviceId) === '') {
@@ -40,10 +42,16 @@ final readonly class Config
                 'configure exactly one of token or token provider',
             );
         }
-        if ($connectTimeout <= 0 || $bindTimeout <= 0 || $writeTimeout <= 0) {
+        if ($connectTimeout <= 0 || $bindTimeout <= 0 || $writeTimeout <= 0 || $ackTimeout <= 0) {
             throw new ClientException(ClientException::INVALID_CONFIG, 'timeouts must be greater than zero');
         }
-        if ($maxFramePayloadSize <= 0 || $maxBodySize < 0 || $maxPendingBeforeReady <= 0 || $readChunkSize <= 0) {
+        if (
+            $maxFramePayloadSize <= 0
+            || $maxBodySize < 0
+            || $maxPendingBeforeReady <= 0
+            || $inboundBuffer <= 0
+            || $readChunkSize <= 0
+        ) {
             throw new ClientException(ClientException::INVALID_CONFIG, 'buffer and size limits are invalid');
         }
 

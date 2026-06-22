@@ -18,6 +18,13 @@ class ClientException extends RuntimeException
     public const BIND_REJECTED = 'bind_rejected';
     public const UNEXPECTED_BIND_ACK = 'unexpected_bind_ack';
     public const PENDING_OVERFLOW = 'pending_overflow';
+    public const INBOUND_OVERFLOW = 'inbound_overflow';
+    public const INVALID_REQUEST = 'invalid_request';
+    public const NOT_READY = 'not_ready';
+    public const RESERVED_MSG_ID = 'reserved_msg_id';
+    public const ACK_TIMEOUT = 'ack_timeout';
+    public const ACK_REJECTED = 'ack_rejected';
+    public const UNEXPECTED_ACK = 'unexpected_ack';
     public const IO_ERROR = 'io_error';
 
     public function __construct(
