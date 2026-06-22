@@ -48,6 +48,9 @@ semantic versioning after the first public MVP tag.
 - Opt-in PHP reconnect with bounded exponential backoff and jitter, fresh token
   and AUTH/BIND per attempt, deterministic failure classification, interruptible
   shutdown, receive-loop resumption, and no implicit replay of failed sends.
+- Live PHP SDK gateway E2E coverage for bind, NSQ-routed upstream ACK, reliable
+  downlink delivery ACK, connection replacement, fresh-session reconnect, and
+  continued bidirectional traffic, with PHP 8.2 checks in GitHub Actions.
 
 ### Changed
 

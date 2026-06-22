@@ -30,8 +30,20 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Test
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+          coverage: none
+
+      - name: Test Go
         run: go test ./...
+
+      - name: Test PHP SDK
+        run: php -d error_reporting=E_ALL sdk/php/tests/run.php
+
+      - name: Lint PHP SDK
+        run: find sdk/php -name '*.php' -print0 | xargs -0 -n1 php -l
 
       - name: Validate shell scripts
         run: bash -n scripts/*.sh
@@ -61,7 +73,13 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Run local and Go SDK integration verifiers
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+          coverage: none
+
+      - name: Run local, Go SDK, and PHP SDK integration verifiers
         run: bash scripts/e2e.sh
 
       - name: Run local cluster integration verifier

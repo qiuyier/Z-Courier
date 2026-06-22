@@ -198,3 +198,12 @@ With Composer installed, the equivalent command is:
 ```bash
 composer --working-dir=sdk/php test
 ```
+
+Run the live-gateway verifier from the repository root. It starts the existing
+local integration stack and checks bind, upstream ACK, automatic downlink ACK,
+connection replacement, reconnect with a fresh SessionID, and continued
+traffic:
+
+```bash
+bash scripts/php_sdk_e2e.sh
+```

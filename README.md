@@ -65,6 +65,15 @@ validates:
 - Prometheus metrics exposure
 - public Go SDK bind, upstream ACK, downlink automatic ACK, reconnect, and
   continued delivery after reconnect
+- public PHP SDK bind, upstream ACK, downlink automatic ACK, reconnect with a
+  fresh SessionID, and continued delivery after reconnect
+
+Run only the PHP SDK live-gateway verifier with the same local integration
+environment:
+
+```bash
+bash scripts/php_sdk_e2e.sh
+```
 
 Run the two-node cluster verifier:
 
@@ -167,6 +176,9 @@ Run the PHP protocol conformance suite without third-party dependencies:
 ```bash
 php sdk/php/tests/run.php
 ```
+
+The single-node E2E command also runs the public Go and PHP SDK verifiers
+against the same live gateway.
 
 Run a small upstream load test against a local gateway:
 
