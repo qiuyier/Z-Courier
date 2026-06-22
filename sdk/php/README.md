@@ -149,7 +149,41 @@ not provide durable exactly-once processing. Important business handlers must
 also enforce a database uniqueness constraint or equivalent persistent
 idempotency check on `MessageID` before sending the delivered ACK.
 
-Automatic reconnect is added in the following V4.3 stage.
+### Automatic Reconnect
+
+Reconnect is opt-in. Configure bounded exponential backoff for long-running
+workers:
+
+```php
+use ZCourier\Client\ReconnectConfig;
+
+$config = new Config(
+    address: '127.0.0.1:8999',
+    clientId: 'client-1',
+    deviceId: 'device-1',
+    tokenProvider: $tokenProvider,
+    reconnect: new ReconnectConfig(
+        initialDelay: 0.25,
+        maxDelay: 30.0,
+        multiplier: 2.0,
+        jitter: 0.2,
+        maxAttempts: 10,
+    ),
+);
+```
+
+`maxAttempts: 0` means no attempt limit. Each attempt opens a new stream,
+fetches a fresh token, and performs a new AUTH/BIND with a new SessionID.
+Authentication rejection, bind rejection, and malformed bind ACKs stop retrying
+immediately. Exhaustion throws `ReconnectException`, which exposes the number
+of attempts and uses the stable `reconnect_exhausted` error kind.
+
+Because this is a blocking PHP client, reconnect runs synchronously in the
+method that detects the connection failure. The failed `send()`, `receive()`,
+or delivery ACK still throws: its result is unknown and the SDK never replays
+it. When recovery succeeds the client is already Ready; `run()` consumes the
+transport error internally and resumes its receive loop. `close()` interrupts
+backoff and prevents another connection attempt.
 
 ## Verify
 

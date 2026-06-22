@@ -237,11 +237,13 @@ Status: complete.
 
 ### V4.3 PHP Protocol And Client SDK
 
-Status: in progress. The protocol foundation, shared fixture conformance,
-blocking TCP AUTH/BIND lifecycle, business sends, ACK correlation, raw
-downlink receive, automatic and manual delivery ACK, callback error isolation,
-and bounded process-local de-duplication are complete. Reconnect remains
-pending.
+Status: complete. The protocol foundation, shared fixture conformance, blocking
+TCP AUTH/BIND lifecycle, business sends, ACK correlation, raw downlink receive,
+automatic and manual delivery ACK, callback error isolation, bounded
+process-local de-duplication, and opt-in synchronous reconnect are complete.
+Reconnect refreshes credentials and binding state, supports bounded exponential
+backoff with jitter, stops on deterministic bind failures, and never implicitly
+replays a failed business send.
 
 - Add Composer metadata, protocol codec, frame parser, and typed exceptions.
 - Implement the blocking high-level client and callback model.

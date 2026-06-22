@@ -10,6 +10,7 @@ use ZCourier\Exception\BindException;
 use ZCourier\Exception\ClientException;
 use ZCourier\Exception\DownlinkException;
 use ZCourier\Exception\ProtocolException;
+use ZCourier\Exception\ReconnectException;
 use ZCourier\Protocol\Ack;
 use ZCourier\Protocol\DeliveryAck;
 use ZCourier\Protocol\FrameCodec;
@@ -192,11 +193,10 @@ final class Client
                 'invalid frame while waiting for ACK: ' . $error->getMessage(),
                 $error,
             );
-            $this->disconnect($mapped);
-            throw $mapped;
+            throw $this->recoverConnection($mapped);
         } catch (ClientException $error) {
             if (in_array($error->kind, [ClientException::IO_ERROR, ClientException::INBOUND_OVERFLOW], true)) {
-                $this->disconnect($error);
+                throw $this->recoverConnection($error);
             }
             throw $error;
         }
@@ -231,11 +231,10 @@ final class Client
                 'invalid frame while receiving a downlink: ' . $error->getMessage(),
                 $error,
             );
-            $this->disconnect($mapped);
-            throw $mapped;
+            throw $this->recoverConnection($mapped);
         } catch (ClientException $error) {
             if (in_array($error->kind, [ClientException::IO_ERROR, ClientException::INBOUND_OVERFLOW], true)) {
-                $this->disconnect($error);
+                throw $this->recoverConnection($error);
             }
             throw $error;
         } finally {
@@ -283,11 +282,10 @@ final class Client
                 'invalid frame while waiting for delivery ACK acceptance: ' . $error->getMessage(),
                 $error,
             );
-            $this->disconnect($mapped);
-            throw $mapped;
+            throw $this->recoverConnection($mapped);
         } catch (ClientException $error) {
             if (in_array($error->kind, [ClientException::IO_ERROR, ClientException::INBOUND_OVERFLOW], true)) {
-                $this->disconnect($error);
+                throw $this->recoverConnection($error);
             }
             throw $error;
         }
@@ -309,7 +307,14 @@ final class Client
 
         $received = 0;
         while ($maxMessages === null || $received < $maxMessages) {
-            $packet = $this->receive();
+            try {
+                $packet = $this->receive();
+            } catch (ClientException $error) {
+                if ($this->ready() && self::isConnectionFailure($error)) {
+                    continue;
+                }
+                throw $error;
+            }
             $received++;
             $target = $this->tryDownlinkTarget($packet);
             if ($target !== null && $this->deduper->contains($target['messageId'])) {
@@ -323,6 +328,9 @@ final class Client
                         $packet,
                         $error,
                     );
+                    if (!$this->ready() && $error instanceof ClientException) {
+                        throw $error;
+                    }
                 }
                 continue;
             }
@@ -353,6 +361,9 @@ final class Client
                     $packet,
                     $error,
                 );
+                if (!$this->ready() && $error instanceof ClientException) {
+                    throw $error;
+                }
             }
         }
     }
@@ -667,6 +678,109 @@ final class Client
         $this->parser->reset();
         $this->lastError = $error;
         $this->state = State::Disconnected;
+    }
+
+    private function recoverConnection(ClientException $failure): ClientException
+    {
+        $this->disconnect($failure);
+        if ($this->config->reconnect === null) {
+            return $failure;
+        }
+
+        try {
+            $this->reconnect($failure);
+            return $failure;
+        } catch (ClientException $error) {
+            return $error;
+        }
+    }
+
+    private function reconnect(ClientException $initialFailure): Binding
+    {
+        $config = $this->config->reconnect;
+        if ($config === null) {
+            throw $initialFailure;
+        }
+
+        $lastFailure = $initialFailure;
+        for ($attempt = 1; ; $attempt++) {
+            if ($config->maxAttempts > 0 && $attempt > $config->maxAttempts) {
+                $error = new ReconnectException($config->maxAttempts, $lastFailure);
+                $this->finishReconnectFailure($error);
+                throw $error;
+            }
+
+            $this->state = State::ReconnectWait;
+            $this->lastError = $lastFailure;
+            $this->waitReconnectDelay($this->reconnectDelay($attempt, $config));
+
+            try {
+                return $this->connect();
+            } catch (ClientException $error) {
+                $lastFailure = $error;
+                if (!self::isRetryableReconnectError($error)) {
+                    $this->finishReconnectFailure($error);
+                    throw $error;
+                }
+            }
+        }
+    }
+
+    private function waitReconnectDelay(float $delay): void
+    {
+        $remaining = max(0.0, $delay);
+        while ($remaining > 0) {
+            if ($this->state === State::Closed || $this->state === State::Closing) {
+                throw new ClientException(ClientException::CLOSED, 'client is closed');
+            }
+            $slice = min(0.1, $remaining);
+            usleep((int) ceil($slice * 1_000_000));
+            $remaining -= $slice;
+        }
+        if ($this->state === State::Closed || $this->state === State::Closing) {
+            throw new ClientException(ClientException::CLOSED, 'client is closed');
+        }
+    }
+
+    private function reconnectDelay(int $attempt, ReconnectConfig $config): float
+    {
+        $delay = $config->initialDelay;
+        for ($current = 1; $current < $attempt && $delay < $config->maxDelay; $current++) {
+            $delay *= $config->multiplier;
+            if (!is_finite($delay) || $delay > $config->maxDelay) {
+                $delay = $config->maxDelay;
+            }
+        }
+        if ($config->jitter > 0) {
+            $random = mt_rand() / mt_getrandmax();
+            $delay *= 1 + ((2 * $random) - 1) * $config->jitter;
+        }
+        return min(max(0.0, $delay), $config->maxDelay);
+    }
+
+    private function finishReconnectFailure(ClientException $error): void
+    {
+        $this->lastError = $error;
+        $this->binding = null;
+        if ($this->state !== State::Closed && $this->state !== State::Closing) {
+            $this->state = State::Disconnected;
+        }
+    }
+
+    private static function isConnectionFailure(ClientException $error): bool
+    {
+        return in_array($error->kind, [ClientException::IO_ERROR, ClientException::INBOUND_OVERFLOW], true);
+    }
+
+    private static function isRetryableReconnectError(ClientException $error): bool
+    {
+        return !in_array($error->kind, [
+            ClientException::CLOSED,
+            ClientException::INVALID_CONFIG,
+            ClientException::AUTHENTICATION_FAILED,
+            ClientException::BIND_REJECTED,
+            ClientException::UNEXPECTED_BIND_ACK,
+        ], true);
     }
 
     private function mapConnectError(Throwable $error): ClientException

@@ -45,6 +45,9 @@ semantic versioning after the first public MVP tag.
 - PHP downlink receive and callback APIs with automatic or manual `MsgID=2`
   delivery ACK, callback failure isolation, receive timeouts that preserve the
   connection, and bounded process-local LRU de-duplication by MessageID.
+- Opt-in PHP reconnect with bounded exponential backoff and jitter, fresh token
+  and AUTH/BIND per attempt, deterministic failure classification, interruptible
+  shutdown, receive-loop resumption, and no implicit replay of failed sends.
 
 ### Changed
 

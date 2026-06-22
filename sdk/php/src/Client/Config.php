@@ -30,6 +30,7 @@ final readonly class Config
         public int $inboundBuffer = 128,
         public int $readChunkSize = 8192,
         public int $downlinkDedupCapacity = 10000,
+        public ?ReconnectConfig $reconnect = null,
     ) {
         if (trim($address) === '' || trim($clientId) === '' || trim($deviceId) === '') {
             throw new ClientException(

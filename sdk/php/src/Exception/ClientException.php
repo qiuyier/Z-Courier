@@ -29,6 +29,7 @@ class ClientException extends RuntimeException
     public const INVALID_DOWNLINK = 'invalid_downlink';
     public const HANDLER_FAILED = 'handler_failed';
     public const AUTO_ACK_FAILED = 'auto_ack_failed';
+    public const RECONNECT_EXHAUSTED = 'reconnect_exhausted';
     public const IO_ERROR = 'io_error';
 
     public function __construct(

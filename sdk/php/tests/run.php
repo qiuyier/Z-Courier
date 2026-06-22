@@ -5,9 +5,11 @@ declare(strict_types=1);
 require __DIR__ . '/bootstrap.php';
 
 use ZCourier\Client\Client as GatewayClient;
+use ZCourier\Client\CallbackTokenProvider;
 use ZCourier\Client\Config as ClientConfig;
 use ZCourier\Client\Connector;
 use ZCourier\Client\MessageDeduper;
+use ZCourier\Client\ReconnectConfig;
 use ZCourier\Client\SendRequest;
 use ZCourier\Client\State;
 use ZCourier\Exception\AckException;
@@ -15,6 +17,7 @@ use ZCourier\Exception\BindException;
 use ZCourier\Exception\ClientException;
 use ZCourier\Exception\DownlinkException;
 use ZCourier\Exception\ProtocolException;
+use ZCourier\Exception\ReconnectException;
 use ZCourier\Protocol\Ack;
 use ZCourier\Protocol\Codec;
 use ZCourier\Protocol\DeliveryAck;
@@ -34,6 +37,29 @@ final class PairConnector implements Connector
         $stream = $this->stream;
         $this->stream = null;
         return $stream;
+    }
+}
+
+final class SequenceConnector implements Connector
+{
+    public int $calls = 0;
+
+    /** @param list<mixed> $connections */
+    public function __construct(private array $connections)
+    {
+    }
+
+    public function connect(string $address, float $timeout): mixed
+    {
+        $index = $this->calls++;
+        if (!array_key_exists($index, $this->connections)) {
+            throw new RuntimeException('no configured connection remains');
+        }
+        $connection = $this->connections[$index];
+        if ($connection instanceof Throwable) {
+            throw $connection;
+        }
+        return $connection;
     }
 }
 
@@ -494,6 +520,181 @@ assertClientError(
 $client->close();
 finishBindServer($serverPid, 'invalid downlink server');
 
+assertClientError(
+    ClientException::INVALID_CONFIG,
+    static fn () => new ReconnectConfig(initialDelay: 2.0, maxDelay: 1.0),
+    'invalid reconnect delay range',
+);
+
+echo "testing receive loop reconnect...\n";
+[$serverPid, $connector] = startReconnectServer('receive_resume');
+$tokenCalls = 0;
+$client = new GatewayClient(new ClientConfig(
+    address: 'socket-sequence',
+    clientId: 'claimed-client',
+    deviceId: 'device-1',
+    tokenProvider: new CallbackTokenProvider(static function () use (&$tokenCalls): string {
+        $tokenCalls++;
+        return "token-{$tokenCalls}";
+    }),
+    connector: $connector,
+    reconnect: new ReconnectConfig(
+        initialDelay: 0.001,
+        maxDelay: 0.002,
+        multiplier: 2.0,
+        jitter: 0.0,
+        maxAttempts: 3,
+    ),
+));
+$firstBinding = $client->connect();
+assertSame('php-reconnect-session-1', $firstBinding->sessionId, 'initial reconnect test session');
+$reconnectedMessages = [];
+$client->run(
+    static function (Packet $packet) use (&$reconnectedMessages): void {
+        $reconnectedMessages[] = $packet->messageId;
+    },
+    maxMessages: 2,
+);
+assertSame(['reconnect-1', 'reconnect-2'], $reconnectedMessages, 'messages across reconnect');
+assertSame('php-reconnect-session-2', $client->binding()?->sessionId, 'binding after reconnect');
+assertSame(2, $tokenCalls, 'token provider calls across reconnect');
+assertSame(2, $connector->calls, 'connector calls across reconnect');
+assertSame(true, $client->ready(), 'client ready after receive reconnect');
+$client->close();
+finishBindServer($serverPid, 'receive reconnect server');
+
+echo "testing failed send is not replayed...\n";
+[$serverPid, $connector] = startReconnectServer('send_no_replay');
+$tokenCalls = 0;
+$client = new GatewayClient(new ClientConfig(
+    address: 'socket-sequence',
+    clientId: 'claimed-client',
+    deviceId: 'device-1',
+    tokenProvider: new CallbackTokenProvider(static function () use (&$tokenCalls): string {
+        $tokenCalls++;
+        return "token-{$tokenCalls}";
+    }),
+    connector: $connector,
+    ackTimeout: 0.5,
+    reconnect: new ReconnectConfig(
+        initialDelay: 0.001,
+        maxDelay: 0.001,
+        jitter: 0.0,
+        maxAttempts: 2,
+    ),
+));
+$client->connect();
+assertClientError(
+    ClientException::IO_ERROR,
+    static fn () => $client->send(new SendRequest(
+        msgId: 2001,
+        body: 'send_no_replay',
+        messageId: 'send-no-replay',
+        ackRequired: true,
+    )),
+    'failed send after successful reconnect',
+);
+assertSame(true, $client->ready(), 'client ready after failed send reconnect');
+assertSame('php-reconnect-session-2', $client->binding()?->sessionId, 'send reconnect binding');
+assertSame(2, $tokenCalls, 'send reconnect token calls');
+assertSame(2, $connector->calls, 'send reconnect connector calls');
+$client->close();
+finishBindServer($serverPid, 'send no replay server');
+
+echo "testing reconnect exhaustion...\n";
+[$serverPid, $connector] = startReconnectServer('exhausted');
+$client = new GatewayClient(new ClientConfig(
+    address: 'socket-sequence',
+    clientId: 'claimed-client',
+    deviceId: 'device-1',
+    token: 'token-1',
+    connector: $connector,
+    reconnect: new ReconnectConfig(
+        initialDelay: 0.001,
+        maxDelay: 0.002,
+        jitter: 0.0,
+        maxAttempts: 2,
+    ),
+));
+$client->connect();
+$reconnectError = assertClientError(
+    ClientException::RECONNECT_EXHAUSTED,
+    static fn () => $client->receive(),
+    'reconnect attempts exhausted',
+);
+assertSame(true, $reconnectError instanceof ReconnectException, 'reconnect exhaustion error type');
+assertSame(2, $reconnectError instanceof ReconnectException ? $reconnectError->attempts : 0, 'reconnect attempts');
+assertSame(State::Disconnected, $client->state(), 'state after reconnect exhaustion');
+assertSame($reconnectError, $client->lastError(), 'last error after reconnect exhaustion');
+assertSame(3, $connector->calls, 'connector calls after reconnect exhaustion');
+$client->close();
+finishBindServer($serverPid, 'reconnect exhaustion server');
+
+echo "testing reconnect stops after authentication failure...\n";
+[$serverPid, $connector] = startReconnectServer('authentication_failed');
+$tokenCalls = 0;
+$client = new GatewayClient(new ClientConfig(
+    address: 'socket-sequence',
+    clientId: 'claimed-client',
+    deviceId: 'device-1',
+    tokenProvider: new CallbackTokenProvider(static function () use (&$tokenCalls): string {
+        $tokenCalls++;
+        return "token-{$tokenCalls}";
+    }),
+    connector: $connector,
+    reconnect: new ReconnectConfig(
+        initialDelay: 0.001,
+        maxDelay: 0.002,
+        jitter: 0.0,
+        maxAttempts: 5,
+    ),
+));
+$client->connect();
+assertClientError(
+    ClientException::AUTHENTICATION_FAILED,
+    static fn () => $client->receive(),
+    'authentication failure stops reconnect',
+);
+assertSame(2, $connector->calls, 'connector stops after authentication failure');
+assertSame(2, $tokenCalls, 'token provider stops after authentication failure');
+assertSame(State::Disconnected, $client->state(), 'state after reconnect authentication failure');
+$client->close();
+finishBindServer($serverPid, 'reconnect authentication failure server');
+
+echo "testing close interrupts reconnect wait...\n";
+[$serverPid, $connector] = startReconnectServer('close_interrupt');
+$client = new GatewayClient(new ClientConfig(
+    address: 'socket-sequence',
+    clientId: 'claimed-client',
+    deviceId: 'device-1',
+    token: 'token-1',
+    connector: $connector,
+    reconnect: new ReconnectConfig(
+        initialDelay: 5.0,
+        maxDelay: 5.0,
+        jitter: 0.0,
+        maxAttempts: 1,
+    ),
+));
+$client->connect();
+$previousAsyncSignals = pcntl_async_signals(true);
+$previousAlarmHandler = pcntl_signal_get_handler(SIGALRM);
+pcntl_signal(SIGALRM, static function () use ($client): void {
+    $client->close();
+});
+pcntl_alarm(1);
+assertClientError(
+    ClientException::CLOSED,
+    static fn () => $client->receive(),
+    'close interrupts reconnect wait',
+);
+pcntl_alarm(0);
+pcntl_signal(SIGALRM, $previousAlarmHandler);
+pcntl_async_signals($previousAsyncSignals);
+assertSame(State::Closed, $client->state(), 'state after interrupted reconnect');
+assertSame(1, $connector->calls, 'close prevents another reconnect dial');
+finishBindServer($serverPid, 'close interrupt reconnect server');
+
 $client = new GatewayClient(new ClientConfig(
     address: 'not-connected',
     clientId: 'claimed-client',
@@ -680,6 +881,167 @@ function startBindServer(string $mode): array
     return [$pid, new PairConnector($pair[0])];
 }
 
+/** @return array{int, SequenceConnector} */
+function startReconnectServer(string $mode): array
+{
+    if (!function_exists('pcntl_fork')) {
+        throw new RuntimeException('PHP reconnect tests require the pcntl extension');
+    }
+    $connectionCount = in_array($mode, ['exhausted', 'close_interrupt'], true) ? 1 : 2;
+    $pairs = [];
+    for ($index = 0; $index < $connectionCount; $index++) {
+        $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
+        if ($pair === false) {
+            throw new RuntimeException("cannot create {$mode} reconnect socket pair");
+        }
+        $pairs[] = $pair;
+    }
+
+    $pid = pcntl_fork();
+    if ($pid === -1) {
+        throw new RuntimeException("cannot fork {$mode} reconnect server");
+    }
+    if ($pid === 0) {
+        foreach ($pairs as $pair) {
+            fclose($pair[0]);
+        }
+        try {
+            serveReconnect(array_map(static fn (array $pair): mixed => $pair[1], $pairs), $mode);
+            foreach ($pairs as $pair) {
+                if (is_resource($pair[1])) {
+                    fclose($pair[1]);
+                }
+            }
+            exit(0);
+        } catch (Throwable $error) {
+            fwrite(STDERR, "{$mode} reconnect server: {$error->getMessage()}\n");
+            exit(1);
+        }
+    }
+
+    $connections = [];
+    foreach ($pairs as $pair) {
+        fclose($pair[1]);
+        $connections[] = $pair[0];
+    }
+    if ($mode === 'exhausted') {
+        $connections[] = new RuntimeException('reconnect dial failed once');
+        $connections[] = new RuntimeException('reconnect dial failed twice');
+    }
+    return [$pid, new SequenceConnector($connections)];
+}
+
+/** @param list<mixed> $connections */
+function serveReconnect(array $connections, string $mode): void
+{
+    foreach ($connections as $connection) {
+        stream_set_timeout($connection, 5);
+    }
+
+    if ($mode === 'receive_resume') {
+        $firstParser = acceptReconnectBind(
+            $connections[0],
+            'token-1',
+            'php-reconnect-session-1',
+        );
+        $firstDownlink = testDownlink('reconnect-1', true, 'php-reconnect-session-1');
+        writeServerPacket($connections[0], $firstDownlink);
+        readAndRespondToDeliveryAck($connections[0], $firstParser, $firstDownlink, token: 'token-1');
+        fclose($connections[0]);
+
+        $secondParser = acceptReconnectBind(
+            $connections[1],
+            'token-2',
+            'php-reconnect-session-2',
+        );
+        $secondDownlink = testDownlink('reconnect-2', true, 'php-reconnect-session-2');
+        writeServerPacket($connections[1], $secondDownlink);
+        readAndRespondToDeliveryAck($connections[1], $secondParser, $secondDownlink, token: 'token-2');
+        waitForClientClose($connections[1]);
+        return;
+    }
+
+    if ($mode === 'send_no_replay') {
+        $firstParser = acceptReconnectBind(
+            $connections[0],
+            'token-1',
+            'php-reconnect-session-1',
+        );
+        $business = readServerPacket($connections[0], $firstParser);
+        if (
+            $business->msgId !== 2001
+            || $business->body !== 'send_no_replay'
+            || $business->messageId !== 'send-no-replay'
+            || $business->sessionId !== 'php-reconnect-session-1'
+            || $business->token !== 'token-1'
+        ) {
+            throw new RuntimeException('invalid business packet before reconnect');
+        }
+        fclose($connections[0]);
+
+        acceptReconnectBind(
+            $connections[1],
+            'token-2',
+            'php-reconnect-session-2',
+        );
+        assertNoServerPacket($connections[1]);
+        waitForClientClose($connections[1]);
+        return;
+    }
+
+    if ($mode === 'exhausted') {
+        acceptReconnectBind($connections[0], 'token-1', 'php-reconnect-session-1');
+        fclose($connections[0]);
+        return;
+    }
+
+    if ($mode === 'authentication_failed') {
+        acceptReconnectBind($connections[0], 'token-1', 'php-reconnect-session-1');
+        fclose($connections[0]);
+        acceptReconnectBind(
+            $connections[1],
+            'token-2',
+            '',
+            Ack::UNAUTHORIZED,
+        );
+        waitForClientClose($connections[1]);
+        return;
+    }
+
+    if ($mode === 'close_interrupt') {
+        acceptReconnectBind($connections[0], 'token-1', 'php-reconnect-session-1');
+        fclose($connections[0]);
+        return;
+    }
+
+    throw new RuntimeException("unknown reconnect mode {$mode}");
+}
+
+/** @param resource $connection */
+function acceptReconnectBind(
+    mixed $connection,
+    string $token,
+    string $sessionId,
+    string $code = Ack::ACCEPTED,
+): FrameParser {
+    $parser = new FrameParser();
+    $bind = readServerPacket($connection, $parser);
+    if (
+        $bind->msgId !== Packet::MSG_ID_BIND
+        || $bind->flags !== Packet::FLAG_ACK_REQUIRED
+        || $bind->clientId !== 'claimed-client'
+        || $bind->deviceId !== 'device-1'
+        || $bind->token !== $token
+        || $bind->messageId === ''
+        || $bind->traceId !== $bind->messageId
+    ) {
+        throw new RuntimeException('invalid reconnect bind packet');
+    }
+    $reason = $code === Ack::ACCEPTED ? '' : 'reconnect authentication rejected for test';
+    writeServerAck($connection, $bind, $code, $reason, $sessionId);
+    return $parser;
+}
+
 function finishBindServer(int $pid, string $label): void
 {
     $waited = pcntl_waitpid($pid, $status);
@@ -804,7 +1166,11 @@ function serveBind(mixed $connection, string $mode): void
     waitForClientClose($connection);
 }
 
-function testDownlink(string $messageId, bool $ackRequired = true): Packet
+function testDownlink(
+    string $messageId,
+    bool $ackRequired = true,
+    string $sessionId = 'php-session-1',
+): Packet
 {
     return new Packet(
         msgId: 2001,
@@ -817,7 +1183,7 @@ function testDownlink(string $messageId, bool $ackRequired = true): Packet
         timestamp: (string) (int) floor(microtime(true) * 1000),
         clientId: 'canonical-client',
         deviceId: 'device-1',
-        sessionId: 'php-session-1',
+        sessionId: $sessionId,
         messageId: $messageId,
         traceId: "trace-{$messageId}",
     );
@@ -829,6 +1195,7 @@ function readAndRespondToDeliveryAck(
     FrameParser $parser,
     Packet $downlink,
     string $code = Ack::ACCEPTED,
+    string $token = 'token-1',
 ): void
 {
     $packet = readServerPacket($connection, $parser);
@@ -840,8 +1207,8 @@ function readAndRespondToDeliveryAck(
         || $packet->traceId !== $downlink->traceId
         || $packet->clientId !== 'canonical-client'
         || $packet->deviceId !== 'device-1'
-        || $packet->sessionId !== 'php-session-1'
-        || $packet->token !== 'token-1'
+        || $packet->sessionId !== $downlink->sessionId
+        || $packet->token !== $token
     ) {
         throw new RuntimeException('invalid delivery ACK packet');
     }
@@ -850,7 +1217,7 @@ function readAndRespondToDeliveryAck(
         throw new RuntimeException('invalid delivery ACK body');
     }
     $reason = $code === Ack::ACCEPTED ? '' : 'delivery ACK rejected for test';
-    writeServerAck($connection, $packet, $code, $reason, 'php-session-1');
+    writeServerAck($connection, $packet, $code, $reason, $downlink->sessionId);
 }
 
 /** @param resource $connection */
