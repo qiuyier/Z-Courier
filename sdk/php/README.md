@@ -185,6 +185,25 @@ it. When recovery succeeds the client is already Ready; `run()` consumes the
 transport error internally and resumes its receive loop. `close()` interrupts
 backoff and prevents another connection attempt.
 
+## Runnable Worker Example
+
+Install development dependencies and start the example from the repository
+root:
+
+```bash
+composer --working-dir=sdk/php install
+export ZCOURIER_CLIENT_TOKEN=e2e-token
+php sdk/php/examples/client.php
+```
+
+The worker sends one ACK-required upstream message, then continuously receives
+downlinks with automatic delivery ACK and reconnect enabled. It is designed for
+a CLI process managed by Supervisor, systemd, Docker, or Kubernetes. Do not run
+the persistent receive loop inside a PHP-FPM request.
+
+See [the V4 migration guide](../../docs/v4-sdk-migration.md) before production
+rollout, especially its durable `MessageID` de-duplication requirements.
+
 ## Verify
 
 The test runner has no third-party dependency:

@@ -19,7 +19,8 @@ A high-performance message push gateway based on the `zinx` network framework.
   upstream, downlink, cluster, retry, capacity, and load-test paths
 - Public Go SDKs for protocol encoding, persistent client connections, and
   backend downlink/message APIs
-- Composer-compatible PHP protocol SDK with binary-safe packet/frame codecs
+- Composer-compatible PHP protocol and blocking client SDK with binary-safe
+  packet/frame codecs
 - Optional timestamped HMAC authentication and replay protection for internal
   backend requests and gateway peer push, with separate key rings
 - Graceful shutdown with readiness drain and cluster route cleanup
@@ -44,8 +45,11 @@ release and upgrade checklist is in
 [docs/v3-release.md](docs/v3-release.md).
 
 V4 client SDK and cross-language protocol work is specified in
-[docs/v4-client-sdk.md](docs/v4-client-sdk.md). The first non-Go SDK will be
-PHP, with shared wire fixtures and live gateway E2E coverage.
+[docs/v4-client-sdk.md](docs/v4-client-sdk.md). The first non-Go SDK is
+PHP, with shared wire fixtures and live gateway E2E coverage. Practical rollout
+guidance is in [docs/v4-sdk-migration.md](docs/v4-sdk-migration.md), with
+runnable clients under [examples/go-client](examples/go-client/main.go) and
+[sdk/php/examples](sdk/php/examples/client.php).
 
 ## Quick Start
 
@@ -159,7 +163,8 @@ cluster peer internal requests. See [docs/go-sdk.md](docs/go-sdk.md),
 V4 targets `v0.4.0` and is now in development. It adds a high-level Go client,
 a PHP protocol/client SDK, shared cross-language golden fixtures, and SDK E2E
 coverage. The scope and completion criteria are defined in
-[docs/v4-client-sdk.md](docs/v4-client-sdk.md).
+[docs/v4-client-sdk.md](docs/v4-client-sdk.md), and the adoption guide is
+[docs/v4-sdk-migration.md](docs/v4-sdk-migration.md).
 
 ## Development
 

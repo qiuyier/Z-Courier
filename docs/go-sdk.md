@@ -216,7 +216,7 @@ The public backend request and response types are canonical. Gateway handlers
 reuse them through internal aliases, which keeps SDK JSON fields synchronized
 with the server contract.
 
-## Client Package (V4 In Progress)
+## Client Package
 
 The high-level TCP client under `pkg/sdk/client` owns the Zinx outer frame,
 validates configuration, opens a native Go TCP connection, completes AUTH/BIND,
@@ -387,3 +387,19 @@ runs `cmd/sdke2e` entirely through the public `pkg/sdk/client` and
 `cmd/devclient` also uses `pkg/sdk/client` and remains the interactive tool for
 manual connection, upstream, and downlink testing. The automated verifier is
 part of the existing GitHub Actions E2E job through `scripts/e2e.sh`.
+
+### Runnable Client Example
+
+The repository includes a long-running client with dynamic token lookup,
+automatic downlink ACK, reconnect, and one ACK-required upstream send:
+
+```bash
+export ZCOURIER_CLIENT_TOKEN=e2e-token
+go run ./examples/go-client \
+  -address 127.0.0.1:8999 \
+  -client-id e2e-client \
+  -device-id go-example
+```
+
+See [v4-sdk-migration.md](v4-sdk-migration.md) for field ownership, durable
+de-duplication, same-identity connection replacement, and rollout guidance.

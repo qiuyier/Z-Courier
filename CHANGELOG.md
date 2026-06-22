@@ -53,6 +53,9 @@ semantic versioning after the first public MVP tag.
   continued bidirectional traffic, with PHP 8.2 checks in GitHub Actions.
 - Maximum-level PHPStan analysis for the PHP 8.2 SDK source, enforced in CI
   without an ignore baseline.
+- Runnable Go and PHP persistent-client examples plus migration guidance for
+  field ownership, token refresh, ACK handling, durable MessageID
+  de-duplication, same-identity replacement, and safe rollout.
 
 ### Changed
 

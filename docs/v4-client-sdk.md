@@ -256,8 +256,9 @@ workflow. The PHP verifier covers bind, upstream ACK, reliable downlink and
 delivery ACK, connection replacement, reconnect with refreshed credentials and
 a new SessionID, and continued bidirectional traffic. PHP 8.2 unit, syntax, and
 live E2E checks are wired into GitHub Actions. Maximum-level PHPStan analysis
-without an ignore baseline is also enforced. Final integration guidance and
-release verification remain pending.
+without an ignore baseline is also enforced. Runnable Go/PHP integration
+examples and migration guidance are published. Release verification remains
+pending.
 
 - Exercise Go and PHP bind, upstream, downlink, ACK, disconnect, and reconnect
   against the same gateway.
