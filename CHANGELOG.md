@@ -7,6 +7,8 @@ semantic versioning after the first public MVP tag.
 
 ## [Unreleased]
 
+## [v0.4.0] - 2026-06-23
+
 ### Added
 
 - V4 client SDK design covering the Zinx outer transport frame, the existing
@@ -56,6 +58,8 @@ semantic versioning after the first public MVP tag.
 - Runnable Go and PHP persistent-client examples plus migration guidance for
   field ownership, token refresh, ACK handling, durable MessageID
   de-duplication, same-identity replacement, and safe rollout.
+- V4 release guide covering scope, compatibility, runtime notes, release
+  verification, release notes, and the `v0.4.0` tagging checklist.
 
 ### Changed
 

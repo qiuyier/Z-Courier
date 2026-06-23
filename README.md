@@ -49,7 +49,8 @@ V4 client SDK and cross-language protocol work is specified in
 PHP, with shared wire fixtures and live gateway E2E coverage. Practical rollout
 guidance is in [docs/v4-sdk-migration.md](docs/v4-sdk-migration.md), with
 runnable clients under [examples/go-client](examples/go-client/main.go) and
-[sdk/php/examples](sdk/php/examples/client.php).
+[sdk/php/examples](sdk/php/examples/client.php). The `v0.4.0` release scope and
+checklist are in [docs/v4-release.md](docs/v4-release.md).
 
 ## Quick Start
 
@@ -127,9 +128,14 @@ For a full release check, run:
 actionlint
 go test -count=1 -timeout=120s ./...
 go test -race -count=1 -timeout=90s \
-  ./pkg/sdk/signing ./internal/auth ./internal/downlink \
+  ./pkg/sdk/protocol ./pkg/sdk/client ./pkg/sdk/backend ./pkg/sdk/signing \
+  ./internal/auth ./internal/downlink \
   ./internal/server ./internal/config
 go vet ./...
+php -d error_reporting=E_ALL sdk/php/tests/run.php
+find sdk/php -name '*.php' -print0 | xargs -0 -n1 php -l
+composer --working-dir=sdk/php install --no-interaction --prefer-dist
+composer --working-dir=sdk/php analyse
 bash scripts/e2e.sh
 bash scripts/e2e_cluster.sh
 bash scripts/loadtest_smoke.sh
@@ -160,11 +166,12 @@ cluster peer internal requests. See [docs/go-sdk.md](docs/go-sdk.md),
 [docs/v3-auth-integration.md](docs/v3-auth-integration.md), and
 [docs/v3-release.md](docs/v3-release.md).
 
-V4 targets `v0.4.0` and is now in development. It adds a high-level Go client,
-a PHP protocol/client SDK, shared cross-language golden fixtures, and SDK E2E
-coverage. The scope and completion criteria are defined in
-[docs/v4-client-sdk.md](docs/v4-client-sdk.md), and the adoption guide is
-[docs/v4-sdk-migration.md](docs/v4-sdk-migration.md).
+V4 targets `v0.4.0` and is ready for final release verification. It adds a
+high-level Go client, a PHP protocol/client SDK, shared cross-language golden
+fixtures, and SDK E2E coverage. The scope and completion criteria are defined
+in [docs/v4-client-sdk.md](docs/v4-client-sdk.md), the adoption guide is
+[docs/v4-sdk-migration.md](docs/v4-sdk-migration.md), and the release checklist
+is [docs/v4-release.md](docs/v4-release.md).
 
 ## Development
 
