@@ -1,0 +1,109 @@
+services:
+  gateway:
+    image: z-courier-gateway:production
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    container_name: z-courier-production-gateway
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      nsqd:
+        condition: service_started
+    ports:
+      - "8999:8999"
+    expose:
+      - "18080"
+    volumes:
+      - ./config/z-courier.yaml:/app/configs/z-courier.yaml:ro
+      - ./conf/zinx.json:/app/conf/zinx.json:ro
+    restart: unless-stopped
+    networks:
+      - zcourier-private
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: z-courier-production-postgres
+    environment:
+      POSTGRES_USER: zcourier
+      POSTGRES_PASSWORD: CHANGE_ME_postgres_password
+      POSTGRES_DB: zcourier
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zcourier -d zcourier"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+    networks:
+      - zcourier-private
+
+  redis:
+    image: redis:8-alpine
+    container_name: z-courier-production-redis
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --requirepass
+      - CHANGE_ME_redis_password
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "CHANGE_ME_redis_password", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+    networks:
+      - zcourier-private
+
+  nsqlookupd:
+    image: nsqio/nsq:latest
+    container_name: z-courier-production-nsqlookupd
+    command: /nsqlookupd
+    restart: unless-stopped
+    networks:
+      - zcourier-private
+
+  nsqd:
+    image: nsqio/nsq:latest
+    container_name: z-courier-production-nsqd
+    command:
+      - /nsqd
+      - --lookupd-tcp-address=nsqlookupd:4160
+      - --broadcast-address=nsqd
+    depends_on:
+      - nsqlookupd
+    restart: unless-stopped
+    networks:
+      - zcourier-private
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: z-courier-production-prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    depends_on:
+      - gateway
+    restart: unless-stopped
+    networks:
+      - zcourier-private
+
+networks:
+  zcourier-private:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  redis-data:
+  prometheus-data:

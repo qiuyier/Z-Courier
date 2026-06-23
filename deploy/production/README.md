@@ -4,6 +4,31 @@ This directory documents the first production-oriented gateway image path for
 Z-Courier. The image builds `cmd/gateway` as a static Linux binary and packages
 the default `configs/` and `conf/` directories under `/app`.
 
+The files in this directory are a production reference, not a secret-safe
+drop-in deployment. Replace every `CHANGE_ME_*` value before using it outside a
+private test environment.
+
+## Reference Layout
+
+```text
+deploy/production/
+  docker-compose.yml
+  config/z-courier.yaml
+  conf/zinx.json
+  prometheus/prometheus.yml
+```
+
+The reference stack includes:
+
+- `gateway`: the Z-Courier gateway image built from the repository Dockerfile
+- `postgres`: durable downlink storage
+- `redis`: cluster online-route registry, ready for cluster mode
+- `nsqlookupd` and `nsqd`: NSQ upstream target
+- `prometheus`: gateway metrics scraping over the private Compose network
+
+It intentionally does not publish the gateway internal HTTP port to the host.
+Only the TCP client gateway port is published by default.
+
 ## Build
 
 From the repository root:
@@ -36,15 +61,32 @@ ZCOURIER_CONFIG=/app/configs/z-courier.yaml
 ZINX_CONFIG_FILE_PATH=/app/conf/zinx.json
 ```
 
+Start the production reference stack:
+
+```bash
+docker compose -f deploy/production/docker-compose.yml up -d --build
+```
+
+Stop it:
+
+```bash
+docker compose -f deploy/production/docker-compose.yml down
+```
+
+Remove local data volumes as well:
+
+```bash
+docker compose -f deploy/production/docker-compose.yml down -v
+```
+
 For a real deployment, mount your own gateway and Zinx configuration files
 rather than using the development defaults:
 
 ```bash
 docker run --rm \
   -p 8999:8999 \
-  -p 18080:18080 \
-  -v "$PWD/configs/z-courier.yaml:/app/configs/z-courier.yaml:ro" \
-  -v "$PWD/conf/zinx.json:/app/conf/zinx.json:ro" \
+  -v "$PWD/deploy/production/config/z-courier.yaml:/app/configs/z-courier.yaml:ro" \
+  -v "$PWD/deploy/production/conf/zinx.json:/app/conf/zinx.json:ro" \
   z-courier-gateway:local
 ```
 
@@ -63,6 +105,15 @@ not a production security model.
 Use private networking for internal HTTP in production. Public clients should
 only reach the TCP listener or a TLS-terminating proxy in front of it.
 
+The reference Compose file publishes:
+
+| Host Port | Service |
+| ---: | --- |
+| `8999` | gateway TCP listener |
+| `9090` | Prometheus UI |
+
+`18080` is available only inside the Compose network as `gateway:18080`.
+
 ## Configuration Notes
 
 - `configs/z-courier.yaml` controls gateway routes, authentication, upstream
@@ -74,6 +125,67 @@ only reach the TCP listener or a TLS-terminating proxy in front of it.
   Redis for cluster online routes.
 - HMAC mode is recommended for backend internal HTTP and gateway peer push when
   requests cross a shared private network.
+
+The reference gateway config uses:
+
+- HTTP token verification:
+  `auth.http.url: http://auth-backend:8080/gateway/auth/verify`
+- HMAC for `/internal/*` APIs:
+  `internal_http.auth.mode: hmac`
+- PostgreSQL downlink storage:
+  `downlink.storage.type: postgres`
+- Redis registry settings that are ready for cluster mode:
+  `cluster.registry.type: redis`
+- HTTP upstream for `MsgID 1001-1999`
+- NSQ upstream for `MsgID 2000-2999`
+- A basic per-client ingress rate limit
+
+If you do not have an `auth-backend` service on the same Docker network, client
+AUTH/BIND will fail. That is intentional: production token semantics should be
+owned by your business backend or identity service. For quick local experiments,
+use the development configs instead.
+
+If you keep `production-http-upstream` enabled, add `business-backend` to the
+same private network or change the route URL to your real backend address.
+
+## Required Replacements
+
+Before production use, replace these values in
+`config/z-courier.yaml` and `docker-compose.yml`:
+
+| Placeholder | Purpose |
+| --- | --- |
+| `CHANGE_ME_postgres_password` | PostgreSQL password and gateway DSN |
+| `CHANGE_ME_redis_password` | Redis password and gateway registry password |
+| `CHANGE_ME_auth_provider_shared_token` | Token sent to your auth backend |
+| `CHANGE_ME_internal_hmac_secret_0123456789abcdef` | Backend-to-gateway HMAC key |
+| `CHANGE_ME_peer_hmac_secret_0123456789abcdef` | Gateway peer HMAC key |
+| `CHANGE_ME_upstream_internal_token` | Optional HTTP upstream token |
+
+Use different HMAC keys for backend internal HTTP and gateway peer push. Do not
+reuse the example values.
+
+## Verify
+
+Render the Compose configuration:
+
+```bash
+docker compose -f deploy/production/docker-compose.yml config
+```
+
+Build the gateway image:
+
+```bash
+docker build -t z-courier-gateway:production .
+```
+
+Check that Prometheus can scrape the gateway after startup:
+
+```bash
+curl http://127.0.0.1:9090/-/ready
+```
+
+The gateway metrics target is `gateway:18080` inside the Compose network.
 
 ## CI Smoke
 

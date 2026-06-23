@@ -1,0 +1,123 @@
+gateway_node: gateway-prod-1
+route_msg_ids:
+  - 1000
+
+auth:
+  type: http
+  http:
+    url: http://auth-backend:8080/gateway/auth/verify
+    internal_token: CHANGE_ME_auth_provider_shared_token
+    timeout: 2s
+    max_in_flight: 1000
+  cache:
+    enabled: true
+    max_entries: 10000
+    positive_ttl: 30s
+    negative_ttl: 3s
+
+internal_http:
+  enabled: true
+  addr: 0.0.0.0:18080
+  auth:
+    mode: hmac
+    hmac:
+      keys:
+        prod-internal-2026-01: CHANGE_ME_internal_hmac_secret_0123456789abcdef
+      max_clock_skew: 30s
+      nonce_ttl: 2m
+      max_nonce_entries: 100000
+  max_request_body_size: 10485760
+  max_in_flight: 2000
+
+cluster:
+  enabled: false
+  internal_addr: http://gateway:18080
+  route_refresh_interval: 10s
+  registry:
+    type: redis
+    ttl: 30s
+    redis:
+      addr: redis:6379
+      username: ""
+      password: CHANGE_ME_redis_password
+      db: 0
+      key_prefix: zcourier:production
+      dial_timeout: 1s
+      read_timeout: 1s
+      write_timeout: 1s
+  peer:
+    timeout: 2s
+    auth:
+      mode: hmac
+      hmac:
+        key_id: prod-peer-2026-01
+        keys:
+          prod-peer-2026-01: CHANGE_ME_peer_hmac_secret_0123456789abcdef
+        max_clock_skew: 30s
+        nonce_ttl: 2m
+        max_nonce_entries: 100000
+
+downlink:
+  storage:
+    type: postgres
+    postgres:
+      dsn: postgres://zcourier:CHANGE_ME_postgres_password@postgres:5432/zcourier?sslmode=disable
+      auto_migrate: true
+      max_open_conns: 50
+      max_idle_conns: 10
+      conn_max_lifetime: 30m
+  delivery:
+    retry_interval: 5s
+    retry_delay: 30s
+    ack_timeout: 30s
+    retry_lease: 30s
+    max_attempts: 10
+    scan_limit: 500
+    bind_flush_limit: 500
+  retention:
+    delivered_ttl: 24h
+    failed_ttl: 168h
+    discarded_ttl: 168h
+    cleanup_interval: 1h
+    cleanup_limit: 1000
+
+pipeline:
+  allowlist:
+    client_ids: []
+    msg_ids: []
+  blocklist:
+    client_ids: []
+    msg_ids: []
+  rate_limit:
+    enabled: true
+    max_requests: 1000
+    window: 1s
+
+upstream:
+  routes:
+    - name: production-http-upstream
+      enabled: true
+      msg_id_min: 1001
+      msg_id_max: 1999
+      target:
+        type: http
+        url: http://business-backend:8080/gateway/upstream
+        token: CHANGE_ME_upstream_internal_token
+        timeout: 5s
+        max_in_flight: 2000
+    - name: production-nsq-upstream
+      enabled: true
+      msg_id_min: 2000
+      msg_id_max: 2999
+      target:
+        type: nsq
+        nsqd_addrs:
+          - nsqd:4150
+        topic: message_events
+        auth_secret: ""
+        dial_timeout: 1s
+        read_timeout: 60s
+        write_timeout: 1s
+        publish_mode: round_robin
+        retry_attempts: 2
+        max_in_flight: 2000

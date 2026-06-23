@@ -14,6 +14,9 @@ semantic versioning after the first public MVP tag.
   `v0.5.0` completion criteria.
 - Production-oriented gateway Dockerfile, build context ignore rules,
   deployment image documentation, and CI image build smoke validation.
+- Single-node production reference deployment with gateway, PostgreSQL, Redis,
+  NSQ, Prometheus, HMAC-protected internal HTTP, HTTP token verification, and
+  durable downlink storage configuration.
 
 ## [v0.4.0] - 2026-06-23
 
