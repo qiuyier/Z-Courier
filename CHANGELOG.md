@@ -7,6 +7,12 @@ semantic versioning after the first public MVP tag.
 
 ## [Unreleased]
 
+### Added
+
+- V5 roadmap covering deployment artifacts, operations/admin APIs, additional
+  SDKs, security deployment patterns, performance baseline governance, and
+  `v0.5.0` completion criteria.
+
 ## [v0.4.0] - 2026-06-23
 
 ### Added

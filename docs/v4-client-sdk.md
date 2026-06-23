@@ -251,14 +251,14 @@ replays a failed business send.
 
 ### V4.4 Cross-Language E2E And Release
 
-Status: release-ready. Go and PHP now share the single-node live-gateway E2E
+Status: released in `v0.4.0`. Go and PHP share the single-node live-gateway E2E
 workflow. The PHP verifier covers bind, upstream ACK, reliable downlink and
 delivery ACK, connection replacement, reconnect with refreshed credentials and
 a new SessionID, and continued bidirectional traffic. PHP 8.2 unit, syntax, and
 live E2E checks are wired into GitHub Actions. Maximum-level PHPStan analysis
 without an ignore baseline is also enforced. Runnable Go/PHP integration
-examples and migration guidance are published. The final release verification
-and tagging checklist are tracked in [v4-release.md](v4-release.md).
+examples and migration guidance are published. The release verification and
+tagging checklist are tracked in [v4-release.md](v4-release.md).
 
 - Exercise Go and PHP bind, upstream, downlink, ACK, disconnect, and reconnect
   against the same gateway.

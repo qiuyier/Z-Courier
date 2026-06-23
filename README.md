@@ -52,6 +52,10 @@ runnable clients under [examples/go-client](examples/go-client/main.go) and
 [sdk/php/examples](sdk/php/examples/client.php). The `v0.4.0` release scope and
 checklist are in [docs/v4-release.md](docs/v4-release.md).
 
+V5 planning is tracked in [docs/v5-roadmap.md](docs/v5-roadmap.md). It focuses
+on deployment artifacts, operations/admin APIs, additional SDKs, security
+deployment patterns, and performance baseline governance.
+
 ## Quick Start
 
 Run the single-node integration verifier from the repository root:
@@ -166,12 +170,14 @@ cluster peer internal requests. See [docs/go-sdk.md](docs/go-sdk.md),
 [docs/v3-auth-integration.md](docs/v3-auth-integration.md), and
 [docs/v3-release.md](docs/v3-release.md).
 
-V4 targets `v0.4.0` and is ready for final release verification. It adds a
-high-level Go client, a PHP protocol/client SDK, shared cross-language golden
-fixtures, and SDK E2E coverage. The scope and completion criteria are defined
-in [docs/v4-client-sdk.md](docs/v4-client-sdk.md), the adoption guide is
-[docs/v4-sdk-migration.md](docs/v4-sdk-migration.md), and the release checklist
-is [docs/v4-release.md](docs/v4-release.md).
+V4 was published as `v0.4.0`. It adds a high-level Go client, a PHP
+protocol/client SDK, shared cross-language golden fixtures, SDK E2E coverage,
+and runnable migration examples. See [docs/v4-client-sdk.md](docs/v4-client-sdk.md),
+[docs/v4-sdk-migration.md](docs/v4-sdk-migration.md), and
+[docs/v4-release.md](docs/v4-release.md).
+
+V5 is in planning for `v0.5.0`. The roadmap is
+[docs/v5-roadmap.md](docs/v5-roadmap.md).
 
 ## Development
 
