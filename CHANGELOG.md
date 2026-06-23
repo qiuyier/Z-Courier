@@ -17,6 +17,9 @@ semantic versioning after the first public MVP tag.
 - Single-node production reference deployment with gateway, PostgreSQL, Redis,
   NSQ, Prometheus, HMAC-protected internal HTTP, HTTP token verification, and
   durable downlink storage configuration.
+- Two-node production cluster reference deployment with Redis online routes,
+  shared PostgreSQL storage, shared NSQ upstream, HMAC peer push, and
+  Prometheus scraping for both gateway nodes.
 
 ## [v0.4.0] - 2026-06-23
 

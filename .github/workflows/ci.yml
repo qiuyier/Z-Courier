@@ -59,6 +59,7 @@ jobs:
           docker compose -f deploy/local/docker-compose.yml config
           docker compose -f deploy/monitoring/docker-compose.yml config
           docker compose -f deploy/production/docker-compose.yml config
+          docker compose -f deploy/production-cluster/docker-compose.yml config
 
       - name: Validate Grafana dashboard JSON
         run: jq . deploy/monitoring/grafana/dashboards/z-courier-overview.json >/dev/null

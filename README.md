@@ -130,6 +130,9 @@ Local service URLs and the manual workflow are documented in
 The first production-oriented gateway image path is documented in
 [deploy/production/README.md](deploy/production/README.md).
 
+The two-node production cluster reference is documented in
+[deploy/production-cluster/README.md](deploy/production-cluster/README.md).
+
 For a full release check, run:
 
 ```bash
