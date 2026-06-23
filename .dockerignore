@@ -1,0 +1,16 @@
+.git
+.github
+.idea
+.gocache
+.gomodcache
+
+log
+reports
+
+sdk/php/vendor
+sdk/php/composer.lock
+
+.DS_Store
+*.test
+*.out
+coverage.out

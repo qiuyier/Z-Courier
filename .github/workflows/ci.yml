@@ -110,6 +110,26 @@ jobs:
         if: always()
         run: docker compose -f deploy/local/docker-compose.yml down -v
 
+  docker-image:
+    name: Docker Image
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs:
+      - validate
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Build gateway image
+        run: docker build --tag z-courier-gateway:ci .
+
+      - name: Smoke gateway image
+        run: |
+          docker run --rm --entrypoint /bin/sh z-courier-gateway:ci -c \
+            'test -x /usr/local/bin/z-courier-gateway && test -f /app/configs/z-courier.yaml && test -f /app/conf/zinx.json'
+          docker run --rm z-courier-gateway:ci -h >/tmp/z-courier-gateway-help.txt 2>&1
+
   loadtest-smoke:
     name: Load Test Smoke
     runs-on: ubuntu-latest

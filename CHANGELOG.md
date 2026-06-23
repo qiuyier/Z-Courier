@@ -12,6 +12,8 @@ semantic versioning after the first public MVP tag.
 - V5 roadmap covering deployment artifacts, operations/admin APIs, additional
   SDKs, security deployment patterns, performance baseline governance, and
   `v0.5.0` completion criteria.
+- Production-oriented gateway Dockerfile, build context ignore rules,
+  deployment image documentation, and CI image build smoke validation.
 
 ## [v0.4.0] - 2026-06-23
 

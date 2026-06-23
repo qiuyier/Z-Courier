@@ -23,6 +23,7 @@ A high-performance message push gateway based on the `zinx` network framework.
   packet/frame codecs
 - Optional timestamped HMAC authentication and replay protection for internal
   backend requests and gateway peer push, with separate key rings
+- Production-oriented Docker image build path with CI smoke validation
 - Graceful shutdown with readiness drain and cluster route cleanup
 - MIT Licensed
 
@@ -126,6 +127,9 @@ which sessions are local to the gateway node you queried.
 Local service URLs and the manual workflow are documented in
 [deploy/local/README.md](deploy/local/README.md).
 
+The first production-oriented gateway image path is documented in
+[deploy/production/README.md](deploy/production/README.md).
+
 For a full release check, run:
 
 ```bash
@@ -143,6 +147,9 @@ composer --working-dir=sdk/php analyse
 bash scripts/e2e.sh
 bash scripts/e2e_cluster.sh
 bash scripts/loadtest_smoke.sh
+docker build --tag z-courier-gateway:release-check .
+docker run --rm --entrypoint /bin/sh z-courier-gateway:release-check -c \
+  'test -x /usr/local/bin/z-courier-gateway && test -f /app/configs/z-courier.yaml && test -f /app/conf/zinx.json'
 git diff --check
 ```
 
