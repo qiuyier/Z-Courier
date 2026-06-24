@@ -500,8 +500,9 @@ The retention worker deletes expired terminal messages from the downlink store:
 `discarded` after `discarded_ttl`. Pending and sent messages are not deleted by
 retention cleanup.
 
-Failed messages can be inspected through the admin CLI and manually handled
-through the internal development helper:
+Failed messages can be inspected and manually handled through the admin CLI.
+Mutation commands require explicit `-confirm`, and discard also requires a
+reason:
 
 ```bash
 go run ./cmd/admin messages \
@@ -514,16 +515,18 @@ go run ./cmd/admin message \
   -internal-token dev-internal-token \
   -message-id message-1
 
-go run ./cmd/devbackend requeue \
-  -internal-url http://127.0.0.1:18080 \
-  -internal-token dev-internal-token \
-  -message-id message-1
-
-go run ./cmd/devbackend discard \
+go run ./cmd/admin requeue \
   -internal-url http://127.0.0.1:18080 \
   -internal-token dev-internal-token \
   -message-id message-1 \
-  -reason "handled manually"
+  -confirm
+
+go run ./cmd/admin discard \
+  -internal-url http://127.0.0.1:18080 \
+  -internal-token dev-internal-token \
+  -message-id message-1 \
+  -reason "handled manually" \
+  -confirm
 ```
 
 Clients confirm downlink delivery by sending a Z-Courier protocol packet with

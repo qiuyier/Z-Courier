@@ -27,6 +27,8 @@ semantic versioning after the first public MVP tag.
 - Read-only admin overview and upstream route APIs plus `cmd/admin` commands for
   gateway overview, route ranges, route lookup, local session inspection, and
   downlink message status/list queries.
+- Guarded `cmd/admin requeue` and `cmd/admin discard` commands for single-message
+  downlink repair, with explicit confirmation and discard reason requirements.
 
 ## [v0.4.0] - 2026-06-23
 

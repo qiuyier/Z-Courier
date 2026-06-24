@@ -57,6 +57,19 @@ type messagesConfig struct {
 	Limit  int
 }
 
+type requeueConfig struct {
+	commonConfig
+	MessageID string
+	Confirm   bool
+}
+
+type discardConfig struct {
+	commonConfig
+	MessageID string
+	Reason    string
+	Confirm   bool
+}
+
 func main() {
 	switch {
 	case len(os.Args) > 1 && os.Args[1] == "overview":
@@ -71,6 +84,10 @@ func main() {
 		os.Exit(runMessage(os.Args[2:]))
 	case len(os.Args) > 1 && os.Args[1] == "messages":
 		os.Exit(runMessages(os.Args[2:]))
+	case len(os.Args) > 1 && os.Args[1] == "requeue":
+		os.Exit(runRequeue(os.Args[2:]))
+	case len(os.Args) > 1 && os.Args[1] == "discard":
+		os.Exit(runDiscard(os.Args[2:]))
 	default:
 		printUsage(os.Stderr)
 		os.Exit(2)
@@ -78,7 +95,7 @@ func main() {
 }
 
 func printUsage(out io.Writer) {
-	fmt.Fprintln(out, "Usage: admin <overview|routes|route|sessions|message|messages> [flags]")
+	fmt.Fprintln(out, "Usage: admin <overview|routes|route|sessions|message|messages|requeue|discard> [flags]")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Commands:")
 	fmt.Fprintln(out, "  overview   Show gateway identity, readiness, cluster, sessions, and dependency summary")
@@ -87,6 +104,8 @@ func printUsage(out io.Writer) {
 	fmt.Fprintln(out, "  sessions   Show local sessions, optionally filtered by client_id")
 	fmt.Fprintln(out, "  message    Show one stored downlink message by message_id")
 	fmt.Fprintln(out, "  messages   List stored downlink messages by delivery status")
+	fmt.Fprintln(out, "  requeue    Requeue one stored downlink message, requires -confirm")
+	fmt.Fprintln(out, "  discard    Discard one stored downlink message, requires -reason and -confirm")
 }
 
 func runOverview(args []string) int {
@@ -210,6 +229,49 @@ func runMessages(args []string) int {
 	return 0
 }
 
+func runRequeue(args []string) int {
+	fs := flag.NewFlagSet("requeue", flag.ExitOnError)
+	config := requeueConfig{commonConfig: defaultCommonConfig()}
+	addCommonFlags(fs, &config.commonConfig)
+	fs.StringVar(&config.MessageID, "message-id", "", "downlink message id")
+	fs.BoolVar(&config.Confirm, "confirm", false, "confirm the requeue mutation")
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: admin requeue -message-id message-id -confirm [flags]\n")
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+
+	if err := requeue(config); err != nil {
+		fmt.Fprintf(os.Stderr, "requeue failed: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+func runDiscard(args []string) int {
+	fs := flag.NewFlagSet("discard", flag.ExitOnError)
+	config := discardConfig{commonConfig: defaultCommonConfig()}
+	addCommonFlags(fs, &config.commonConfig)
+	fs.StringVar(&config.MessageID, "message-id", "", "downlink message id")
+	fs.StringVar(&config.Reason, "reason", "", "operator reason for discarding the message")
+	fs.BoolVar(&config.Confirm, "confirm", false, "confirm the discard mutation")
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: admin discard -message-id message-id -reason reason -confirm [flags]\n")
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+
+	if err := discard(config); err != nil {
+		fmt.Fprintf(os.Stderr, "discard failed: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
 func defaultCommonConfig() commonConfig {
 	keyID := strings.TrimSpace(os.Getenv("ZCOURIER_ADMIN_HMAC_KEY_ID"))
 	secret := os.Getenv("ZCOURIER_ADMIN_HMAC_SECRET")
@@ -313,15 +375,49 @@ func messages(config messagesConfig) error {
 	return requestAndPrint(config.commonConfig, "/internal/messages?"+query.Encode())
 }
 
+func requeue(config requeueConfig) error {
+	messageID := strings.TrimSpace(config.MessageID)
+	if messageID == "" {
+		return fmt.Errorf("message-id is required")
+	}
+	if !config.Confirm {
+		return fmt.Errorf("refusing to requeue %q without -confirm; would POST /internal/message/requeue", messageID)
+	}
+
+	request := sdkbackend.MessageActionRequest{MessageID: messageID}
+	return requestAndPrintJSON(config.commonConfig, http.MethodPost, "/internal/message/requeue", request)
+}
+
+func discard(config discardConfig) error {
+	messageID := strings.TrimSpace(config.MessageID)
+	if messageID == "" {
+		return fmt.Errorf("message-id is required")
+	}
+	reason := strings.TrimSpace(config.Reason)
+	if reason == "" {
+		return fmt.Errorf("reason is required")
+	}
+	if !config.Confirm {
+		return fmt.Errorf("refusing to discard %q without -confirm; would POST /internal/message/discard", messageID)
+	}
+
+	request := sdkbackend.MessageActionRequest{MessageID: messageID, Reason: reason}
+	return requestAndPrintJSON(config.commonConfig, http.MethodPost, "/internal/message/discard", request)
+}
+
 func requestAndPrint(config commonConfig, path string) error {
-	statusCode, body, err := requestJSON(config, path)
+	return requestAndPrintJSON(config, http.MethodGet, path, nil)
+}
+
+func requestAndPrintJSON(config commonConfig, method, path string, body any) error {
+	statusCode, responseBody, err := requestJSON(config, method, path, body)
 	if err != nil {
 		return err
 	}
 
 	fmt.Printf("status=%d\n", statusCode)
-	if len(body) > 0 {
-		fmt.Printf("response=%s\n", prettyJSON(body))
+	if len(responseBody) > 0 {
+		fmt.Printf("response=%s\n", prettyJSON(responseBody))
 	}
 
 	if statusCode < http.StatusOK || statusCode >= http.StatusMultipleChoices {
@@ -330,7 +426,7 @@ func requestAndPrint(config commonConfig, path string) error {
 	return nil
 }
 
-func requestJSON(config commonConfig, path string) (int, []byte, error) {
+func requestJSON(config commonConfig, method, path string, body any) (int, []byte, error) {
 	if err := validateCommonConfig(config); err != nil {
 		return 0, nil, err
 	}
@@ -338,12 +434,28 @@ func requestJSON(config commonConfig, path string) (int, []byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), config.Timeout)
 	defer cancel()
 
+	var requestBody []byte
+	if body != nil {
+		var err error
+		requestBody, err = sonic.Marshal(body)
+		if err != nil {
+			return 0, nil, fmt.Errorf("marshal request body: %w", err)
+		}
+	}
+
 	requestURL := strings.TrimRight(config.InternalURL, "/") + path
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
+	var reader io.Reader
+	if requestBody != nil {
+		reader = bytes.NewReader(requestBody)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, requestURL, reader)
 	if err != nil {
 		return 0, nil, fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Accept", "application/json")
+	if requestBody != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 
 	switch strings.ToLower(strings.TrimSpace(config.AuthMode)) {
 	case authModeToken:
@@ -358,7 +470,7 @@ func requestJSON(config commonConfig, path string) (int, []byte, error) {
 		if err != nil {
 			return 0, nil, fmt.Errorf("create HMAC signer: %w", err)
 		}
-		if err := signer.Sign(req, nil); err != nil {
+		if err := signer.Sign(req, requestBody); err != nil {
 			return 0, nil, fmt.Errorf("sign request: %w", err)
 		}
 	default:
@@ -367,15 +479,15 @@ func requestJSON(config commonConfig, path string) (int, []byte, error) {
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return 0, nil, fmt.Errorf("GET %s: %w", requestURL, err)
+		return 0, nil, fmt.Errorf("%s %s: %w", method, requestURL, err)
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return 0, nil, fmt.Errorf("read response: %w", err)
 	}
-	return resp.StatusCode, body, nil
+	return resp.StatusCode, responseBody, nil
 }
 
 func validateCommonConfig(config commonConfig) error {

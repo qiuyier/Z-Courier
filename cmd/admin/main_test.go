@@ -1,12 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/bytedance/sonic"
 	sdkbackend "github.com/qiuyier/Z-Courier/pkg/sdk/backend"
 	"github.com/qiuyier/Z-Courier/pkg/sdk/signing"
 )
@@ -183,6 +185,148 @@ func TestMessagesSendsListRequest(t *testing.T) {
 	}
 }
 
+func TestRequeueRequiresConfirm(t *testing.T) {
+	var called bool
+	stubFailingAdminHTTPClient(t, &called)
+
+	err := requeue(requeueConfig{
+		commonConfig: validCommonConfig(t),
+		MessageID:    "message-1",
+	})
+	if err == nil || !strings.Contains(err.Error(), "without -confirm") {
+		t.Fatalf("requeue() error = %v, want confirm error", err)
+	}
+	if called {
+		t.Fatal("requeue() sent an HTTP request without confirm")
+	}
+}
+
+func TestRequeueSendsConfirmedRequest(t *testing.T) {
+	var gotReq *http.Request
+	var gotBody []byte
+	stubAdminHTTPClientWithBody(t, http.StatusOK, `{"code":"ok"}`, &gotReq, &gotBody)
+
+	err := requeue(requeueConfig{
+		commonConfig: commonConfig{
+			InternalURL:   "http://gateway-a:18182/",
+			AuthMode:      authModeToken,
+			InternalToken: "secret",
+			Timeout:       time.Second,
+		},
+		MessageID: " message-1 ",
+		Confirm:   true,
+	})
+	if err != nil {
+		t.Fatalf("requeue() error = %v", err)
+	}
+
+	if gotReq == nil {
+		t.Fatal("request was not sent")
+	}
+	if gotReq.Method != http.MethodPost || gotReq.URL.String() != "http://gateway-a:18182/internal/message/requeue" {
+		t.Fatalf("request = %s %s, want POST /internal/message/requeue", gotReq.Method, gotReq.URL.String())
+	}
+	if gotReq.Header.Get("Content-Type") != "application/json" {
+		t.Fatalf("content-type = %q, want application/json", gotReq.Header.Get("Content-Type"))
+	}
+	if gotReq.Header.Get(sdkbackend.InternalTokenHeader) != "secret" {
+		t.Fatalf("internal token = %q, want secret", gotReq.Header.Get(sdkbackend.InternalTokenHeader))
+	}
+
+	var body sdkbackend.MessageActionRequest
+	if err := sonic.Unmarshal(gotBody, &body); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
+	if body.MessageID != "message-1" || body.Reason != "" {
+		t.Fatalf("body = %+v, want message_id only", body)
+	}
+}
+
+func TestDiscardRequiresConfirmAndReason(t *testing.T) {
+	var called bool
+	stubFailingAdminHTTPClient(t, &called)
+
+	if err := discard(discardConfig{commonConfig: validCommonConfig(t), MessageID: "message-1", Reason: "manual"}); err == nil || !strings.Contains(err.Error(), "without -confirm") {
+		t.Fatalf("discard() confirm error = %v, want confirm error", err)
+	}
+	if err := discard(discardConfig{commonConfig: validCommonConfig(t), MessageID: "message-1", Confirm: true}); err == nil || !strings.Contains(err.Error(), "reason is required") {
+		t.Fatalf("discard() reason error = %v, want reason error", err)
+	}
+	if called {
+		t.Fatal("discard() sent an HTTP request before validation passed")
+	}
+}
+
+func TestDiscardSendsConfirmedRequest(t *testing.T) {
+	var gotReq *http.Request
+	var gotBody []byte
+	stubAdminHTTPClientWithBody(t, http.StatusOK, `{"code":"ok"}`, &gotReq, &gotBody)
+
+	err := discard(discardConfig{
+		commonConfig: commonConfig{
+			InternalURL:   "http://gateway-a:18182/",
+			AuthMode:      authModeToken,
+			InternalToken: "secret",
+			Timeout:       time.Second,
+		},
+		MessageID: " message-1 ",
+		Reason:    " handled manually ",
+		Confirm:   true,
+	})
+	if err != nil {
+		t.Fatalf("discard() error = %v", err)
+	}
+
+	if gotReq == nil {
+		t.Fatal("request was not sent")
+	}
+	if gotReq.Method != http.MethodPost || gotReq.URL.String() != "http://gateway-a:18182/internal/message/discard" {
+		t.Fatalf("request = %s %s, want POST /internal/message/discard", gotReq.Method, gotReq.URL.String())
+	}
+
+	var body sdkbackend.MessageActionRequest
+	if err := sonic.Unmarshal(gotBody, &body); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
+	if body.MessageID != "message-1" || body.Reason != "handled manually" {
+		t.Fatalf("body = %+v, want message_id and trimmed reason", body)
+	}
+}
+
+func TestRequeueSignsRequestWithHMAC(t *testing.T) {
+	var gotReq *http.Request
+	var gotBody []byte
+	stubAdminHTTPClientWithBody(t, http.StatusOK, `{"code":"ok"}`, &gotReq, &gotBody)
+
+	err := requeue(requeueConfig{
+		commonConfig: commonConfig{
+			InternalURL: "http://gateway-a:18182",
+			AuthMode:    authModeHMAC,
+			HMACKeyID:   "backend-1",
+			HMACSecret:  "0123456789abcdef0123456789abcdef",
+			Timeout:     time.Second,
+		},
+		MessageID: "message-1",
+		Confirm:   true,
+	})
+	if err != nil {
+		t.Fatalf("requeue() error = %v", err)
+	}
+
+	if gotReq == nil {
+		t.Fatal("request was not sent")
+	}
+	if len(gotBody) == 0 {
+		t.Fatal("request body is empty")
+	}
+	if gotReq.Header.Get(sdkbackend.InternalTokenHeader) != "" {
+		t.Fatalf("internal token = %q, want empty", gotReq.Header.Get(sdkbackend.InternalTokenHeader))
+	}
+	if gotReq.Header.Get(signing.HeaderKeyID) != "backend-1" || gotReq.Header.Get(signing.HeaderSignature) == "" {
+		t.Fatalf("missing HMAC headers: key=%q signature=%q", gotReq.Header.Get(signing.HeaderKeyID), gotReq.Header.Get(signing.HeaderSignature))
+	}
+}
+
 func TestCommonConfigValidation(t *testing.T) {
 	tests := []commonConfig{
 		{InternalURL: "", AuthMode: authModeToken, Timeout: time.Second},
@@ -223,6 +367,11 @@ func validCommonConfig(t *testing.T) commonConfig {
 
 func stubAdminHTTPClient(t *testing.T, status int, body string, gotReq **http.Request) {
 	t.Helper()
+	stubAdminHTTPClientWithBody(t, status, body, gotReq, nil)
+}
+
+func stubAdminHTTPClientWithBody(t *testing.T, status int, body string, gotReq **http.Request, gotBody *[]byte) {
+	t.Helper()
 
 	oldClient := httpClient
 	t.Cleanup(func() {
@@ -232,9 +381,38 @@ func stubAdminHTTPClient(t *testing.T, status int, body string, gotReq **http.Re
 	httpClient = &http.Client{
 		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			*gotReq = req
+			if gotBody != nil && req.Body != nil {
+				content, err := io.ReadAll(req.Body)
+				if err != nil {
+					return nil, err
+				}
+				*gotBody = content
+				req.Body = io.NopCloser(bytes.NewReader(content))
+			}
 			return &http.Response{
 				StatusCode: status,
 				Body:       io.NopCloser(strings.NewReader(body)),
+				Header:     make(http.Header),
+				Request:    req,
+			}, nil
+		}),
+	}
+}
+
+func stubFailingAdminHTTPClient(t *testing.T, called *bool) {
+	t.Helper()
+
+	oldClient := httpClient
+	t.Cleanup(func() {
+		httpClient = oldClient
+	})
+
+	httpClient = &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			*called = true
+			return &http.Response{
+				StatusCode: http.StatusInternalServerError,
+				Body:       io.NopCloser(strings.NewReader(`{"code":"unexpected"}`)),
 				Header:     make(http.Header),
 				Request:    req,
 			}, nil

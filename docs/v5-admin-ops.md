@@ -166,7 +166,9 @@ gateway defaults to failed messages.
 
 ## CLI
 
-`cmd/admin` wraps the read-only admin and debug APIs.
+`cmd/admin` wraps the admin and debug APIs. Overview, route, session, message,
+and message-list commands are read-only. Message repair commands are guarded
+mutations and require explicit confirmation.
 
 Token mode:
 
@@ -200,6 +202,19 @@ go run ./cmd/admin messages \
   -internal-token dev-internal-token \
   -status failed \
   -limit 100
+
+go run ./cmd/admin requeue \
+  -internal-url http://127.0.0.1:18182 \
+  -internal-token dev-internal-token \
+  -message-id message-1 \
+  -confirm
+
+go run ./cmd/admin discard \
+  -internal-url http://127.0.0.1:18182 \
+  -internal-token dev-internal-token \
+  -message-id message-1 \
+  -reason "handled manually" \
+  -confirm
 ```
 
 HMAC mode:
@@ -231,7 +246,7 @@ variables.
 `cmd/devbackend` remains a development helper and can still call push, batch,
 message status, list, requeue, discard, route, and sessions endpoints.
 
-`cmd/admin` is the safer operator entrypoint. Its first milestone is read-only:
+`cmd/admin` is the safer operator entrypoint. It supports:
 
 - overview
 - routes
@@ -239,7 +254,8 @@ message status, list, requeue, discard, route, and sessions endpoints.
 - local session listing
 - message status lookup
 - message listing by status
+- single-message requeue with `-confirm`
+- single-message discard with `-reason` and `-confirm`
 
-Message repair commands such as requeue and discard should move into `cmd/admin`
-only after their response contracts, audit logging, and operational guardrails
-are tightened.
+`requeue` and `discard` intentionally operate on one `message_id` at a time.
+Batch repair is not provided by the operator CLI yet.
