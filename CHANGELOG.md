@@ -25,7 +25,8 @@ semantic versioning after the first public MVP tag.
 - Production reference smoke verifiers for single-node and two-node Compose
   stacks, with CI coverage for gateway readiness and Prometheus target health.
 - Read-only admin overview and upstream route APIs plus `cmd/admin` commands for
-  gateway overview, route ranges, route lookup, and local session inspection.
+  gateway overview, route ranges, route lookup, local session inspection, and
+  downlink message status/list queries.
 
 ## [v0.4.0] - 2026-06-23
 

@@ -147,6 +147,23 @@ local session if one exists and a cluster route if cluster routing is enabled.
 `sessions` answers which sessions are local to the gateway node you queried.
 It does not claim to list all sessions across all nodes.
 
+### Existing Message Inspection
+
+The existing message inspection endpoints also remain part of the read-only
+operator workflow:
+
+```text
+GET /internal/message/status?message_id=...
+GET /internal/messages?status=failed&limit=100
+```
+
+`message/status` answers the persisted delivery state, attempts, last error,
+claim owner, retry timestamps, and body size for one reliable downlink message.
+
+`messages` lists stored messages by status. Supported statuses are `pending`,
+`sent`, `delivered`, `failed`, and `discarded`. When status is omitted, the
+gateway defaults to failed messages.
+
 ## CLI
 
 `cmd/admin` wraps the read-only admin and debug APIs.
@@ -172,6 +189,17 @@ go run ./cmd/admin sessions \
   -internal-url http://127.0.0.1:18183 \
   -internal-token dev-internal-token \
   -client-id e2e-client
+
+go run ./cmd/admin message \
+  -internal-url http://127.0.0.1:18182 \
+  -internal-token dev-internal-token \
+  -message-id message-1
+
+go run ./cmd/admin messages \
+  -internal-url http://127.0.0.1:18182 \
+  -internal-token dev-internal-token \
+  -status failed \
+  -limit 100
 ```
 
 HMAC mode:
@@ -209,6 +237,8 @@ message status, list, requeue, discard, route, and sessions endpoints.
 - routes
 - route lookup
 - local session listing
+- message status lookup
+- message listing by status
 
 Message repair commands such as requeue and discard should move into `cmd/admin`
 only after their response contracts, audit logging, and operational guardrails

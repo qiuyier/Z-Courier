@@ -46,6 +46,17 @@ type sessionsConfig struct {
 	Limit    int
 }
 
+type messageConfig struct {
+	commonConfig
+	MessageID string
+}
+
+type messagesConfig struct {
+	commonConfig
+	Status string
+	Limit  int
+}
+
 func main() {
 	switch {
 	case len(os.Args) > 1 && os.Args[1] == "overview":
@@ -56,6 +67,10 @@ func main() {
 		os.Exit(runRoute(os.Args[2:]))
 	case len(os.Args) > 1 && os.Args[1] == "sessions":
 		os.Exit(runSessions(os.Args[2:]))
+	case len(os.Args) > 1 && os.Args[1] == "message":
+		os.Exit(runMessage(os.Args[2:]))
+	case len(os.Args) > 1 && os.Args[1] == "messages":
+		os.Exit(runMessages(os.Args[2:]))
 	default:
 		printUsage(os.Stderr)
 		os.Exit(2)
@@ -63,13 +78,15 @@ func main() {
 }
 
 func printUsage(out io.Writer) {
-	fmt.Fprintln(out, "Usage: admin <overview|routes|route|sessions> [flags]")
+	fmt.Fprintln(out, "Usage: admin <overview|routes|route|sessions|message|messages> [flags]")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Commands:")
 	fmt.Fprintln(out, "  overview   Show gateway identity, readiness, cluster, sessions, and dependency summary")
 	fmt.Fprintln(out, "  routes     Show enabled upstream route ranges and sanitized target metadata")
 	fmt.Fprintln(out, "  route      Show where one client/device would be pushed")
 	fmt.Fprintln(out, "  sessions   Show local sessions, optionally filtered by client_id")
+	fmt.Fprintln(out, "  message    Show one stored downlink message by message_id")
+	fmt.Fprintln(out, "  messages   List stored downlink messages by delivery status")
 }
 
 func runOverview(args []string) int {
@@ -152,6 +169,47 @@ func runSessions(args []string) int {
 	return 0
 }
 
+func runMessage(args []string) int {
+	fs := flag.NewFlagSet("message", flag.ExitOnError)
+	config := messageConfig{commonConfig: defaultCommonConfig()}
+	addCommonFlags(fs, &config.commonConfig)
+	fs.StringVar(&config.MessageID, "message-id", "", "downlink message id")
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: admin message -message-id message-id [flags]\n")
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+
+	if err := message(config); err != nil {
+		fmt.Fprintf(os.Stderr, "message failed: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+func runMessages(args []string) int {
+	fs := flag.NewFlagSet("messages", flag.ExitOnError)
+	config := messagesConfig{commonConfig: defaultCommonConfig(), Status: string(sdkbackend.MessageStatusFailed), Limit: 100}
+	addCommonFlags(fs, &config.commonConfig)
+	fs.StringVar(&config.Status, "status", config.Status, "message status: pending, sent, delivered, failed, or discarded")
+	fs.IntVar(&config.Limit, "limit", 100, "maximum messages to return")
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: admin messages [flags]\n")
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+
+	if err := messages(config); err != nil {
+		fmt.Fprintf(os.Stderr, "messages failed: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
 func defaultCommonConfig() commonConfig {
 	keyID := strings.TrimSpace(os.Getenv("ZCOURIER_ADMIN_HMAC_KEY_ID"))
 	secret := os.Getenv("ZCOURIER_ADMIN_HMAC_SECRET")
@@ -225,6 +283,34 @@ func sessions(config sessionsConfig) error {
 		query.Set("client_id", strings.TrimSpace(config.ClientID))
 	}
 	return requestAndPrint(config.commonConfig, "/internal/debug/sessions?"+query.Encode())
+}
+
+func message(config messageConfig) error {
+	messageID := strings.TrimSpace(config.MessageID)
+	if messageID == "" {
+		return fmt.Errorf("message-id is required")
+	}
+
+	query := url.Values{}
+	query.Set("message_id", messageID)
+	return requestAndPrint(config.commonConfig, "/internal/message/status?"+query.Encode())
+}
+
+func messages(config messagesConfig) error {
+	if config.Limit <= 0 {
+		return fmt.Errorf("limit must be greater than 0")
+	}
+	status := sdkbackend.MessageStatus(strings.TrimSpace(config.Status))
+	if status != "" && !status.Valid() {
+		return fmt.Errorf("unsupported message status %q", config.Status)
+	}
+
+	query := url.Values{}
+	query.Set("limit", strconv.Itoa(config.Limit))
+	if status != "" {
+		query.Set("status", string(status))
+	}
+	return requestAndPrint(config.commonConfig, "/internal/messages?"+query.Encode())
 }
 
 func requestAndPrint(config commonConfig, path string) error {

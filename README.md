@@ -128,11 +128,17 @@ go run ./cmd/admin sessions \
   -internal-url http://127.0.0.1:18183 \
   -internal-token dev-internal-token \
   -client-id e2e-client
+
+go run ./cmd/admin messages \
+  -internal-url http://127.0.0.1:18182 \
+  -internal-token dev-internal-token \
+  -status failed
 ```
 
 `overview` summarizes the queried gateway node. `routes` shows enabled MsgID
 route ranges. `route` answers where the cluster would send a client/device.
 `sessions` answers which sessions are local to the gateway node you queried.
+`message` and `messages` inspect persisted downlink delivery state.
 
 Local service URLs and the manual workflow are documented in
 [deploy/local/README.md](deploy/local/README.md).
@@ -494,13 +500,19 @@ The retention worker deletes expired terminal messages from the downlink store:
 `discarded` after `discarded_ttl`. Pending and sent messages are not deleted by
 retention cleanup.
 
-Failed messages can be inspected and manually handled through the internal API:
+Failed messages can be inspected through the admin CLI and manually handled
+through the internal development helper:
 
 ```bash
-go run ./cmd/devbackend list \
+go run ./cmd/admin messages \
   -internal-url http://127.0.0.1:18080 \
   -internal-token dev-internal-token \
   -status failed
+
+go run ./cmd/admin message \
+  -internal-url http://127.0.0.1:18080 \
+  -internal-token dev-internal-token \
+  -message-id message-1
 
 go run ./cmd/devbackend requeue \
   -internal-url http://127.0.0.1:18080 \
@@ -629,7 +641,7 @@ scrape-target details.
 ## Project Structure
 - `cmd/gateway`: Gateway entry point
 - `cmd/admin`: Read-only operator CLI for gateway overview, route, and session
-  inspection
+  inspection plus message status/list queries
 - `cmd/devclient`: Public Go SDK-based client for manual end-to-end testing
 - `cmd/sdke2e`: Automated live-gateway verifier for the public Go client SDK
 - `cmd/devbackend`: Development backend and internal API debugging CLI
