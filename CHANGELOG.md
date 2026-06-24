@@ -39,6 +39,11 @@ semantic versioning after the first public MVP tag.
   checklist, verification commands, operational smoke checks, GitHub release
   notes, known boundaries, and tagging steps.
 
+### Fixed
+
+- Removed the external Dockerfile frontend directive so production image builds
+  do not depend on pulling `docker/dockerfile:1` from a registry mirror.
+
 ## [v0.4.0] - 2026-06-23
 
 ### Added
