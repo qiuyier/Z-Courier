@@ -9,6 +9,10 @@ This document is a roadmap, not a release guarantee. A feature is not part of
 `v0.5.0` until it is implemented, documented, tested, and included in the
 release guide for that version.
 
+The current `v0.5.0` release guide is [v5-release.md](v5-release.md). Its
+scope is intentionally narrowed to deployment artifacts and operations/admin
+readiness; additional SDKs and Kubernetes/Helm support remain future work.
+
 ## Product Direction
 
 V1 through V4 established the core:
@@ -201,6 +205,11 @@ V5 is complete only when:
   environment.
 - Existing Go/PHP SDK behavior, V4 wire compatibility, cluster E2E, and
   load-test smoke checks remain green.
+
+For `v0.5.0`, the release guide narrows completion to deployment artifacts,
+admin/operator workflows, production smoke checks, audit logs, and the
+production runbook. New SDKs, Kubernetes manifests, Helm charts, and built-in
+TLS listeners are deferred.
 
 ## Open Questions
 

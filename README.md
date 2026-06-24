@@ -58,7 +58,8 @@ on deployment artifacts, operations/admin APIs, additional SDKs, security
 deployment patterns, and performance baseline governance. Operator CLI and
 admin API notes are in [docs/v5-admin-ops.md](docs/v5-admin-ops.md).
 Production troubleshooting and operations flows are collected in
-[docs/v5-production-runbook.md](docs/v5-production-runbook.md).
+[docs/v5-production-runbook.md](docs/v5-production-runbook.md). The `v0.5.0`
+release scope and checklist are in [docs/v5-release.md](docs/v5-release.md).
 
 ## Quick Start
 
@@ -210,8 +211,9 @@ and runnable migration examples. See [docs/v4-client-sdk.md](docs/v4-client-sdk.
 [docs/v4-sdk-migration.md](docs/v4-sdk-migration.md), and
 [docs/v4-release.md](docs/v4-release.md).
 
-V5 is in planning for `v0.5.0`. The roadmap is
-[docs/v5-roadmap.md](docs/v5-roadmap.md).
+V5 is being prepared for `v0.5.0`. The roadmap is
+[docs/v5-roadmap.md](docs/v5-roadmap.md), and the current release guide is
+[docs/v5-release.md](docs/v5-release.md).
 
 ## Development
 

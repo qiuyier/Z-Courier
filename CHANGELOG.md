@@ -35,6 +35,9 @@ semantic versioning after the first public MVP tag.
 - V5 production runbook covering health checks, admin CLI inspection,
   failed-message repair, cluster route diagnosis, dependency failures, HMAC
   failures, audit logs, Prometheus queries, and load-test baseline review.
+- V5 release guide covering `v0.5.0` scope, upgrade notes, production secret
+  checklist, verification commands, operational smoke checks, GitHub release
+  notes, known boundaries, and tagging steps.
 
 ## [v0.4.0] - 2026-06-23
 
