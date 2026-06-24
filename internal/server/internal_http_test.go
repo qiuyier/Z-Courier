@@ -128,6 +128,178 @@ func TestInternalHTTPRegistersMessageAdminRoutes(t *testing.T) {
 	}
 }
 
+func TestInternalHTTPAdminOverview(t *testing.T) {
+	sessions := session.NewManager()
+	if _, err := sessions.Bind(session.BindInput{SessionID: "session-1", ConnID: 1, ClientID: "client-1", DeviceID: "device-1", GatewayNode: "gateway-a"}); err != nil {
+		t.Fatalf("Bind() error = %v", err)
+	}
+	if _, err := sessions.Bind(session.BindInput{SessionID: "session-2", ConnID: 2, ClientID: "client-1", DeviceID: "device-2", GatewayNode: "gateway-a"}); err != nil {
+		t.Fatalf("Bind() error = %v", err)
+	}
+
+	registry := cluster.NewMemoryRegistry(cluster.MemoryRegistryConfig{TTL: time.Minute})
+	store := downlink.NewMemoryStore()
+	service := downlink.NewService(sessions, testConnectionFinder{}, downlink.WithStore(store))
+	config := normalizeConfig(Config{
+		Sessions:         sessions,
+		GatewayNode:      "gateway-a",
+		InternalHTTPAddr: "127.0.0.1:18080",
+		InternalToken:    "secret",
+		DownlinkStore:    store,
+		Cluster: ClusterConfig{
+			Enabled:      true,
+			InternalAddr: "http://gateway-a:18080",
+			Registry: ClusterRegistryConfig{
+				Type: "memory",
+				TTL:  time.Minute,
+			},
+			Peer: ClusterPeerConfig{
+				Auth: ClusterPeerAuthConfig{
+					Mode: ClusterPeerAuthModeHMAC,
+					HMAC: ClusterPeerHMACConfig{
+						KeyID: "gateway-1",
+						Keys:  map[string][]byte{"gateway-1": peerHMACTestSecret},
+					},
+				},
+			},
+		},
+		UpstreamRoutes: []UpstreamRouteConfig{{
+			Name:     "events",
+			MsgIDMin: 2000,
+			MsgIDMax: 2999,
+			NSQ:      &NSQUpstreamConfig{Topic: "message_events"},
+		}},
+	})
+
+	health := &gatewayHealth{}
+	server := mustInternalHTTPServer(t, config, service, health, registry)
+	req := httptest.NewRequest(http.MethodGet, "/internal/admin/overview", nil)
+	req.Header.Set(downlink.InternalTokenHeader, "secret")
+	rec := httptest.NewRecorder()
+	server.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var resp adminOverviewResponse
+	if err := sonic.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if resp.Code != "ok" || resp.GatewayNode != "gateway-a" || !resp.Readiness.Ready || resp.Readiness.Status != "ready" {
+		t.Fatalf("overview = %+v, want ready gateway-a", resp)
+	}
+	if resp.Sessions.Online != 2 || resp.Sessions.UniqueClients != 1 {
+		t.Fatalf("sessions = %+v, want 2 online and 1 unique client", resp.Sessions)
+	}
+	if !resp.Cluster.Enabled || resp.Cluster.RegistryType != "memory" || resp.Cluster.PeerAuthMode != ClusterPeerAuthModeHMAC {
+		t.Fatalf("cluster = %+v, want enabled memory hmac", resp.Cluster)
+	}
+	if !resp.Downlink.StoreConfigured || resp.Upstream.Routes != 1 {
+		t.Fatalf("downlink/upstream = %+v/%+v, want store configured and one route", resp.Downlink, resp.Upstream)
+	}
+
+	health.BeginDrain()
+	req = httptest.NewRequest(http.MethodGet, "/internal/admin/overview", nil)
+	req.Header.Set(downlink.InternalTokenHeader, "secret")
+	rec = httptest.NewRecorder()
+	server.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("draining status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if err := sonic.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("Unmarshal draining error = %v", err)
+	}
+	if resp.Readiness.Ready || resp.Readiness.Status != "draining" {
+		t.Fatalf("draining readiness = %+v, want draining", resp.Readiness)
+	}
+}
+
+func TestInternalHTTPAdminRoutesRedactsSensitiveRouteConfig(t *testing.T) {
+	service := downlink.NewService(testSessionFinder{}, testConnectionFinder{})
+	config := normalizeConfig(Config{
+		GatewayNode:      "gateway-a",
+		InternalHTTPAddr: "127.0.0.1:18080",
+		InternalToken:    "secret",
+		UpstreamRoutes: []UpstreamRouteConfig{
+			{
+				Name:     "http-route",
+				MsgIDMin: 1001,
+				MsgIDMax: 1999,
+				HTTP: &HTTPUpstreamConfig{
+					URL:     "http://user:password@backend:8080/gateway/upstream?token=secret#fragment",
+					Token:   "upstream-token",
+					Timeout: time.Second,
+				},
+			},
+			{
+				Name:        "nsq-route",
+				MsgIDMin:    2000,
+				MsgIDMax:    2999,
+				MaxInFlight: 10,
+				NSQ: &NSQUpstreamConfig{
+					Addresses:     []string{"nsqd-a:4150", "nsqd-b:4150"},
+					Topic:         "message_events",
+					AuthSecret:    "nsq-secret",
+					DialTimeout:   time.Second,
+					ReadTimeout:   time.Minute,
+					WriteTimeout:  time.Second,
+					PublishMode:   "round_robin",
+					RetryAttempts: 2,
+				},
+			},
+		},
+	})
+
+	server := mustInternalHTTPServer(t, config, service, &gatewayHealth{}, nil)
+	req := httptest.NewRequest(http.MethodGet, "/internal/admin/routes", nil)
+	req.Header.Set(downlink.InternalTokenHeader, "secret")
+	rec := httptest.NewRecorder()
+	server.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, secret := range []string{"user:password", "token=secret", "upstream-token", "nsq-secret"} {
+		if strings.Contains(body, secret) {
+			t.Fatalf("response leaked %q: %s", secret, body)
+		}
+	}
+
+	var resp adminRoutesResponse
+	if err := sonic.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if resp.Code != "ok" || resp.Total != 2 || len(resp.Routes) != 2 {
+		t.Fatalf("routes = %+v, want two routes", resp)
+	}
+	if resp.Routes[0].TargetType != "http" || resp.Routes[0].HTTP == nil || resp.Routes[0].HTTP.URL != "http://backend:8080/gateway/upstream" {
+		t.Fatalf("http route = %+v, want sanitized backend URL", resp.Routes[0])
+	}
+	if resp.Routes[1].TargetType != "nsq" || resp.Routes[1].NSQ == nil || len(resp.Routes[1].NSQ.Addresses) != 2 || resp.Routes[1].NSQ.Topic != "message_events" {
+		t.Fatalf("nsq route = %+v, want nsq addresses/topic", resp.Routes[1])
+	}
+}
+
+func TestInternalHTTPAdminRequiresToken(t *testing.T) {
+	service := downlink.NewService(testSessionFinder{}, testConnectionFinder{})
+	config := normalizeConfig(Config{
+		InternalHTTPAddr: "127.0.0.1:18080",
+		InternalToken:    "secret",
+	})
+
+	server := mustInternalHTTPServer(t, config, service, &gatewayHealth{}, nil)
+	for _, path := range []string{"/internal/admin/overview", "/internal/admin/routes"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		server.Handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("%s status = %d, want %d", path, rec.Code, http.StatusUnauthorized)
+		}
+	}
+}
+
 func TestInternalHTTPHealthAndReady(t *testing.T) {
 	service := downlink.NewService(testSessionFinder{}, testConnectionFinder{})
 	health := &gatewayHealth{}

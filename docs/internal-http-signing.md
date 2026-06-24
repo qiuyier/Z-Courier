@@ -98,10 +98,11 @@ environment when producing the final configuration file.
 ## Protected Paths
 
 Backend HMAC mode protects backend-facing `/internal/*` APIs, including push,
-message administration, and debug routes. Cluster peer HMAC mode independently
-protects `POST /internal/cluster/push`. Backend and peer authentication use
-separate key rings and nonce stores even though they share this wire protocol.
-`/healthz`, `/readyz`, and `/metrics` remain unsigned for probes and Prometheus.
+message administration, admin overview/routes, and debug routes. Cluster peer
+HMAC mode independently protects `POST /internal/cluster/push`. Backend and peer
+authentication use separate key rings and nonce stores even though they share
+this wire protocol. `/healthz`, `/readyz`, and `/metrics` remain unsigned for
+probes and Prometheus.
 
 ## Observability
 

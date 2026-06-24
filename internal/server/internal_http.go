@@ -69,6 +69,8 @@ func newInternalHTTPServer(config Config, logger *zap.Logger, service *downlink.
 		MaxRequestBodySize: config.InternalMaxRequestBodySize,
 		Logger:             logger,
 	}))
+	mux.Handle("/internal/admin/overview", newAdminOverviewHandler(handlerConfig, health, registry))
+	mux.Handle("/internal/admin/routes", newAdminRoutesHandler(handlerConfig))
 	mux.Handle("/internal/debug/route", newDebugRouteHandler(handlerConfig, registry))
 	mux.Handle("/internal/debug/sessions", newDebugSessionsHandler(handlerConfig))
 	if config.Cluster.Enabled {

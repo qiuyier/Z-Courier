@@ -24,6 +24,8 @@ semantic versioning after the first public MVP tag.
   `.env.example` files, and gitignored real production `.env` files.
 - Production reference smoke verifiers for single-node and two-node Compose
   stacks, with CI coverage for gateway readiness and Prometheus target health.
+- Read-only admin overview and upstream route APIs plus `cmd/admin` commands for
+  gateway overview, route ranges, route lookup, and local session inspection.
 
 ## [v0.4.0] - 2026-06-23
 

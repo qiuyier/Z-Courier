@@ -55,7 +55,8 @@ checklist are in [docs/v4-release.md](docs/v4-release.md).
 
 V5 planning is tracked in [docs/v5-roadmap.md](docs/v5-roadmap.md). It focuses
 on deployment artifacts, operations/admin APIs, additional SDKs, security
-deployment patterns, and performance baseline governance.
+deployment patterns, and performance baseline governance. The first read-only
+operator CLI and admin API notes are in [docs/v5-admin-ops.md](docs/v5-admin-ops.md).
 
 ## Quick Start
 
@@ -106,23 +107,32 @@ gateway-b internal HTTP: http://127.0.0.1:18183
 client TCP target:       127.0.0.1:9902
 ```
 
-Useful manual debug commands after starting the two-node stack:
+Useful manual admin commands after starting the two-node stack:
 
 ```bash
-go run ./cmd/devbackend route \
+go run ./cmd/admin overview \
+  -internal-url http://127.0.0.1:18182 \
+  -internal-token dev-internal-token
+
+go run ./cmd/admin routes \
+  -internal-url http://127.0.0.1:18182 \
+  -internal-token dev-internal-token
+
+go run ./cmd/admin route \
   -internal-url http://127.0.0.1:18182 \
   -internal-token dev-internal-token \
   -client-id e2e-client \
   -device-id e2e-device
 
-go run ./cmd/devbackend sessions \
+go run ./cmd/admin sessions \
   -internal-url http://127.0.0.1:18183 \
   -internal-token dev-internal-token \
   -client-id e2e-client
 ```
 
-`route` answers where the cluster would send a client/device. `sessions` answers
-which sessions are local to the gateway node you queried.
+`overview` summarizes the queried gateway node. `routes` shows enabled MsgID
+route ranges. `route` answers where the cluster would send a client/device.
+`sessions` answers which sessions are local to the gateway node you queried.
 
 Local service URLs and the manual workflow are documented in
 [deploy/local/README.md](deploy/local/README.md).
@@ -618,6 +628,8 @@ scrape-target details.
 
 ## Project Structure
 - `cmd/gateway`: Gateway entry point
+- `cmd/admin`: Read-only operator CLI for gateway overview, route, and session
+  inspection
 - `cmd/devclient`: Public Go SDK-based client for manual end-to-end testing
 - `cmd/sdke2e`: Automated live-gateway verifier for the public Go client SDK
 - `cmd/devbackend`: Development backend and internal API debugging CLI
