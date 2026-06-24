@@ -132,6 +132,23 @@ jobs:
             'test -x /usr/local/bin/z-courier-gateway && test -f /app/configs/z-courier.yaml && test -f /app/conf/zinx.json'
           docker run --rm z-courier-gateway:ci -h >/tmp/z-courier-gateway-help.txt 2>&1
 
+  production-smoke:
+    name: Production Smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs:
+      - validate
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Run production reference smoke verifier
+        run: bash scripts/production_smoke.sh
+
+      - name: Run production cluster smoke verifier
+        run: bash scripts/production_cluster_smoke.sh
+
   loadtest-smoke:
     name: Load Test Smoke
     runs-on: ubuntu-latest

@@ -194,7 +194,19 @@ Build the gateway image:
 docker build -t z-courier-gateway:production .
 ```
 
-Check that Prometheus can scrape the gateway after startup:
+Run the production reference smoke verifier:
+
+```bash
+bash scripts/production_smoke.sh
+```
+
+The script renders the Compose config with `.env.example`, builds and starts the
+reference stack, checks gateway readiness and metrics from inside the Compose
+network, verifies Prometheus can see the gateway target, and then removes the
+stack and volumes. Set `PRODUCTION_SMOKE_KEEP_STACK=1` to keep the stack running
+after the script exits.
+
+If you started the stack manually, check Prometheus readiness:
 
 ```bash
 curl http://127.0.0.1:9090/-/ready
@@ -213,3 +225,13 @@ docker build --tag z-courier-gateway:ci .
 The CI smoke check verifies that the gateway binary, default gateway config,
 and default Zinx config are present in the image. It also runs the gateway help
 command to prove the image entrypoint starts.
+
+CI also runs:
+
+```bash
+bash scripts/production_smoke.sh
+```
+
+That production smoke check proves the production reference Compose stack can
+boot with environment placeholders resolved and expose gateway metrics to
+Prometheus.

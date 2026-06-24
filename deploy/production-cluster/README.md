@@ -142,8 +142,23 @@ docker compose \
 Build and start the stack:
 
 ```bash
-docker compose -f deploy/production-cluster/docker-compose.yml up -d --build
+docker compose \
+  --env-file deploy/production-cluster/.env \
+  -f deploy/production-cluster/docker-compose.yml \
+  up -d --build
 ```
+
+Run the production cluster smoke verifier:
+
+```bash
+bash scripts/production_cluster_smoke.sh
+```
+
+The script renders the Compose config with `.env.example`, builds and starts the
+two-node reference stack, checks both gateway nodes from inside the Compose
+network, verifies Prometheus can see both gateway targets, and then removes the
+stack and volumes. Set `PRODUCTION_CLUSTER_SMOKE_KEEP_STACK=1` to keep the stack
+running after the script exits.
 
 Check Prometheus readiness:
 
@@ -166,3 +181,7 @@ bash scripts/e2e_cluster.sh
 
 The verifier starts its own local test stack and proves the same route lookup
 and peer push behavior with deterministic test clients.
+
+CI runs the production cluster smoke verifier as a deployment-reference boot
+check. It does not replace the local cluster E2E; the production reference stack
+does not include real `auth-backend` or `business-backend` services.

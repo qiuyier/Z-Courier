@@ -150,6 +150,8 @@ composer --working-dir=sdk/php analyse
 bash scripts/e2e.sh
 bash scripts/e2e_cluster.sh
 bash scripts/loadtest_smoke.sh
+bash scripts/production_smoke.sh
+bash scripts/production_cluster_smoke.sh
 docker build --tag z-courier-gateway:release-check .
 docker run --rm --entrypoint /bin/sh z-courier-gateway:release-check -c \
   'test -x /usr/local/bin/z-courier-gateway && test -f /app/configs/z-courier.yaml && test -f /app/conf/zinx.json'

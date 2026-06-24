@@ -22,6 +22,8 @@ semantic versioning after the first public MVP tag.
   Prometheus scraping for both gateway nodes.
 - Strict `${ENV_NAME}` expansion for gateway YAML configuration, production
   `.env.example` files, and gitignored real production `.env` files.
+- Production reference smoke verifiers for single-node and two-node Compose
+  stacks, with CI coverage for gateway readiness and Prometheus target health.
 
 ## [v0.4.0] - 2026-06-23
 
