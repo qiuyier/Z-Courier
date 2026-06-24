@@ -32,6 +32,9 @@ semantic versioning after the first public MVP tag.
 - Structured audit logs for admin downlink message mutations, including action,
   result, gateway node, message id, auth mode, HMAC key id, and HTTP status
   without exposing internal tokens or secrets.
+- V5 production runbook covering health checks, admin CLI inspection,
+  failed-message repair, cluster route diagnosis, dependency failures, HMAC
+  failures, audit logs, Prometheus queries, and load-test baseline review.
 
 ## [v0.4.0] - 2026-06-23
 

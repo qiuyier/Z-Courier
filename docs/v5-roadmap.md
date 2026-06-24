@@ -94,6 +94,9 @@ Acceptance criteria:
   documented command.
 - Operators can inspect and repair failed downlink messages without manual SQL.
 - Admin APIs are authenticated with the existing internal token or HMAC modes.
+- A production runbook documents health checks, message repair, cluster route
+  diagnosis, dependency failures, HMAC failures, audit logs, and Prometheus
+  queries.
 
 ### V5.3 SDK Expansion
 

@@ -55,8 +55,10 @@ checklist are in [docs/v4-release.md](docs/v4-release.md).
 
 V5 planning is tracked in [docs/v5-roadmap.md](docs/v5-roadmap.md). It focuses
 on deployment artifacts, operations/admin APIs, additional SDKs, security
-deployment patterns, and performance baseline governance. The first read-only
-operator CLI and admin API notes are in [docs/v5-admin-ops.md](docs/v5-admin-ops.md).
+deployment patterns, and performance baseline governance. Operator CLI and
+admin API notes are in [docs/v5-admin-ops.md](docs/v5-admin-ops.md).
+Production troubleshooting and operations flows are collected in
+[docs/v5-production-runbook.md](docs/v5-production-runbook.md).
 
 ## Quick Start
 
@@ -148,6 +150,10 @@ The first production-oriented gateway image path is documented in
 
 The two-node production cluster reference is documented in
 [deploy/production-cluster/README.md](deploy/production-cluster/README.md).
+
+The production runbook for health checks, admin inspection, failed-message
+repair, cluster routing, dependency failures, HMAC failures, and Prometheus
+queries is in [docs/v5-production-runbook.md](docs/v5-production-runbook.md).
 
 For a full release check, run:
 
@@ -643,8 +649,8 @@ scrape-target details.
 
 ## Project Structure
 - `cmd/gateway`: Gateway entry point
-- `cmd/admin`: Read-only operator CLI for gateway overview, route, and session
-  inspection plus message status/list queries
+- `cmd/admin`: Operator CLI for gateway overview, route/session inspection,
+  message status/list queries, and guarded message repair
 - `cmd/devclient`: Public Go SDK-based client for manual end-to-end testing
 - `cmd/sdke2e`: Automated live-gateway verifier for the public Go client SDK
 - `cmd/devbackend`: Development backend and internal API debugging CLI

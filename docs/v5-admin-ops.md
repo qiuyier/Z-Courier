@@ -1,10 +1,12 @@
 # V5 Admin Operations
 
-V5 introduces a small read-only operations surface for answering common gateway
-questions without querying Redis, PostgreSQL, or raw logs by hand.
+V5 introduces a small operations surface for answering common gateway questions
+without querying Redis, PostgreSQL, or raw logs by hand.
 
 This is not a browser admin console. The first milestone is a stable internal
-HTTP contract plus a safe `cmd/admin` CLI.
+HTTP contract plus a safe `cmd/admin` CLI. For incident-oriented command
+sequences and Prometheus queries, see the
+[V5 Production Runbook](v5-production-runbook.md).
 
 ## Internal APIs
 
