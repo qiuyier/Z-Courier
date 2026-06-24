@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/bytedance/sonic"
+	"github.com/qiuyier/Z-Courier/internal/httpauth"
 	"github.com/qiuyier/Z-Courier/internal/metrics"
 	"go.uber.org/zap"
 )
@@ -90,11 +91,13 @@ type messageActionHandler struct {
 func (h *messageActionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		h.record("method_not_allowed")
+		h.audit(r, "method_not_allowed", http.StatusMethodNotAllowed, MessageActionRequest{}, Message{}, nil)
 		writeJSON(w, http.StatusMethodNotAllowed, MessageStatusResponse{Code: "method_not_allowed"})
 		return
 	}
 	if h.config.InternalToken != "" && r.Header.Get(InternalTokenHeader) != h.config.InternalToken {
 		h.record("unauthorized")
+		h.audit(r, "unauthorized", http.StatusUnauthorized, MessageActionRequest{}, Message{}, nil)
 		writeJSON(w, http.StatusUnauthorized, MessageStatusResponse{Code: "unauthorized"})
 		return
 	}
@@ -109,12 +112,7 @@ func (h *messageActionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		statusCode := statusFromAdminError(err)
 		result := codeFromAdminError(err, statusCode)
 		h.record(result)
-		h.config.Logger.Warn(
-			"downlink message action failed",
-			zap.String("action", h.action),
-			zap.String("message_id", req.MessageID),
-			zap.Error(err),
-		)
+		h.audit(r, result, statusCode, req, Message{}, err)
 		writeJSON(w, statusCode, MessageStatusResponse{
 			Code:      result,
 			Reason:    err.Error(),
@@ -124,12 +122,7 @@ func (h *messageActionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	}
 
 	h.record("success")
-	h.config.Logger.Info(
-		"downlink message action accepted",
-		zap.String("action", h.action),
-		zap.String("message_id", message.MessageID),
-		zap.String("status", string(message.Status)),
-	)
+	h.audit(r, "success", http.StatusOK, req, message, nil)
 	writeJSON(w, http.StatusOK, responseFromMessage(message))
 }
 
@@ -138,6 +131,7 @@ func (h *messageActionHandler) request(w http.ResponseWriter, r *http.Request) (
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, h.config.MaxRequestBodySize))
 	if err != nil {
 		h.record("request_too_large")
+		h.audit(r, "request_too_large", http.StatusRequestEntityTooLarge, MessageActionRequest{}, Message{}, err)
 		writeJSON(w, http.StatusRequestEntityTooLarge, MessageStatusResponse{Code: "request_too_large", Reason: err.Error()})
 		return MessageActionRequest{}, false
 	}
@@ -145,6 +139,7 @@ func (h *messageActionHandler) request(w http.ResponseWriter, r *http.Request) (
 	var req MessageActionRequest
 	if err := sonic.Unmarshal(body, &req); err != nil {
 		h.record("bad_request")
+		h.audit(r, "bad_request", http.StatusBadRequest, MessageActionRequest{}, Message{}, err)
 		writeJSON(w, http.StatusBadRequest, MessageStatusResponse{Code: "bad_request", Reason: err.Error()})
 		return MessageActionRequest{}, false
 	}
@@ -171,6 +166,67 @@ func (h *messageActionHandler) record(result string) {
 	case messageActionDiscard:
 		metrics.RecordDownlinkDiscard(result)
 	}
+}
+
+func (h *messageActionHandler) audit(r *http.Request, result string, statusCode int, req MessageActionRequest, message Message, err error) {
+	if h.config.Logger == nil {
+		return
+	}
+
+	identity := h.authIdentity(r)
+	messageID := strings.TrimSpace(req.MessageID)
+	if messageID == "" {
+		messageID = message.MessageID
+	}
+
+	fields := []zap.Field{
+		zap.String("audit_event", "downlink_message_action"),
+		zap.String("action", h.action),
+		zap.String("result", result),
+		zap.Int("http_status", statusCode),
+		zap.String("auth_mode", identity.Mode),
+		zap.String("method", r.Method),
+		zap.String("path", r.URL.Path),
+		zap.String("remote_addr", r.RemoteAddr),
+	}
+	if h.config.GatewayNode != "" {
+		fields = append(fields, zap.String("gateway_node", h.config.GatewayNode))
+	}
+	if identity.KeyID != "" {
+		fields = append(fields, zap.String("auth_key_id", identity.KeyID))
+	}
+	if messageID != "" {
+		fields = append(fields, zap.String("message_id", messageID))
+	}
+	if req.Reason != "" {
+		fields = append(fields, zap.String("reason", req.Reason))
+	}
+	if message.Status != "" {
+		fields = append(fields, zap.String("message_status", string(message.Status)))
+	}
+	if err != nil {
+		fields = append(fields, zap.Error(err))
+		h.config.Logger.Warn("admin message action audit", fields...)
+		return
+	}
+	if statusCode >= http.StatusBadRequest {
+		h.config.Logger.Warn("admin message action audit", fields...)
+		return
+	}
+	h.config.Logger.Info("admin message action audit", fields...)
+}
+
+func (h *messageActionHandler) authIdentity(r *http.Request) httpauth.Identity {
+	if identity, ok := httpauth.IdentityFromContext(r.Context()); ok {
+		if identity.Mode == "" {
+			identity.Mode = httpauth.ModeNone
+		}
+		return identity
+	}
+	if h.config.InternalToken != "" {
+		return httpauth.Identity{Mode: httpauth.ModeToken}
+	}
+	return httpauth.Identity{Mode: httpauth.ModeNone}
 }
 
 func parseMessageStatus(raw string) (MessageStatus, error) {

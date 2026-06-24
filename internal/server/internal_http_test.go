@@ -11,6 +11,7 @@ import (
 	"github.com/bytedance/sonic"
 	"github.com/qiuyier/Z-Courier/internal/cluster"
 	"github.com/qiuyier/Z-Courier/internal/downlink"
+	"github.com/qiuyier/Z-Courier/internal/httpauth"
 	"github.com/qiuyier/Z-Courier/internal/session"
 	sdkbackend "github.com/qiuyier/Z-Courier/pkg/sdk/backend"
 	"github.com/qiuyier/Z-Courier/pkg/sdk/signing"
@@ -378,6 +379,48 @@ func TestInternalHTTPHMACAcceptsSignedRequestAndRejectsReplay(t *testing.T) {
 	server.Handler.ServeHTTP(tamperedRec, tampered)
 	if tamperedRec.Code != http.StatusUnauthorized {
 		t.Fatalf("tampered status = %d, want %d, body = %s", tamperedRec.Code, http.StatusUnauthorized, tamperedRec.Body.String())
+	}
+}
+
+func TestInternalHTTPHMACStoresAuthIdentity(t *testing.T) {
+	config := normalizeConfig(Config{
+		InternalHTTPAddr: "127.0.0.1:18080",
+		InternalHTTPAuth: InternalHTTPAuthConfig{
+			Mode: InternalHTTPAuthModeHMAC,
+			HMAC: InternalHTTPHMACConfig{
+				Keys: map[string][]byte{"backend-1": internalHMACTestSecret},
+			},
+		},
+	})
+	var gotIdentity httpauth.Identity
+	var gotIdentityOK bool
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotIdentity, gotIdentityOK = httpauth.IdentityFromContext(r.Context())
+		w.WriteHeader(http.StatusNoContent)
+	})
+	handler, err := newInternalHMACHandler(next, config, zap.NewNop())
+	if err != nil {
+		t.Fatalf("newInternalHMACHandler() error = %v", err)
+	}
+	signer, err := signing.NewSigner(signing.SignerConfig{KeyID: "backend-1", Secret: internalHMACTestSecret})
+	if err != nil {
+		t.Fatalf("NewSigner() error = %v", err)
+	}
+
+	body := []byte(`{"message_id":"message-1"}`)
+	req := httptest.NewRequest(http.MethodPost, "/internal/message/requeue", strings.NewReader(string(body)))
+	if err := signer.Sign(req, body); err != nil {
+		t.Fatalf("Sign() error = %v", err)
+	}
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusNoContent, rec.Body.String())
+	}
+	if !gotIdentityOK || gotIdentity.Mode != httpauth.ModeHMAC || gotIdentity.KeyID != "backend-1" {
+		t.Fatalf("identity = %+v ok=%v, want hmac backend-1", gotIdentity, gotIdentityOK)
 	}
 }
 

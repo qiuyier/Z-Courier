@@ -9,6 +9,7 @@ import (
 
 	"github.com/bytedance/sonic"
 	"github.com/qiuyier/Z-Courier/internal/downlink"
+	"github.com/qiuyier/Z-Courier/internal/httpauth"
 	"github.com/qiuyier/Z-Courier/internal/metrics"
 	"github.com/qiuyier/Z-Courier/pkg/sdk/signing"
 	"go.uber.org/zap"
@@ -68,7 +69,11 @@ func (h *internalHMACHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	}
 
 	metrics.RecordInternalHTTPSignature("success")
-	h.next.ServeHTTP(w, r)
+	identity := httpauth.Identity{
+		Mode:  httpauth.ModeHMAC,
+		KeyID: r.Header.Get(signing.HeaderKeyID),
+	}
+	h.next.ServeHTTP(w, r.WithContext(httpauth.WithIdentity(r.Context(), identity)))
 }
 
 func (h *internalHMACHandler) readBody(w http.ResponseWriter, r *http.Request) ([]byte, error) {

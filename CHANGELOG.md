@@ -29,6 +29,9 @@ semantic versioning after the first public MVP tag.
   downlink message status/list queries.
 - Guarded `cmd/admin requeue` and `cmd/admin discard` commands for single-message
   downlink repair, with explicit confirmation and discard reason requirements.
+- Structured audit logs for admin downlink message mutations, including action,
+  result, gateway node, message id, auth mode, HMAC key id, and HTTP status
+  without exposing internal tokens or secrets.
 
 ## [v0.4.0] - 2026-06-23
 

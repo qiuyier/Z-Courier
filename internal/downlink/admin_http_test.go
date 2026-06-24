@@ -8,7 +8,9 @@ import (
 	"testing"
 
 	"github.com/bytedance/sonic"
+	"github.com/qiuyier/Z-Courier/internal/httpauth"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 func TestMessageListHandlerOK(t *testing.T) {
@@ -151,6 +153,101 @@ func TestDiscardHandlerOK(t *testing.T) {
 	}
 }
 
+func TestDiscardHandlerAuditsSuccessWithTokenIdentity(t *testing.T) {
+	store := NewMemoryStore()
+	if _, err := store.Save(context.Background(), Message{
+		MessageID: "message-1",
+		ClientID:  "client-1",
+		DeviceID:  "device-1",
+		MsgID:     2001,
+		Status:    MessageStatusFailed,
+	}); err != nil {
+		t.Fatalf("Save error = %v", err)
+	}
+
+	core, logs := observer.New(zap.InfoLevel)
+	handler := NewDiscardHandler(HandlerConfig{
+		Service:       NewService(fakeSessions{}, fakeConnections{}, WithStore(store)),
+		InternalToken: "secret",
+		GatewayNode:   "gateway-a",
+		Logger:        zap.New(core),
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/internal/message/discard", strings.NewReader(`{"message_id":"message-1","reason":"manual"}`))
+	req.Header.Set(InternalTokenHeader, "secret")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	entry := onlyAuditLog(t, logs)
+	if entry.Level != zap.InfoLevel {
+		t.Fatalf("level = %s, want info", entry.Level)
+	}
+	fields := entry.ContextMap()
+	if fields["audit_event"] != "downlink_message_action" ||
+		fields["action"] != "discard" ||
+		fields["result"] != "success" ||
+		fields["http_status"] != int64(http.StatusOK) ||
+		fields["auth_mode"] != httpauth.ModeToken ||
+		fields["gateway_node"] != "gateway-a" ||
+		fields["message_id"] != "message-1" ||
+		fields["reason"] != "manual" ||
+		fields["message_status"] != string(MessageStatusDiscarded) {
+		t.Fatalf("audit fields = %#v", fields)
+	}
+}
+
+func TestRequeueHandlerAuditsFailureWithHMACIdentity(t *testing.T) {
+	store := NewMemoryStore()
+	if _, err := store.Save(context.Background(), Message{
+		MessageID: "message-1",
+		ClientID:  "client-1",
+		DeviceID:  "device-1",
+		MsgID:     2001,
+		Status:    MessageStatusDelivered,
+	}); err != nil {
+		t.Fatalf("Save error = %v", err)
+	}
+
+	core, logs := observer.New(zap.InfoLevel)
+	handler := NewRequeueHandler(HandlerConfig{
+		Service:     NewService(fakeSessions{}, fakeConnections{}, WithStore(store)),
+		GatewayNode: "gateway-b",
+		Logger:      zap.New(core),
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/internal/message/requeue", strings.NewReader(`{"message_id":"message-1"}`))
+	req = req.WithContext(httpauth.WithIdentity(req.Context(), httpauth.Identity{Mode: httpauth.ModeHMAC, KeyID: "backend-1"}))
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusConflict, rec.Body.String())
+	}
+	entry := onlyAuditLog(t, logs)
+	if entry.Level != zap.WarnLevel {
+		t.Fatalf("level = %s, want warn", entry.Level)
+	}
+	fields := entry.ContextMap()
+	if fields["audit_event"] != "downlink_message_action" ||
+		fields["action"] != "requeue" ||
+		fields["result"] != "invalid_transition" ||
+		fields["http_status"] != int64(http.StatusConflict) ||
+		fields["auth_mode"] != httpauth.ModeHMAC ||
+		fields["auth_key_id"] != "backend-1" ||
+		fields["gateway_node"] != "gateway-b" ||
+		fields["message_id"] != "message-1" {
+		t.Fatalf("audit fields = %#v", fields)
+	}
+	if _, ok := fields["error"]; !ok {
+		t.Fatalf("audit fields = %#v, want error", fields)
+	}
+}
+
 func TestRequeueHandlerRejectsDelivered(t *testing.T) {
 	store := NewMemoryStore()
 	if _, err := store.Save(context.Background(), Message{
@@ -181,4 +278,14 @@ func TestRequeueHandlerRejectsDelivered(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), `"code":"invalid_transition"`) {
 		t.Fatalf("body = %s, want invalid_transition", rec.Body.String())
 	}
+}
+
+func onlyAuditLog(t *testing.T, logs *observer.ObservedLogs) observer.LoggedEntry {
+	t.Helper()
+
+	entries := logs.FilterMessage("admin message action audit").All()
+	if len(entries) != 1 {
+		t.Fatalf("audit log entries = %d, want 1: %+v", len(entries), entries)
+	}
+	return entries[0]
 }

@@ -259,3 +259,30 @@ message status, list, requeue, discard, route, and sessions endpoints.
 
 `requeue` and `discard` intentionally operate on one `message_id` at a time.
 Batch repair is not provided by the operator CLI yet.
+
+## Mutation Audit Logs
+
+`requeue` and `discard` emit one structured audit log for every accepted or
+rejected mutation attempt. The log message is:
+
+```text
+admin message action audit
+```
+
+Stable fields include:
+
+| Field | Meaning |
+| --- | --- |
+| `audit_event` | Always `downlink_message_action` |
+| `action` | `requeue` or `discard` |
+| `result` | `success`, `unauthorized`, `bad_request`, `invalid_transition`, and related result codes |
+| `http_status` | HTTP status returned to the operator |
+| `gateway_node` | Gateway node handling the operation, when configured |
+| `message_id` | Target reliable downlink message id, when available |
+| `reason` | Operator discard reason, when supplied |
+| `message_status` | Message status after a successful mutation |
+| `auth_mode` | `token`, `hmac`, or `none` |
+| `auth_key_id` | HMAC key id for HMAC-authenticated operations |
+| `remote_addr` | Operator source address as seen by the gateway |
+
+The audit log never records the internal token or HMAC secret.

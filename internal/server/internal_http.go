@@ -35,6 +35,7 @@ func newInternalHTTPServer(config Config, logger *zap.Logger, service *downlink.
 		Service:            service,
 		InternalToken:      handlerConfig.InternalToken,
 		MaxRequestBodySize: config.InternalMaxRequestBodySize,
+		GatewayNode:        config.GatewayNode,
 		PushLimiter:        pushLimiter,
 		Logger:             logger,
 	}))
@@ -42,6 +43,7 @@ func newInternalHTTPServer(config Config, logger *zap.Logger, service *downlink.
 		Service:            service,
 		InternalToken:      handlerConfig.InternalToken,
 		MaxRequestBodySize: config.InternalMaxRequestBodySize,
+		GatewayNode:        config.GatewayNode,
 		PushLimiter:        pushLimiter,
 		Logger:             logger,
 	}))
@@ -49,24 +51,28 @@ func newInternalHTTPServer(config Config, logger *zap.Logger, service *downlink.
 		Service:            service,
 		InternalToken:      handlerConfig.InternalToken,
 		MaxRequestBodySize: config.InternalMaxRequestBodySize,
+		GatewayNode:        config.GatewayNode,
 		Logger:             logger,
 	}))
 	mux.Handle("/internal/messages", downlink.NewMessageListHandler(downlink.HandlerConfig{
 		Service:            service,
 		InternalToken:      handlerConfig.InternalToken,
 		MaxRequestBodySize: config.InternalMaxRequestBodySize,
+		GatewayNode:        config.GatewayNode,
 		Logger:             logger,
 	}))
 	mux.Handle("/internal/message/requeue", downlink.NewRequeueHandler(downlink.HandlerConfig{
 		Service:            service,
 		InternalToken:      handlerConfig.InternalToken,
 		MaxRequestBodySize: config.InternalMaxRequestBodySize,
+		GatewayNode:        config.GatewayNode,
 		Logger:             logger,
 	}))
 	mux.Handle("/internal/message/discard", downlink.NewDiscardHandler(downlink.HandlerConfig{
 		Service:            service,
 		InternalToken:      handlerConfig.InternalToken,
 		MaxRequestBodySize: config.InternalMaxRequestBodySize,
+		GatewayNode:        config.GatewayNode,
 		Logger:             logger,
 	}))
 	mux.Handle("/internal/admin/overview", newAdminOverviewHandler(handlerConfig, health, registry))

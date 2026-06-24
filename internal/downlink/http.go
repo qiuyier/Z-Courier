@@ -16,6 +16,7 @@ type HandlerConfig struct {
 	InternalToken      string
 	MaxRequestBodySize int64
 	MaxBatchMessages   int
+	GatewayNode        string
 	PushLimiter        *capacity.Limiter
 	Logger             *zap.Logger
 }
