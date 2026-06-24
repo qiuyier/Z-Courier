@@ -21,9 +21,11 @@ final class NativeConnector implements Connector
             STREAM_CLIENT_CONNECT,
         );
         if ($stream === false) {
+            $errorCodeText = is_int($errorCode) ? (string) $errorCode : '0';
+            $errorMessageText = is_string($errorMessage) ? $errorMessage : '';
             throw new ClientException(
                 ClientException::CONNECT_FAILED,
-                "connect {$target} failed ({$errorCode}): {$errorMessage}",
+                "connect {$target} failed ({$errorCodeText}): {$errorMessageText}",
             );
         }
         if (!stream_set_blocking($stream, true)) {
