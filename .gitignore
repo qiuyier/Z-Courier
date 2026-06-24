@@ -11,3 +11,5 @@ reports/*
 !reports/baseline/**/*.json
 /sdk/php/vendor/
 /sdk/php/composer.lock
+/deploy/production/.env
+/deploy/production-cluster/.env

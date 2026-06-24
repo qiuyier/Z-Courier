@@ -20,6 +20,8 @@ semantic versioning after the first public MVP tag.
 - Two-node production cluster reference deployment with Redis online routes,
   shared PostgreSQL storage, shared NSQ upstream, HMAC peer push, and
   Prometheus scraping for both gateway nodes.
+- Strict `${ENV_NAME}` expansion for gateway YAML configuration, production
+  `.env.example` files, and gitignored real production `.env` files.
 
 ## [v0.4.0] - 2026-06-23
 

@@ -11,6 +11,25 @@ the `-config` flag or the `ZCOURIER_CONFIG` environment variable.
 The Zinx config path defaults to `conf/zinx.json`. Override it with
 `ZINX_CONFIG_FILE_PATH`.
 
+## Environment Placeholders
+
+`configs/z-courier.yaml` supports strict environment placeholders in the form
+`${ENV_NAME}`. Z-Courier expands them before YAML parsing:
+
+```yaml
+downlink:
+  storage:
+    postgres:
+      dsn: "postgres://zcourier:${ZCOURIER_POSTGRES_PASSWORD}@postgres:5432/zcourier?sslmode=disable"
+```
+
+Only braced placeholders are supported. Bare `$ENV_NAME` is treated as ordinary
+text. If a referenced environment variable is not set, startup fails with a
+configuration error; it is never silently replaced with an empty value.
+
+This is intended for deployment-provided values such as passwords, HMAC keys,
+internal tokens, and upstream secrets. Do not commit real secret values to Git.
+
 ## Zinx Runtime Config
 
 Example:
@@ -253,9 +272,9 @@ internal_http:
 
 `nonce_ttl` must be at least twice `max_clock_skew`, and every secret must be at
 least 32 bytes. HMAC and token settings are mutually exclusive. Environment
-variable expansion is shown as a deployment-template convention; Z-Courier's
-YAML loader does not expand `${...}` itself. The exact cross-language signing
-contract and TLS requirements are documented in
+placeholders such as `${ZCOURIER_INTERNAL_HMAC_SECRET}` are expanded by the
+Z-Courier YAML loader before parsing. The exact cross-language signing contract
+and TLS requirements are documented in
 [internal-http-signing.md](internal-http-signing.md).
 
 ## Cluster
@@ -329,9 +348,8 @@ Configure the same accepted key ring on each gateway, but select that node's
 own `key_id`. Peer keys must be separate from backend internal-HTTP keys so a
 compromised backend credential cannot impersonate a gateway node. The selected
 `key_id` must exist in `keys`; secrets require at least 32 bytes, and
-`nonce_ttl` must be at least twice `max_clock_skew`.
-The `${...}` values above are deployment-template placeholders; as with
-internal HTTP HMAC configuration, Z-Courier does not expand them itself.
+`nonce_ttl` must be at least twice `max_clock_skew`. The `${...}` values above
+are strict environment placeholders expanded by the Z-Courier YAML loader.
 
 When cluster mode is enabled, Z-Courier writes `client_id + device_id` online
 routes after session binding and removes them on connection close only when the

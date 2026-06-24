@@ -40,6 +40,88 @@ func TestResolvePath(t *testing.T) {
 	}
 }
 
+func TestLoadExpandsEnvironmentPlaceholders(t *testing.T) {
+	t.Setenv("ZCOURIER_TEST_CLIENT_ID", "client-from-env")
+	t.Setenv("ZCOURIER_TEST_TOKEN", "token-from-env")
+
+	path := writeConfig(t, `
+auth:
+  static_tokens:
+    ${ZCOURIER_TEST_TOKEN}:
+      client_id: ${ZCOURIER_TEST_CLIENT_ID}
+`)
+
+	config, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	principal := config.Auth.StaticTokens["token-from-env"]
+	if principal.ClientID != "client-from-env" {
+		t.Fatalf("expanded client_id = %q, want client-from-env", principal.ClientID)
+	}
+}
+
+func TestLoadRejectsMissingEnvironmentPlaceholder(t *testing.T) {
+	t.Setenv("ZCOURIER_MISSING_TEST", "")
+	os.Unsetenv("ZCOURIER_MISSING_TEST")
+
+	path := writeConfig(t, `
+auth:
+  static_tokens:
+    token-a:
+      client_id: ${ZCOURIER_MISSING_TEST}
+`)
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("Load() error = nil, want missing environment error")
+	}
+	if !strings.Contains(err.Error(), "missing environment variables: ZCOURIER_MISSING_TEST") {
+		t.Fatalf("Load() error = %q, want missing env message", err)
+	}
+}
+
+func TestLoadRejectsMalformedEnvironmentPlaceholder(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  string
+		message string
+	}{
+		{
+			name: "unterminated",
+			config: `
+auth:
+  static_tokens:
+    token-a:
+      client_id: ${ZCOURIER_CLIENT_ID
+`,
+			message: "unterminated environment placeholder",
+		},
+		{
+			name: "invalid name",
+			config: `
+auth:
+  static_tokens:
+    token-a:
+      client_id: ${1INVALID}
+`,
+			message: "invalid environment placeholder",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := Load(writeConfig(t, test.config))
+			if err == nil {
+				t.Fatal("Load() error = nil, want placeholder error")
+			}
+			if !strings.Contains(err.Error(), test.message) {
+				t.Fatalf("Load() error = %q, want substring %q", err, test.message)
+			}
+		})
+	}
+}
+
 func TestLoadServerConfig(t *testing.T) {
 	path := writeConfig(t, `
 gateway_node: node-a

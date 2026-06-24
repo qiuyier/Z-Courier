@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -247,6 +248,10 @@ func Load(path string) (*File, error) {
 	if err != nil {
 		return nil, fmt.Errorf("config: read %s: %w", path, err)
 	}
+	data, err = expandEnvPlaceholders(data)
+	if err != nil {
+		return nil, fmt.Errorf("config: expand env %s: %w", path, err)
+	}
 
 	var fileConfig File
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
@@ -256,6 +261,73 @@ func Load(path string) (*File, error) {
 	}
 
 	return &fileConfig, nil
+}
+
+func expandEnvPlaceholders(data []byte) ([]byte, error) {
+	text := string(data)
+	if !strings.Contains(text, "${") {
+		return data, nil
+	}
+
+	var builder strings.Builder
+	builder.Grow(len(text))
+
+	missing := make(map[string]struct{})
+	offset := 0
+	for {
+		start := strings.Index(text[offset:], "${")
+		if start < 0 {
+			builder.WriteString(text[offset:])
+			break
+		}
+		start += offset
+		end := strings.IndexByte(text[start+2:], '}')
+		if end < 0 {
+			return nil, fmt.Errorf("unterminated environment placeholder at byte %d", start)
+		}
+		end += start + 2
+
+		name := text[start+2 : end]
+		if !validEnvPlaceholderName(name) {
+			return nil, fmt.Errorf("invalid environment placeholder %q", name)
+		}
+
+		builder.WriteString(text[offset:start])
+		if value, ok := os.LookupEnv(name); ok {
+			builder.WriteString(value)
+		} else {
+			missing[name] = struct{}{}
+		}
+		offset = end + 1
+	}
+
+	if len(missing) > 0 {
+		names := make([]string, 0, len(missing))
+		for name := range missing {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		return nil, fmt.Errorf("missing environment variables: %s", strings.Join(names, ", "))
+	}
+
+	return []byte(builder.String()), nil
+}
+
+func validEnvPlaceholderName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for index := 0; index < len(name); index++ {
+		char := name[index]
+		if char == '_' || ('A' <= char && char <= 'Z') || ('a' <= char && char <= 'z') {
+			continue
+		}
+		if index > 0 && '0' <= char && char <= '9' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func (c *File) ToServerConfig() (server.Config, error) {

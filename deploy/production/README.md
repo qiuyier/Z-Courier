@@ -5,8 +5,8 @@ Z-Courier. The image builds `cmd/gateway` as a static Linux binary and packages
 the default `configs/` and `conf/` directories under `/app`.
 
 The files in this directory are a production reference, not a secret-safe
-drop-in deployment. Replace every `CHANGE_ME_*` value before using it outside a
-private test environment.
+drop-in deployment. Copy `.env.example` to `.env`, replace every value, and do
+not commit the real `.env` file.
 
 ## Reference Layout
 
@@ -64,19 +64,31 @@ ZINX_CONFIG_FILE_PATH=/app/conf/zinx.json
 Start the production reference stack:
 
 ```bash
-docker compose -f deploy/production/docker-compose.yml up -d --build
+cp deploy/production/.env.example deploy/production/.env
+$EDITOR deploy/production/.env
+
+docker compose \
+  --env-file deploy/production/.env \
+  -f deploy/production/docker-compose.yml \
+  up -d --build
 ```
 
 Stop it:
 
 ```bash
-docker compose -f deploy/production/docker-compose.yml down
+docker compose \
+  --env-file deploy/production/.env \
+  -f deploy/production/docker-compose.yml \
+  down
 ```
 
 Remove local data volumes as well:
 
 ```bash
-docker compose -f deploy/production/docker-compose.yml down -v
+docker compose \
+  --env-file deploy/production/.env \
+  -f deploy/production/docker-compose.yml \
+  down -v
 ```
 
 For a real deployment, mount your own gateway and Zinx configuration files
@@ -148,19 +160,19 @@ use the development configs instead.
 If you keep `production-http-upstream` enabled, add `business-backend` to the
 same private network or change the route URL to your real backend address.
 
-## Required Replacements
+## Required Environment
 
-Before production use, replace these values in
-`config/z-courier.yaml` and `docker-compose.yml`:
+Before production use, copy `deploy/production/.env.example` to
+`deploy/production/.env` and replace every value:
 
-| Placeholder | Purpose |
+| Variable | Purpose |
 | --- | --- |
-| `CHANGE_ME_postgres_password` | PostgreSQL password and gateway DSN |
-| `CHANGE_ME_redis_password` | Redis password and gateway registry password |
-| `CHANGE_ME_auth_provider_shared_token` | Token sent to your auth backend |
-| `CHANGE_ME_internal_hmac_secret_0123456789abcdef` | Backend-to-gateway HMAC key |
-| `CHANGE_ME_peer_hmac_secret_0123456789abcdef` | Gateway peer HMAC key |
-| `CHANGE_ME_upstream_internal_token` | Optional HTTP upstream token |
+| `ZCOURIER_POSTGRES_PASSWORD` | PostgreSQL password and gateway DSN |
+| `ZCOURIER_REDIS_PASSWORD` | Redis password and gateway registry password |
+| `ZCOURIER_AUTH_PROVIDER_SHARED_TOKEN` | Token sent to your auth backend |
+| `ZCOURIER_INTERNAL_HMAC_SECRET` | Backend-to-gateway HMAC key |
+| `ZCOURIER_PEER_HMAC_SECRET` | Gateway peer HMAC key |
+| `ZCOURIER_UPSTREAM_INTERNAL_TOKEN` | Optional HTTP upstream token |
 
 Use different HMAC keys for backend internal HTTP and gateway peer push. Do not
 reuse the example values.
@@ -170,7 +182,10 @@ reuse the example values.
 Render the Compose configuration:
 
 ```bash
-docker compose -f deploy/production/docker-compose.yml config
+docker compose \
+  --env-file deploy/production/.env.example \
+  -f deploy/production/docker-compose.yml \
+  config
 ```
 
 Build the gateway image:

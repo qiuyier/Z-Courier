@@ -3,6 +3,8 @@ package config
 import "testing"
 
 func TestLoadProductionReferenceConfig(t *testing.T) {
+	setProductionReferenceEnv(t)
+
 	config, err := LoadServerConfig("../../deploy/production/config/z-courier.yaml")
 	if err != nil {
 		t.Fatalf("LoadServerConfig(production reference) error = %v", err)
@@ -20,6 +22,8 @@ func TestLoadProductionReferenceConfig(t *testing.T) {
 }
 
 func TestLoadProductionClusterReferenceConfigs(t *testing.T) {
+	setProductionReferenceEnv(t)
+
 	tests := []struct {
 		name         string
 		path         string
@@ -66,4 +70,15 @@ func TestLoadProductionClusterReferenceConfigs(t *testing.T) {
 			}
 		})
 	}
+}
+
+func setProductionReferenceEnv(t *testing.T) {
+	t.Helper()
+
+	t.Setenv("ZCOURIER_AUTH_PROVIDER_SHARED_TOKEN", "change-me-auth-provider-shared-token")
+	t.Setenv("ZCOURIER_INTERNAL_HMAC_SECRET", "change-me-internal-hmac-secret-32bytes")
+	t.Setenv("ZCOURIER_PEER_HMAC_SECRET", "change-me-peer-hmac-secret-32bytes")
+	t.Setenv("ZCOURIER_POSTGRES_PASSWORD", "change-me-postgres-password")
+	t.Setenv("ZCOURIER_REDIS_PASSWORD", "change-me-redis-password")
+	t.Setenv("ZCOURIER_UPSTREAM_INTERNAL_TOKEN", "change-me-upstream-internal-token")
 }

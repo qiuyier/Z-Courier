@@ -64,8 +64,9 @@ Configuration examples and validation rules are in
   encryption. Use TLS, mTLS, or an encrypted service mesh in production.
 - The current nonce stores are process-local. Backend requests distributed
   across several gateway nodes do not yet have cluster-global replay state.
-- `${ENV_NAME}` in YAML examples is a deployment-template convention. The
-  Z-Courier YAML loader does not expand environment variables itself.
+- At the time of `v0.3.0`, `${ENV_NAME}` in YAML examples was only a
+  deployment-template convention. Later versions added strict environment
+  placeholder expansion in the Z-Courier YAML loader.
 - Reliable delivery is at-least-once. Clients must de-duplicate by `MessageID`.
 
 ## Release Verification

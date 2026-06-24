@@ -16,6 +16,13 @@ services:
       - "8999:8999"
     expose:
       - "18080"
+    environment:
+      ZCOURIER_AUTH_PROVIDER_SHARED_TOKEN: ${ZCOURIER_AUTH_PROVIDER_SHARED_TOKEN:?set ZCOURIER_AUTH_PROVIDER_SHARED_TOKEN}
+      ZCOURIER_INTERNAL_HMAC_SECRET: ${ZCOURIER_INTERNAL_HMAC_SECRET:?set ZCOURIER_INTERNAL_HMAC_SECRET}
+      ZCOURIER_PEER_HMAC_SECRET: ${ZCOURIER_PEER_HMAC_SECRET:?set ZCOURIER_PEER_HMAC_SECRET}
+      ZCOURIER_POSTGRES_PASSWORD: ${ZCOURIER_POSTGRES_PASSWORD:?set ZCOURIER_POSTGRES_PASSWORD}
+      ZCOURIER_REDIS_PASSWORD: ${ZCOURIER_REDIS_PASSWORD:?set ZCOURIER_REDIS_PASSWORD}
+      ZCOURIER_UPSTREAM_INTERNAL_TOKEN: ${ZCOURIER_UPSTREAM_INTERNAL_TOKEN:?set ZCOURIER_UPSTREAM_INTERNAL_TOKEN}
     volumes:
       - ./config/gateway-a.yaml:/app/configs/z-courier.yaml:ro
       - ./conf/zinx.json:/app/conf/zinx.json:ro
@@ -40,6 +47,13 @@ services:
       - "9000:8999"
     expose:
       - "18080"
+    environment:
+      ZCOURIER_AUTH_PROVIDER_SHARED_TOKEN: ${ZCOURIER_AUTH_PROVIDER_SHARED_TOKEN:?set ZCOURIER_AUTH_PROVIDER_SHARED_TOKEN}
+      ZCOURIER_INTERNAL_HMAC_SECRET: ${ZCOURIER_INTERNAL_HMAC_SECRET:?set ZCOURIER_INTERNAL_HMAC_SECRET}
+      ZCOURIER_PEER_HMAC_SECRET: ${ZCOURIER_PEER_HMAC_SECRET:?set ZCOURIER_PEER_HMAC_SECRET}
+      ZCOURIER_POSTGRES_PASSWORD: ${ZCOURIER_POSTGRES_PASSWORD:?set ZCOURIER_POSTGRES_PASSWORD}
+      ZCOURIER_REDIS_PASSWORD: ${ZCOURIER_REDIS_PASSWORD:?set ZCOURIER_REDIS_PASSWORD}
+      ZCOURIER_UPSTREAM_INTERNAL_TOKEN: ${ZCOURIER_UPSTREAM_INTERNAL_TOKEN:?set ZCOURIER_UPSTREAM_INTERNAL_TOKEN}
     volumes:
       - ./config/gateway-b.yaml:/app/configs/z-courier.yaml:ro
       - ./conf/zinx.json:/app/conf/zinx.json:ro
@@ -52,7 +66,7 @@ services:
     container_name: z-courier-production-cluster-postgres
     environment:
       POSTGRES_USER: zcourier
-      POSTGRES_PASSWORD: CHANGE_ME_postgres_password
+      POSTGRES_PASSWORD: ${ZCOURIER_POSTGRES_PASSWORD:?set ZCOURIER_POSTGRES_PASSWORD}
       POSTGRES_DB: zcourier
     volumes:
       - postgres-data:/var/lib/postgresql/data
@@ -73,11 +87,11 @@ services:
       - --appendonly
       - "yes"
       - --requirepass
-      - CHANGE_ME_redis_password
+      - ${ZCOURIER_REDIS_PASSWORD:?set ZCOURIER_REDIS_PASSWORD}
     volumes:
       - redis-data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "CHANGE_ME_redis_password", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${ZCOURIER_REDIS_PASSWORD:?set ZCOURIER_REDIS_PASSWORD}", "ping"]
       interval: 10s
       timeout: 5s
       retries: 12

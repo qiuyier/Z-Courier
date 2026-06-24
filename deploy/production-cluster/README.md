@@ -4,8 +4,8 @@ This directory provides a two-node Z-Courier production reference stack. It is
 meant to demonstrate how multiple gateway nodes share online routes and durable
 downlink storage while keeping internal HTTP private.
 
-Replace every `CHANGE_ME_*` value before using this outside a private test
-environment.
+Copy `.env.example` to `.env`, replace every value, and do not commit the real
+`.env` file before using this outside a private test environment.
 
 ## Layout
 
@@ -43,19 +43,31 @@ private load balancer, not over the public internet.
 From the repository root:
 
 ```bash
-docker compose -f deploy/production-cluster/docker-compose.yml up -d --build
+cp deploy/production-cluster/.env.example deploy/production-cluster/.env
+$EDITOR deploy/production-cluster/.env
+
+docker compose \
+  --env-file deploy/production-cluster/.env \
+  -f deploy/production-cluster/docker-compose.yml \
+  up -d --build
 ```
 
 Stop the stack:
 
 ```bash
-docker compose -f deploy/production-cluster/docker-compose.yml down
+docker compose \
+  --env-file deploy/production-cluster/.env \
+  -f deploy/production-cluster/docker-compose.yml \
+  down
 ```
 
 Remove local data volumes as well:
 
 ```bash
-docker compose -f deploy/production-cluster/docker-compose.yml down -v
+docker compose \
+  --env-file deploy/production-cluster/.env \
+  -f deploy/production-cluster/docker-compose.yml \
+  down -v
 ```
 
 ## How Cluster Push Works
@@ -86,18 +98,19 @@ its local sessions. If the client is not local, it reads Redis, finds
 This is the same runtime behavior tested by the local cluster E2E, but using
 container service names instead of host loopback ports.
 
-## Required Replacements
+## Required Environment
 
-Replace these placeholders in both gateway configs and the Compose file:
+Copy `deploy/production-cluster/.env.example` to
+`deploy/production-cluster/.env` and replace every value:
 
-| Placeholder | Purpose |
+| Variable | Purpose |
 | --- | --- |
-| `CHANGE_ME_postgres_password` | PostgreSQL password and gateway DSN |
-| `CHANGE_ME_redis_password` | Redis password and gateway registry password |
-| `CHANGE_ME_auth_provider_shared_token` | Token sent to your auth backend |
-| `CHANGE_ME_internal_hmac_secret_0123456789abcdef` | Backend-to-gateway HMAC key |
-| `CHANGE_ME_peer_hmac_secret_0123456789abcdef` | Gateway-to-gateway peer HMAC key |
-| `CHANGE_ME_upstream_internal_token` | Optional HTTP upstream token |
+| `ZCOURIER_POSTGRES_PASSWORD` | PostgreSQL password and gateway DSN |
+| `ZCOURIER_REDIS_PASSWORD` | Redis password and gateway registry password |
+| `ZCOURIER_AUTH_PROVIDER_SHARED_TOKEN` | Token sent to your auth backend |
+| `ZCOURIER_INTERNAL_HMAC_SECRET` | Backend-to-gateway HMAC key |
+| `ZCOURIER_PEER_HMAC_SECRET` | Gateway-to-gateway peer HMAC key |
+| `ZCOURIER_UPSTREAM_INTERNAL_TOKEN` | Optional HTTP upstream token |
 
 Use different HMAC keys for backend internal HTTP and gateway peer push.
 
@@ -120,7 +133,10 @@ addresses.
 Render the Compose configuration:
 
 ```bash
-docker compose -f deploy/production-cluster/docker-compose.yml config
+docker compose \
+  --env-file deploy/production-cluster/.env.example \
+  -f deploy/production-cluster/docker-compose.yml \
+  config
 ```
 
 Build and start the stack:
