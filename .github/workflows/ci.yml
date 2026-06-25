@@ -61,6 +61,14 @@ jobs:
           docker compose --env-file deploy/production/.env.example -f deploy/production/docker-compose.yml config
           docker compose --env-file deploy/production-cluster/.env.example -f deploy/production-cluster/docker-compose.yml config
 
+      - name: Validate Helm chart
+        run: |
+          HELM_IMAGE=alpine/helm:3.17.3
+          docker run --rm -v "$PWD:/work" -w /work "$HELM_IMAGE" lint deploy/helm/z-courier
+          docker run --rm -v "$PWD:/work" -w /work "$HELM_IMAGE" template z-courier deploy/helm/z-courier >/tmp/z-courier-helm.yaml
+          docker run --rm -v "$PWD:/work" -w /work "$HELM_IMAGE" lint deploy/helm/z-courier -f deploy/helm/z-courier/examples/values-production.yaml
+          docker run --rm -v "$PWD:/work" -w /work "$HELM_IMAGE" template z-courier deploy/helm/z-courier -f deploy/helm/z-courier/examples/values-production.yaml >/tmp/z-courier-helm-production.yaml
+
       - name: Validate Grafana dashboard JSON
         run: jq . deploy/monitoring/grafana/dashboards/z-courier-overview.json >/dev/null
 

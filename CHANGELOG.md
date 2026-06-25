@@ -14,6 +14,8 @@ semantic versioning after the first public MVP tag.
   services, ConfigMap-rendered gateway/Zinx config, existing Secret integration,
   and optional ServiceMonitor support.
 - Production values example for the Helm chart without committing real secrets.
+- GitHub Actions Helm chart validation for default values and the production
+  values example.
 - V6 Kubernetes and Helm planning document for the `v0.6.0` milestone.
 
 ## [v0.5.0] - 2026-06-25
