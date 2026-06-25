@@ -23,6 +23,8 @@ semantic versioning after the first public MVP tag.
 - GitHub Actions Kubernetes smoke workflow for running the Helm chart in a kind
   cluster when Kubernetes deployment files or gateway runtime code changes.
 - Helm values schema validation for default, production, and kind smoke values.
+- GitHub Actions Helm chart packaging artifact for CI-produced `.tgz` chart
+  archives.
 - V6 Kubernetes and Helm planning document for the `v0.6.0` milestone.
 
 ## [v0.5.0] - 2026-06-25

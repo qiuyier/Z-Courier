@@ -102,6 +102,7 @@ When Helm is installed locally:
 ```bash
 helm lint deploy/helm/z-courier
 helm template z-courier deploy/helm/z-courier >/tmp/z-courier-k8s.yaml
+helm package deploy/helm/z-courier --destination /tmp
 ```
 
 `helm lint` validates the chart values against `values.schema.json`, including

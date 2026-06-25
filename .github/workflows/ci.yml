@@ -71,6 +71,19 @@ jobs:
           docker run --rm -v "$PWD:/work" -w /work "$HELM_IMAGE" lint deploy/helm/z-courier -f deploy/helm/z-courier/examples/values-kind-smoke.yaml
           docker run --rm -v "$PWD:/work" -w /work "$HELM_IMAGE" template z-courier deploy/helm/z-courier -f deploy/helm/z-courier/examples/values-kind-smoke.yaml >/tmp/z-courier-helm-kind-smoke.yaml
 
+      - name: Package Helm chart
+        run: |
+          mkdir -p reports/helm
+          docker run --rm -v "$PWD:/work" -w /work alpine/helm:3.17.3 package deploy/helm/z-courier --destination reports/helm
+          ls -l reports/helm
+
+      - name: Upload Helm chart package
+        uses: actions/upload-artifact@v6
+        with:
+          name: helm-chart
+          path: reports/helm/*.tgz
+          if-no-files-found: error
+
       - name: Validate Grafana dashboard JSON
         run: jq . deploy/monitoring/grafana/dashboards/z-courier-overview.json >/dev/null
 

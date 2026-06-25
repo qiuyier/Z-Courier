@@ -98,6 +98,7 @@ Local validation:
 ```bash
 helm lint deploy/helm/z-courier
 helm template z-courier deploy/helm/z-courier >/tmp/z-courier-k8s.yaml
+helm package deploy/helm/z-courier --destination /tmp
 ```
 
 Cluster validation:
@@ -128,7 +129,6 @@ service.
 
 Good next increments:
 
-- Add CI coverage for the kind smoke script after the runtime cost is clear.
 - Add a kind-based E2E that installs external dependencies and the chart.
 - Add NetworkPolicy examples for client, backend, peer, Redis, PostgreSQL, and
   NSQ traffic.
