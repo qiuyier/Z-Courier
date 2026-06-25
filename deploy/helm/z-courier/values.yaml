@@ -19,6 +19,8 @@ podLabels: {}
 
 podSecurityContext:
   runAsNonRoot: true
+  runAsUser: 100
+  runAsGroup: 101
 
 securityContext:
   allowPrivilegeEscalation: false
@@ -79,6 +81,7 @@ cluster:
   enabled: true
   routeRefreshInterval: 10s
   registry:
+    type: redis
     ttl: 30s
     redis:
       addr: redis-master:6379
@@ -236,4 +239,3 @@ nodeSelector: {}
 tolerations: []
 affinity: {}
 priorityClassName: ""
-

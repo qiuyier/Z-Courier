@@ -68,6 +68,8 @@ jobs:
           docker run --rm -v "$PWD:/work" -w /work "$HELM_IMAGE" template z-courier deploy/helm/z-courier >/tmp/z-courier-helm.yaml
           docker run --rm -v "$PWD:/work" -w /work "$HELM_IMAGE" lint deploy/helm/z-courier -f deploy/helm/z-courier/examples/values-production.yaml
           docker run --rm -v "$PWD:/work" -w /work "$HELM_IMAGE" template z-courier deploy/helm/z-courier -f deploy/helm/z-courier/examples/values-production.yaml >/tmp/z-courier-helm-production.yaml
+          docker run --rm -v "$PWD:/work" -w /work "$HELM_IMAGE" lint deploy/helm/z-courier -f deploy/helm/z-courier/examples/values-kind-smoke.yaml
+          docker run --rm -v "$PWD:/work" -w /work "$HELM_IMAGE" template z-courier deploy/helm/z-courier -f deploy/helm/z-courier/examples/values-kind-smoke.yaml >/tmp/z-courier-helm-kind-smoke.yaml
 
       - name: Validate Grafana dashboard JSON
         run: jq . deploy/monitoring/grafana/dashboards/z-courier-overview.json >/dev/null

@@ -114,6 +114,18 @@ curl http://127.0.0.1:18080/readyz
 curl http://127.0.0.1:18080/metrics
 ```
 
+For a local kind smoke test:
+
+```bash
+bash scripts/k8s_helm_smoke.sh
+```
+
+The smoke test requires `docker`, `kind`, `kubectl`, and `curl`. It builds the
+gateway image, creates a temporary kind cluster, loads the image into kind,
+renders this chart with
+`examples/values-kind-smoke.yaml`, waits for the StatefulSet to become ready,
+and checks `/readyz` and `/metrics`.
+
 ## Boundaries
 
 This first chart does not install PostgreSQL, Redis, NSQ, Prometheus, Grafana,

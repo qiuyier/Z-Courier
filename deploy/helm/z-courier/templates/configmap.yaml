@@ -42,7 +42,7 @@ data:
       internal_addr: {{ include "z-courier.podInternalAddr" . | quote }}
       route_refresh_interval: {{ .Values.cluster.routeRefreshInterval | quote }}
       registry:
-        type: redis
+        type: {{ .Values.cluster.registry.type | quote }}
         ttl: {{ .Values.cluster.registry.ttl | quote }}
         redis:
           addr: {{ .Values.cluster.registry.redis.addr | quote }}
@@ -107,6 +107,7 @@ data:
 
     upstream:
       routes:
+{{ if .Values.upstream.routes }}
         {{- range .Values.upstream.routes }}
         - name: {{ .name | quote }}
           enabled: {{ .enabled }}
@@ -132,6 +133,9 @@ data:
             max_in_flight: {{ .target.maxInFlight }}
             {{- end }}
         {{- end }}
+{{ else }}
+        []
+{{ end }}
 
   zinx.json: |
     {

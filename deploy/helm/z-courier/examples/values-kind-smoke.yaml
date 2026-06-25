@@ -1,0 +1,47 @@
+# Values used by scripts/k8s_helm_smoke.sh.
+# They keep the smoke test self-contained: no external PostgreSQL, Redis, NSQ,
+# auth service, or business backend is required just to prove the gateway boots
+# from the chart.
+
+replicaCount: 2
+
+image:
+  repository: z-courier-gateway
+  tag: kind-smoke
+  pullPolicy: IfNotPresent
+
+secret:
+  create: true
+  values:
+    authProviderSharedToken: kind-auth-provider-token-0123456789abcdef
+    internalHMACSecret: kind-internal-hmac-secret-0123456789abcdef
+    peerHMACSecret: kind-peer-hmac-secret-0123456789abcdef
+    postgresPassword: kind-postgres-password
+    redisPassword: kind-redis-password
+    upstreamInternalToken: kind-upstream-token
+
+auth:
+  http:
+    url: http://auth-backend.z-courier-smoke.svc.cluster.local:8080/gateway/auth/verify
+
+cluster:
+  enabled: true
+  registry:
+    type: memory
+    ttl: 30s
+
+downlink:
+  storage:
+    type: memory
+
+upstream:
+  routes: []
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+

@@ -21,6 +21,8 @@ The first `v0.6.0` Kubernetes milestone includes:
 - Optional ServiceMonitor for Prometheus Operator users.
 - Documentation for install, validation, and production boundaries.
 - A production values example without real secrets.
+- A self-contained kind smoke values file and script for verifying gateway
+  startup from the chart.
 
 ## Non-Goals
 
@@ -107,6 +109,17 @@ curl http://127.0.0.1:18080/readyz
 curl http://127.0.0.1:18080/metrics
 ```
 
+Local kind smoke validation:
+
+```bash
+bash scripts/k8s_helm_smoke.sh
+```
+
+The first smoke path intentionally uses memory downlink storage and an in-memory
+cluster registry so it can prove Kubernetes packaging without requiring
+PostgreSQL, Redis, NSQ, or backend stubs. A later E2E path should add those
+dependencies and exercise AUTH/BIND, upstream forwarding, and downlink push.
+
 Runtime validation should then reuse the existing SDK clients against the
 client TCP service and the existing backend SDK against the internal HTTP
 service.
@@ -115,8 +128,8 @@ service.
 
 Good next increments:
 
-- Add CI `helm lint` and `helm template` once Helm is available in the runner.
-- Add a kind-based smoke test that installs external dependencies and the chart.
+- Add CI coverage for the kind smoke script after the runtime cost is clear.
+- Add a kind-based E2E that installs external dependencies and the chart.
 - Add NetworkPolicy examples for client, backend, peer, Redis, PostgreSQL, and
   NSQ traffic.
 - Add TLS termination examples for public TCP traffic.
