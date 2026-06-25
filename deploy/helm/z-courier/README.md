@@ -104,6 +104,9 @@ helm lint deploy/helm/z-courier
 helm template z-courier deploy/helm/z-courier >/tmp/z-courier-k8s.yaml
 ```
 
+`helm lint` validates the chart values against `values.schema.json`, including
+the default values and any `-f` override file passed to Helm.
+
 After install:
 
 ```bash

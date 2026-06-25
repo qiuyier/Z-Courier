@@ -1,0 +1,474 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "Z-Courier Helm values",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "replicaCount": { "$ref": "#/definitions/positiveInteger" },
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "repository": { "type": "string", "minLength": 1 },
+        "pullPolicy": {
+          "type": "string",
+          "enum": ["Always", "IfNotPresent", "Never"]
+        },
+        "tag": { "type": "string" }
+      }
+    },
+    "imagePullSecrets": {
+      "type": "array",
+      "items": { "type": "object" }
+    },
+    "nameOverride": { "type": "string" },
+    "fullnameOverride": { "type": "string" },
+    "serviceAccount": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "create": { "type": "boolean" },
+        "annotations": { "$ref": "#/definitions/stringMap" },
+        "name": { "type": "string" }
+      }
+    },
+    "podAnnotations": { "$ref": "#/definitions/stringMap" },
+    "podLabels": { "$ref": "#/definitions/stringMap" },
+    "podSecurityContext": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "runAsNonRoot": { "type": "boolean" },
+        "runAsUser": { "$ref": "#/definitions/nonNegativeInteger" },
+        "runAsGroup": { "$ref": "#/definitions/nonNegativeInteger" }
+      }
+    },
+    "securityContext": { "type": "object" },
+    "gateway": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "routeMsgIDs": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/nonNegativeInteger" }
+        }
+      }
+    },
+    "zinx": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "host": { "type": "string", "minLength": 1 },
+        "tcpPort": { "$ref": "#/definitions/port" },
+        "mode": { "type": "string", "enum": ["tcp"] },
+        "maxConn": { "$ref": "#/definitions/positiveInteger" },
+        "maxPacketSize": { "$ref": "#/definitions/positiveInteger" },
+        "workerPoolSize": { "$ref": "#/definitions/nonNegativeInteger" },
+        "maxWorkerTaskLen": { "$ref": "#/definitions/nonNegativeInteger" },
+        "maxMsgChanLen": { "$ref": "#/definitions/nonNegativeInteger" },
+        "ioReadBuffSize": { "$ref": "#/definitions/nonNegativeInteger" },
+        "heartbeatMax": { "$ref": "#/definitions/nonNegativeInteger" },
+        "logDir": { "type": "string" },
+        "logFile": { "type": "string" },
+        "logCons": { "type": "boolean" },
+        "logIsolationLevel": { "$ref": "#/definitions/nonNegativeInteger" }
+      }
+    },
+    "auth": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": { "type": "string", "enum": ["http"] },
+        "http": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "url": { "type": "string", "minLength": 1 },
+            "internalTokenEnv": { "$ref": "#/definitions/envName" },
+            "timeout": { "$ref": "#/definitions/duration" },
+            "maxInFlight": { "$ref": "#/definitions/nonNegativeInteger" }
+          }
+        },
+        "cache": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "maxEntries": { "$ref": "#/definitions/nonNegativeInteger" },
+            "positiveTTL": { "$ref": "#/definitions/duration" },
+            "negativeTTL": { "$ref": "#/definitions/duration" }
+          }
+        }
+      }
+    },
+    "internalHttp": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "port": { "$ref": "#/definitions/port" },
+        "maxRequestBodySize": { "$ref": "#/definitions/positiveInteger" },
+        "maxInFlight": { "$ref": "#/definitions/nonNegativeInteger" },
+        "auth": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "mode": { "type": "string", "enum": ["hmac"] },
+            "hmac": { "$ref": "#/definitions/hmacConfig" }
+          }
+        }
+      }
+    },
+    "cluster": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "routeRefreshInterval": { "$ref": "#/definitions/duration" },
+        "registry": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": { "type": "string", "enum": ["redis", "memory"] },
+            "ttl": { "$ref": "#/definitions/duration" },
+            "redis": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "addr": { "type": "string", "minLength": 1 },
+                "username": { "type": "string" },
+                "passwordEnv": { "$ref": "#/definitions/envName" },
+                "db": { "$ref": "#/definitions/nonNegativeInteger" },
+                "keyPrefix": { "type": "string", "minLength": 1 },
+                "dialTimeout": { "$ref": "#/definitions/duration" },
+                "readTimeout": { "$ref": "#/definitions/duration" },
+                "writeTimeout": { "$ref": "#/definitions/duration" }
+              }
+            }
+          }
+        },
+        "peer": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "timeout": { "$ref": "#/definitions/duration" },
+            "auth": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "mode": { "type": "string", "enum": ["hmac"] },
+                "hmac": { "$ref": "#/definitions/hmacConfig" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "downlink": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "storage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["memory", "postgres", "none", "disabled"]
+            },
+            "postgres": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "dsn": { "type": "string" },
+                "autoMigrate": { "type": "boolean" },
+                "maxOpenConns": { "$ref": "#/definitions/nonNegativeInteger" },
+                "maxIdleConns": { "$ref": "#/definitions/nonNegativeInteger" },
+                "connMaxLifetime": { "$ref": "#/definitions/duration" }
+              }
+            }
+          }
+        },
+        "delivery": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "retryInterval": { "$ref": "#/definitions/duration" },
+            "retryDelay": { "$ref": "#/definitions/duration" },
+            "ackTimeout": { "$ref": "#/definitions/duration" },
+            "retryLease": { "$ref": "#/definitions/duration" },
+            "maxAttempts": { "$ref": "#/definitions/nonNegativeInteger" },
+            "scanLimit": { "$ref": "#/definitions/nonNegativeInteger" },
+            "bindFlushLimit": { "$ref": "#/definitions/nonNegativeInteger" }
+          }
+        },
+        "retention": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "deliveredTTL": { "$ref": "#/definitions/duration" },
+            "failedTTL": { "$ref": "#/definitions/duration" },
+            "discardedTTL": { "$ref": "#/definitions/duration" },
+            "cleanupInterval": { "$ref": "#/definitions/duration" },
+            "cleanupLimit": { "$ref": "#/definitions/nonNegativeInteger" }
+          }
+        }
+      }
+    },
+    "pipeline": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "allowlist": { "$ref": "#/definitions/policyList" },
+        "blocklist": { "$ref": "#/definitions/policyList" },
+        "rateLimit": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "maxRequests": { "$ref": "#/definitions/nonNegativeInteger" },
+            "window": { "$ref": "#/definitions/duration" }
+          }
+        }
+      }
+    },
+    "upstream": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "routes": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/upstreamRoute" }
+        }
+      }
+    },
+    "secret": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "create": { "type": "boolean" },
+        "name": { "type": "string" },
+        "keys": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "authProviderSharedToken": { "type": "string", "minLength": 1 },
+            "internalHMACSecret": { "type": "string", "minLength": 1 },
+            "peerHMACSecret": { "type": "string", "minLength": 1 },
+            "postgresPassword": { "type": "string", "minLength": 1 },
+            "redisPassword": { "type": "string", "minLength": 1 },
+            "upstreamInternalToken": { "type": "string", "minLength": 1 }
+          }
+        },
+        "values": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "authProviderSharedToken": { "type": "string" },
+            "internalHMACSecret": { "type": "string" },
+            "peerHMACSecret": { "type": "string" },
+            "postgresPassword": { "type": "string" },
+            "redisPassword": { "type": "string" },
+            "upstreamInternalToken": { "type": "string" }
+          }
+        }
+      }
+    },
+    "extraEnv": {
+      "type": "array",
+      "items": { "type": "object" }
+    },
+    "extraEnvFrom": {
+      "type": "array",
+      "items": { "type": "object" }
+    },
+    "clientService": { "$ref": "#/definitions/service" },
+    "internalService": { "$ref": "#/definitions/service" },
+    "headlessService": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "annotations": { "$ref": "#/definitions/stringMap" }
+      }
+    },
+    "serviceMonitor": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "interval": { "$ref": "#/definitions/duration" },
+        "scrapeTimeout": { "$ref": "#/definitions/duration" },
+        "labels": { "$ref": "#/definitions/stringMap" }
+      }
+    },
+    "resources": { "type": "object" },
+    "probes": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "readiness": { "$ref": "#/definitions/probe" },
+        "liveness": { "$ref": "#/definitions/probe" }
+      }
+    },
+    "podDisruptionBudget": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "minAvailable": {
+          "oneOf": [
+            { "$ref": "#/definitions/nonNegativeInteger" },
+            { "type": "string", "pattern": "^[0-9]+%$" }
+          ]
+        }
+      }
+    },
+    "nodeSelector": { "$ref": "#/definitions/stringMap" },
+    "tolerations": {
+      "type": "array",
+      "items": { "type": "object" }
+    },
+    "affinity": { "type": "object" },
+    "priorityClassName": { "type": "string" }
+  },
+  "definitions": {
+    "duration": {
+      "type": "string",
+      "minLength": 1
+    },
+    "envName": {
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+    },
+    "nonNegativeInteger": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "positiveInteger": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "port": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535
+    },
+    "stringMap": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "hmacConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "keyID": { "type": "string", "minLength": 1 },
+        "secretEnv": { "$ref": "#/definitions/envName" },
+        "maxClockSkew": { "$ref": "#/definitions/duration" },
+        "nonceTTL": { "$ref": "#/definitions/duration" },
+        "maxNonceEntries": { "$ref": "#/definitions/nonNegativeInteger" }
+      }
+    },
+    "policyList": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "clientIDs": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "msgIDs": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/nonNegativeInteger" }
+        }
+      }
+    },
+    "probe": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "path": { "type": "string", "minLength": 1 },
+        "initialDelaySeconds": { "$ref": "#/definitions/nonNegativeInteger" },
+        "periodSeconds": { "$ref": "#/definitions/positiveInteger" },
+        "timeoutSeconds": { "$ref": "#/definitions/positiveInteger" },
+        "failureThreshold": { "$ref": "#/definitions/positiveInteger" }
+      }
+    },
+    "service": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "type": {
+          "type": "string",
+          "enum": ["ClusterIP", "NodePort", "LoadBalancer"]
+        },
+        "port": { "$ref": "#/definitions/port" },
+        "annotations": { "$ref": "#/definitions/stringMap" }
+      }
+    },
+    "upstreamRoute": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "enabled", "msgIDMin", "msgIDMax", "target"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "enabled": { "type": "boolean" },
+        "msgIDMin": { "$ref": "#/definitions/positiveInteger" },
+        "msgIDMax": { "$ref": "#/definitions/positiveInteger" },
+        "target": {
+          "oneOf": [
+            { "$ref": "#/definitions/httpTarget" },
+            { "$ref": "#/definitions/nsqTarget" }
+          ]
+        }
+      }
+    },
+    "httpTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "url", "tokenEnv", "timeout", "maxInFlight"],
+      "properties": {
+        "type": { "type": "string", "enum": ["http"] },
+        "url": { "type": "string", "minLength": 1 },
+        "tokenEnv": { "$ref": "#/definitions/envName" },
+        "timeout": { "$ref": "#/definitions/duration" },
+        "maxInFlight": { "$ref": "#/definitions/nonNegativeInteger" }
+      }
+    },
+    "nsqTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "nsqdAddrs",
+        "topic",
+        "authSecret",
+        "dialTimeout",
+        "readTimeout",
+        "writeTimeout",
+        "publishMode",
+        "retryAttempts",
+        "maxInFlight"
+      ],
+      "properties": {
+        "type": { "type": "string", "enum": ["nsq"] },
+        "nsqdAddrs": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "topic": { "type": "string", "minLength": 1 },
+        "authSecret": { "type": "string" },
+        "dialTimeout": { "$ref": "#/definitions/duration" },
+        "readTimeout": { "$ref": "#/definitions/duration" },
+        "writeTimeout": { "$ref": "#/definitions/duration" },
+        "publishMode": { "type": "string", "enum": ["round_robin"] },
+        "retryAttempts": { "$ref": "#/definitions/nonNegativeInteger" },
+        "maxInFlight": { "$ref": "#/definitions/nonNegativeInteger" }
+      }
+    }
+  }
+}
+
