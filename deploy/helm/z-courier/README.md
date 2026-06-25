@@ -79,6 +79,24 @@ Keep the internal service private. If clients connect from outside the cluster,
 set `clientService.type` to `LoadBalancer` or front it with an ingress/load
 balancer that supports long-lived TCP connections.
 
+## Network Policy
+
+The chart does not install a default `NetworkPolicy`, because namespace labels,
+ingress controllers, service meshes, and dependency placement vary by cluster.
+Use [examples/networkpolicy.yaml](examples/networkpolicy.yaml) as a production
+starting point.
+
+The example restricts gateway pods to:
+
+- Client TCP ingress on `zinx.tcpPort`.
+- Internal HTTP ingress from backend, admin, monitoring, and peer gateway pods.
+- Egress to DNS, peer gateway pods, auth service, business backend, PostgreSQL,
+  Redis, and NSQ.
+
+Adjust namespace labels and dependency ports before applying it.
+If `clientService` is exposed directly through a cloud `LoadBalancer`, adjust
+the client ingress rule for your CNI and load balancer source behavior.
+
 ## Required Secrets
 
 By default, the chart references an existing secret. The default key names are:

@@ -27,6 +27,8 @@ semantic versioning after the first public MVP tag.
   archives.
 - GitHub Release workflow for uploading the Helm chart archive and checksum as
   release assets.
+- Kubernetes NetworkPolicy example for production-style gateway ingress and
+  dependency egress boundaries.
 - V6 Kubernetes and Helm planning document for the `v0.6.0` milestone.
 
 ## [v0.5.0] - 2026-06-25

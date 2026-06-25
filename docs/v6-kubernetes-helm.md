@@ -91,6 +91,24 @@ The chart expects these to be provided by the platform:
 This keeps the Z-Courier chart focused on the gateway while allowing teams to
 use their preferred database, Redis, and observability operators.
 
+## Network Boundary Example
+
+The first Kubernetes network boundary is documented as an example manifest at
+`deploy/helm/z-courier/examples/networkpolicy.yaml`. It is intentionally not a
+chart template yet, because production clusters differ in namespace labels,
+ingress controllers, service meshes, and dependency placement.
+
+The example isolates gateway pods and then allows only these flows:
+
+- client ingress to the TCP gateway port
+- internal ingress from backend, admin, monitoring, and peer gateway pods
+- egress to DNS, peer gateway pods, auth, business backend, PostgreSQL, Redis,
+  and NSQ
+
+Before applying it, operators should align namespace labels and dependency
+ports with their own cluster conventions. NetworkPolicy is port-level only, so
+internal HTTP path protection still depends on Z-Courier HMAC/auth checks.
+
 ## Validation Path
 
 Local validation:
@@ -141,8 +159,8 @@ manually with `workflow_dispatch` by passing an existing release tag.
 Good next increments:
 
 - Add a kind-based E2E that installs external dependencies and the chart.
-- Add NetworkPolicy examples for client, backend, peer, Redis, PostgreSQL, and
-  NSQ traffic.
+- Turn the NetworkPolicy example into optional chart templates once the label
+  model is stable across real deployments.
 - Add TLS termination examples for public TCP traffic.
 - Add mTLS or service-mesh examples for internal HTTP and peer push.
 - Add a values compatibility matrix for chart version, gateway image version,

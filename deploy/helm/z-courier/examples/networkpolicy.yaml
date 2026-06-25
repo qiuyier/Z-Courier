@@ -1,0 +1,122 @@
+# Example NetworkPolicy for a production-style Z-Courier namespace.
+#
+# Apply this with:
+#   kubectl -n z-courier apply -f deploy/helm/z-courier/examples/networkpolicy.yaml
+#
+# This file assumes the Helm release name is "z-courier". If you install the
+# chart with another release name, update app.kubernetes.io/instance below.
+#
+# Label the namespaces that should talk to the gateway before applying:
+#   kubectl label namespace <client-ingress-ns> z-courier.io/client-access=true
+#   kubectl label namespace <backend-ns> z-courier.io/internal-access=true
+#   kubectl label namespace <monitoring-ns> z-courier.io/internal-access=true
+#   kubectl label namespace <auth-ns> z-courier.io/auth-access=true
+#   kubectl label namespace <business-backend-ns> z-courier.io/backend-access=true
+#   kubectl label namespace <postgres-ns> z-courier.io/postgres-access=true
+#   kubectl label namespace <redis-ns> z-courier.io/redis-access=true
+#   kubectl label namespace <nsq-ns> z-courier.io/nsq-access=true
+#
+# NetworkPolicy cannot restrict HTTP paths. Access to /internal/push, admin
+# APIs, /metrics, and health endpoints is separated by application auth.
+#
+# If clientService is exposed directly through a cloud LoadBalancer, adjust the
+# client ingress rule for your CNI and load balancer source behavior. Some
+# clusters need an ingress-controller namespace or ipBlock rule instead.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: z-courier-gateway-ingress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: z-courier
+      app.kubernetes.io/instance: z-courier
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              z-courier.io/client-access: "true"
+      ports:
+        - protocol: TCP
+          port: 9900
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              z-courier.io/internal-access: "true"
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: z-courier
+              app.kubernetes.io/instance: z-courier
+      ports:
+        - protocol: TCP
+          port: 18080
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: z-courier-gateway-egress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: z-courier
+      app.kubernetes.io/instance: z-courier
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: z-courier
+              app.kubernetes.io/instance: z-courier
+      ports:
+        - protocol: TCP
+          port: 18080
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              z-courier.io/auth-access: "true"
+      ports:
+        - protocol: TCP
+          port: 8080
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              z-courier.io/backend-access: "true"
+      ports:
+        - protocol: TCP
+          port: 8080
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              z-courier.io/postgres-access: "true"
+      ports:
+        - protocol: TCP
+          port: 5432
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              z-courier.io/redis-access: "true"
+      ports:
+        - protocol: TCP
+          port: 6379
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              z-courier.io/nsq-access: "true"
+      ports:
+        - protocol: TCP
+          port: 4150
