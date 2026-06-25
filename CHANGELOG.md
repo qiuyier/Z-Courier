@@ -25,6 +25,8 @@ semantic versioning after the first public MVP tag.
 - Helm values schema validation for default, production, and kind smoke values.
 - GitHub Actions Helm chart packaging artifact for CI-produced `.tgz` chart
   archives.
+- GitHub Release workflow for uploading the Helm chart archive and checksum as
+  release assets.
 - V6 Kubernetes and Helm planning document for the `v0.6.0` milestone.
 
 ## [v0.5.0] - 2026-06-25

@@ -1,0 +1,41 @@
+name: Release Helm Chart
+
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to upload the Helm chart to
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release-helm-chart:
+    name: Package and Upload Helm Chart
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+
+      - name: Package Helm chart
+        run: |
+          mkdir -p reports/helm
+          docker run --rm -v "$PWD:/work" -w /work alpine/helm:3.17.3 lint deploy/helm/z-courier
+          docker run --rm -v "$PWD:/work" -w /work alpine/helm:3.17.3 package deploy/helm/z-courier --destination reports/helm
+          shasum -a 256 reports/helm/*.tgz >reports/helm/SHA256SUMS
+          ls -l reports/helm
+
+      - name: Upload Helm chart to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: gh release upload "$RELEASE_TAG" reports/helm/*.tgz reports/helm/SHA256SUMS --clobber

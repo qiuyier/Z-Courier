@@ -108,6 +108,9 @@ helm package deploy/helm/z-courier --destination /tmp
 `helm lint` validates the chart values against `values.schema.json`, including
 the default values and any `-f` override file passed to Helm.
 
+When a GitHub Release is published, CI packages this chart and uploads the
+`.tgz` archive plus `SHA256SUMS` as release assets.
+
 After install:
 
 ```bash

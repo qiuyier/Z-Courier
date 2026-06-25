@@ -125,6 +125,17 @@ Runtime validation should then reuse the existing SDK clients against the
 client TCP service and the existing backend SDK against the internal HTTP
 service.
 
+## Release Asset Path
+
+The `Release Helm Chart` workflow packages the chart from the released tag and
+uploads these assets to the GitHub Release:
+
+- `z-courier-<chart-version>.tgz`
+- `SHA256SUMS`
+
+It runs automatically when a GitHub Release is published. It can also be run
+manually with `workflow_dispatch` by passing an existing release tag.
+
 ## Future Work
 
 Good next increments:
