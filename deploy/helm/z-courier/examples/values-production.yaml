@@ -1,0 +1,83 @@
+# Example production values. Replace image, secret, and dependency addresses
+# before installing. Do not put real secret values in this file.
+
+replicaCount: 2
+
+image:
+  repository: ghcr.io/your-org/z-courier-gateway
+  tag: v0.5.0
+  pullPolicy: IfNotPresent
+
+secret:
+  create: false
+  name: z-courier-secret
+
+clientService:
+  type: LoadBalancer
+  port: 8999
+
+internalService:
+  type: ClusterIP
+  port: 18080
+
+auth:
+  http:
+    url: http://auth-backend.z-courier.svc.cluster.local:8080/gateway/auth/verify
+
+cluster:
+  enabled: true
+  registry:
+    redis:
+      addr: redis-master.z-courier.svc.cluster.local:6379
+      keyPrefix: zcourier:production-k8s
+
+downlink:
+  storage:
+    postgres:
+      dsn: "postgres://zcourier:${ZCOURIER_POSTGRES_PASSWORD}@postgresql.z-courier.svc.cluster.local:5432/zcourier?sslmode=disable"
+      autoMigrate: true
+
+upstream:
+  routes:
+    - name: production-http-upstream
+      enabled: true
+      msgIDMin: 1001
+      msgIDMax: 1999
+      target:
+        type: http
+        url: http://business-backend.z-courier.svc.cluster.local:8080/gateway/upstream
+        tokenEnv: ZCOURIER_UPSTREAM_INTERNAL_TOKEN
+        timeout: 5s
+        maxInFlight: 2000
+    - name: production-nsq-upstream
+      enabled: true
+      msgIDMin: 2000
+      msgIDMax: 2999
+      target:
+        type: nsq
+        nsqdAddrs:
+          - nsqd.z-courier.svc.cluster.local:4150
+        topic: message_events
+        authSecret: ""
+        dialTimeout: 1s
+        readTimeout: 60s
+        writeTimeout: 1s
+        publishMode: round_robin
+        retryAttempts: 2
+        maxInFlight: 2000
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 256Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+serviceMonitor:
+  enabled: false
+

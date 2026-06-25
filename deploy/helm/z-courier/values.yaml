@@ -1,0 +1,239 @@
+replicaCount: 2
+
+image:
+  repository: z-courier-gateway
+  pullPolicy: IfNotPresent
+  tag: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop:
+      - ALL
+
+gateway:
+  routeMsgIDs:
+    - 1000
+
+zinx:
+  name: Z-Courier Gateway
+  host: 0.0.0.0
+  tcpPort: 8999
+  mode: tcp
+  maxConn: 50000
+  maxPacketSize: 8388608
+  workerPoolSize: 64
+  maxWorkerTaskLen: 4096
+  maxMsgChanLen: 4096
+  ioReadBuffSize: 8192
+  heartbeatMax: 30
+  logDir: ./log
+  logFile: zinx.log
+  logCons: true
+  logIsolationLevel: 2
+
+auth:
+  type: http
+  http:
+    url: http://auth-backend:8080/gateway/auth/verify
+    internalTokenEnv: ZCOURIER_AUTH_PROVIDER_SHARED_TOKEN
+    timeout: 2s
+    maxInFlight: 1000
+  cache:
+    enabled: true
+    maxEntries: 10000
+    positiveTTL: 30s
+    negativeTTL: 3s
+
+internalHttp:
+  enabled: true
+  port: 18080
+  maxRequestBodySize: 10485760
+  maxInFlight: 2000
+  auth:
+    mode: hmac
+    hmac:
+      keyID: prod-internal-2026-01
+      secretEnv: ZCOURIER_INTERNAL_HMAC_SECRET
+      maxClockSkew: 30s
+      nonceTTL: 2m
+      maxNonceEntries: 100000
+
+cluster:
+  enabled: true
+  routeRefreshInterval: 10s
+  registry:
+    ttl: 30s
+    redis:
+      addr: redis-master:6379
+      username: ""
+      passwordEnv: ZCOURIER_REDIS_PASSWORD
+      db: 0
+      keyPrefix: zcourier:kubernetes
+      dialTimeout: 1s
+      readTimeout: 1s
+      writeTimeout: 1s
+  peer:
+    timeout: 2s
+    auth:
+      mode: hmac
+      hmac:
+        keyID: prod-peer-2026-01
+        secretEnv: ZCOURIER_PEER_HMAC_SECRET
+        maxClockSkew: 30s
+        nonceTTL: 2m
+        maxNonceEntries: 100000
+
+downlink:
+  storage:
+    type: postgres
+    postgres:
+      dsn: "postgres://zcourier:${ZCOURIER_POSTGRES_PASSWORD}@postgres:5432/zcourier?sslmode=disable"
+      autoMigrate: true
+      maxOpenConns: 50
+      maxIdleConns: 10
+      connMaxLifetime: 30m
+  delivery:
+    retryInterval: 5s
+    retryDelay: 30s
+    ackTimeout: 30s
+    retryLease: 30s
+    maxAttempts: 10
+    scanLimit: 500
+    bindFlushLimit: 500
+  retention:
+    deliveredTTL: 24h
+    failedTTL: 168h
+    discardedTTL: 168h
+    cleanupInterval: 1h
+    cleanupLimit: 1000
+
+pipeline:
+  allowlist:
+    clientIDs: []
+    msgIDs: []
+  blocklist:
+    clientIDs: []
+    msgIDs: []
+  rateLimit:
+    enabled: true
+    maxRequests: 1000
+    window: 1s
+
+upstream:
+  routes:
+    - name: production-http-upstream
+      enabled: true
+      msgIDMin: 1001
+      msgIDMax: 1999
+      target:
+        type: http
+        url: http://business-backend:8080/gateway/upstream
+        tokenEnv: ZCOURIER_UPSTREAM_INTERNAL_TOKEN
+        timeout: 5s
+        maxInFlight: 2000
+    - name: production-nsq-upstream
+      enabled: true
+      msgIDMin: 2000
+      msgIDMax: 2999
+      target:
+        type: nsq
+        nsqdAddrs:
+          - nsqd:4150
+        topic: message_events
+        authSecret: ""
+        dialTimeout: 1s
+        readTimeout: 60s
+        writeTimeout: 1s
+        publishMode: round_robin
+        retryAttempts: 2
+        maxInFlight: 2000
+
+secret:
+  create: false
+  name: ""
+  keys:
+    authProviderSharedToken: auth-provider-shared-token
+    internalHMACSecret: internal-hmac-secret
+    peerHMACSecret: peer-hmac-secret
+    postgresPassword: postgres-password
+    redisPassword: redis-password
+    upstreamInternalToken: upstream-internal-token
+  values:
+    authProviderSharedToken: ""
+    internalHMACSecret: ""
+    peerHMACSecret: ""
+    postgresPassword: ""
+    redisPassword: ""
+    upstreamInternalToken: ""
+
+extraEnv: []
+extraEnvFrom: []
+
+clientService:
+  enabled: true
+  type: ClusterIP
+  port: 8999
+  annotations: {}
+
+internalService:
+  enabled: true
+  type: ClusterIP
+  port: 18080
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "18080"
+    prometheus.io/path: /metrics
+
+headlessService:
+  annotations: {}
+
+serviceMonitor:
+  enabled: false
+  interval: 30s
+  scrapeTimeout: 10s
+  labels: {}
+
+resources: {}
+
+probes:
+  readiness:
+    enabled: true
+    path: /readyz
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 2
+    failureThreshold: 6
+  liveness:
+    enabled: true
+    path: /healthz
+    initialDelaySeconds: 15
+    periodSeconds: 20
+    timeoutSeconds: 2
+    failureThreshold: 6
+
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+priorityClassName: ""
+

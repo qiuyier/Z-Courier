@@ -152,6 +152,10 @@ The first production-oriented gateway image path is documented in
 The two-node production cluster reference is documented in
 [deploy/production-cluster/README.md](deploy/production-cluster/README.md).
 
+The first Kubernetes Helm chart is in
+[deploy/helm/z-courier](deploy/helm/z-courier), with the `v0.6.0` deployment
+plan in [docs/v6-kubernetes-helm.md](docs/v6-kubernetes-helm.md).
+
 The production runbook for health checks, admin inspection, failed-message
 repair, cluster routing, dependency failures, HMAC failures, and Prometheus
 queries is in [docs/v5-production-runbook.md](docs/v5-production-runbook.md).

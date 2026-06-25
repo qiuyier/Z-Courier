@@ -1,0 +1,153 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "z-courier.fullname" . }}-config
+  labels:
+    {{- include "z-courier.labels" . | nindent 4 }}
+data:
+  z-courier.yaml: |
+    gateway_node: "${POD_NAME}"
+    route_msg_ids:
+      {{- toYaml .Values.gateway.routeMsgIDs | nindent 6 }}
+
+    auth:
+      type: {{ .Values.auth.type | quote }}
+      http:
+        url: {{ .Values.auth.http.url | quote }}
+        internal_token: {{ printf "${%s}" .Values.auth.http.internalTokenEnv | quote }}
+        timeout: {{ .Values.auth.http.timeout | quote }}
+        max_in_flight: {{ .Values.auth.http.maxInFlight }}
+      cache:
+        enabled: {{ .Values.auth.cache.enabled }}
+        max_entries: {{ .Values.auth.cache.maxEntries }}
+        positive_ttl: {{ .Values.auth.cache.positiveTTL | quote }}
+        negative_ttl: {{ .Values.auth.cache.negativeTTL | quote }}
+
+    internal_http:
+      enabled: {{ .Values.internalHttp.enabled }}
+      addr: 0.0.0.0:{{ .Values.internalHttp.port }}
+      auth:
+        mode: {{ .Values.internalHttp.auth.mode | quote }}
+        hmac:
+          keys:
+            {{ .Values.internalHttp.auth.hmac.keyID }}: {{ printf "${%s}" .Values.internalHttp.auth.hmac.secretEnv | quote }}
+          max_clock_skew: {{ .Values.internalHttp.auth.hmac.maxClockSkew | quote }}
+          nonce_ttl: {{ .Values.internalHttp.auth.hmac.nonceTTL | quote }}
+          max_nonce_entries: {{ .Values.internalHttp.auth.hmac.maxNonceEntries }}
+      max_request_body_size: {{ int .Values.internalHttp.maxRequestBodySize }}
+      max_in_flight: {{ .Values.internalHttp.maxInFlight }}
+
+    cluster:
+      enabled: {{ .Values.cluster.enabled }}
+      internal_addr: {{ include "z-courier.podInternalAddr" . | quote }}
+      route_refresh_interval: {{ .Values.cluster.routeRefreshInterval | quote }}
+      registry:
+        type: redis
+        ttl: {{ .Values.cluster.registry.ttl | quote }}
+        redis:
+          addr: {{ .Values.cluster.registry.redis.addr | quote }}
+          username: {{ .Values.cluster.registry.redis.username | quote }}
+          password: {{ printf "${%s}" .Values.cluster.registry.redis.passwordEnv | quote }}
+          db: {{ .Values.cluster.registry.redis.db }}
+          key_prefix: {{ .Values.cluster.registry.redis.keyPrefix | quote }}
+          dial_timeout: {{ .Values.cluster.registry.redis.dialTimeout | quote }}
+          read_timeout: {{ .Values.cluster.registry.redis.readTimeout | quote }}
+          write_timeout: {{ .Values.cluster.registry.redis.writeTimeout | quote }}
+      peer:
+        timeout: {{ .Values.cluster.peer.timeout | quote }}
+        auth:
+          mode: {{ .Values.cluster.peer.auth.mode | quote }}
+          hmac:
+            key_id: {{ .Values.cluster.peer.auth.hmac.keyID | quote }}
+            keys:
+              {{ .Values.cluster.peer.auth.hmac.keyID }}: {{ printf "${%s}" .Values.cluster.peer.auth.hmac.secretEnv | quote }}
+            max_clock_skew: {{ .Values.cluster.peer.auth.hmac.maxClockSkew | quote }}
+            nonce_ttl: {{ .Values.cluster.peer.auth.hmac.nonceTTL | quote }}
+            max_nonce_entries: {{ .Values.cluster.peer.auth.hmac.maxNonceEntries }}
+
+    downlink:
+      storage:
+        type: {{ .Values.downlink.storage.type | quote }}
+        postgres:
+          dsn: {{ .Values.downlink.storage.postgres.dsn | quote }}
+          auto_migrate: {{ .Values.downlink.storage.postgres.autoMigrate }}
+          max_open_conns: {{ .Values.downlink.storage.postgres.maxOpenConns }}
+          max_idle_conns: {{ .Values.downlink.storage.postgres.maxIdleConns }}
+          conn_max_lifetime: {{ .Values.downlink.storage.postgres.connMaxLifetime | quote }}
+      delivery:
+        retry_interval: {{ .Values.downlink.delivery.retryInterval | quote }}
+        retry_delay: {{ .Values.downlink.delivery.retryDelay | quote }}
+        ack_timeout: {{ .Values.downlink.delivery.ackTimeout | quote }}
+        retry_lease: {{ .Values.downlink.delivery.retryLease | quote }}
+        max_attempts: {{ .Values.downlink.delivery.maxAttempts }}
+        scan_limit: {{ .Values.downlink.delivery.scanLimit }}
+        bind_flush_limit: {{ .Values.downlink.delivery.bindFlushLimit }}
+      retention:
+        delivered_ttl: {{ .Values.downlink.retention.deliveredTTL | quote }}
+        failed_ttl: {{ .Values.downlink.retention.failedTTL | quote }}
+        discarded_ttl: {{ .Values.downlink.retention.discardedTTL | quote }}
+        cleanup_interval: {{ .Values.downlink.retention.cleanupInterval | quote }}
+        cleanup_limit: {{ .Values.downlink.retention.cleanupLimit }}
+
+    pipeline:
+      allowlist:
+        client_ids:
+          {{- toYaml .Values.pipeline.allowlist.clientIDs | nindent 10 }}
+        msg_ids:
+          {{- toYaml .Values.pipeline.allowlist.msgIDs | nindent 10 }}
+      blocklist:
+        client_ids:
+          {{- toYaml .Values.pipeline.blocklist.clientIDs | nindent 10 }}
+        msg_ids:
+          {{- toYaml .Values.pipeline.blocklist.msgIDs | nindent 10 }}
+      rate_limit:
+        enabled: {{ .Values.pipeline.rateLimit.enabled }}
+        max_requests: {{ .Values.pipeline.rateLimit.maxRequests }}
+        window: {{ .Values.pipeline.rateLimit.window | quote }}
+
+    upstream:
+      routes:
+        {{- range .Values.upstream.routes }}
+        - name: {{ .name | quote }}
+          enabled: {{ .enabled }}
+          msg_id_min: {{ .msgIDMin }}
+          msg_id_max: {{ .msgIDMax }}
+          target:
+            type: {{ .target.type | quote }}
+            {{- if eq .target.type "http" }}
+            url: {{ .target.url | quote }}
+            token: {{ printf "${%s}" .target.tokenEnv | quote }}
+            timeout: {{ .target.timeout | quote }}
+            max_in_flight: {{ .target.maxInFlight }}
+            {{- else if eq .target.type "nsq" }}
+            nsqd_addrs:
+              {{- toYaml .target.nsqdAddrs | nindent 14 }}
+            topic: {{ .target.topic | quote }}
+            auth_secret: {{ .target.authSecret | quote }}
+            dial_timeout: {{ .target.dialTimeout | quote }}
+            read_timeout: {{ .target.readTimeout | quote }}
+            write_timeout: {{ .target.writeTimeout | quote }}
+            publish_mode: {{ .target.publishMode | quote }}
+            retry_attempts: {{ .target.retryAttempts }}
+            max_in_flight: {{ .target.maxInFlight }}
+            {{- end }}
+        {{- end }}
+
+  zinx.json: |
+    {
+      "Name": {{ .Values.zinx.name | quote }},
+      "Host": {{ .Values.zinx.host | quote }},
+      "TCPPort": {{ .Values.zinx.tcpPort }},
+      "Mode": {{ .Values.zinx.mode | quote }},
+      "MaxConn": {{ .Values.zinx.maxConn }},
+      "MaxPacketSize": {{ int .Values.zinx.maxPacketSize }},
+      "WorkerPoolSize": {{ .Values.zinx.workerPoolSize }},
+      "MaxWorkerTaskLen": {{ .Values.zinx.maxWorkerTaskLen }},
+      "MaxMsgChanLen": {{ .Values.zinx.maxMsgChanLen }},
+      "IOReadBuffSize": {{ .Values.zinx.ioReadBuffSize }},
+      "HeartbeatMax": {{ .Values.zinx.heartbeatMax }},
+      "LogDir": {{ .Values.zinx.logDir | quote }},
+      "LogFile": {{ .Values.zinx.logFile | quote }},
+      "LogCons": {{ .Values.zinx.logCons }},
+      "LogIsolationLevel": {{ .Values.zinx.logIsolationLevel }}
+    }

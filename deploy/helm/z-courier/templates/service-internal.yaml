@@ -1,0 +1,22 @@
+{{- if .Values.internalService.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "z-courier.fullname" . }}-internal
+  labels:
+    {{- include "z-courier.labels" . | nindent 4 }}
+    app.kubernetes.io/component: internal-service
+  {{- with .Values.internalService.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.internalService.type }}
+  ports:
+    - name: internal
+      port: {{ .Values.internalService.port }}
+      targetPort: internal
+      protocol: TCP
+  selector:
+    {{- include "z-courier.selectorLabels" . | nindent 4 }}
+{{- end }}

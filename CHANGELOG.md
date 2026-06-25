@@ -5,6 +5,17 @@ All notable changes to Z-Courier are documented in this file.
 The format follows the spirit of Keep a Changelog, and this project uses
 semantic versioning after the first public MVP tag.
 
+## [Unreleased]
+
+### Added
+
+- Initial Kubernetes Helm chart for deploying Z-Courier gateway pods through a
+  StatefulSet, headless peer-push service, separate client and internal
+  services, ConfigMap-rendered gateway/Zinx config, existing Secret integration,
+  and optional ServiceMonitor support.
+- Production values example for the Helm chart without committing real secrets.
+- V6 Kubernetes and Helm planning document for the `v0.6.0` milestone.
+
 ## [v0.5.0] - 2026-06-25
 
 ### Added

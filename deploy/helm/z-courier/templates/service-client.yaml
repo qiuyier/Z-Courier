@@ -1,0 +1,22 @@
+{{- if .Values.clientService.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "z-courier.fullname" . }}-client
+  labels:
+    {{- include "z-courier.labels" . | nindent 4 }}
+    app.kubernetes.io/component: client-service
+  {{- with .Values.clientService.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.clientService.type }}
+  ports:
+    - name: tcp
+      port: {{ .Values.clientService.port }}
+      targetPort: tcp
+      protocol: TCP
+  selector:
+    {{- include "z-courier.selectorLabels" . | nindent 4 }}
+{{- end }}

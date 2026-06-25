@@ -1,0 +1,16 @@
+apiVersion: v2
+name: z-courier
+description: Helm chart for deploying the Z-Courier gateway on Kubernetes
+type: application
+version: 0.1.0
+appVersion: "v0.5.0"
+keywords:
+  - z-courier
+  - gateway
+  - push
+  - messaging
+home: https://github.com/qiuyier/Z-Courier
+sources:
+  - https://github.com/qiuyier/Z-Courier
+maintainers:
+  - name: Z-Courier maintainers

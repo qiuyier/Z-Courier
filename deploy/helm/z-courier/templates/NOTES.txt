@@ -1,0 +1,28 @@
+Z-Courier has been installed.
+
+Client TCP service:
+  {{ include "z-courier.fullname" . }}-client:{{ .Values.clientService.port }}
+
+Internal HTTP service:
+  {{ include "z-courier.fullname" . }}-internal:{{ .Values.internalService.port }}
+
+Per-pod peer push uses the headless service:
+  {{ include "z-courier.headlessServiceName" . }}
+
+Before the gateway can become ready, make sure these dependencies are reachable
+from the namespace:
+  - PostgreSQL DSN: {{ .Values.downlink.storage.postgres.dsn }}
+  - Redis: {{ .Values.cluster.registry.redis.addr }}
+  - Auth verifier: {{ .Values.auth.http.url }}
+  - Enabled upstream routes in values.yaml
+
+If secret.create=false, create the secret before installing:
+
+  kubectl create secret generic {{ include "z-courier.secretName" . }} \
+    --from-literal={{ .Values.secret.keys.authProviderSharedToken }}='<replace-me>' \
+    --from-literal={{ .Values.secret.keys.internalHMACSecret }}='<replace-me>' \
+    --from-literal={{ .Values.secret.keys.peerHMACSecret }}='<replace-me>' \
+    --from-literal={{ .Values.secret.keys.postgresPassword }}='<replace-me>' \
+    --from-literal={{ .Values.secret.keys.redisPassword }}='<replace-me>' \
+    --from-literal={{ .Values.secret.keys.upstreamInternalToken }}='<replace-me>'
+
