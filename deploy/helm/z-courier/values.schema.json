@@ -79,7 +79,11 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "type": { "type": "string", "enum": ["http"] },
+        "type": { "type": "string", "enum": ["http", "static"] },
+        "staticTokens": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/definitions/staticToken" }
+        },
         "http": {
           "type": "object",
           "additionalProperties": false,
@@ -358,6 +362,19 @@
       "type": "object",
       "additionalProperties": { "type": "string" }
     },
+    "staticToken": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["client_id", "token_id"],
+      "properties": {
+        "client_id": { "type": "string", "minLength": 1 },
+        "token_id": { "type": "string", "minLength": 1 },
+        "scopes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
     "hmacConfig": {
       "type": "object",
       "additionalProperties": false,
@@ -471,4 +488,3 @@
     }
   }
 }
-

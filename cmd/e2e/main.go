@@ -23,6 +23,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/qiuyier/Z-Courier/internal/downlink"
 	"github.com/qiuyier/Z-Courier/internal/protocol"
+	"github.com/qiuyier/Z-Courier/pkg/sdk/signing"
 )
 
 const (
@@ -31,6 +32,9 @@ const (
 	defaultInternalURL  = "http://127.0.0.1:18082"
 	defaultPostgresDSN  = "postgres://zcourier:zcourier@127.0.0.1:15432/zcourier?sslmode=disable"
 	downlinkPushTimeout = 10 * time.Second
+
+	internalAuthModeToken = "token"
+	internalAuthModeHMAC  = "hmac"
 )
 
 type config struct {
@@ -38,7 +42,10 @@ type config struct {
 	GatewayPort            int
 	InternalURL            string
 	MetricsURLs            []string
+	InternalAuthMode       string
 	InternalToken          string
+	InternalHMACKeyID      string
+	InternalHMACSecret     string
 	PostgresDSN            string
 	ClientID               string
 	DeviceID               string
@@ -73,7 +80,10 @@ func parseFlags() config {
 	flag.IntVar(&cfg.GatewayPort, "gateway-port", defaultGatewayPort, "gateway TCP port")
 	flag.StringVar(&cfg.InternalURL, "internal-url", defaultInternalURL, "gateway internal HTTP base URL")
 	flag.StringVar(&metricsURLRaw, "metrics-url", "", "comma-separated gateway metrics URLs; defaults to internal-url/metrics")
+	flag.StringVar(&cfg.InternalAuthMode, "internal-auth-mode", internalAuthModeToken, "gateway internal HTTP auth mode: token or hmac")
 	flag.StringVar(&cfg.InternalToken, "internal-token", "dev-internal-token", "gateway internal HTTP token")
+	flag.StringVar(&cfg.InternalHMACKeyID, "internal-hmac-key-id", "", "HMAC key id for internal HTTP hmac auth")
+	flag.StringVar(&cfg.InternalHMACSecret, "internal-hmac-secret", "", "HMAC secret for internal HTTP hmac auth")
 	flag.StringVar(&cfg.PostgresDSN, "postgres-dsn", defaultPostgresDSN, "PostgreSQL DSN")
 	flag.StringVar(&cfg.ClientID, "client-id", "e2e-client", "client id")
 	flag.StringVar(&cfg.DeviceID, "device-id", "e2e-device", "device id")
@@ -89,6 +99,7 @@ func parseFlags() config {
 	flag.Parse()
 
 	cfg.InternalURL = strings.TrimRight(cfg.InternalURL, "/")
+	cfg.InternalAuthMode = strings.ToLower(strings.TrimSpace(cfg.InternalAuthMode))
 	cfg.ExpectSessionURL = strings.TrimRight(cfg.ExpectSessionURL, "/")
 	cfg.MetricsURLs = parseMetricsURLs(metricsURLRaw, cfg.InternalURL+"/metrics")
 	return cfg
@@ -115,7 +126,58 @@ func parseMetricsURLs(raw, fallback string) []string {
 	return urls
 }
 
+func validateInternalAuthConfig(cfg config) error {
+	switch cfg.InternalAuthMode {
+	case internalAuthModeToken:
+		return nil
+	case internalAuthModeHMAC:
+		if strings.TrimSpace(cfg.InternalHMACKeyID) == "" {
+			return fmt.Errorf("internal-hmac-key-id is required in hmac auth mode")
+		}
+		if cfg.InternalHMACSecret == "" {
+			return fmt.Errorf("internal-hmac-secret is required in hmac auth mode")
+		}
+		_, err := signing.NewSigner(signing.SignerConfig{
+			KeyID:  strings.TrimSpace(cfg.InternalHMACKeyID),
+			Secret: []byte(cfg.InternalHMACSecret),
+		})
+		if err != nil {
+			return fmt.Errorf("create internal HMAC signer: %w", err)
+		}
+		return nil
+	default:
+		return fmt.Errorf("unsupported internal auth mode %q", cfg.InternalAuthMode)
+	}
+}
+
+func applyInternalAuth(request *http.Request, body []byte, cfg config) error {
+	switch cfg.InternalAuthMode {
+	case internalAuthModeToken:
+		if cfg.InternalToken != "" {
+			request.Header.Set(downlink.InternalTokenHeader, cfg.InternalToken)
+		}
+		return nil
+	case internalAuthModeHMAC:
+		signer, err := signing.NewSigner(signing.SignerConfig{
+			KeyID:  strings.TrimSpace(cfg.InternalHMACKeyID),
+			Secret: []byte(cfg.InternalHMACSecret),
+		})
+		if err != nil {
+			return fmt.Errorf("create internal HMAC signer: %w", err)
+		}
+		if err := signer.Sign(request, body); err != nil {
+			return fmt.Errorf("sign internal request: %w", err)
+		}
+		return nil
+	default:
+		return fmt.Errorf("unsupported internal auth mode %q", cfg.InternalAuthMode)
+	}
+}
+
 func run(ctx context.Context, cfg config) error {
+	if err := validateInternalAuthConfig(cfg); err != nil {
+		return err
+	}
 	if err := waitHTTP(ctx, cfg.InternalURL+"/metrics"); err != nil {
 		return fmt.Errorf("wait gateway metrics: %w", err)
 	}
@@ -349,7 +411,7 @@ func fetchDebugRoute(ctx context.Context, cfg config) (debugRouteResponse, error
 	query.Set("device_id", cfg.DeviceID)
 
 	var resp debugRouteResponse
-	if err := getInternalJSON(ctx, cfg.InternalURL, "/internal/debug/route?"+query.Encode(), cfg.InternalToken, &resp); err != nil {
+	if err := getInternalJSON(ctx, cfg, cfg.InternalURL, "/internal/debug/route?"+query.Encode(), &resp); err != nil {
 		return debugRouteResponse{}, err
 	}
 
@@ -441,7 +503,7 @@ func fetchDebugSessions(ctx context.Context, cfg config) (debugSessionsResponse,
 	query.Set("limit", "10")
 
 	var resp debugSessionsResponse
-	if err := getInternalJSON(ctx, cfg.ExpectSessionURL, "/internal/debug/sessions?"+query.Encode(), cfg.InternalToken, &resp); err != nil {
+	if err := getInternalJSON(ctx, cfg, cfg.ExpectSessionURL, "/internal/debug/sessions?"+query.Encode(), &resp); err != nil {
 		return debugSessionsResponse{}, err
 	}
 
@@ -493,7 +555,7 @@ func validateDebugSessionsGone(cfg config, resp debugSessionsResponse) error {
 	return nil
 }
 
-func getInternalJSON(ctx context.Context, baseURL, path, token string, target any) error {
+func getInternalJSON(ctx context.Context, cfg config, baseURL, path string, target any) error {
 	requestCtx, cancel := context.WithTimeout(ctx, downlinkPushTimeout)
 	defer cancel()
 
@@ -501,7 +563,9 @@ func getInternalJSON(ctx context.Context, baseURL, path, token string, target an
 	if err != nil {
 		return err
 	}
-	req.Header.Set(downlink.InternalTokenHeader, token)
+	if err := applyInternalAuth(req, nil, cfg); err != nil {
+		return err
+	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -571,7 +635,9 @@ func pushDownlink(ctx context.Context, cfg config, messageID string, body []byte
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set(downlink.InternalTokenHeader, cfg.InternalToken)
+	if err := applyInternalAuth(req, reqBody, cfg); err != nil {
+		return err
+	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

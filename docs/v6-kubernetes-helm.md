@@ -136,8 +136,19 @@ bash scripts/k8s_helm_smoke.sh
 
 The first smoke path intentionally uses memory downlink storage and an in-memory
 cluster registry so it can prove Kubernetes packaging without requiring
-PostgreSQL, Redis, NSQ, or backend stubs. A later E2E path should add those
-dependencies and exercise AUTH/BIND, upstream forwarding, and downlink push.
+PostgreSQL, Redis, NSQ, or backend stubs.
+
+Local kind E2E validation:
+
+```bash
+bash scripts/k8s_helm_e2e.sh
+```
+
+The E2E path installs PostgreSQL, Redis, and NSQ into kind, deploys two gateway
+pods through the Helm chart, pins the client TCP connection to one pod, sends
+internal downlink requests to the other pod, and verifies AUTH/BIND, PostgreSQL
+downlink storage, reconnect retry, Redis online routing, cross-pod HMAC peer
+push, NSQ upstream forwarding, and metrics exposure.
 
 Runtime validation should then reuse the existing SDK clients against the
 client TCP service and the existing backend SDK against the internal HTTP
@@ -158,7 +169,6 @@ manually with `workflow_dispatch` by passing an existing release tag.
 
 Good next increments:
 
-- Add a kind-based E2E that installs external dependencies and the chart.
 - Turn the NetworkPolicy example into optional chart templates once the label
   model is stable across real deployments.
 - Add TLS termination examples for public TCP traffic.

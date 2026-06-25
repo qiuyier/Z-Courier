@@ -52,6 +52,7 @@ zinx:
 
 auth:
   type: http
+  staticTokens: {}
   http:
     url: http://auth-backend:8080/gateway/auth/verify
     internalTokenEnv: ZCOURIER_AUTH_PROVIDER_SHARED_TOKEN

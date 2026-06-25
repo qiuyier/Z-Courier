@@ -29,6 +29,12 @@ semantic versioning after the first public MVP tag.
   release assets.
 - Kubernetes NetworkPolicy example for production-style gateway ingress and
   dependency egress boundaries.
+- Kubernetes Helm E2E script and manual workflow covering PostgreSQL downlink
+  storage, Redis online routing, cross-pod peer push, NSQ upstream forwarding,
+  reconnect retry, and metrics.
+- Helm chart static-token auth rendering for self-contained Kubernetes E2E
+  validation.
+- HMAC internal HTTP support in the E2E verifier.
 - V6 Kubernetes and Helm planning document for the `v0.6.0` milestone.
 
 ## [v0.5.0] - 2026-06-25

@@ -1,0 +1,114 @@
+# Values used by scripts/k8s_helm_e2e.sh.
+# This exercises the Helm chart with real PostgreSQL downlink storage, Redis
+# cluster routing, NSQ upstream forwarding, HMAC-protected internal HTTP, and
+# two gateway pods for peer push.
+
+replicaCount: 2
+
+image:
+  repository: z-courier-gateway
+  tag: kind-e2e
+  pullPolicy: IfNotPresent
+
+secret:
+  create: true
+  values:
+    authProviderSharedToken: kind-auth-provider-token-0123456789abcdef
+    internalHMACSecret: kind-internal-hmac-secret-0123456789abcdef
+    peerHMACSecret: kind-peer-hmac-secret-0123456789abcdef
+    postgresPassword: zcourier
+    redisPassword: kind-redis-password
+    upstreamInternalToken: kind-upstream-token
+
+auth:
+  type: static
+  staticTokens:
+    e2e-token:
+      client_id: e2e-client
+      token_id: e2e-token
+      scopes:
+        - gateway:e2e
+  cache:
+    enabled: false
+
+internalHttp:
+  auth:
+    mode: hmac
+    hmac:
+      keyID: e2e-internal-2026-01
+      secretEnv: ZCOURIER_INTERNAL_HMAC_SECRET
+      maxClockSkew: 30s
+      nonceTTL: 1m
+      maxNonceEntries: 10000
+
+cluster:
+  enabled: true
+  routeRefreshInterval: 1s
+  registry:
+    type: redis
+    ttl: 10s
+    redis:
+      addr: redis:6379
+      keyPrefix: zcourier:k8s-e2e
+      dialTimeout: 1s
+      readTimeout: 1s
+      writeTimeout: 1s
+  peer:
+    timeout: 2s
+    auth:
+      mode: hmac
+      hmac:
+        keyID: e2e-peer-2026-01
+        secretEnv: ZCOURIER_PEER_HMAC_SECRET
+        maxClockSkew: 30s
+        nonceTTL: 1m
+        maxNonceEntries: 10000
+
+downlink:
+  storage:
+    type: postgres
+    postgres:
+      dsn: "postgres://zcourier:${ZCOURIER_POSTGRES_PASSWORD}@postgres:5432/zcourier?sslmode=disable"
+      autoMigrate: true
+      maxOpenConns: 10
+      maxIdleConns: 5
+      connMaxLifetime: 30m
+  delivery:
+    retryInterval: 1s
+    retryDelay: 1s
+    ackTimeout: 1s
+    retryLease: 5s
+    maxAttempts: 5
+    scanLimit: 100
+    bindFlushLimit: 100
+
+pipeline:
+  rateLimit:
+    enabled: false
+
+upstream:
+  routes:
+    - name: k8s-e2e-nsq-upstream
+      enabled: true
+      msgIDMin: 2000
+      msgIDMax: 2999
+      target:
+        type: nsq
+        nsqdAddrs:
+          - nsqd:4150
+        topic: message_events
+        authSecret: ""
+        dialTimeout: 1s
+        readTimeout: 60s
+        writeTimeout: 1s
+        publishMode: round_robin
+        retryAttempts: 1
+        maxInFlight: 1000
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi

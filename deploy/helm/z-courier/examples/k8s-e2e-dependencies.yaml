@@ -1,0 +1,171 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/component: e2e-dependency
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: postgres
+        app.kubernetes.io/component: e2e-dependency
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: zcourier
+            - name: POSTGRES_PASSWORD
+              value: zcourier
+            - name: POSTGRES_DB
+              value: zcourier
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - zcourier
+                - -d
+                - zcourier
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            timeoutSeconds: 3
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/component: e2e-dependency
+spec:
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+  selector:
+    app.kubernetes.io/name: postgres
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/component: e2e-dependency
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redis
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: redis
+        app.kubernetes.io/component: e2e-dependency
+    spec:
+      containers:
+        - name: redis
+          image: redis:8-alpine
+          ports:
+            - name: redis
+              containerPort: 6379
+          readinessProbe:
+            exec:
+              command:
+                - redis-cli
+                - ping
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            timeoutSeconds: 3
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/component: e2e-dependency
+spec:
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+  selector:
+    app.kubernetes.io/name: redis
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nsqd
+  labels:
+    app.kubernetes.io/name: nsqd
+    app.kubernetes.io/component: e2e-dependency
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nsqd
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: nsqd
+        app.kubernetes.io/component: e2e-dependency
+    spec:
+      containers:
+        - name: nsqd
+          image: nsqio/nsq:latest
+          command:
+            - /nsqd
+            - --broadcast-address=nsqd
+          ports:
+            - name: tcp
+              containerPort: 4150
+            - name: http
+              containerPort: 4151
+          readinessProbe:
+            tcpSocket:
+              port: tcp
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            timeoutSeconds: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nsqd
+  labels:
+    app.kubernetes.io/name: nsqd
+    app.kubernetes.io/component: e2e-dependency
+spec:
+  ports:
+    - name: tcp
+      port: 4150
+      targetPort: tcp
+    - name: http
+      port: 4151
+      targetPort: http
+  selector:
+    app.kubernetes.io/name: nsqd

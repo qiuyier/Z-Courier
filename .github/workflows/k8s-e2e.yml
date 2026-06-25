@@ -1,0 +1,74 @@
+name: Kubernetes E2E
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  k8s-e2e:
+    name: Helm Kind E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Setup kind
+        uses: helm/kind-action@v1
+        with:
+          install_only: true
+          version: v0.32.0
+
+      - name: Run Kubernetes Helm E2E
+        env:
+          K8S_HELM_E2E_KEEP_CLUSTER: "1"
+        run: bash scripts/k8s_helm_e2e.sh
+
+      - name: Dump Kubernetes E2E diagnostics
+        if: failure()
+        run: |
+          mkdir -p reports/k8s-e2e
+          {
+            echo "## Pods"
+            kubectl -n z-courier-e2e get pods -o wide || true
+            echo
+            echo "## Services"
+            kubectl -n z-courier-e2e get svc -o wide || true
+            echo
+            echo "## Events"
+            kubectl -n z-courier-e2e get events --sort-by=.lastTimestamp || true
+          } | tee reports/k8s-e2e/summary.txt
+          kubectl -n z-courier-e2e describe pods >reports/k8s-e2e/pods.txt 2>&1 || true
+          kubectl -n z-courier-e2e logs statefulset/z-courier --all-containers=true --tail=300 >reports/k8s-e2e/gateway.log 2>&1 || true
+          kubectl -n z-courier-e2e logs deployment/postgres --tail=200 >reports/k8s-e2e/postgres.log 2>&1 || true
+          kubectl -n z-courier-e2e logs deployment/redis --tail=200 >reports/k8s-e2e/redis.log 2>&1 || true
+          kubectl -n z-courier-e2e logs deployment/nsqd --tail=200 >reports/k8s-e2e/nsqd.log 2>&1 || true
+          if [ -f /tmp/z-courier-kind-helm-e2e.yaml ]; then
+            cp /tmp/z-courier-kind-helm-e2e.yaml reports/k8s-e2e/manifest.yaml
+          fi
+          for file in /tmp/z-courier-k8s-e2e-*.log; do
+            if [ -f "$file" ]; then
+              cp "$file" "reports/k8s-e2e/$(basename "$file")"
+            fi
+          done
+
+      - name: Upload Kubernetes E2E diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: k8s-e2e-diagnostics
+          path: reports/k8s-e2e/
+          if-no-files-found: warn
+
+      - name: Cleanup kind cluster
+        if: always()
+        run: kind delete cluster --name z-courier-helm-e2e || true

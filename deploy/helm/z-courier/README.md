@@ -151,6 +151,18 @@ renders this chart with
 `examples/values-kind-smoke.yaml`, waits for the StatefulSet to become ready,
 and checks `/readyz` and `/metrics`.
 
+For a local kind E2E test with real dependencies:
+
+```bash
+bash scripts/k8s_helm_e2e.sh
+```
+
+The E2E path installs PostgreSQL, Redis, and NSQ into the kind cluster, renders
+this chart with `examples/values-k8s-e2e.yaml`, pins the client connection to
+one gateway pod, sends internal downlink requests to another gateway pod, and
+verifies AUTH/BIND, durable downlink storage, reconnect retry, Redis online
+routing, cross-pod peer push, NSQ upstream forwarding, and metrics.
+
 ## Boundaries
 
 This first chart does not install PostgreSQL, Redis, NSQ, Prometheus, Grafana,

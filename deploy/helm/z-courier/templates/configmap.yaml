@@ -12,11 +12,16 @@ data:
 
     auth:
       type: {{ .Values.auth.type | quote }}
+      {{- if eq .Values.auth.type "static" }}
+      static_tokens:
+        {{- toYaml .Values.auth.staticTokens | nindent 8 }}
+      {{- else if eq .Values.auth.type "http" }}
       http:
         url: {{ .Values.auth.http.url | quote }}
         internal_token: {{ printf "${%s}" .Values.auth.http.internalTokenEnv | quote }}
         timeout: {{ .Values.auth.http.timeout | quote }}
         max_in_flight: {{ .Values.auth.http.maxInFlight }}
+      {{- end }}
       cache:
         enabled: {{ .Values.auth.cache.enabled }}
         max_entries: {{ .Values.auth.cache.maxEntries }}
