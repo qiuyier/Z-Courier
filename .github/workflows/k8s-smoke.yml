@@ -1,0 +1,95 @@
+name: Kubernetes Smoke
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/k8s-smoke.yml"
+      - "Dockerfile"
+      - "deploy/helm/**"
+      - "scripts/k8s_helm_smoke.sh"
+      - "cmd/gateway/**"
+      - "internal/**"
+      - "pkg/**"
+      - "go.mod"
+      - "go.sum"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/k8s-smoke.yml"
+      - "Dockerfile"
+      - "deploy/helm/**"
+      - "scripts/k8s_helm_smoke.sh"
+      - "cmd/gateway/**"
+      - "internal/**"
+      - "pkg/**"
+      - "go.mod"
+      - "go.sum"
+
+permissions:
+  contents: read
+
+jobs:
+  k8s-smoke:
+    name: Helm Kind Smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Setup kind
+        uses: helm/kind-action@v1
+        with:
+          install_only: true
+          version: v0.32.0
+
+      - name: Run Kubernetes Helm smoke
+        env:
+          K8S_HELM_SMOKE_KEEP_CLUSTER: "1"
+        run: bash scripts/k8s_helm_smoke.sh
+
+      - name: Dump Kubernetes smoke diagnostics
+        if: failure()
+        run: |
+          mkdir -p reports/k8s-smoke
+          {
+            echo "## Pods"
+            kubectl -n z-courier-smoke get pods -o wide || true
+            echo
+            echo "## Services"
+            kubectl -n z-courier-smoke get svc -o wide || true
+            echo
+            echo "## Events"
+            kubectl -n z-courier-smoke get events --sort-by=.lastTimestamp || true
+          } | tee reports/k8s-smoke/summary.txt
+          kubectl -n z-courier-smoke describe pods >reports/k8s-smoke/pods.txt 2>&1 || true
+          kubectl -n z-courier-smoke logs statefulset/z-courier --all-containers=true --tail=300 >reports/k8s-smoke/gateway.log 2>&1 || true
+          if [ -f /tmp/z-courier-kind-helm.yaml ]; then
+            cp /tmp/z-courier-kind-helm.yaml reports/k8s-smoke/manifest.yaml
+          fi
+          if [ -f /tmp/z-courier-kind-port-forward.log ]; then
+            cp /tmp/z-courier-kind-port-forward.log reports/k8s-smoke/port-forward.log
+          fi
+
+      - name: Upload Kubernetes smoke diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: k8s-smoke-diagnostics
+          path: reports/k8s-smoke/
+          if-no-files-found: warn
+
+      - name: Cleanup kind cluster
+        if: always()
+        run: kind delete cluster --name z-courier-helm-smoke || true

@@ -20,6 +20,8 @@ semantic versioning after the first public MVP tag.
   from the Kubernetes chart.
 - Numeric Kubernetes security context defaults for the gateway container so
   `runAsNonRoot` can be verified by kubelet.
+- GitHub Actions Kubernetes smoke workflow for running the Helm chart in a kind
+  cluster when Kubernetes deployment files or gateway runtime code changes.
 - V6 Kubernetes and Helm planning document for the `v0.6.0` milestone.
 
 ## [v0.5.0] - 2026-06-25
