@@ -154,7 +154,7 @@ Runtime validation should then reuse the existing SDK clients against the
 client TCP service and the existing backend SDK against the internal HTTP
 service.
 
-## Release Asset Path
+## Release Distribution Path
 
 The `Release Helm Chart` workflow packages the chart from the released tag and
 uploads these assets to the GitHub Release:
@@ -164,6 +164,20 @@ uploads these assets to the GitHub Release:
 
 It runs automatically when a GitHub Release is published. It can also be run
 manually with `workflow_dispatch` by passing an existing release tag.
+
+The `Release Helm OCI` workflow publishes the same chart package to GHCR as an
+OCI Helm chart:
+
+```bash
+helm upgrade --install z-courier oci://ghcr.io/qiuyier/charts/z-courier \
+  --version 0.1.0 \
+  --namespace z-courier \
+  -f values-production.yaml
+```
+
+The OCI chart version is the Helm chart version from `Chart.yaml`, not the Git
+tag. Before publishing a changed chart, bump `deploy/helm/z-courier/Chart.yaml`
+`version` so Helm clients can request the new package version.
 
 ## Future Work
 

@@ -65,6 +65,19 @@ helm upgrade --install z-courier ./deploy/helm/z-courier \
   -f deploy/helm/z-courier/examples/values-production.yaml
 ```
 
+After a GitHub Release publishes the chart to GHCR, Kubernetes users can install
+the packaged chart from the OCI registry instead of cloning this repository:
+
+```bash
+helm upgrade --install z-courier oci://ghcr.io/qiuyier/charts/z-courier \
+  --version 0.1.0 \
+  --namespace z-courier \
+  -f values-production.yaml
+```
+
+The OCI chart version is the Helm `Chart.yaml` `version`, not the Git release
+tag. Bump the chart version whenever the published chart changes.
+
 ## Services
 
 The chart creates three services:
@@ -128,6 +141,8 @@ the default values and any `-f` override file passed to Helm.
 
 When a GitHub Release is published, CI packages this chart and uploads the
 `.tgz` archive plus `SHA256SUMS` as release assets.
+Another release workflow also publishes the chart to
+`oci://ghcr.io/qiuyier/charts/z-courier`.
 
 After install:
 

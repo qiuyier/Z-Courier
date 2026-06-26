@@ -27,6 +27,8 @@ semantic versioning after the first public MVP tag.
   archives.
 - GitHub Release workflow for uploading the Helm chart archive and checksum as
   release assets.
+- GitHub Release workflow for publishing the Helm chart to GHCR as an OCI Helm
+  chart.
 - Kubernetes NetworkPolicy example for production-style gateway ingress and
   dependency egress boundaries.
 - Kubernetes Helm E2E script and manual workflow covering PostgreSQL downlink

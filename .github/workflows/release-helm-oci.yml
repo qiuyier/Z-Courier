@@ -1,0 +1,50 @@
+name: Release Helm OCI
+
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to publish the Helm chart from
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  release-helm-oci:
+    name: Push Helm Chart to GHCR
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+
+      - name: Package and push Helm chart
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_OWNER: ${{ github.repository_owner }}
+        run: |
+          mkdir -p reports/helm
+          docker run --rm -v "$PWD:/work" -w /work alpine/helm:3.17.3 lint deploy/helm/z-courier
+          docker run --rm -v "$PWD:/work" -w /work alpine/helm:3.17.3 package deploy/helm/z-courier --destination reports/helm
+
+          owner="$(printf '%s' "$GHCR_OWNER" | tr '[:upper:]' '[:lower:]')"
+          docker run --rm \
+            --entrypoint /bin/sh \
+            -e GH_TOKEN="$GH_TOKEN" \
+            -e GHCR_USERNAME="$GHCR_USERNAME" \
+            -e OCI_REGISTRY="ghcr.io" \
+            -e OCI_REPOSITORY="oci://ghcr.io/${owner}/charts" \
+            -v "$PWD:/work" \
+            -w /work \
+            alpine/helm:3.17.3 \
+            -c 'printf "%s" "$GH_TOKEN" | helm registry login "$OCI_REGISTRY" --username "$GHCR_USERNAME" --password-stdin && helm push reports/helm/*.tgz "$OCI_REPOSITORY"'
