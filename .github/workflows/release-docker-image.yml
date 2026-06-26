@@ -77,26 +77,35 @@ jobs:
           fi
           revision="$(git rev-parse HEAD)"
 
-          docker build \
+          smoke_image="${image}:smoke-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          DOCKER_BUILDKIT=1 docker build \
+            --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
+            --label "org.opencontainers.image.revision=${revision}" \
+            --label "org.opencontainers.image.version=${RELEASE_TAG}" \
+            --tag "$smoke_image" \
+            .
+
+          docker run --rm --entrypoint /bin/sh "$smoke_image" -c \
+            'test -x /usr/local/bin/z-courier-gateway && test -f /app/configs/z-courier.yaml && test -f /app/conf/zinx.json'
+          docker run --rm "$smoke_image" -h >/tmp/z-courier-gateway-help.txt 2>&1
+
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GHCR_USERNAME" --password-stdin
+          docker run --privileged --rm tonistiigi/binfmt --install amd64,arm64
+          docker buildx create --name z-courier-release-builder --use
+          docker buildx inspect --bootstrap
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
             --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
             --label "org.opencontainers.image.revision=${revision}" \
             --label "org.opencontainers.image.version=${RELEASE_TAG}" \
             "${tags[@]}" \
+            --push \
             .
-
-          docker run --rm --entrypoint /bin/sh "${image}:${RELEASE_TAG}" -c \
-            'test -x /usr/local/bin/z-courier-gateway && test -f /app/configs/z-courier.yaml && test -f /app/conf/zinx.json'
-          docker run --rm "${image}:${RELEASE_TAG}" -h >/tmp/z-courier-gateway-help.txt 2>&1
-
-          printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GHCR_USERNAME" --password-stdin
-          docker push "${image}:${RELEASE_TAG}"
-          if [ "$push_latest" = "true" ]; then
-            docker push "${image}:latest"
-          fi
 
           {
             echo "## Docker Image"
             echo ""
             echo "- Image: \`${image}:${RELEASE_TAG}\`"
+            echo "- Platforms: \`linux/amd64,linux/arm64\`"
             echo "- Latest pushed: \`${push_latest}\`"
           } >> "$GITHUB_STEP_SUMMARY"

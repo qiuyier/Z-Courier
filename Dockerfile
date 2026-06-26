@@ -1,6 +1,7 @@
 ARG GO_VERSION=1.26
+ARG BUILDPLATFORM=linux/amd64
 
-FROM golang:${GO_VERSION}-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-alpine AS build
 
 WORKDIR /src
 

@@ -143,6 +143,8 @@ jobs:
     timeout-minutes: 20
     needs:
       - validate
+    env:
+      DOCKER_BUILDKIT: "1"
 
     steps:
       - name: Checkout

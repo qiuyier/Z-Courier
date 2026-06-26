@@ -14,6 +14,7 @@ The first `v0.7.0` image release milestone includes:
 - A `Release Docker Image` GitHub Actions workflow.
 - Release-triggered publishing to
   `ghcr.io/qiuyier/z-courier-gateway:<release-tag>`.
+- Multi-architecture image manifests for `linux/amd64` and `linux/arm64`.
 - Manual `workflow_dispatch` support for publishing an existing tag.
 - Container smoke checks before pushing the image.
 - Optional `latest` publishing for stable releases only.
@@ -38,12 +39,26 @@ ghcr.io/qiuyier/z-courier-gateway:latest
 `latest` is not pushed for pre-release tags such as `v0.7.0-rc.1`. Manual runs
 can opt into `latest`, but the default is false.
 
+## Platforms
+
+Published gateway images are multi-architecture manifests:
+
+```text
+linux/amd64
+linux/arm64
+```
+
+This lets x86 Linux servers, ARM Linux servers, and Apple Silicon development
+machines pull the same tag while Docker selects the native platform image.
+
 ## Manual Backfill
 
 Because this workflow is added after `v0.6.0` was already released, it will not
-automatically publish the `v0.6.0` image unless the workflow is run manually.
+automatically publish or upgrade the `v0.6.0` image unless the workflow is run
+manually.
 
-To backfill an existing tag after this workflow lands on `main`:
+To backfill or replace an existing tag with a multi-arch manifest after this
+workflow lands on `main`:
 
 ```bash
 gh workflow run release-docker-image.yml \
@@ -56,6 +71,7 @@ Then confirm:
 
 ```bash
 docker pull ghcr.io/qiuyier/z-courier-gateway:v0.6.0
+docker buildx imagetools inspect ghcr.io/qiuyier/z-courier-gateway:v0.6.0
 docker run --rm --entrypoint /bin/sh ghcr.io/qiuyier/z-courier-gateway:v0.6.0 -c \
   'test -x /usr/local/bin/z-courier-gateway && test -f /app/configs/z-courier.yaml && test -f /app/conf/zinx.json'
 ```
@@ -88,7 +104,7 @@ actionlint
 helm lint deploy/helm/z-courier
 helm lint deploy/helm/z-courier -f deploy/helm/z-courier/examples/values-production.yaml
 helm template z-courier deploy/helm/z-courier >/tmp/z-courier-k8s.yaml
-docker build --tag z-courier-gateway:release-image-check .
+DOCKER_BUILDKIT=1 docker build --tag z-courier-gateway:release-image-check .
 docker run --rm --entrypoint /bin/sh z-courier-gateway:release-image-check -c \
   'test -x /usr/local/bin/z-courier-gateway && test -f /app/configs/z-courier.yaml && test -f /app/conf/zinx.json'
 ```
@@ -97,6 +113,7 @@ After publishing a release, confirm:
 
 ```bash
 docker pull ghcr.io/qiuyier/z-courier-gateway:<release-tag>
+docker buildx imagetools inspect ghcr.io/qiuyier/z-courier-gateway:<release-tag>
 helm template z-courier oci://ghcr.io/qiuyier/charts/z-courier \
   --version <chart-version> \
   --set image.tag=<release-tag>

@@ -12,10 +12,13 @@ semantic versioning after the first public MVP tag.
 - GitHub Actions Docker image release workflow for publishing the gateway image
   to GHCR on GitHub Release events or manual tag backfills.
 - V7 Docker image release plan covering GHCR tags, stable `latest` behavior,
-  manual backfill, Helm defaults, and verification.
+  multi-architecture image publishing, manual backfill, Helm defaults, and
+  verification.
 
 ### Changed
 
+- Docker image release publishing now uses Docker Buildx to publish
+  `linux/amd64` and `linux/arm64` manifests for the same image tag.
 - Helm chart version bumped to `0.2.0` because the default gateway image
   repository now points at the official GHCR package.
 - Helm default and production example image repository now use

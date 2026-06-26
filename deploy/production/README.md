@@ -54,6 +54,9 @@ The release image publishing workflow publishes the gateway image to GHCR:
 ghcr.io/qiuyier/z-courier-gateway:<release-tag>
 ```
 
+Published gateway images are multi-architecture manifests for `linux/amd64`
+and `linux/arm64`.
+
 For stable releases, the workflow can also publish:
 
 ```text
