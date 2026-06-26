@@ -7,6 +7,8 @@ semantic versioning after the first public MVP tag.
 
 ## [Unreleased]
 
+## [v0.7.0] - 2026-06-26
+
 ### Added
 
 - GitHub Actions Docker image release workflow for publishing the gateway image
