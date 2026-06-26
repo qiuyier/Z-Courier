@@ -99,10 +99,11 @@ The chart has its own version in
 
 ```yaml
 version: 0.1.0
-appVersion: "v0.5.0"
+appVersion: "v0.6.0"
 ```
 
-Before tagging `v0.6.0`, update `appVersion` to the intended gateway image tag:
+For the `v0.6.0` release, `appVersion` should point at the intended gateway
+image tag:
 
 ```yaml
 version: 0.1.0
@@ -284,10 +285,10 @@ HMAC for backend and peer internal traffic.
 ## Tagging Checklist
 
 1. Commit and push the release documentation to `main`.
-2. Update `deploy/helm/z-courier/Chart.yaml` `appVersion` to `"v0.6.0"`.
+2. Confirm `deploy/helm/z-courier/Chart.yaml` `appVersion` is `"v0.6.0"`.
 3. Confirm `deploy/helm/z-courier/Chart.yaml` `version` is the intended chart
    version.
-4. Update `CHANGELOG.md` with the final `v0.6.0` date and scope.
+4. Confirm `CHANGELOG.md` has the final `v0.6.0` date and scope.
 5. Confirm GitHub Actions is green on the exact commit.
 6. Run or confirm the manual **Kubernetes E2E** workflow.
 7. Confirm release notes match the final scope.

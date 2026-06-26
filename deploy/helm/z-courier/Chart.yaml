@@ -3,7 +3,7 @@ name: z-courier
 description: Helm chart for deploying the Z-Courier gateway on Kubernetes
 type: application
 version: 0.1.0
-appVersion: "v0.5.0"
+appVersion: "v0.6.0"
 keywords:
   - z-courier
   - gateway

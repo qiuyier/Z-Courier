@@ -14,7 +14,7 @@ tag.
 | Field | Example | Meaning |
 | --- | --- | --- |
 | `version` | `0.1.0` | Helm chart package version used by `.tgz`, GitHub Release assets, and GHCR OCI installs. |
-| `appVersion` | `v0.5.0` | Recommended Z-Courier gateway application/image version for this chart. |
+| `appVersion` | `v0.6.0` | Recommended Z-Courier gateway application/image version for this chart. |
 
 Helm clients select charts by `version`:
 

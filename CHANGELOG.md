@@ -7,6 +7,8 @@ semantic versioning after the first public MVP tag.
 
 ## [Unreleased]
 
+## [v0.6.0] - 2026-06-26
+
 ### Added
 
 - Initial Kubernetes Helm chart for deploying Z-Courier gateway pods through a
