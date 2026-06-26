@@ -1,0 +1,102 @@
+name: Release Docker Image
+
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to build and publish as a gateway image
+        required: true
+        type: string
+      push_latest:
+        description: Also push the latest tag
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  release-docker-image:
+    name: Build and Push Gateway Image
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+
+      - name: Build, smoke, and push image
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_OWNER: ${{ github.repository_owner }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+          RELEASE_PRERELEASE: ${{ github.event.release.prerelease || 'false' }}
+          INPUT_PUSH_LATEST: ${{ inputs.push_latest || 'false' }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$RELEASE_TAG" ]; then
+            echo "::error::release tag is required"
+            exit 1
+          fi
+
+          case "$RELEASE_TAG" in
+            v*) ;;
+            *)
+              echo "::error::release tag must start with v, got ${RELEASE_TAG}"
+              exit 1
+              ;;
+          esac
+
+          owner="$(printf '%s' "$GHCR_OWNER" | tr '[:upper:]' '[:lower:]')"
+          image="ghcr.io/${owner}/z-courier-gateway"
+
+          push_latest=false
+          if [ "$GITHUB_EVENT_NAME" = "release" ] && [ "$RELEASE_PRERELEASE" != "true" ]; then
+            push_latest=true
+          fi
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ "$INPUT_PUSH_LATEST" = "true" ]; then
+            push_latest=true
+          fi
+          if [[ "$RELEASE_TAG" == *-* ]]; then
+            push_latest=false
+          fi
+
+          tags=(--tag "${image}:${RELEASE_TAG}")
+          if [ "$push_latest" = "true" ]; then
+            tags+=(--tag "${image}:latest")
+          fi
+          revision="$(git rev-parse HEAD)"
+
+          docker build \
+            --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
+            --label "org.opencontainers.image.revision=${revision}" \
+            --label "org.opencontainers.image.version=${RELEASE_TAG}" \
+            "${tags[@]}" \
+            .
+
+          docker run --rm --entrypoint /bin/sh "${image}:${RELEASE_TAG}" -c \
+            'test -x /usr/local/bin/z-courier-gateway && test -f /app/configs/z-courier.yaml && test -f /app/conf/zinx.json'
+          docker run --rm "${image}:${RELEASE_TAG}" -h >/tmp/z-courier-gateway-help.txt 2>&1
+
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GHCR_USERNAME" --password-stdin
+          docker push "${image}:${RELEASE_TAG}"
+          if [ "$push_latest" = "true" ]; then
+            docker push "${image}:latest"
+          fi
+
+          {
+            echo "## Docker Image"
+            echo ""
+            echo "- Image: \`${image}:${RELEASE_TAG}\`"
+            echo "- Latest pushed: \`${push_latest}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

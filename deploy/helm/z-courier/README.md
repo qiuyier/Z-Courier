@@ -43,13 +43,13 @@ kubectl -n z-courier create secret generic z-courier-secret \
   --from-literal=upstream-internal-token='<replace-me>'
 ```
 
-Install with your gateway image and private dependency addresses:
+Install with the published gateway image and private dependency addresses:
 
 ```bash
 helm upgrade --install z-courier ./deploy/helm/z-courier \
   --namespace z-courier \
-  --set image.repository=ghcr.io/your-org/z-courier-gateway \
-  --set image.tag=v0.5.0 \
+  --set image.repository=ghcr.io/qiuyier/z-courier-gateway \
+  --set image.tag=v0.6.0 \
   --set secret.name=z-courier-secret \
   --set cluster.registry.redis.addr=redis-master.z-courier.svc.cluster.local:6379 \
   --set auth.http.url=http://auth-backend.z-courier.svc.cluster.local:8080/gateway/auth/verify \
@@ -78,7 +78,9 @@ helm upgrade --install z-courier oci://ghcr.io/qiuyier/charts/z-courier \
 The OCI chart version is the Helm `Chart.yaml` `version`, not the Git release
 tag. Bump the chart version whenever the published chart changes. See
 [../../../docs/v6-helm-versioning.md](../../../docs/v6-helm-versioning.md) for the
-chart/app compatibility matrix and release checklist.
+chart/app compatibility matrix and release checklist. The gateway image release
+workflow is described in
+[../../../docs/v7-docker-image-release.md](../../../docs/v7-docker-image-release.md).
 
 ## Services
 

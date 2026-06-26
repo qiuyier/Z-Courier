@@ -1,7 +1,7 @@
 replicaCount: 2
 
 image:
-  repository: z-courier-gateway
+  repository: ghcr.io/qiuyier/z-courier-gateway
   pullPolicy: IfNotPresent
   tag: ""
 

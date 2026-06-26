@@ -46,6 +46,24 @@ docker build --platform linux/amd64 -t z-courier-gateway:local .
 docker build --platform linux/arm64 -t z-courier-gateway:local-arm64 .
 ```
 
+## Published Image
+
+The release image publishing workflow publishes the gateway image to GHCR:
+
+```text
+ghcr.io/qiuyier/z-courier-gateway:<release-tag>
+```
+
+For stable releases, the workflow can also publish:
+
+```text
+ghcr.io/qiuyier/z-courier-gateway:latest
+```
+
+Use immutable version tags for production deployments. The local Compose
+reference still builds from the repository Dockerfile so it can validate local
+changes before they are released.
+
 ## Run
 
 The image entrypoint is:

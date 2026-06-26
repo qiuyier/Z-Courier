@@ -30,7 +30,7 @@ The gateway container image tag defaults to `appVersion` when
 
 ```yaml
 image:
-  repository: ghcr.io/your-org/z-courier-gateway
+  repository: ghcr.io/qiuyier/z-courier-gateway
   tag: ""
 ```
 
@@ -85,6 +85,7 @@ Maintain this matrix when releasing or changing the chart:
 | Chart version | Recommended appVersion | Gateway image tag | Protocol/config compatibility | Notes |
 | --- | --- | --- | --- | --- |
 | `0.1.0` | `v0.6.0` at release time | `v0.6.0` | Gateway config rendered by this chart must pass `values.schema.json`, kind smoke, and kind E2E. | First Kubernetes/Helm chart release. |
+| `0.2.0` | `v0.6.0` until the next app release tag is finalized | `v0.6.0` or the next validated app tag | Same protocol and config contract as `0.1.0`; chart renders the official GHCR gateway image repository by default. | First chart update after adding gateway image publishing. |
 
 If the chart is used with a gateway image that differs from `appVersion`, the
 operator owns compatibility validation. The safest check is:
@@ -132,7 +133,7 @@ Production operators should pin both the chart version and gateway image tag:
 
 ```yaml
 image:
-  repository: ghcr.io/your-org/z-courier-gateway
+  repository: ghcr.io/qiuyier/z-courier-gateway
   tag: v0.6.0
 ```
 

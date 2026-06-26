@@ -7,6 +7,20 @@ semantic versioning after the first public MVP tag.
 
 ## [Unreleased]
 
+### Added
+
+- GitHub Actions Docker image release workflow for publishing the gateway image
+  to GHCR on GitHub Release events or manual tag backfills.
+- V7 Docker image release plan covering GHCR tags, stable `latest` behavior,
+  manual backfill, Helm defaults, and verification.
+
+### Changed
+
+- Helm chart version bumped to `0.2.0` because the default gateway image
+  repository now points at the official GHCR package.
+- Helm default and production example image repository now use
+  `ghcr.io/qiuyier/z-courier-gateway`.
+
 ## [v0.6.0] - 2026-06-26
 
 ### Added

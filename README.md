@@ -65,6 +65,9 @@ V6 Kubernetes and Helm work is tracked in
 rules are in [docs/v6-helm-versioning.md](docs/v6-helm-versioning.md), and the
 `v0.6.0` release guide is in [docs/v6-release.md](docs/v6-release.md).
 
+V7 Docker image publishing is tracked in
+[docs/v7-docker-image-release.md](docs/v7-docker-image-release.md).
+
 ## Quick Start
 
 Run the single-node integration verifier from the repository root:
@@ -228,12 +231,16 @@ See [docs/v5-roadmap.md](docs/v5-roadmap.md),
 [docs/v5-production-runbook.md](docs/v5-production-runbook.md), and
 [docs/v5-release.md](docs/v5-release.md).
 
-V6 is being prepared for `v0.6.0`. It adds the first Kubernetes Helm chart,
-kind smoke and E2E validation, Helm release assets, GHCR OCI chart publishing,
-and chart versioning guidance. See
+V6 was published as `v0.6.0`. It adds the first Kubernetes Helm chart, kind
+smoke and E2E validation, Helm release assets, GHCR OCI chart publishing, and
+chart versioning guidance. See
 [docs/v6-kubernetes-helm.md](docs/v6-kubernetes-helm.md),
 [docs/v6-helm-versioning.md](docs/v6-helm-versioning.md), and
 [docs/v6-release.md](docs/v6-release.md).
+
+V7 is being prepared for `v0.7.0`. It focuses on publishing the gateway image
+itself to GHCR, then wiring that official image into the Helm production path.
+See [docs/v7-docker-image-release.md](docs/v7-docker-image-release.md).
 
 ## Development
 
