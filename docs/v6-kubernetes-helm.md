@@ -179,6 +179,9 @@ The OCI chart version is the Helm chart version from `Chart.yaml`, not the Git
 tag. Before publishing a changed chart, bump `deploy/helm/z-courier/Chart.yaml`
 `version` so Helm clients can request the new package version.
 
+Versioning rules, the chart/app compatibility matrix, and release checklist are
+maintained in [v6-helm-versioning.md](v6-helm-versioning.md).
+
 ## Future Work
 
 Good next increments:
@@ -187,5 +190,3 @@ Good next increments:
   model is stable across real deployments.
 - Add TLS termination examples for public TCP traffic.
 - Add mTLS or service-mesh examples for internal HTTP and peer push.
-- Add a values compatibility matrix for chart version, gateway image version,
-  and protocol version.

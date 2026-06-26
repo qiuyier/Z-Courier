@@ -76,7 +76,9 @@ helm upgrade --install z-courier oci://ghcr.io/qiuyier/charts/z-courier \
 ```
 
 The OCI chart version is the Helm `Chart.yaml` `version`, not the Git release
-tag. Bump the chart version whenever the published chart changes.
+tag. Bump the chart version whenever the published chart changes. See
+[../../../docs/v6-helm-versioning.md](../../../docs/v6-helm-versioning.md) for the
+chart/app compatibility matrix and release checklist.
 
 ## Services
 

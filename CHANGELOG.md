@@ -37,6 +37,8 @@ semantic versioning after the first public MVP tag.
 - Helm chart static-token auth rendering for self-contained Kubernetes E2E
   validation.
 - HMAC internal HTTP support in the E2E verifier.
+- Helm chart versioning guide covering chart/app version policy, compatibility
+  matrix, OCI install semantics, and release checklist.
 - V6 Kubernetes and Helm planning document for the `v0.6.0` milestone.
 
 ## [v0.5.0] - 2026-06-25
