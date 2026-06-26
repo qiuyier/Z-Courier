@@ -17,6 +17,8 @@ The first `v0.7.0` image release milestone includes:
 - Multi-architecture image manifests for `linux/amd64` and `linux/arm64`.
 - Manual `workflow_dispatch` support for publishing an existing tag.
 - Container smoke checks before pushing the image.
+- Post-push manifest inspection that fails the workflow unless both target
+  platforms are present.
 - Optional `latest` publishing for stable releases only.
 - Helm default image repository set to the official GHCR gateway image.
 - Helm chart version bump for the repository default change.
@@ -78,6 +80,10 @@ docker run --rm --entrypoint /bin/sh ghcr.io/qiuyier/z-courier-gateway:v0.6.0 -c
 
 If the package appears private on its first publish, make the package public in
 GitHub Packages before documenting it as a public install path.
+
+The workflow also runs `docker buildx imagetools inspect` after pushing and
+writes the manifest details into the GitHub Actions summary. It fails if
+`linux/amd64` or `linux/arm64` is missing.
 
 ## Helm Defaults
 

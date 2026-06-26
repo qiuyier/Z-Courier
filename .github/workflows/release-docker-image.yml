@@ -102,10 +102,21 @@ jobs:
             --push \
             .
 
+          manifest_report="$(docker buildx imagetools inspect "${image}:${RELEASE_TAG}")"
+          printf '%s\n' "$manifest_report"
+          printf '%s\n' "$manifest_report" | grep -q 'Platform:[[:space:]]*linux/amd64'
+          printf '%s\n' "$manifest_report" | grep -q 'Platform:[[:space:]]*linux/arm64'
+
           {
             echo "## Docker Image"
             echo ""
             echo "- Image: \`${image}:${RELEASE_TAG}\`"
             echo "- Platforms: \`linux/amd64,linux/arm64\`"
             echo "- Latest pushed: \`${push_latest}\`"
+            echo ""
+            echo "### Manifest"
+            echo ""
+            echo '```text'
+            printf '%s\n' "$manifest_report"
+            echo '```'
           } >> "$GITHUB_STEP_SUMMARY"

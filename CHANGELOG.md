@@ -10,7 +10,8 @@ semantic versioning after the first public MVP tag.
 ### Added
 
 - GitHub Actions Docker image release workflow for publishing the gateway image
-  to GHCR on GitHub Release events or manual tag backfills.
+  to GHCR on GitHub Release events or manual tag backfills, including post-push
+  manifest platform verification.
 - V7 Docker image release plan covering GHCR tags, stable `latest` behavior,
   multi-architecture image publishing, manual backfill, Helm defaults, and
   verification.
