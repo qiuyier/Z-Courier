@@ -53,13 +53,17 @@ runnable clients under [examples/go-client](examples/go-client/main.go) and
 [sdk/php/examples](sdk/php/examples/client.php). The `v0.4.0` release scope and
 checklist are in [docs/v4-release.md](docs/v4-release.md).
 
-V5 planning is tracked in [docs/v5-roadmap.md](docs/v5-roadmap.md). It focuses
-on deployment artifacts, operations/admin APIs, additional SDKs, security
-deployment patterns, and performance baseline governance. Operator CLI and
-admin API notes are in [docs/v5-admin-ops.md](docs/v5-admin-ops.md).
-Production troubleshooting and operations flows are collected in
+V5 deployment and operations work is tracked in
+[docs/v5-roadmap.md](docs/v5-roadmap.md). Operator CLI and admin API notes are
+in [docs/v5-admin-ops.md](docs/v5-admin-ops.md). Production troubleshooting and
+operations flows are collected in
 [docs/v5-production-runbook.md](docs/v5-production-runbook.md). The `v0.5.0`
 release scope and checklist are in [docs/v5-release.md](docs/v5-release.md).
+
+V6 Kubernetes and Helm work is tracked in
+[docs/v6-kubernetes-helm.md](docs/v6-kubernetes-helm.md). Helm chart versioning
+rules are in [docs/v6-helm-versioning.md](docs/v6-helm-versioning.md), and the
+`v0.6.0` release guide is in [docs/v6-release.md](docs/v6-release.md).
 
 ## Quick Start
 
@@ -154,7 +158,9 @@ The two-node production cluster reference is documented in
 
 The first Kubernetes Helm chart is in
 [deploy/helm/z-courier](deploy/helm/z-courier), with the `v0.6.0` deployment
-plan in [docs/v6-kubernetes-helm.md](docs/v6-kubernetes-helm.md).
+plan in [docs/v6-kubernetes-helm.md](docs/v6-kubernetes-helm.md), chart
+versioning in [docs/v6-helm-versioning.md](docs/v6-helm-versioning.md), and the
+release checklist in [docs/v6-release.md](docs/v6-release.md).
 
 The production runbook for health checks, admin inspection, failed-message
 repair, cluster routing, dependency failures, HMAC failures, and Prometheus
@@ -215,9 +221,19 @@ and runnable migration examples. See [docs/v4-client-sdk.md](docs/v4-client-sdk.
 [docs/v4-sdk-migration.md](docs/v4-sdk-migration.md), and
 [docs/v4-release.md](docs/v4-release.md).
 
-V5 is being prepared for `v0.5.0`. The roadmap is
-[docs/v5-roadmap.md](docs/v5-roadmap.md), and the current release guide is
+V5 was published as `v0.5.0`. It added production-oriented Docker deployment
+artifacts, single-node and two-node production Compose references, admin
+inspection and message repair APIs, audit logs, and the production runbook.
+See [docs/v5-roadmap.md](docs/v5-roadmap.md),
+[docs/v5-production-runbook.md](docs/v5-production-runbook.md), and
 [docs/v5-release.md](docs/v5-release.md).
+
+V6 is being prepared for `v0.6.0`. It adds the first Kubernetes Helm chart,
+kind smoke and E2E validation, Helm release assets, GHCR OCI chart publishing,
+and chart versioning guidance. See
+[docs/v6-kubernetes-helm.md](docs/v6-kubernetes-helm.md),
+[docs/v6-helm-versioning.md](docs/v6-helm-versioning.md), and
+[docs/v6-release.md](docs/v6-release.md).
 
 ## Development
 

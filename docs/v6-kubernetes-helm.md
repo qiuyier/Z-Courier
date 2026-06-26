@@ -182,6 +182,9 @@ tag. Before publishing a changed chart, bump `deploy/helm/z-courier/Chart.yaml`
 Versioning rules, the chart/app compatibility matrix, and release checklist are
 maintained in [v6-helm-versioning.md](v6-helm-versioning.md).
 
+The `v0.6.0` release scope, verification path, artifact checks, and tagging
+checklist are maintained in [v6-release.md](v6-release.md).
+
 ## Future Work
 
 Good next increments:

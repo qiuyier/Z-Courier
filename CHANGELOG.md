@@ -40,6 +40,9 @@ semantic versioning after the first public MVP tag.
 - Helm chart versioning guide covering chart/app version policy, compatibility
   matrix, OCI install semantics, and release checklist.
 - V6 Kubernetes and Helm planning document for the `v0.6.0` milestone.
+- V6 release guide covering Kubernetes/Helm scope, compatibility, production
+  secret checks, verification commands, release artifacts, GHCR OCI checks, and
+  tagging checklist.
 
 ## [v0.5.0] - 2026-06-25
 
