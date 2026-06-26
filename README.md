@@ -66,7 +66,8 @@ rules are in [docs/v6-helm-versioning.md](docs/v6-helm-versioning.md), and the
 `v0.6.0` release guide is in [docs/v6-release.md](docs/v6-release.md).
 
 V7 Docker image publishing is tracked in
-[docs/v7-docker-image-release.md](docs/v7-docker-image-release.md).
+[docs/v7-docker-image-release.md](docs/v7-docker-image-release.md), and the
+`v0.7.0` release guide is in [docs/v7-release.md](docs/v7-release.md).
 
 ## Quick Start
 
@@ -240,7 +241,8 @@ chart versioning guidance. See
 
 V7 is being prepared for `v0.7.0`. It focuses on publishing the gateway image
 itself to GHCR, then wiring that official image into the Helm production path.
-See [docs/v7-docker-image-release.md](docs/v7-docker-image-release.md).
+See [docs/v7-docker-image-release.md](docs/v7-docker-image-release.md) and
+[docs/v7-release.md](docs/v7-release.md).
 
 ## Development
 

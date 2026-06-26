@@ -15,6 +15,9 @@ semantic versioning after the first public MVP tag.
 - V7 Docker image release plan covering GHCR tags, stable `latest` behavior,
   multi-architecture image publishing, manual backfill, Helm defaults, and
   verification.
+- V7 release guide covering Docker image publishing scope, compatibility,
+  verification commands, release artifacts, GHCR image checks, Helm chart
+  checks, release notes, and tagging checklist.
 
 ### Changed
 

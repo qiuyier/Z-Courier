@@ -85,6 +85,9 @@ The workflow also runs `docker buildx imagetools inspect` after pushing and
 writes the manifest details into the GitHub Actions summary. It fails if
 `linux/amd64` or `linux/arm64` is missing.
 
+The `v0.7.0` release scope and tagging checklist are maintained in
+[v7-release.md](v7-release.md).
+
 ## Helm Defaults
 
 The chart default image repository is:
