@@ -69,6 +69,9 @@ V7 Docker image publishing is tracked in
 [docs/v7-docker-image-release.md](docs/v7-docker-image-release.md), and the
 `v0.7.0` release guide is in [docs/v7-release.md](docs/v7-release.md).
 
+V8 production operations governance is tracked in
+[docs/v8-roadmap.md](docs/v8-roadmap.md).
+
 ## Quick Start
 
 Run the single-node integration verifier from the repository root:

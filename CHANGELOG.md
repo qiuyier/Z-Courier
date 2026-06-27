@@ -7,6 +7,12 @@ semantic versioning after the first public MVP tag.
 
 ## [Unreleased]
 
+### Added
+
+- V8 roadmap covering production diagnostics, configuration validation, admin
+  diagnosis bundles, alerting, dashboards, resilience controls, and completion
+  criteria for the `v0.8.0` planning track.
+
 ## [v0.7.0] - 2026-06-26
 
 ### Added
