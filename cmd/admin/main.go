@@ -74,6 +74,8 @@ func main() {
 	switch {
 	case len(os.Args) > 1 && os.Args[1] == "overview":
 		os.Exit(runOverview(os.Args[2:]))
+	case len(os.Args) > 1 && os.Args[1] == "diagnostics":
+		os.Exit(runDiagnostics(os.Args[2:]))
 	case len(os.Args) > 1 && os.Args[1] == "routes":
 		os.Exit(runRoutes(os.Args[2:]))
 	case len(os.Args) > 1 && os.Args[1] == "route":
@@ -95,17 +97,18 @@ func main() {
 }
 
 func printUsage(out io.Writer) {
-	fmt.Fprintln(out, "Usage: admin <overview|routes|route|sessions|message|messages|requeue|discard> [flags]")
+	fmt.Fprintln(out, "Usage: admin <overview|diagnostics|routes|route|sessions|message|messages|requeue|discard> [flags]")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Commands:")
-	fmt.Fprintln(out, "  overview   Show gateway identity, readiness, cluster, sessions, and dependency summary")
-	fmt.Fprintln(out, "  routes     Show enabled upstream route ranges and sanitized target metadata")
-	fmt.Fprintln(out, "  route      Show where one client/device would be pushed")
-	fmt.Fprintln(out, "  sessions   Show local sessions, optionally filtered by client_id")
-	fmt.Fprintln(out, "  message    Show one stored downlink message by message_id")
-	fmt.Fprintln(out, "  messages   List stored downlink messages by delivery status")
-	fmt.Fprintln(out, "  requeue    Requeue one stored downlink message, requires -confirm")
-	fmt.Fprintln(out, "  discard    Discard one stored downlink message, requires -reason and -confirm")
+	fmt.Fprintln(out, "  overview     Show gateway identity, readiness, cluster, sessions, and dependency summary")
+	fmt.Fprintln(out, "  diagnostics  Show runtime diagnostics, capacity summary, dependency summary, and warnings")
+	fmt.Fprintln(out, "  routes       Show enabled upstream route ranges and sanitized target metadata")
+	fmt.Fprintln(out, "  route        Show where one client/device would be pushed")
+	fmt.Fprintln(out, "  sessions     Show local sessions, optionally filtered by client_id")
+	fmt.Fprintln(out, "  message      Show one stored downlink message by message_id")
+	fmt.Fprintln(out, "  messages     List stored downlink messages by delivery status")
+	fmt.Fprintln(out, "  requeue      Requeue one stored downlink message, requires -confirm")
+	fmt.Fprintln(out, "  discard      Discard one stored downlink message, requires -reason and -confirm")
 }
 
 func runOverview(args []string) int {
@@ -122,6 +125,25 @@ func runOverview(args []string) int {
 
 	if err := overview(config); err != nil {
 		fmt.Fprintf(os.Stderr, "overview failed: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+func runDiagnostics(args []string) int {
+	fs := flag.NewFlagSet("diagnostics", flag.ExitOnError)
+	config := defaultCommonConfig()
+	addCommonFlags(fs, &config)
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: admin diagnostics [flags]\n")
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+
+	if err := diagnostics(config); err != nil {
+		fmt.Fprintf(os.Stderr, "diagnostics failed: %v\n", err)
 		return 1
 	}
 	return 0
@@ -314,6 +336,10 @@ func addCommonFlags(fs *flag.FlagSet, config *commonConfig) {
 
 func overview(config commonConfig) error {
 	return requestAndPrint(config, "/internal/admin/overview")
+}
+
+func diagnostics(config commonConfig) error {
+	return requestAndPrint(config, "/internal/admin/diagnostics")
 }
 
 func routes(config commonConfig) error {

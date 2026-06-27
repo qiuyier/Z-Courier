@@ -220,14 +220,18 @@ gateway defaults to failed messages.
 
 ## CLI
 
-`cmd/admin` wraps the admin and debug APIs. Overview, route, session, message,
-and message-list commands are read-only. Message repair commands are guarded
-mutations and require explicit confirmation.
+`cmd/admin` wraps the admin and debug APIs. Overview, diagnostics, route,
+session, message, and message-list commands are read-only. Message repair
+commands are guarded mutations and require explicit confirmation.
 
 Token mode:
 
 ```bash
 go run ./cmd/admin overview \
+  -internal-url http://127.0.0.1:18182 \
+  -internal-token dev-internal-token
+
+go run ./cmd/admin diagnostics \
   -internal-url http://127.0.0.1:18182 \
   -internal-token dev-internal-token
 
@@ -303,6 +307,7 @@ message status, list, requeue, discard, route, and sessions endpoints.
 `cmd/admin` is the safer operator entrypoint. It supports:
 
 - overview
+- diagnostics
 - routes
 - route lookup
 - local session listing

@@ -38,6 +38,31 @@ func TestOverviewSendsAdminRequest(t *testing.T) {
 	}
 }
 
+func TestDiagnosticsSendsAdminRequest(t *testing.T) {
+	var gotReq *http.Request
+	stubAdminHTTPClient(t, http.StatusOK, `{"code":"ok","warnings":[]}`, &gotReq)
+
+	err := diagnostics(commonConfig{
+		InternalURL:   "http://gateway-a:18182/",
+		AuthMode:      authModeToken,
+		InternalToken: "secret",
+		Timeout:       time.Second,
+	})
+	if err != nil {
+		t.Fatalf("diagnostics() error = %v", err)
+	}
+
+	if gotReq == nil {
+		t.Fatal("request was not sent")
+	}
+	if gotReq.Method != http.MethodGet || gotReq.URL.String() != "http://gateway-a:18182/internal/admin/diagnostics" {
+		t.Fatalf("request = %s %s, want GET /internal/admin/diagnostics", gotReq.Method, gotReq.URL.String())
+	}
+	if gotReq.Header.Get(sdkbackend.InternalTokenHeader) != "secret" {
+		t.Fatalf("internal token = %q, want secret", gotReq.Header.Get(sdkbackend.InternalTokenHeader))
+	}
+}
+
 func TestRoutesSignsAdminRequestWithHMAC(t *testing.T) {
 	var gotReq *http.Request
 	stubAdminHTTPClient(t, http.StatusOK, `{"code":"ok"}`, &gotReq)
