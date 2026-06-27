@@ -82,6 +82,21 @@ route_msg_ids:
 connection to `client_id + device_id`, returns a gateway ACK, and is not
 forwarded upstream.
 
+## Static Validation
+
+Validate a gateway config without starting the TCP server or connecting to
+external dependencies:
+
+```bash
+go run ./cmd/gateway -config configs/z-courier.yaml -check-config
+```
+
+The check validates the YAML schema, duration fields, auth provider shape,
+internal HTTP auth settings, cluster and downlink storage structure, pipeline
+rate-limit settings, enabled upstream targets, upstream route overlaps, and
+reserved business MsgID conflicts. Warnings are printed for risky but still
+valid local patterns, such as memory-backed cluster routing.
+
 ## Auth
 
 ```yaml

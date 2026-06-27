@@ -39,6 +39,13 @@ jobs:
       - name: Test Go
         run: go test ./...
 
+      - name: Validate gateway configs
+        run: |
+          go run ./cmd/gateway -config configs/z-courier.yaml -check-config
+          go run ./cmd/gateway -config configs/z-courier.integration.yaml -check-config
+          go run ./cmd/gateway -config configs/z-courier.cluster-a.yaml -check-config
+          go run ./cmd/gateway -config configs/z-courier.cluster-b.yaml -check-config
+
       - name: Test PHP SDK
         run: php -d error_reporting=E_ALL sdk/php/tests/run.php
 

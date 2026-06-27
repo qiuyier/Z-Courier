@@ -14,6 +14,7 @@ import (
 
 func main() {
 	configPathFlag := flag.String("config", "", "path to z-courier config file")
+	checkConfigFlag := flag.Bool("check-config", false, "validate z-courier config and exit without starting the gateway")
 	flag.Parse()
 
 	logger, err := zap.NewProduction()
@@ -25,9 +26,25 @@ func main() {
 	}()
 
 	configPath := appconfig.ResolvePath(*configPathFlag)
-	config, err := appconfig.LoadServerConfig(configPath)
+	fileConfig, err := appconfig.Load(configPath)
 	if err != nil {
 		logger.Fatal("failed to load z-courier config", zap.String("path", configPath), zap.Error(err))
+	}
+	if *checkConfigFlag {
+		report, err := fileConfig.Validate()
+		if err != nil {
+			logger.Fatal("z-courier config validation failed", zap.String("path", configPath), zap.Error(err))
+		}
+		for _, warning := range report.Warnings {
+			logger.Warn("z-courier config validation warning", zap.String("path", configPath), zap.String("warning", warning))
+		}
+		logger.Info("z-courier config validation passed", zap.String("path", configPath), zap.Int("warnings", len(report.Warnings)))
+		return
+	}
+
+	config, err := fileConfig.ToServerConfig()
+	if err != nil {
+		logger.Fatal("failed to build z-courier config", zap.String("path", configPath), zap.Error(err))
 	}
 
 	gateway, err := server.New(config, logger)

@@ -913,6 +913,95 @@ upstream:
 	}
 }
 
+func TestValidateFileRejectsOverlappingUpstreamRoutes(t *testing.T) {
+	path := writeConfig(t, `
+upstream:
+  routes:
+    - name: first
+      msg_id_min: 1001
+      msg_id_max: 1999
+      target:
+        type: http
+        url: http://backend-a.local
+    - name: second
+      msg_id_min: 1500
+      msg_id_max: 2500
+      target:
+        type: http
+        url: http://backend-b.local
+`)
+
+	_, err := ValidateFile(path)
+	if err == nil {
+		t.Fatal("ValidateFile() error = nil, want overlap error")
+	}
+	if !strings.Contains(err.Error(), "overlaps") {
+		t.Fatalf("ValidateFile() error = %q, want overlap message", err)
+	}
+}
+
+func TestLoadServerConfigRejectsReservedUpstreamMsgID(t *testing.T) {
+	path := writeConfig(t, `
+upstream:
+  routes:
+    - name: bind-conflict
+      msg_id_min: 999
+      msg_id_max: 1001
+      target:
+        type: http
+        url: http://backend.local
+`)
+
+	_, err := LoadServerConfig(path)
+	if err == nil {
+		t.Fatal("LoadServerConfig() error = nil, want reserved MsgID error")
+	}
+	if !strings.Contains(err.Error(), "reserved msg_id 1000") {
+		t.Fatalf("LoadServerConfig() error = %q, want reserved MsgID message", err)
+	}
+}
+
+func TestValidateFileWarnsForMemoryClusterRegistry(t *testing.T) {
+	path := writeConfig(t, `
+cluster:
+  enabled: true
+  internal_addr: http://127.0.0.1:18080
+  registry:
+    type: memory
+downlink:
+  storage:
+    type: memory
+`)
+
+	report, err := ValidateFile(path)
+	if err != nil {
+		t.Fatalf("ValidateFile() error = %v", err)
+	}
+	if len(report.Warnings) != 2 {
+		t.Fatalf("warnings = %v, want 2 warnings", report.Warnings)
+	}
+	if !strings.Contains(strings.Join(report.Warnings, "\n"), "memory") {
+		t.Fatalf("warnings = %v, want memory warnings", report.Warnings)
+	}
+}
+
+func TestValidateFileDoesNotFetchJWKS(t *testing.T) {
+	path := writeConfig(t, `
+auth:
+  type: jwt
+  jwt:
+    issuer: https://issuer.local
+    audience: z-courier
+    jwks_url: http://127.0.0.1:1/.well-known/jwks.json
+    algorithms:
+      - RS256
+`)
+
+	if _, err := ValidateFile(path); err != nil {
+		t.Fatalf("ValidateFile() error = %v", err)
+	}
+}
+
 func TestLoadServerConfigNSQRequiresTopic(t *testing.T) {
 	path := writeConfig(t, `
 upstream:

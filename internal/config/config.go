@@ -331,6 +331,10 @@ func validEnvPlaceholderName(name string) bool {
 }
 
 func (c *File) ToServerConfig() (server.Config, error) {
+	if _, err := c.Validate(); err != nil {
+		return server.Config{}, err
+	}
+
 	out := server.DefaultConfig()
 
 	if c.GatewayNode != "" {
