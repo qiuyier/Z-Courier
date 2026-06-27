@@ -32,6 +32,7 @@ type Gateway struct {
 	sessions *session.Manager
 	logger   *zap.Logger
 	health   *gatewayHealth
+	runtime  *gatewayRuntime
 	started  atomic.Bool
 
 	clusterRegistry          cluster.OnlineRegistry
@@ -95,7 +96,8 @@ func New(config Config, logger *zap.Logger) (*Gateway, error) {
 		return nil, err
 	}
 	health := &gatewayHealth{}
-	internalHTTP, err := newInternalHTTPServer(config, logger, downlinkService, health, clusterRegistry)
+	runtime := newGatewayRuntime()
+	internalHTTP, err := newInternalHTTPServer(config, logger, downlinkService, health, clusterRegistry, runtime)
 	if err != nil {
 		closeWithLog(downlinkCloser, logger, "downlink store")
 		if upstream != nil {
@@ -113,6 +115,7 @@ func New(config Config, logger *zap.Logger) (*Gateway, error) {
 		sessions:               config.Sessions,
 		logger:                 logger,
 		health:                 health,
+		runtime:                runtime,
 		clusterRegistry:        clusterRegistry,
 		clusterRegistryCloser:  clusterRegistryCloser,
 		authVerifierCloser:     authVerifierCloser,
@@ -187,6 +190,7 @@ func (g *Gateway) Start() {
 		return
 	}
 
+	g.runtime.MarkStarted(time.Now())
 	g.startInternalHTTP()
 	g.startDownlinkRetryWorker()
 	g.startDownlinkCleanupWorker()

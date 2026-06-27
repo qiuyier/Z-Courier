@@ -85,6 +85,58 @@ The dependency list is intentionally conservative. It reports whether a
 dependency is configured and attached to the gateway process; it is not a
 replacement for active PostgreSQL, Redis, or NSQ health probes.
 
+### `GET /internal/admin/diagnostics`
+
+Returns a runtime diagnosis snapshot for one gateway process. This endpoint is
+read-only and does not actively connect to PostgreSQL, Redis, NSQ, JWKS, or
+business backends; it reports the state and configuration already known by the
+process.
+
+Example:
+
+```json
+{
+  "code": "ok",
+  "gateway_node": "gateway-a",
+  "runtime": {
+    "started": true,
+    "started_at": "2026-06-27T12:00:00Z",
+    "uptime": "10m0s"
+  },
+  "readiness": {
+    "ready": true,
+    "status": "ready"
+  },
+  "sessions": {
+    "online": 2,
+    "unique_clients": 1
+  },
+  "auth": {
+    "provider": "http",
+    "verifier_loaded": true
+  },
+  "upstream": {
+    "routes": 2,
+    "http_routes": 1,
+    "nsq_routes": 1,
+    "routes_with_capacity_limit": 2
+  },
+  "capacity": {
+    "internal_http_max_in_flight": 2000,
+    "upstream_limited_routes": 2,
+    "rate_limit_enabled": true,
+    "rate_limit_max_requests": 1000,
+    "rate_limit_window": "1s"
+  },
+  "warnings": []
+}
+```
+
+Diagnostics intentionally omit secrets. Internal tokens, HMAC secrets, upstream
+tokens, NSQ auth secrets, PostgreSQL DSNs, Redis passwords, URL user-info,
+queries, fragments, and message bodies must not be exposed through this
+endpoint.
+
 ### `GET /internal/admin/routes`
 
 Returns enabled upstream route ranges and sanitized target metadata.

@@ -13,7 +13,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func newInternalHTTPServer(config Config, logger *zap.Logger, service *downlink.Service, health *gatewayHealth, registry cluster.OnlineRegistry) (*http.Server, error) {
+func newInternalHTTPServer(config Config, logger *zap.Logger, service *downlink.Service, health *gatewayHealth, registry cluster.OnlineRegistry, runtime *gatewayRuntime) (*http.Server, error) {
 	if config.DisableInternalHTTP || config.InternalHTTPAddr == "" || service == nil {
 		return nil, nil
 	}
@@ -77,6 +77,7 @@ func newInternalHTTPServer(config Config, logger *zap.Logger, service *downlink.
 	}))
 	mux.Handle("/internal/admin/overview", newAdminOverviewHandler(handlerConfig, health, registry))
 	mux.Handle("/internal/admin/routes", newAdminRoutesHandler(handlerConfig))
+	mux.Handle("/internal/admin/diagnostics", newAdminDiagnosticsHandler(handlerConfig, health, registry, runtime, service.HasStore()))
 	mux.Handle("/internal/debug/route", newDebugRouteHandler(handlerConfig, registry))
 	mux.Handle("/internal/debug/sessions", newDebugSessionsHandler(handlerConfig))
 	if config.Cluster.Enabled {

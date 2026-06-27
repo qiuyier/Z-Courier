@@ -1,12 +1,15 @@
 package server
 
 import (
+	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/bytedance/sonic"
+	"github.com/qiuyier/Z-Courier/internal/auth"
 	"github.com/qiuyier/Z-Courier/internal/cluster"
 	"github.com/qiuyier/Z-Courier/internal/downlink"
 )
@@ -75,6 +78,54 @@ type adminUpstreamSummary struct {
 	Routes int `json:"routes"`
 }
 
+type adminDiagnosticsResponse struct {
+	Code         string                   `json:"code"`
+	GatewayNode  string                   `json:"gateway_node"`
+	Runtime      adminRuntimeDiagnostics  `json:"runtime"`
+	Readiness    adminReadiness           `json:"readiness"`
+	Sessions     adminSessionSummary      `json:"sessions"`
+	Auth         adminAuthDiagnostics     `json:"auth"`
+	InternalHTTP adminInternalHTTPSummary `json:"internal_http"`
+	Cluster      adminClusterSummary      `json:"cluster"`
+	Downlink     adminDownlinkSummary     `json:"downlink"`
+	Upstream     adminUpstreamDiagnostics `json:"upstream"`
+	Capacity     adminCapacityDiagnostics `json:"capacity"`
+	Dependencies []adminDependency        `json:"dependencies"`
+	Warnings     []adminDiagnosticWarning `json:"warnings,omitempty"`
+}
+
+type adminRuntimeDiagnostics struct {
+	Started   bool      `json:"started"`
+	StartedAt time.Time `json:"started_at,omitempty"`
+	Uptime    string    `json:"uptime,omitempty"`
+}
+
+type adminAuthDiagnostics struct {
+	Provider       string `json:"provider"`
+	CacheWrapped   bool   `json:"cache_wrapped,omitempty"`
+	VerifierLoaded bool   `json:"verifier_loaded"`
+}
+
+type adminUpstreamDiagnostics struct {
+	Routes             int `json:"routes"`
+	HTTPRoutes         int `json:"http_routes"`
+	NSQRoutes          int `json:"nsq_routes"`
+	RoutesWithCapacity int `json:"routes_with_capacity_limit"`
+}
+
+type adminCapacityDiagnostics struct {
+	InternalHTTPMaxInFlight int    `json:"internal_http_max_in_flight,omitempty"`
+	UpstreamLimitedRoutes   int    `json:"upstream_limited_routes,omitempty"`
+	RateLimitEnabled        bool   `json:"rate_limit_enabled"`
+	RateLimitMaxRequests    int    `json:"rate_limit_max_requests,omitempty"`
+	RateLimitWindow         string `json:"rate_limit_window,omitempty"`
+}
+
+type adminDiagnosticWarning struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
 type adminDependency struct {
 	Name   string `json:"name"`
 	Status string `json:"status"`
@@ -119,6 +170,18 @@ func newAdminOverviewHandler(config Config, health *gatewayHealth, registry clus
 
 func newAdminRoutesHandler(config Config) http.Handler {
 	return &adminRoutesHandler{config: adminConfig(config, nil, nil)}
+}
+
+func newAdminDiagnosticsHandler(config Config, health *gatewayHealth, registry cluster.OnlineRegistry, runtime *gatewayRuntime, downlinkHasStore bool) http.Handler {
+	handlerConfig := adminConfig(config, health, registry)
+	if runtime == nil {
+		runtime = newGatewayRuntime()
+	}
+	return &adminDiagnosticsHandler{
+		config:           handlerConfig,
+		runtime:          runtime,
+		downlinkHasStore: downlinkHasStore,
+	}
 }
 
 func adminConfig(config Config, health *gatewayHealth, registry cluster.OnlineRegistry) adminHandlerConfig {
@@ -176,6 +239,12 @@ type adminRoutesHandler struct {
 	config adminHandlerConfig
 }
 
+type adminDiagnosticsHandler struct {
+	config           adminHandlerConfig
+	runtime          *gatewayRuntime
+	downlinkHasStore bool
+}
+
 func (h *adminRoutesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeAdminJSON(w, http.StatusMethodNotAllowed, adminRoutesResponse{Code: "method_not_allowed", GatewayNode: h.config.gatewayNode})
@@ -198,8 +267,72 @@ func (h *adminRoutesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (h *adminDiagnosticsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeAdminJSON(w, http.StatusMethodNotAllowed, adminDiagnosticsResponse{Code: "method_not_allowed", GatewayNode: h.config.gatewayNode})
+		return
+	}
+	if !h.config.authorized(r) {
+		writeAdminJSON(w, http.StatusUnauthorized, adminDiagnosticsResponse{Code: "unauthorized", GatewayNode: h.config.gatewayNode})
+		return
+	}
+
+	config := h.config.config
+	now := time.Now()
+	resp := adminDiagnosticsResponse{
+		Code:         "ok",
+		GatewayNode:  h.config.gatewayNode,
+		Runtime:      adminRuntimeFromRuntime(h.runtime, now),
+		Readiness:    adminReadinessFromHealth(h.config.health),
+		Sessions:     adminSessionsFromConfig(config),
+		Auth:         adminAuthFromConfig(config),
+		InternalHTTP: adminInternalHTTPFromConfig(config),
+		Cluster:      adminClusterFromConfig(config),
+		Downlink:     adminDownlinkFromConfig(config),
+		Upstream:     adminUpstreamDiagnosticsFromConfig(config),
+		Capacity:     adminCapacityFromConfig(config),
+		Dependencies: adminDiagnosticDependencies(config, h.config.registry, h.config.clusterEnabled, h.downlinkHasStore),
+		Warnings:     adminDiagnosticWarnings(config, h.config.registry, h.downlinkHasStore),
+	}
+	writeAdminJSON(w, http.StatusOK, resp)
+}
+
 func (c adminHandlerConfig) authorized(r *http.Request) bool {
 	return c.internalToken == "" || r.Header.Get(downlink.InternalTokenHeader) == c.internalToken
+}
+
+func adminRuntimeFromRuntime(runtime *gatewayRuntime, now time.Time) adminRuntimeDiagnostics {
+	startedAt, started := runtime.StartedAt()
+	out := adminRuntimeDiagnostics{Started: started}
+	if started {
+		out.StartedAt = startedAt.UTC()
+		out.Uptime = durationString(runtime.Uptime(now))
+	}
+	return out
+}
+
+func adminReadinessFromHealth(health *gatewayHealth) adminReadiness {
+	readiness := adminReadiness{Ready: health.Ready(), Status: "ready"}
+	if !readiness.Ready {
+		readiness.Status = "draining"
+	}
+	return readiness
+}
+
+func adminSessionsFromConfig(config Config) adminSessionSummary {
+	sessions := adminSessionSummary{}
+	if config.Sessions != nil {
+		sessions.Online = config.Sessions.Len()
+		sessions.UniqueClients = config.Sessions.UniqueClientLen()
+	}
+	return sessions
+}
+
+func adminAuthFromConfig(config Config) adminAuthDiagnostics {
+	return adminAuthDiagnostics{
+		Provider:       auth.ProviderName(config.Verifier),
+		VerifierLoaded: config.Verifier != nil,
+	}
 }
 
 func adminClusterFromConfig(config Config) adminClusterSummary {
@@ -256,6 +389,105 @@ func adminDependencies(config Config, registry cluster.OnlineRegistry, clusterEn
 		}
 	}
 	return append(dependencies, clusterStatus)
+}
+
+func adminDiagnosticDependencies(config Config, registry cluster.OnlineRegistry, clusterEnabled bool, downlinkHasStore bool) []adminDependency {
+	dependencies := []adminDependency{
+		{Name: "auth_verifier", Status: "configured", Reason: auth.ProviderName(config.Verifier)},
+		{Name: "downlink_store", Status: "configured", Reason: config.DownlinkStorage.Type},
+		{Name: "cluster_registry", Status: "disabled"},
+		{Name: "http_upstream", Status: "not_configured"},
+		{Name: "nsq_upstream", Status: "not_configured"},
+	}
+	if config.Verifier == nil {
+		dependencies[0].Status = "not_configured"
+		dependencies[0].Reason = "auth verifier is nil"
+	}
+	if !downlinkHasStore {
+		dependencies[1].Status = "not_configured"
+		dependencies[1].Reason = "downlink storage is disabled"
+	}
+	if config.Cluster.Enabled {
+		dependencies[2].Status = "configured"
+		dependencies[2].Reason = config.Cluster.Registry.Type
+		if !clusterEnabled || registry == nil {
+			dependencies[2].Status = "not_configured"
+			dependencies[2].Reason = "cluster is enabled but no registry is attached"
+		}
+	}
+	upstream := adminUpstreamDiagnosticsFromConfig(config)
+	if upstream.HTTPRoutes > 0 {
+		dependencies[3].Status = "configured"
+		dependencies[3].Reason = "configured routes: " + intString(upstream.HTTPRoutes)
+	}
+	if upstream.NSQRoutes > 0 {
+		dependencies[4].Status = "configured"
+		dependencies[4].Reason = "configured routes: " + intString(upstream.NSQRoutes)
+	}
+	return dependencies
+}
+
+func adminUpstreamDiagnosticsFromConfig(config Config) adminUpstreamDiagnostics {
+	out := adminUpstreamDiagnostics{Routes: len(config.UpstreamRoutes)}
+	for _, route := range config.UpstreamRoutes {
+		switch {
+		case route.HTTP != nil:
+			out.HTTPRoutes++
+		case route.NSQ != nil:
+			out.NSQRoutes++
+		}
+		if route.MaxInFlight > 0 {
+			out.RoutesWithCapacity++
+		}
+	}
+	return out
+}
+
+func adminCapacityFromConfig(config Config) adminCapacityDiagnostics {
+	return adminCapacityDiagnostics{
+		InternalHTTPMaxInFlight: config.InternalPushMaxInFlight,
+		UpstreamLimitedRoutes:   adminUpstreamDiagnosticsFromConfig(config).RoutesWithCapacity,
+		RateLimitEnabled:        config.Pipeline.RateLimit.Enabled,
+		RateLimitMaxRequests:    config.Pipeline.RateLimit.MaxRequests,
+		RateLimitWindow:         durationString(config.Pipeline.RateLimit.Window),
+	}
+}
+
+func adminDiagnosticWarnings(config Config, registry cluster.OnlineRegistry, downlinkHasStore bool) []adminDiagnosticWarning {
+	warnings := make([]adminDiagnosticWarning, 0)
+	if auth.ProviderName(config.Verifier) == auth.ProviderStatic {
+		warnings = append(warnings, adminDiagnosticWarning{
+			Code:    "static_auth_provider",
+			Message: "static auth provider is suitable for development; production should use HTTP or JWT/JWKS auth",
+		})
+	}
+	if config.Cluster.Enabled {
+		if registry == nil {
+			warnings = append(warnings, adminDiagnosticWarning{
+				Code:    "cluster_registry_not_attached",
+				Message: "cluster is enabled but this process has no online route registry attached",
+			})
+		}
+		if config.Cluster.Registry.Type != "redis" {
+			warnings = append(warnings, adminDiagnosticWarning{
+				Code:    "non_redis_cluster_registry",
+				Message: "multi-node deployments should use the redis cluster registry",
+			})
+		}
+	}
+	if !downlinkHasStore || config.DownlinkStorage.Type == "memory" {
+		warnings = append(warnings, adminDiagnosticWarning{
+			Code:    "non_durable_downlink_store",
+			Message: "downlink storage is not durable across gateway restarts",
+		})
+	}
+	if adminInternalHTTPFromConfig(config).AuthMode == InternalHTTPAuthModeToken && adminBindsWildcard(config.InternalHTTPAddr) {
+		warnings = append(warnings, adminDiagnosticWarning{
+			Code:    "token_auth_on_wildcard_internal_http",
+			Message: "internal HTTP listens on all interfaces with token auth; prefer HMAC or a private network boundary",
+		})
+	}
+	return warnings
 }
 
 func adminRouteFromConfig(route UpstreamRouteConfig) adminRoute {
@@ -320,6 +552,18 @@ func durationString(duration time.Duration) string {
 		return ""
 	}
 	return duration.String()
+}
+
+func intString(value int) string {
+	return strconv.Itoa(value)
+}
+
+func adminBindsWildcard(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return strings.HasPrefix(addr, "0.0.0.0:") || strings.HasPrefix(addr, "[::]:") || strings.HasPrefix(addr, ":")
+	}
+	return host == "" || host == "0.0.0.0" || host == "::" || host == "[::]"
 }
 
 func writeAdminJSON(w http.ResponseWriter, status int, value any) {

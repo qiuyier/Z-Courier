@@ -72,7 +72,7 @@ func TestInternalHTTPRejectsUnknownProgrammaticAuthMode(t *testing.T) {
 		InternalHTTPAddr: "127.0.0.1:18080",
 		InternalHTTPAuth: InternalHTTPAuthConfig{Mode: "unknown"},
 	})
-	if _, err := newInternalHTTPServer(config, zap.NewNop(), service, &gatewayHealth{}, nil); err == nil {
+	if _, err := newInternalHTTPServer(config, zap.NewNop(), service, &gatewayHealth{}, nil, nil); err == nil {
 		t.Fatal("newInternalHTTPServer() error = nil, want unsupported auth mode error")
 	}
 }
@@ -88,7 +88,7 @@ func TestInternalHTTPRejectsUnknownProgrammaticPeerAuthMode(t *testing.T) {
 			},
 		},
 	})
-	if _, err := newInternalHTTPServer(config, zap.NewNop(), service, &gatewayHealth{}, nil); err == nil {
+	if _, err := newInternalHTTPServer(config, zap.NewNop(), service, &gatewayHealth{}, nil, nil); err == nil {
 		t.Fatal("newInternalHTTPServer() error = nil, want unsupported peer auth mode error")
 	}
 }
@@ -216,6 +216,94 @@ func TestInternalHTTPAdminOverview(t *testing.T) {
 	}
 }
 
+func TestInternalHTTPAdminDiagnostics(t *testing.T) {
+	sessions := session.NewManager()
+	if _, err := sessions.Bind(session.BindInput{SessionID: "session-1", ConnID: 1, ClientID: "client-1", DeviceID: "device-1", GatewayNode: "gateway-a"}); err != nil {
+		t.Fatalf("Bind() error = %v", err)
+	}
+
+	registry := cluster.NewMemoryRegistry(cluster.MemoryRegistryConfig{TTL: time.Minute})
+	store := downlink.NewMemoryStore()
+	service := downlink.NewService(sessions, testConnectionFinder{}, downlink.WithStore(store))
+	config := normalizeConfig(Config{
+		Sessions:         sessions,
+		GatewayNode:      "gateway-a",
+		InternalHTTPAddr: "0.0.0.0:18080",
+		InternalToken:    "secret",
+		DownlinkStore:    store,
+		Cluster: ClusterConfig{
+			Enabled:      true,
+			InternalAddr: "http://gateway-a:18080",
+			Registry: ClusterRegistryConfig{
+				Type: "memory",
+				TTL:  time.Minute,
+			},
+		},
+		UpstreamRoutes: []UpstreamRouteConfig{
+			{
+				Name:        "http-route",
+				MsgIDMin:    1001,
+				MsgIDMax:    1999,
+				MaxInFlight: 10,
+				HTTP: &HTTPUpstreamConfig{
+					URL:   "http://user:password@backend:8080/gateway/upstream?token=secret#fragment",
+					Token: "upstream-token",
+				},
+			},
+			{
+				Name:     "nsq-route",
+				MsgIDMin: 2000,
+				MsgIDMax: 2999,
+				NSQ: &NSQUpstreamConfig{
+					Addresses:  []string{"nsqd:4150"},
+					Topic:      "message_events",
+					AuthSecret: "nsq-secret",
+				},
+			},
+		},
+	})
+
+	health := &gatewayHealth{}
+	server := mustInternalHTTPServer(t, config, service, health, registry)
+	req := httptest.NewRequest(http.MethodGet, "/internal/admin/diagnostics", nil)
+	req.Header.Set(downlink.InternalTokenHeader, "secret")
+	rec := httptest.NewRecorder()
+	server.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, secret := range []string{"upstream-token", "nsq-secret", "user:password", "token=secret"} {
+		if strings.Contains(body, secret) {
+			t.Fatalf("diagnostics leaked secret %q in body %s", secret, body)
+		}
+	}
+
+	var resp adminDiagnosticsResponse
+	if err := sonic.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if resp.Code != "ok" || resp.GatewayNode != "gateway-a" || !resp.Runtime.Started || resp.Runtime.StartedAt.IsZero() || resp.Runtime.Uptime == "" {
+		t.Fatalf("runtime diagnostics = %+v, want started gateway-a", resp)
+	}
+	if !resp.Readiness.Ready || resp.Sessions.Online != 1 || resp.Sessions.UniqueClients != 1 {
+		t.Fatalf("readiness/sessions = %+v/%+v", resp.Readiness, resp.Sessions)
+	}
+	if resp.Auth.Provider == "" || !resp.Auth.VerifierLoaded {
+		t.Fatalf("auth diagnostics = %+v, want loaded provider", resp.Auth)
+	}
+	if resp.Upstream.Routes != 2 || resp.Upstream.HTTPRoutes != 1 || resp.Upstream.NSQRoutes != 1 || resp.Upstream.RoutesWithCapacity != 1 {
+		t.Fatalf("upstream diagnostics = %+v, want http/nsq/capacity counts", resp.Upstream)
+	}
+	if resp.Capacity.InternalHTTPMaxInFlight == 0 || resp.Capacity.UpstreamLimitedRoutes != 1 {
+		t.Fatalf("capacity diagnostics = %+v, want configured limits", resp.Capacity)
+	}
+	if len(resp.Dependencies) == 0 || len(resp.Warnings) == 0 {
+		t.Fatalf("dependencies/warnings = %+v/%+v, want non-empty", resp.Dependencies, resp.Warnings)
+	}
+}
+
 func TestInternalHTTPAdminRoutesRedactsSensitiveRouteConfig(t *testing.T) {
 	service := downlink.NewService(testSessionFinder{}, testConnectionFinder{})
 	config := normalizeConfig(Config{
@@ -291,7 +379,7 @@ func TestInternalHTTPAdminRequiresToken(t *testing.T) {
 	})
 
 	server := mustInternalHTTPServer(t, config, service, &gatewayHealth{}, nil)
-	for _, path := range []string{"/internal/admin/overview", "/internal/admin/routes"} {
+	for _, path := range []string{"/internal/admin/overview", "/internal/admin/routes", "/internal/admin/diagnostics"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		rec := httptest.NewRecorder()
 		server.Handler.ServeHTTP(rec, req)
@@ -708,7 +796,9 @@ func TestInternalHTTPDebugSessionsListsLocalSessions(t *testing.T) {
 
 func mustInternalHTTPServer(t *testing.T, config Config, service *downlink.Service, health *gatewayHealth, registry cluster.OnlineRegistry) *http.Server {
 	t.Helper()
-	server, err := newInternalHTTPServer(config, zap.NewNop(), service, health, registry)
+	runtime := newGatewayRuntime()
+	runtime.MarkStarted(time.Date(2026, 6, 27, 12, 0, 0, 0, time.UTC))
+	server, err := newInternalHTTPServer(config, zap.NewNop(), service, health, registry, runtime)
 	if err != nil {
 		t.Fatalf("newInternalHTTPServer() error = %v", err)
 	}
