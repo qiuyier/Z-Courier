@@ -9,6 +9,7 @@ import (
 	"github.com/qiuyier/Z-Courier/internal/capacity"
 	"github.com/qiuyier/Z-Courier/internal/metrics"
 	"github.com/qiuyier/Z-Courier/internal/protocol"
+	"github.com/qiuyier/Z-Courier/internal/resilience"
 	"github.com/qiuyier/Z-Courier/internal/router"
 )
 
@@ -112,7 +113,7 @@ func (f *capacityForwarder) Forward(ctx context.Context, packet *protocol.Packet
 		return &router.ForwardResult{
 			RouteName:  f.routeName,
 			TargetType: f.targetType,
-			Status:     "overloaded",
+			Status:     resilience.ReasonOverloaded,
 		}, router.ErrOverloaded
 	}
 

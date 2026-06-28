@@ -13,6 +13,7 @@ import (
 	"github.com/qiuyier/Z-Courier/internal/downlink"
 	"github.com/qiuyier/Z-Courier/internal/pipeline"
 	"github.com/qiuyier/Z-Courier/internal/protocol"
+	"github.com/qiuyier/Z-Courier/internal/resilience"
 	"github.com/qiuyier/Z-Courier/internal/router"
 	"github.com/qiuyier/Z-Courier/internal/session"
 	"go.uber.org/zap"
@@ -151,6 +152,56 @@ func TestIngressRouterHandlesBindWithoutForwarding(t *testing.T) {
 	}
 }
 
+func TestIngressRouterReturnsStableOverloadReason(t *testing.T) {
+	forwarder := &testForwarder{
+		result: &router.ForwardResult{RouteName: "chat", TargetType: "http", Status: resilience.ReasonOverloaded},
+		err:    router.ErrOverloaded,
+	}
+	upstream := router.NewEngine([]router.Route{{
+		Name:      "chat",
+		MsgIDMin:  1001,
+		MsgIDMax:  1001,
+		Forwarder: forwarder,
+	}})
+	chain := pipeline.NewChain(pipeline.HandlerFunc(func(ctx *pipeline.Context) error {
+		ctx.Session = &session.Session{
+			SessionID: "session-1",
+			ConnID:    ctx.ConnID(),
+			ClientID:  "client-1",
+			DeviceID:  "device-1",
+		}
+		return nil
+	}))
+	ingress := NewIngressRouter(zap.NewNop(), nil, chain, upstream, nil, 100)
+
+	packet := protocol.NewPacket(1001, []byte("hello"))
+	packet.ClientID = "client-1"
+	packet.DeviceID = "device-1"
+	packet.SessionID = "session-1"
+	packet.MessageID = "message-1"
+	encoded, err := protocol.Encode(packet)
+	if err != nil {
+		t.Fatalf("Encode packet error = %v", err)
+	}
+
+	conn := &testZinxConnection{connID: 7}
+	request := &testZinxRequest{
+		conn:  conn,
+		msgID: 1001,
+		data:  encoded,
+	}
+
+	ingress.Handle(request)
+
+	ack := decodeSentAck(t, conn)
+	if ack.Code != protocol.AckRejected {
+		t.Fatalf("Ack code = %s, want %s", ack.Code, protocol.AckRejected)
+	}
+	if ack.Reason != resilience.ReasonOverloaded {
+		t.Fatalf("Ack reason = %q, want %q", ack.Reason, resilience.ReasonOverloaded)
+	}
+}
+
 type testSessionFinder struct{}
 
 func (testSessionFinder) GetByClientDevice(string, string) (*session.Session, bool) {
@@ -165,11 +216,30 @@ func (testConnectionFinder) Get(uint64) (downlink.Connection, error) {
 
 type testForwarder struct {
 	packet *protocol.Packet
+	result *router.ForwardResult
+	err    error
 }
 
 func (f *testForwarder) Forward(_ context.Context, packet *protocol.Packet) (*router.ForwardResult, error) {
 	f.packet = packet
+	if f.result != nil || f.err != nil {
+		return f.result, f.err
+	}
 	return &router.ForwardResult{RouteName: "test", TargetType: "test", Status: "ok"}, nil
+}
+
+func decodeSentAck(t *testing.T, conn *testZinxConnection) protocol.Ack {
+	t.Helper()
+
+	ackPacket, err := protocol.Decode(conn.sentData)
+	if err != nil {
+		t.Fatalf("Decode sent ack packet error = %v", err)
+	}
+	ack, err := protocol.DecodeAck(ackPacket)
+	if err != nil {
+		t.Fatalf("DecodeAck() error = %v", err)
+	}
+	return ack
 }
 
 type testZinxRequest struct {

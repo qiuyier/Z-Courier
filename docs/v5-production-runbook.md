@@ -484,6 +484,8 @@ Symptoms:
 - requests return `429`
 - in-flight metrics stay high
 - client ingress is rejected during bursts
+- client ACKs have `code="rejected"` with `reason="rate_limited"` or
+  `reason="overloaded"`
 
 PromQL:
 

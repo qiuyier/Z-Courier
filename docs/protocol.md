@@ -123,8 +123,13 @@ Common codes:
 - `unauthorized`: token verification failed.
 - `auth_unavailable`: the authentication provider timed out or is temporarily
   unavailable; clients may retry with backoff.
-- `rate_limited`: the rate limiter rejected the packet.
 - `decode_failed`: the binary envelope could not be decoded.
+
+Common `reason` values when `code = "rejected"`:
+
+- `rate_limited`: the ingress rate limiter rejected the packet.
+- `overloaded`: an upstream route or internal gateway capacity limiter rejected
+  work; clients or backends may retry with backoff.
 
 ## Downlink Push
 

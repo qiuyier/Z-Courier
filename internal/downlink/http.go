@@ -8,6 +8,7 @@ import (
 	"github.com/bytedance/sonic"
 	"github.com/qiuyier/Z-Courier/internal/capacity"
 	"github.com/qiuyier/Z-Courier/internal/metrics"
+	"github.com/qiuyier/Z-Courier/internal/resilience"
 	"go.uber.org/zap"
 )
 
@@ -89,9 +90,9 @@ func (h *handler) acquireCapacity(w http.ResponseWriter, r *http.Request) bool {
 
 	path := r.URL.Path
 	if !h.config.PushLimiter.TryAcquire() {
-		metrics.RecordDownlinkPush(0, "overloaded")
+		metrics.RecordDownlinkPush(0, resilience.ReasonOverloaded)
 		metrics.RecordInternalHTTPOverloadRejected(path)
-		h.writeFailure(w, http.StatusTooManyRequests, "overloaded", "internal push capacity exceeded")
+		h.writeFailure(w, http.StatusTooManyRequests, resilience.ReasonOverloaded, "internal push capacity exceeded")
 		return false
 	}
 

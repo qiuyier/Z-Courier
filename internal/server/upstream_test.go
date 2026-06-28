@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/qiuyier/Z-Courier/internal/protocol"
+	"github.com/qiuyier/Z-Courier/internal/resilience"
 	"github.com/qiuyier/Z-Courier/internal/router"
 )
 
@@ -28,7 +29,7 @@ func TestCapacityForwarderRejectsWhenFull(t *testing.T) {
 	if !errors.Is(err, router.ErrOverloaded) {
 		t.Fatalf("Forward() error = %v, want %v", err, router.ErrOverloaded)
 	}
-	if result == nil || result.RouteName != "chat" || result.TargetType != "http" || result.Status != "overloaded" {
+	if result == nil || result.RouteName != "chat" || result.TargetType != "http" || result.Status != resilience.ReasonOverloaded {
 		t.Fatalf("result = %+v, want overloaded chat/http", result)
 	}
 

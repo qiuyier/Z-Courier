@@ -7,8 +7,9 @@ import (
 )
 
 type Error struct {
-	Code protocol.AckCode
-	Err  error
+	Code   protocol.AckCode
+	Reason string
+	Err    error
 }
 
 func Reject(code protocol.AckCode, err error) error {
@@ -17,6 +18,14 @@ func Reject(code protocol.AckCode, err error) error {
 	}
 
 	return &Error{Code: code, Err: err}
+}
+
+func RejectWithReason(code protocol.AckCode, reason string, err error) error {
+	if err == nil {
+		return nil
+	}
+
+	return &Error{Code: code, Reason: reason, Err: err}
 }
 
 func (e *Error) Error() string {
@@ -42,6 +51,9 @@ func AckError(err error) (protocol.AckCode, string) {
 
 	var pipelineErr *Error
 	if errors.As(err, &pipelineErr) {
+		if pipelineErr.Reason != "" {
+			return pipelineErr.Code, pipelineErr.Reason
+		}
 		return pipelineErr.Code, pipelineErr.Error()
 	}
 

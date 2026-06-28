@@ -6,6 +6,7 @@ import (
 
 	"github.com/qiuyier/Z-Courier/internal/auth"
 	"github.com/qiuyier/Z-Courier/internal/protocol"
+	"github.com/qiuyier/Z-Courier/internal/resilience"
 )
 
 func TestRateLimitHandlerRejectsAfterLimit(t *testing.T) {
@@ -26,9 +27,12 @@ func TestRateLimitHandlerRejectsAfterLimit(t *testing.T) {
 	}
 
 	err := handler.Handle(ctx)
-	code, _ := AckError(err)
+	code, reason := AckError(err)
 	if code != protocol.AckRejected {
 		t.Fatalf("Ack code = %s, want %s", code, protocol.AckRejected)
+	}
+	if reason != resilience.ReasonRateLimited {
+		t.Fatalf("Ack reason = %q, want %q", reason, resilience.ReasonRateLimited)
 	}
 }
 

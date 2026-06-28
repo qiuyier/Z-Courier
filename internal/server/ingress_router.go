@@ -12,6 +12,7 @@ import (
 	"github.com/qiuyier/Z-Courier/internal/metrics"
 	"github.com/qiuyier/Z-Courier/internal/pipeline"
 	"github.com/qiuyier/Z-Courier/internal/protocol"
+	"github.com/qiuyier/Z-Courier/internal/resilience"
 	"github.com/qiuyier/Z-Courier/internal/router"
 	"github.com/qiuyier/Z-Courier/internal/session"
 	"go.uber.org/zap"
@@ -249,7 +250,7 @@ func (r *IngressRouter) forwardUpstream(request ziface.IRequest, packet *protoco
 		return true
 	}
 	if err != nil {
-		metrics.RecordUpstreamForward(resultRouteName(result), resultTargetType(result), "failure", duration)
+		metrics.RecordUpstreamForward(resultRouteName(result), resultTargetType(result), upstreamForwardResult(err), duration)
 		metrics.RecordIngressPacket(packet.MsgID, "rejected")
 		metrics.RecordIngressRejected(packet.MsgID, protocol.AckRejected)
 		r.logger.Warn(
@@ -259,9 +260,10 @@ func (r *IngressRouter) forwardUpstream(request ziface.IRequest, packet *protoco
 			zap.String("device_id", packet.DeviceID),
 			zap.String("message_id", packet.MessageID),
 			zap.String("trace_id", packet.TraceID),
+			zap.String("upstream_result", upstreamForwardResult(err)),
 			zap.Error(err),
 		)
-		r.sendAck(request, packet, protocol.AckRejected, err.Error())
+		r.sendAck(request, packet, protocol.AckRejected, upstreamAckReason(err))
 		return false
 	}
 
@@ -295,6 +297,20 @@ func resultTargetType(result *router.ForwardResult) string {
 	}
 
 	return result.TargetType
+}
+
+func upstreamForwardResult(err error) string {
+	if errors.Is(err, router.ErrOverloaded) {
+		return resilience.ResultOverloaded
+	}
+	return resilience.ResultUpstreamFail
+}
+
+func upstreamAckReason(err error) string {
+	if errors.Is(err, router.ErrOverloaded) {
+		return resilience.ReasonOverloaded
+	}
+	return err.Error()
 }
 
 func (r *IngressRouter) stopReplacedConnection(currentConnID uint64, replaced *session.Session) {

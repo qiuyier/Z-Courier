@@ -7,6 +7,7 @@ import (
 
 	"github.com/qiuyier/Z-Courier/internal/metrics"
 	"github.com/qiuyier/Z-Courier/internal/protocol"
+	"github.com/qiuyier/Z-Courier/internal/resilience"
 )
 
 type RateLimitHandler struct {
@@ -59,7 +60,7 @@ func (h *RateLimitHandler) Handle(ctx *Context) error {
 		if ctx.Packet != nil {
 			metrics.RecordRateLimitRejected(ctx.Packet.MsgID)
 		}
-		return Reject(protocol.AckRejected, fmt.Errorf("rate limit exceeded for %s", key))
+		return RejectWithReason(protocol.AckRejected, resilience.ReasonRateLimited, fmt.Errorf("rate limit exceeded for %s", key))
 	}
 
 	return nil
