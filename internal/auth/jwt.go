@@ -199,6 +199,13 @@ func NewJWTVerifier(config JWTVerifierConfig) (*JWTVerifier, error) {
 
 func (*JWTVerifier) Provider() string { return ProviderJWT }
 
+func (v *JWTVerifier) Ping(ctx context.Context) error {
+	if v == nil || v.client == nil {
+		return ErrMisconfigured
+	}
+	return v.refresh(ctx)
+}
+
 func (v *JWTVerifier) Close() error {
 	if v == nil {
 		return nil

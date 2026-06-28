@@ -116,6 +116,36 @@ func (*HTTPVerifier) Provider() string {
 	return ProviderHTTP
 }
 
+func (v *HTTPVerifier) Ping(ctx context.Context) error {
+	if v == nil || v.client == nil {
+		return ErrMisconfigured
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, v.timeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(requestCtx, http.MethodHead, v.url, nil)
+	if err != nil {
+		return fmt.Errorf("%w: create verification health request", ErrMisconfigured)
+	}
+	if v.internalToken != "" {
+		req.Header.Set(InternalTokenHeader, v.internalToken)
+	}
+
+	resp, err := v.client.Do(req)
+	if err != nil {
+		return classifyHTTPProviderError(err)
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1024))
+	if resp.StatusCode >= http.StatusInternalServerError {
+		return mapHTTPProviderStatus(resp.StatusCode)
+	}
+	return nil
+}
+
 func (v *HTTPVerifier) Verify(ctx context.Context, token string) (*Principal, error) {
 	if v == nil || v.client == nil || v.limiter == nil {
 		return nil, ErrMisconfigured

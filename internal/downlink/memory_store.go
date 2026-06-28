@@ -366,6 +366,10 @@ func (s *MemoryStore) Close() error {
 	return nil
 }
 
+func (s *MemoryStore) Ping(ctx context.Context) error {
+	return ctx.Err()
+}
+
 func limitMessages(messages []Message, limit int) []Message {
 	sort.Slice(messages, func(i, j int) bool {
 		if messages[i].CreatedAt.Equal(messages[j].CreatedAt) {

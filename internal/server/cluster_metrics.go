@@ -51,6 +51,14 @@ func (r *metricsRegistry) Touch(ctx context.Context, entry cluster.RouteEntry) e
 	return err
 }
 
+func (r *metricsRegistry) Ping(ctx context.Context) error {
+	pinger, ok := r.inner.(interface{ Ping(context.Context) error })
+	if !ok {
+		return nil
+	}
+	return pinger.Ping(ctx)
+}
+
 func (r *metricsRegistry) Close() error {
 	return r.inner.Close()
 }

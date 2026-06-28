@@ -304,6 +304,80 @@ func TestInternalHTTPAdminDiagnostics(t *testing.T) {
 	}
 }
 
+func TestInternalHTTPAdminCheck(t *testing.T) {
+	var gotMethod string
+	var gotToken string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotToken = r.Header.Get("X-ZCourier-Internal-Token")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer upstream.Close()
+
+	registry := cluster.NewMemoryRegistry(cluster.MemoryRegistryConfig{TTL: time.Minute})
+	store := downlink.NewMemoryStore()
+	service := downlink.NewService(testSessionFinder{}, testConnectionFinder{}, downlink.WithStore(store))
+	config := normalizeConfig(Config{
+		GatewayNode:      "gateway-a",
+		InternalHTTPAddr: "127.0.0.1:18080",
+		InternalToken:    "secret",
+		DownlinkStore:    store,
+		Cluster: ClusterConfig{
+			Enabled:      true,
+			InternalAddr: "http://gateway-a:18080",
+			Registry: ClusterRegistryConfig{
+				Type: "memory",
+				TTL:  time.Minute,
+			},
+		},
+		UpstreamRoutes: []UpstreamRouteConfig{{
+			Name:     "http-route",
+			MsgIDMin: 1001,
+			MsgIDMax: 1999,
+			HTTP: &HTTPUpstreamConfig{
+				URL:   upstream.URL + "/gateway/upstream?token=secret#fragment",
+				Token: "upstream-token",
+			},
+		}},
+	})
+
+	server := mustInternalHTTPServer(t, config, service, &gatewayHealth{}, registry)
+	req := httptest.NewRequest(http.MethodGet, "/internal/admin/check?timeout=1s", nil)
+	req.Header.Set(downlink.InternalTokenHeader, "secret")
+	rec := httptest.NewRecorder()
+	server.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if gotMethod != http.MethodHead || gotToken != "upstream-token" {
+		t.Fatalf("upstream request = method %s token %q, want HEAD with token", gotMethod, gotToken)
+	}
+	body := rec.Body.String()
+	for _, secret := range []string{"upstream-token", "token=secret", "#fragment"} {
+		if strings.Contains(body, secret) {
+			t.Fatalf("check leaked secret %q in body %s", secret, body)
+		}
+	}
+
+	var resp adminCheckResponse
+	if err := sonic.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if resp.Code != "ok" || resp.GatewayNode != "gateway-a" || resp.Status != adminCheckStatusOK || resp.Timeout != "1s" {
+		t.Fatalf("check response = %+v, want ok gateway-a timeout", resp)
+	}
+	if findAdminCheck(resp.Checks, "downlink_store").Status != adminCheckStatusOK {
+		t.Fatalf("downlink check = %+v, want ok", findAdminCheck(resp.Checks, "downlink_store"))
+	}
+	if findAdminCheck(resp.Checks, "cluster_registry").Status != adminCheckStatusOK {
+		t.Fatalf("cluster check = %+v, want ok", findAdminCheck(resp.Checks, "cluster_registry"))
+	}
+	if findAdminCheck(resp.Checks, "http_upstream:http-route").Status != adminCheckStatusOK {
+		t.Fatalf("http upstream check = %+v, want ok", findAdminCheck(resp.Checks, "http_upstream:http-route"))
+	}
+}
+
 func TestInternalHTTPAdminRoutesRedactsSensitiveRouteConfig(t *testing.T) {
 	service := downlink.NewService(testSessionFinder{}, testConnectionFinder{})
 	config := normalizeConfig(Config{
@@ -379,7 +453,7 @@ func TestInternalHTTPAdminRequiresToken(t *testing.T) {
 	})
 
 	server := mustInternalHTTPServer(t, config, service, &gatewayHealth{}, nil)
-	for _, path := range []string{"/internal/admin/overview", "/internal/admin/routes", "/internal/admin/diagnostics"} {
+	for _, path := range []string{"/internal/admin/overview", "/internal/admin/routes", "/internal/admin/diagnostics", "/internal/admin/check"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		rec := httptest.NewRecorder()
 		server.Handler.ServeHTTP(rec, req)
@@ -806,6 +880,15 @@ func mustInternalHTTPServer(t *testing.T, config Config, service *downlink.Servi
 		t.Fatal("newInternalHTTPServer() = nil")
 	}
 	return server
+}
+
+func findAdminCheck(checks []adminCheckResult, name string) adminCheckResult {
+	for _, check := range checks {
+		if check.Name == name {
+			return check
+		}
+	}
+	return adminCheckResult{}
 }
 
 var internalHMACTestSecret = []byte("0123456789abcdef0123456789abcdef")

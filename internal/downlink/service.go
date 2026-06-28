@@ -117,6 +117,13 @@ func (s *Service) HasStore() bool {
 	return s.store != nil
 }
 
+func (s *Service) Store() Store {
+	if s == nil {
+		return nil
+	}
+	return s.store
+}
+
 func (s *Service) MessageStatus(ctx context.Context, messageID string) (Message, bool, error) {
 	if messageID == "" {
 		return Message{}, false, ErrMissingMessageID

@@ -44,6 +44,16 @@ func (v *ObservedVerifier) Close() error {
 	return nil
 }
 
+func (v *ObservedVerifier) Ping(ctx context.Context) error {
+	if v == nil || v.delegate == nil {
+		return ErrMisconfigured
+	}
+	if pinger, ok := v.delegate.(interface{ Ping(context.Context) error }); ok {
+		return pinger.Ping(ctx)
+	}
+	return ErrHealthCheckUnsupported
+}
+
 func (v *ObservedVerifier) Verify(ctx context.Context, token string) (*Principal, error) {
 	if v == nil || v.delegate == nil {
 		return nil, ErrMisconfigured

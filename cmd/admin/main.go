@@ -57,6 +57,11 @@ type messagesConfig struct {
 	Limit  int
 }
 
+type checkConfig struct {
+	commonConfig
+	ProbeTimeout time.Duration
+}
+
 type requeueConfig struct {
 	commonConfig
 	MessageID string
@@ -76,6 +81,8 @@ func main() {
 		os.Exit(runOverview(os.Args[2:]))
 	case len(os.Args) > 1 && os.Args[1] == "diagnostics":
 		os.Exit(runDiagnostics(os.Args[2:]))
+	case len(os.Args) > 1 && os.Args[1] == "check":
+		os.Exit(runCheck(os.Args[2:]))
 	case len(os.Args) > 1 && os.Args[1] == "routes":
 		os.Exit(runRoutes(os.Args[2:]))
 	case len(os.Args) > 1 && os.Args[1] == "route":
@@ -97,11 +104,12 @@ func main() {
 }
 
 func printUsage(out io.Writer) {
-	fmt.Fprintln(out, "Usage: admin <overview|diagnostics|routes|route|sessions|message|messages|requeue|discard> [flags]")
+	fmt.Fprintln(out, "Usage: admin <overview|diagnostics|check|routes|route|sessions|message|messages|requeue|discard> [flags]")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Commands:")
 	fmt.Fprintln(out, "  overview     Show gateway identity, readiness, cluster, sessions, and dependency summary")
 	fmt.Fprintln(out, "  diagnostics  Show runtime diagnostics, capacity summary, dependency summary, and warnings")
+	fmt.Fprintln(out, "  check        Actively check configured runtime dependencies")
 	fmt.Fprintln(out, "  routes       Show enabled upstream route ranges and sanitized target metadata")
 	fmt.Fprintln(out, "  route        Show where one client/device would be pushed")
 	fmt.Fprintln(out, "  sessions     Show local sessions, optionally filtered by client_id")
@@ -144,6 +152,26 @@ func runDiagnostics(args []string) int {
 
 	if err := diagnostics(config); err != nil {
 		fmt.Fprintf(os.Stderr, "diagnostics failed: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+func runCheck(args []string) int {
+	fs := flag.NewFlagSet("check", flag.ExitOnError)
+	config := checkConfig{commonConfig: defaultCommonConfig(), ProbeTimeout: 2 * time.Second}
+	addCommonFlags(fs, &config.commonConfig)
+	fs.DurationVar(&config.ProbeTimeout, "probe-timeout", config.ProbeTimeout, "per-request dependency probe timeout")
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: admin check [flags]\n")
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+
+	if err := check(config); err != nil {
+		fmt.Fprintf(os.Stderr, "check failed: %v\n", err)
 		return 1
 	}
 	return 0
@@ -340,6 +368,39 @@ func overview(config commonConfig) error {
 
 func diagnostics(config commonConfig) error {
 	return requestAndPrint(config, "/internal/admin/diagnostics")
+}
+
+func check(config checkConfig) error {
+	if config.ProbeTimeout <= 0 {
+		return fmt.Errorf("probe-timeout must be greater than 0")
+	}
+
+	query := url.Values{}
+	query.Set("timeout", config.ProbeTimeout.String())
+	statusCode, responseBody, err := requestJSON(config.commonConfig, http.MethodGet, "/internal/admin/check?"+query.Encode(), nil)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("status=%d\n", statusCode)
+	if len(responseBody) > 0 {
+		fmt.Printf("response=%s\n", prettyJSON(responseBody))
+	}
+
+	if statusCode < http.StatusOK || statusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("gateway returned status %d", statusCode)
+	}
+
+	var response struct {
+		Status string `json:"status"`
+	}
+	if err := sonic.Unmarshal(responseBody, &response); err != nil {
+		return fmt.Errorf("decode check response: %w", err)
+	}
+	if response.Status != "" && response.Status != "ok" {
+		return fmt.Errorf("gateway dependency check status is %s", response.Status)
+	}
+	return nil
 }
 
 func routes(config commonConfig) error {

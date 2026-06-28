@@ -61,13 +61,19 @@ Start every incident with the same small checklist:
    go run ./cmd/admin overview
    ```
 
-4. Check route configuration:
+4. Actively check configured dependencies:
+
+   ```bash
+   go run ./cmd/admin check
+   ```
+
+5. Check route configuration:
 
    ```bash
    go run ./cmd/admin routes
    ```
 
-5. Check Prometheus target health:
+6. Check Prometheus target health:
 
    ```text
    Prometheus -> Status -> Targets
@@ -97,6 +103,12 @@ Inspect one gateway node:
 
 ```bash
 go run ./cmd/admin overview
+```
+
+Actively check runtime dependencies:
+
+```bash
+go run ./cmd/admin check
 ```
 
 Inspect upstream route ranges and targets:
@@ -509,6 +521,7 @@ Collect:
 - gateway version or git commit
 - config with secrets removed
 - `cmd/admin overview`
+- `cmd/admin check`
 - `cmd/admin routes`
 - relevant `cmd/admin route`, `sessions`, `message`, or `messages` output
 - Prometheus target state

@@ -103,6 +103,13 @@ CREATE INDEX IF NOT EXISTS z_courier_downlink_messages_status_updated_at_idx
 	return err
 }
 
+func (s *PostgresStore) Ping(ctx context.Context) error {
+	if s == nil || s.db == nil {
+		return ErrStoreNotConfigured
+	}
+	return s.db.PingContext(ctx)
+}
+
 func (s *PostgresStore) Save(ctx context.Context, message Message) (Message, error) {
 	if message.MessageID == "" {
 		message.MessageID = NewMessageID()

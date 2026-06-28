@@ -14,12 +14,13 @@ const (
 )
 
 var (
-	ErrInvalidToken        = errors.New("auth: invalid token")
-	ErrExpiredToken        = errors.New("auth: expired token")
-	ErrForbidden           = errors.New("auth: forbidden")
-	ErrProviderTimeout     = errors.New("auth: provider timeout")
-	ErrProviderUnavailable = errors.New("auth: provider unavailable")
-	ErrMisconfigured       = errors.New("auth: misconfigured")
+	ErrInvalidToken           = errors.New("auth: invalid token")
+	ErrExpiredToken           = errors.New("auth: expired token")
+	ErrForbidden              = errors.New("auth: forbidden")
+	ErrProviderTimeout        = errors.New("auth: provider timeout")
+	ErrProviderUnavailable    = errors.New("auth: provider unavailable")
+	ErrMisconfigured          = errors.New("auth: misconfigured")
+	ErrHealthCheckUnsupported = errors.New("auth: health check unsupported")
 )
 
 const (

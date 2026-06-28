@@ -137,6 +137,61 @@ tokens, NSQ auth secrets, PostgreSQL DSNs, Redis passwords, URL user-info,
 queries, fragments, and message bodies must not be exposed through this
 endpoint.
 
+### `GET /internal/admin/check`
+
+Actively checks configured runtime dependencies for one gateway process. This
+endpoint is read-only but it does perform outbound probes with a short timeout:
+
+- PostgreSQL downlink store: `PingContext`
+- Redis or memory cluster registry: `PING` or in-process readiness check
+- JWT/JWKS auth provider: JWKS refresh
+- HTTP auth provider: `HEAD` reachability check
+- HTTP upstream routes: `HEAD` reachability check
+- NSQ upstream routes: TCP connect to configured `nsqd` addresses
+
+Query parameters:
+
+| Parameter | Default | Meaning |
+| --- | --- | --- |
+| `timeout` | `2s` | Maximum duration for the dependency probe request, capped at `30s` |
+
+Example:
+
+```json
+{
+  "code": "ok",
+  "gateway_node": "gateway-a",
+  "status": "ok",
+  "timeout": "2s",
+  "checks": [
+    {
+      "name": "auth_verifier",
+      "status": "skipped",
+      "target": "static",
+      "error": "dependency does not expose an active health probe"
+    },
+    {
+      "name": "downlink_store",
+      "status": "ok",
+      "target": "postgres",
+      "latency": "1.2ms"
+    },
+    {
+      "name": "cluster_registry",
+      "status": "ok",
+      "target": "redis",
+      "latency": "800us"
+    }
+  ]
+}
+```
+
+`status` is `ok`, `degraded`, or `failed`. A check can also be `skipped` when a
+dependency is intentionally disabled or does not expose a safe active probe.
+Secrets are not returned. HTTP route targets are sanitized, and failure messages
+avoid echoing URLs, tokens, DSNs, Redis passwords, NSQ auth secrets, or message
+bodies.
+
 ### `GET /internal/admin/routes`
 
 Returns enabled upstream route ranges and sanitized target metadata.
@@ -220,9 +275,10 @@ gateway defaults to failed messages.
 
 ## CLI
 
-`cmd/admin` wraps the admin and debug APIs. Overview, diagnostics, route,
-session, message, and message-list commands are read-only. Message repair
-commands are guarded mutations and require explicit confirmation.
+`cmd/admin` wraps the admin and debug APIs. Overview, diagnostics, dependency
+check, route, session, message, and message-list commands are read-only.
+Message repair commands are guarded mutations and require explicit
+confirmation.
 
 Token mode:
 
@@ -234,6 +290,11 @@ go run ./cmd/admin overview \
 go run ./cmd/admin diagnostics \
   -internal-url http://127.0.0.1:18182 \
   -internal-token dev-internal-token
+
+go run ./cmd/admin check \
+  -internal-url http://127.0.0.1:18182 \
+  -internal-token dev-internal-token \
+  -probe-timeout 2s
 
 go run ./cmd/admin routes \
   -internal-url http://127.0.0.1:18182 \
@@ -308,6 +369,7 @@ message status, list, requeue, discard, route, and sessions endpoints.
 
 - overview
 - diagnostics
+- dependency check
 - routes
 - route lookup
 - local session listing

@@ -148,6 +148,19 @@ func (r *MemoryRegistry) Touch(ctx context.Context, entry RouteEntry) error {
 	return nil
 }
 
+func (r *MemoryRegistry) Ping(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if r.closed {
+		return ErrClosed
+	}
+	return nil
+}
+
 func (r *MemoryRegistry) Close() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
