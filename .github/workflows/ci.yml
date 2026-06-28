@@ -68,6 +68,9 @@ jobs:
           docker compose --env-file deploy/production/.env.example -f deploy/production/docker-compose.yml config
           docker compose --env-file deploy/production-cluster/.env.example -f deploy/production-cluster/docker-compose.yml config
 
+      - name: Validate Prometheus rules and configs
+        run: bash scripts/promtool_check.sh
+
       - name: Validate Helm chart
         run: |
           HELM_IMAGE=alpine/helm:3.17.3
@@ -94,7 +97,7 @@ jobs:
           if-no-files-found: error
 
       - name: Validate Grafana dashboard JSON
-        run: jq . deploy/monitoring/grafana/dashboards/z-courier-overview.json >/dev/null
+        run: jq empty deploy/monitoring/grafana/dashboards/*.json
 
   e2e:
     name: E2E
