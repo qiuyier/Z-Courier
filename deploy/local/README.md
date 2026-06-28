@@ -276,6 +276,7 @@ curl -s http://127.0.0.1:18183/metrics | rg 'z_courier_sessions_online|z_courier
 ## Local URLs
 
 - Prometheus: `http://127.0.0.1:19090`
+- Alertmanager: `http://127.0.0.1:19093`
 - Grafana: `http://127.0.0.1:13000` (`admin` / `admin`)
 - NSQ Admin: `http://127.0.0.1:14171`
 - Redis: `127.0.0.1:16379`

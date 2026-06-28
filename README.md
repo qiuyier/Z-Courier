@@ -80,8 +80,8 @@ Run the single-node integration verifier from the repository root:
 bash scripts/e2e.sh
 ```
 
-The script starts PostgreSQL, NSQ, Prometheus, Grafana, and the gateway, then
-validates:
+The script starts PostgreSQL, NSQ, Prometheus, Alertmanager, Grafana, and the
+gateway, then validates:
 
 - offline downlink queueing with PostgreSQL
 - client bind and offline message flush
@@ -433,8 +433,8 @@ Run the local single-node integration verifier:
 bash scripts/e2e.sh
 ```
 
-It starts PostgreSQL, NSQ, Prometheus, Grafana, the gateway, and validates the
-reliable downlink path with PostgreSQL storage. See
+It starts PostgreSQL, NSQ, Prometheus, Alertmanager, Grafana, the gateway, and
+validates the reliable downlink path with PostgreSQL storage. See
 [deploy/local/README.md](deploy/local/README.md) for the manual workflow and
 local URLs.
 
@@ -687,13 +687,14 @@ The first metrics include ingress packet totals, rejected ingress packets,
 upstream forwarding totals and latency, online sessions, downlink push totals,
 downlink ACK totals and latency, and rate-limit rejects.
 
-Start a local Prometheus + Grafana monitoring stack:
+Start a local Prometheus + Alertmanager + Grafana monitoring stack:
 
 ```bash
 docker compose -f deploy/monitoring/docker-compose.yml up -d
 ```
 
-Prometheus is available at `http://127.0.0.1:9090`, and Grafana is available at
+Prometheus is available at `http://127.0.0.1:9090`, Alertmanager is available
+at `http://127.0.0.1:9093`, and Grafana is available at
 `http://127.0.0.1:3000` with the default local credentials `admin` / `admin`.
 See [deploy/monitoring/README.md](deploy/monitoring/README.md) for alert rules,
 dashboards, and scrape-target details.

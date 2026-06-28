@@ -1,0 +1,43 @@
+global:
+  resolve_timeout: 5m
+  smtp_smarthost: smtp.example.com:587
+  smtp_from: z-courier-alerts@example.com
+  smtp_auth_username: z-courier-alerts@example.com
+  smtp_auth_password: replace-with-smtp-password
+  smtp_require_tls: true
+
+route:
+  receiver: z-courier-email
+  group_by:
+    - alertname
+    - component
+    - job
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - receiver: z-courier-email-critical
+      matchers:
+        - severity="critical"
+      repeat_interval: 1h
+
+receivers:
+  - name: z-courier-email
+    email_configs:
+      - to: z-courier-oncall@example.com
+        send_resolved: true
+
+  - name: z-courier-email-critical
+    email_configs:
+      - to: z-courier-critical-oncall@example.com
+        send_resolved: true
+
+inhibit_rules:
+  - source_matchers:
+      - severity="critical"
+    target_matchers:
+      - severity="warning"
+    equal:
+      - alertname
+      - job
+      - instance

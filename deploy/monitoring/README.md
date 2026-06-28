@@ -1,12 +1,14 @@
 # Z-Courier Monitoring
 
-This directory contains a local Prometheus + Grafana stack for Z-Courier
-development and demos.
+This directory contains a local Prometheus + Alertmanager + Grafana stack for
+Z-Courier development and demos.
 
 ## What Runs
 
 - Prometheus scrapes Z-Courier metrics from the gateway internal HTTP server
   and loads the bundled Z-Courier recording and alert rules.
+- Alertmanager receives firing Prometheus alerts and groups them with a local
+  no-op receiver that is safe for demos.
 - Grafana loads the Prometheus data source, `Z-Courier Overview`, and
   `Z-Courier Production Signals` dashboards automatically.
 - node-exporter exposes host/container node metrics. It is useful for CPU,
@@ -45,6 +47,14 @@ http://127.0.0.1:9090
 Check `Status -> Targets`. The `z-courier` target should be `UP`.
 Check `Status -> Rules` to review the bundled Z-Courier recording rules and
 alert rules.
+
+Open Alertmanager:
+
+```text
+http://127.0.0.1:9093
+```
+
+Firing alerts from Prometheus should appear here after their `for` windows pass.
 
 Example PromQL queries:
 
@@ -129,9 +139,39 @@ The rule file includes:
 
 Alert annotations link to the production runbook for first-response actions.
 
-This stack does not include Alertmanager. Prometheus evaluates the rules and
-Grafana can visualize the signals, but paging or chat notifications require an
-Alertmanager or platform-specific alerting integration.
+## Alertmanager
+
+The bundled Alertmanager config is:
+
+```text
+deploy/monitoring/alertmanager/alertmanager.yml
+```
+
+The default receivers are intentionally local no-op receivers. They let
+Prometheus send firing alerts to Alertmanager without sending external messages.
+Before using this setup for production paging, add your real notification
+receiver, such as a webhook, email, Slack, PagerDuty, or a platform-specific
+bridge for Feishu, DingTalk, or WeCom.
+
+Example receiver configs are available under:
+
+```text
+deploy/monitoring/alertmanager/examples/
+```
+
+- `webhook.yml` is the most flexible option. Use it to forward Alertmanager
+  payloads to your own bridge for Feishu, DingTalk, WeCom, PagerDuty, or an
+  internal incident platform.
+- `email.yml` shows SMTP-based email routing.
+- `slack.yml` shows Slack incoming-webhook routing.
+
+To try an example locally, replace the placeholder values and either copy the
+example over `deploy/monitoring/alertmanager/alertmanager.yml` or change the
+Alertmanager volume in the Compose file to point at the example file.
+
+The local monitoring stack exposes Alertmanager at `http://127.0.0.1:9093`.
+The full local dependency stack in `deploy/local/docker-compose.yml` exposes the
+same Alertmanager config at `http://127.0.0.1:19093`.
 
 ## Gateway Target
 
@@ -154,7 +194,7 @@ targets:
 
 ## Stop
 
-Stop containers but keep Prometheus and Grafana data:
+Stop containers but keep Prometheus, Alertmanager, and Grafana data:
 
 ```bash
 docker compose -f deploy/monitoring/docker-compose.yml down

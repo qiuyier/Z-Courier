@@ -115,6 +115,12 @@ Prometheus Operator can start from
 Default thresholds are examples. Tune rates and `for` windows to production
 traffic before paging humans.
 
+The local monitoring stack includes an Alertmanager example at
+`deploy/monitoring/alertmanager/alertmanager.yml`. Its default receivers are
+local no-op receivers, so production deployments must add real notification
+routing before relying on paging. Receiver examples for webhook, SMTP email,
+and Slack live under `deploy/monitoring/alertmanager/examples/`.
+
 | Alert | Probable Source | First Action |
 | --- | --- | --- |
 | `ZCourierGatewayTargetDown` | Gateway down, internal HTTP unreachable, scrape config wrong | Check `/readyz`, container status, and Prometheus targets |

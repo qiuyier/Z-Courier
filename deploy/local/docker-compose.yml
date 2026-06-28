@@ -72,6 +72,21 @@ services:
       - prometheus-data:/prometheus
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    depends_on:
+      - alertmanager
+    restart: unless-stopped
+
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: z-courier-local-alertmanager
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    ports:
+      - "19093:9093"
+    volumes:
+      - ../monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
     restart: unless-stopped
 
   grafana:
@@ -95,4 +110,5 @@ volumes:
   postgres-data:
   redis-data:
   prometheus-data:
+  alertmanager-data:
   grafana-data:

@@ -1,0 +1,34 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: z-courier-local
+  group_by:
+    - alertname
+    - component
+    - job
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - receiver: z-courier-critical
+      matchers:
+        - severity="critical"
+      repeat_interval: 1h
+
+receivers:
+  # Local demo receivers intentionally do not send external notifications.
+  # Add webhook_configs, email_configs, slack_configs, or platform-specific
+  # integrations before using this config for production paging.
+  - name: z-courier-local
+  - name: z-courier-critical
+
+inhibit_rules:
+  - source_matchers:
+      - severity="critical"
+    target_matchers:
+      - severity="warning"
+    equal:
+      - alertname
+      - job
+      - instance
