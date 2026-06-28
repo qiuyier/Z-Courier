@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -62,6 +63,16 @@ type checkConfig struct {
 	ProbeTimeout time.Duration
 }
 
+type diagnoseConfig struct {
+	commonConfig
+	ProbeTimeout time.Duration
+	Output       string
+	ClientID     string
+	DeviceID     string
+	SessionLimit int
+	MessageLimit int
+}
+
 type requeueConfig struct {
 	commonConfig
 	MessageID string
@@ -83,6 +94,8 @@ func main() {
 		os.Exit(runDiagnostics(os.Args[2:]))
 	case len(os.Args) > 1 && os.Args[1] == "check":
 		os.Exit(runCheck(os.Args[2:]))
+	case len(os.Args) > 1 && os.Args[1] == "diagnose":
+		os.Exit(runDiagnose(os.Args[2:]))
 	case len(os.Args) > 1 && os.Args[1] == "routes":
 		os.Exit(runRoutes(os.Args[2:]))
 	case len(os.Args) > 1 && os.Args[1] == "route":
@@ -104,12 +117,13 @@ func main() {
 }
 
 func printUsage(out io.Writer) {
-	fmt.Fprintln(out, "Usage: admin <overview|diagnostics|check|routes|route|sessions|message|messages|requeue|discard> [flags]")
+	fmt.Fprintln(out, "Usage: admin <overview|diagnostics|check|diagnose|routes|route|sessions|message|messages|requeue|discard> [flags]")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Commands:")
 	fmt.Fprintln(out, "  overview     Show gateway identity, readiness, cluster, sessions, and dependency summary")
 	fmt.Fprintln(out, "  diagnostics  Show runtime diagnostics, capacity summary, dependency summary, and warnings")
 	fmt.Fprintln(out, "  check        Actively check configured runtime dependencies")
+	fmt.Fprintln(out, "  diagnose     Collect a safe diagnosis bundle from one gateway node")
 	fmt.Fprintln(out, "  routes       Show enabled upstream route ranges and sanitized target metadata")
 	fmt.Fprintln(out, "  route        Show where one client/device would be pushed")
 	fmt.Fprintln(out, "  sessions     Show local sessions, optionally filtered by client_id")
@@ -172,6 +186,36 @@ func runCheck(args []string) int {
 
 	if err := check(config); err != nil {
 		fmt.Fprintf(os.Stderr, "check failed: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+func runDiagnose(args []string) int {
+	fs := flag.NewFlagSet("diagnose", flag.ExitOnError)
+	config := diagnoseConfig{
+		commonConfig: defaultCommonConfig(),
+		ProbeTimeout: 2 * time.Second,
+		SessionLimit: 100,
+		MessageLimit: 20,
+	}
+	addCommonFlags(fs, &config.commonConfig)
+	fs.DurationVar(&config.ProbeTimeout, "probe-timeout", config.ProbeTimeout, "dependency probe timeout for the collected check section")
+	fs.StringVar(&config.Output, "output", "", "optional output file for the diagnosis JSON bundle")
+	fs.StringVar(&config.ClientID, "client-id", "", "optional client id for route and session inspection")
+	fs.StringVar(&config.DeviceID, "device-id", "", "optional device id for route inspection")
+	fs.IntVar(&config.SessionLimit, "session-limit", config.SessionLimit, "maximum sessions to collect when client-id is set")
+	fs.IntVar(&config.MessageLimit, "message-limit", config.MessageLimit, "maximum failed messages to collect")
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: admin diagnose [flags]\n")
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+
+	if err := diagnose(config); err != nil {
+		fmt.Fprintf(os.Stderr, "diagnose failed: %v\n", err)
 		return 1
 	}
 	return 0
@@ -401,6 +445,165 @@ func check(config checkConfig) error {
 		return fmt.Errorf("gateway dependency check status is %s", response.Status)
 	}
 	return nil
+}
+
+type diagnoseBundle struct {
+	Code             string                     `json:"code"`
+	GeneratedAt      time.Time                  `json:"generated_at"`
+	TargetURL        string                     `json:"target_url"`
+	CollectionStatus string                     `json:"collection_status"`
+	Sections         map[string]diagnoseSection `json:"sections"`
+}
+
+type diagnoseSection struct {
+	Endpoint   string `json:"endpoint"`
+	HTTPStatus int    `json:"http_status,omitempty"`
+	Error      string `json:"error,omitempty"`
+	Body       any    `json:"body,omitempty"`
+}
+
+func diagnose(config diagnoseConfig) error {
+	if config.ProbeTimeout <= 0 {
+		return fmt.Errorf("probe-timeout must be greater than 0")
+	}
+	if config.SessionLimit <= 0 {
+		return fmt.Errorf("session-limit must be greater than 0")
+	}
+	if config.MessageLimit <= 0 {
+		return fmt.Errorf("message-limit must be greater than 0")
+	}
+	if strings.TrimSpace(config.DeviceID) != "" && strings.TrimSpace(config.ClientID) == "" {
+		return fmt.Errorf("client-id is required when device-id is set")
+	}
+
+	bundle := diagnoseBundle{
+		Code:        "ok",
+		GeneratedAt: time.Now().UTC(),
+		TargetURL:   sanitizeAdminTargetURL(config.InternalURL),
+		Sections:    make(map[string]diagnoseSection),
+	}
+	collectDiagnoseSection(config.commonConfig, bundle.Sections, "overview", "/internal/admin/overview")
+	collectDiagnoseSection(config.commonConfig, bundle.Sections, "diagnostics", "/internal/admin/diagnostics")
+
+	checkQuery := url.Values{}
+	checkQuery.Set("timeout", config.ProbeTimeout.String())
+	collectDiagnoseSection(config.commonConfig, bundle.Sections, "check", "/internal/admin/check?"+checkQuery.Encode())
+	collectDiagnoseSection(config.commonConfig, bundle.Sections, "routes", "/internal/admin/routes")
+
+	messagesQuery := url.Values{}
+	messagesQuery.Set("status", string(sdkbackend.MessageStatusFailed))
+	messagesQuery.Set("limit", strconv.Itoa(config.MessageLimit))
+	collectDiagnoseSection(config.commonConfig, bundle.Sections, "failed_messages", "/internal/messages?"+messagesQuery.Encode())
+
+	clientID := strings.TrimSpace(config.ClientID)
+	deviceID := strings.TrimSpace(config.DeviceID)
+	if clientID != "" {
+		sessionsQuery := url.Values{}
+		sessionsQuery.Set("client_id", clientID)
+		sessionsQuery.Set("limit", strconv.Itoa(config.SessionLimit))
+		collectDiagnoseSection(config.commonConfig, bundle.Sections, "sessions", "/internal/debug/sessions?"+sessionsQuery.Encode())
+	}
+	if clientID != "" && deviceID != "" {
+		routeQuery := url.Values{}
+		routeQuery.Set("client_id", clientID)
+		routeQuery.Set("device_id", deviceID)
+		collectDiagnoseSection(config.commonConfig, bundle.Sections, "route", "/internal/debug/route?"+routeQuery.Encode())
+	}
+
+	bundle.CollectionStatus = diagnoseCollectionStatus(bundle.Sections)
+	encoded, err := sonic.MarshalIndent(bundle, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal diagnosis bundle: %w", err)
+	}
+	encoded = append(bytes.TrimSpace(encoded), '\n')
+
+	output := strings.TrimSpace(config.Output)
+	if output == "" {
+		fmt.Print(string(encoded))
+	} else {
+		if err := writeDiagnoseOutput(output, encoded); err != nil {
+			return err
+		}
+		fmt.Printf("output=%s\n", output)
+		fmt.Printf("collection_status=%s\n", bundle.CollectionStatus)
+	}
+
+	if bundle.CollectionStatus == "failed" {
+		return fmt.Errorf("all diagnosis sections failed")
+	}
+	return nil
+}
+
+func collectDiagnoseSection(config commonConfig, sections map[string]diagnoseSection, name, endpoint string) {
+	statusCode, body, err := requestJSON(config, http.MethodGet, endpoint, nil)
+	section := diagnoseSection{
+		Endpoint:   endpoint,
+		HTTPStatus: statusCode,
+	}
+	if err != nil {
+		section.Error = err.Error()
+		sections[name] = section
+		return
+	}
+	if statusCode < http.StatusOK || statusCode >= http.StatusMultipleChoices {
+		section.Error = fmt.Sprintf("gateway returned status %d", statusCode)
+	}
+	if len(body) > 0 {
+		section.Body = decodeDiagnoseBody(body)
+	}
+	sections[name] = section
+}
+
+func decodeDiagnoseBody(body []byte) any {
+	var value any
+	if err := sonic.Unmarshal(body, &value); err != nil {
+		return string(body)
+	}
+	return value
+}
+
+func diagnoseCollectionStatus(sections map[string]diagnoseSection) string {
+	successes := 0
+	failures := 0
+	for _, section := range sections {
+		if section.Error != "" || section.HTTPStatus < http.StatusOK || section.HTTPStatus >= http.StatusMultipleChoices {
+			failures++
+			continue
+		}
+		successes++
+	}
+	switch {
+	case successes == 0:
+		return "failed"
+	case failures > 0:
+		return "partial"
+	default:
+		return "complete"
+	}
+}
+
+func writeDiagnoseOutput(output string, body []byte) error {
+	dir := filepath.Dir(output)
+	if dir != "." && dir != "" {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("create output directory: %w", err)
+		}
+	}
+	if err := os.WriteFile(output, body, 0o644); err != nil {
+		return fmt.Errorf("write output file: %w", err)
+	}
+	return nil
+}
+
+func sanitizeAdminTargetURL(raw string) string {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return strings.TrimSpace(raw)
+	}
+	parsed.User = nil
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return strings.TrimRight(parsed.String(), "/")
 }
 
 func routes(config commonConfig) error {

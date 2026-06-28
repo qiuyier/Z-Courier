@@ -137,6 +137,11 @@ go run ./cmd/admin check \
   -internal-token dev-internal-token \
   -probe-timeout 2s
 
+go run ./cmd/admin diagnose \
+  -internal-url http://127.0.0.1:18182 \
+  -internal-token dev-internal-token \
+  -output reports/diagnose/gateway-a.json
+
 go run ./cmd/admin routes \
   -internal-url http://127.0.0.1:18182 \
   -internal-token dev-internal-token
@@ -160,10 +165,11 @@ go run ./cmd/admin messages \
 
 `overview` summarizes the queried gateway node. `diagnostics` returns a richer
 runtime troubleshooting snapshot. `check` actively probes configured runtime
-dependencies. `routes` shows enabled MsgID route ranges. `route` answers where
-the cluster would send a client/device. `sessions` answers which sessions are
-local to the gateway node you queried. `message` and `messages` inspect
-persisted downlink delivery state.
+dependencies. `diagnose` collects a safe JSON bundle for incident reports.
+`routes` shows enabled MsgID route ranges. `route` answers where the cluster
+would send a client/device. `sessions` answers which sessions are local to the
+gateway node you queried. `message` and `messages` inspect persisted downlink
+delivery state.
 
 Local service URLs and the manual workflow are documented in
 [deploy/local/README.md](deploy/local/README.md).
@@ -695,8 +701,8 @@ scrape-target details.
 ## Project Structure
 - `cmd/gateway`: Gateway entry point
 - `cmd/admin`: Operator CLI for gateway overview, diagnostics, dependency
-  checks, route/session inspection, message status/list queries, and guarded
-  message repair
+  checks, diagnosis bundles, route/session inspection, message status/list
+  queries, and guarded message repair
 - `cmd/devclient`: Public Go SDK-based client for manual end-to-end testing
 - `cmd/sdke2e`: Automated live-gateway verifier for the public Go client SDK
 - `cmd/devbackend`: Development backend and internal API debugging CLI

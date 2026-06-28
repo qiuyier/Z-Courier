@@ -276,9 +276,9 @@ gateway defaults to failed messages.
 ## CLI
 
 `cmd/admin` wraps the admin and debug APIs. Overview, diagnostics, dependency
-check, route, session, message, and message-list commands are read-only.
-Message repair commands are guarded mutations and require explicit
-confirmation.
+check, diagnosis bundle collection, route, session, message, and message-list
+commands are read-only. Message repair commands are guarded mutations and
+require explicit confirmation.
 
 Token mode:
 
@@ -295,6 +295,18 @@ go run ./cmd/admin check \
   -internal-url http://127.0.0.1:18182 \
   -internal-token dev-internal-token \
   -probe-timeout 2s
+
+go run ./cmd/admin diagnose \
+  -internal-url http://127.0.0.1:18182 \
+  -internal-token dev-internal-token \
+  -output reports/diagnose/gateway-a.json
+
+go run ./cmd/admin diagnose \
+  -internal-url http://127.0.0.1:18182 \
+  -internal-token dev-internal-token \
+  -client-id e2e-client \
+  -device-id e2e-device \
+  -output reports/diagnose/e2e-client.json
 
 go run ./cmd/admin routes \
   -internal-url http://127.0.0.1:18182 \
@@ -360,6 +372,14 @@ The CLI defaults to `http://127.0.0.1:18082` and `dev-internal-token` for local
 development. Production scripts should pass explicit values or use environment
 variables.
 
+`cmd/admin diagnose` is a CLI-side collector rather than a new server endpoint.
+It collects overview, diagnostics, active dependency check, routes, failed
+message summary, and optionally client/device route plus local sessions. Each
+section records its HTTP status and response body independently, so partial
+collection failures stay visible in the output bundle. The command sanitizes the
+target URL and does not write admin tokens, HMAC secrets, DSNs, route tokens, or
+message bodies beyond what the existing safe admin APIs already return.
+
 ## Boundary With `cmd/devbackend`
 
 `cmd/devbackend` remains a development helper and can still call push, batch,
@@ -370,6 +390,7 @@ message status, list, requeue, discard, route, and sessions endpoints.
 - overview
 - diagnostics
 - dependency check
+- diagnosis bundle collection
 - routes
 - route lookup
 - local session listing

@@ -129,12 +129,11 @@ repeatable.
 
 Candidate work:
 
-- Add `cmd/admin diagnose` to collect overview, routes, local sessions summary,
-  message backlog summary, dependency diagnostics, and selected Prometheus
-  query hints.
-- Support JSON and human-readable output.
-- Redact all secrets and large message bodies.
-- Include a clear distinction between local state and cluster-discovered remote
+- Extend `cmd/admin diagnose` beyond the first gateway-API bundle with optional
+  Prometheus query hints and scenario-specific collectors.
+- Consider a human-readable summary alongside the JSON output.
+- Keep redacting all secrets and large message bodies.
+- Keep a clear distinction between local state and cluster-discovered remote
   routes.
 - Add runbook examples for common scenarios: client cannot receive downlink,
   Redis route stale, peer push failing, upstream route failing, auth rejected,

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -104,6 +106,100 @@ func TestCheckFailsWhenGatewayReportsFailure(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "failed") {
 		t.Fatalf("check() error = %v, want failed status error", err)
+	}
+}
+
+func TestDiagnoseCollectsBundle(t *testing.T) {
+	var gotPaths []string
+	stubAdminHTTPClientFunc(t, func(req *http.Request) (int, string) {
+		gotPaths = append(gotPaths, req.URL.RequestURI())
+		switch req.URL.Path {
+		case "/internal/admin/overview":
+			return http.StatusOK, `{"code":"ok","gateway_node":"gateway-a"}`
+		case "/internal/admin/diagnostics":
+			return http.StatusOK, `{"code":"ok","warnings":[]}`
+		case "/internal/admin/check":
+			return http.StatusOK, `{"code":"ok","status":"ok","checks":[]}`
+		case "/internal/admin/routes":
+			return http.StatusOK, `{"code":"ok","routes":[]}`
+		case "/internal/messages":
+			return http.StatusOK, `{"code":"ok","total":0,"messages":[]}`
+		case "/internal/debug/sessions":
+			return http.StatusOK, `{"code":"ok","sessions":[]}`
+		case "/internal/debug/route":
+			return http.StatusOK, `{"code":"ok","cluster_route_found":false}`
+		default:
+			return http.StatusNotFound, `{"code":"not_found"}`
+		}
+	})
+
+	output := filepath.Join(t.TempDir(), "gateway-a.json")
+	err := diagnose(diagnoseConfig{
+		commonConfig: commonConfig{
+			InternalURL:   "http://user:password@gateway-a:18182",
+			AuthMode:      authModeToken,
+			InternalToken: "secret",
+			Timeout:       time.Second,
+		},
+		ProbeTimeout: time.Second,
+		Output:       output,
+		ClientID:     "client-1",
+		DeviceID:     "device-1",
+		SessionLimit: 10,
+		MessageLimit: 5,
+	})
+	if err != nil {
+		t.Fatalf("diagnose() error = %v", err)
+	}
+
+	content, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	body := string(content)
+	for _, secret := range []string{"user:password", "secret"} {
+		if strings.Contains(body, secret) {
+			t.Fatalf("diagnose output leaked %q: %s", secret, body)
+		}
+	}
+
+	var bundle diagnoseBundle
+	if err := sonic.Unmarshal(content, &bundle); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if bundle.Code != "ok" || bundle.CollectionStatus != "complete" || bundle.TargetURL != "http://gateway-a:18182" {
+		t.Fatalf("bundle = %+v, want complete sanitized target", bundle)
+	}
+	for _, section := range []string{"overview", "diagnostics", "check", "routes", "failed_messages", "sessions", "route"} {
+		if _, ok := bundle.Sections[section]; !ok {
+			t.Fatalf("missing section %q in %+v", section, bundle.Sections)
+		}
+	}
+
+	if !containsPath(gotPaths, "/internal/admin/check?timeout=1s") {
+		t.Fatalf("paths = %v, want check timeout path", gotPaths)
+	}
+	if !containsPath(gotPaths, "/internal/messages?limit=5&status=failed") {
+		t.Fatalf("paths = %v, want failed messages path", gotPaths)
+	}
+	if !containsPath(gotPaths, "/internal/debug/sessions?client_id=client-1&limit=10") {
+		t.Fatalf("paths = %v, want sessions path", gotPaths)
+	}
+	if !containsPath(gotPaths, "/internal/debug/route?client_id=client-1&device_id=device-1") {
+		t.Fatalf("paths = %v, want route path", gotPaths)
+	}
+}
+
+func TestDiagnoseRequiresClientIDWithDeviceID(t *testing.T) {
+	err := diagnose(diagnoseConfig{
+		commonConfig: validCommonConfig(t),
+		ProbeTimeout: time.Second,
+		DeviceID:     "device-1",
+		SessionLimit: 100,
+		MessageLimit: 20,
+	})
+	if err == nil || !strings.Contains(err.Error(), "client-id is required") {
+		t.Fatalf("diagnose() error = %v, want client-id error", err)
 	}
 }
 
@@ -439,6 +535,27 @@ func stubAdminHTTPClient(t *testing.T, status int, body string, gotReq **http.Re
 	stubAdminHTTPClientWithBody(t, status, body, gotReq, nil)
 }
 
+func stubAdminHTTPClientFunc(t *testing.T, handler func(*http.Request) (int, string)) {
+	t.Helper()
+
+	oldClient := httpClient
+	t.Cleanup(func() {
+		httpClient = oldClient
+	})
+
+	httpClient = &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			status, body := handler(req)
+			return &http.Response{
+				StatusCode: status,
+				Body:       io.NopCloser(strings.NewReader(body)),
+				Header:     make(http.Header),
+				Request:    req,
+			}, nil
+		}),
+	}
+}
+
 func stubAdminHTTPClientWithBody(t *testing.T, status int, body string, gotReq **http.Request, gotBody *[]byte) {
 	t.Helper()
 
@@ -493,4 +610,13 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
+}
+
+func containsPath(paths []string, want string) bool {
+	for _, path := range paths {
+		if path == want {
+			return true
+		}
+	}
+	return false
 }

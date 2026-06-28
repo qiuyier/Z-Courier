@@ -67,13 +67,20 @@ Start every incident with the same small checklist:
    go run ./cmd/admin check
    ```
 
-5. Check route configuration:
+5. Collect a diagnosis bundle:
+
+   ```bash
+   go run ./cmd/admin diagnose \
+     -output reports/diagnose/gateway-a.json
+   ```
+
+6. Check route configuration:
 
    ```bash
    go run ./cmd/admin routes
    ```
 
-6. Check Prometheus target health:
+7. Check Prometheus target health:
 
    ```text
    Prometheus -> Status -> Targets
@@ -109,6 +116,13 @@ Actively check runtime dependencies:
 
 ```bash
 go run ./cmd/admin check
+```
+
+Collect a safe JSON diagnosis bundle:
+
+```bash
+go run ./cmd/admin diagnose \
+  -output reports/diagnose/gateway-a.json
 ```
 
 Inspect upstream route ranges and targets:
@@ -522,6 +536,7 @@ Collect:
 - config with secrets removed
 - `cmd/admin overview`
 - `cmd/admin check`
+- `cmd/admin diagnose`
 - `cmd/admin routes`
 - relevant `cmd/admin route`, `sessions`, `message`, or `messages` output
 - Prometheus target state
