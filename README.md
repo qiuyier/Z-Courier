@@ -695,8 +695,8 @@ docker compose -f deploy/monitoring/docker-compose.yml up -d
 
 Prometheus is available at `http://127.0.0.1:9090`, and Grafana is available at
 `http://127.0.0.1:3000` with the default local credentials `admin` / `admin`.
-See [deploy/monitoring/README.md](deploy/monitoring/README.md) for dashboard and
-scrape-target details.
+See [deploy/monitoring/README.md](deploy/monitoring/README.md) for alert rules,
+dashboards, and scrape-target details.
 
 ## Project Structure
 - `cmd/gateway`: Gateway entry point

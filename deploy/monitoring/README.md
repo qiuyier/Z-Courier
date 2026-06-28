@@ -5,9 +5,10 @@ development and demos.
 
 ## What Runs
 
-- Prometheus scrapes Z-Courier metrics from the gateway internal HTTP server.
-- Grafana loads the Prometheus data source and the `Z-Courier Overview`
-  dashboard automatically.
+- Prometheus scrapes Z-Courier metrics from the gateway internal HTTP server
+  and loads the bundled Z-Courier recording and alert rules.
+- Grafana loads the Prometheus data source, `Z-Courier Overview`, and
+  `Z-Courier Production Signals` dashboards automatically.
 - node-exporter exposes host/container node metrics. It is useful for CPU,
   memory, disk, and network visibility, but it is not required for Z-Courier
   application metrics.
@@ -42,6 +43,8 @@ http://127.0.0.1:9090
 ```
 
 Check `Status -> Targets`. The `z-courier` target should be `UP`.
+Check `Status -> Rules` to review the bundled Z-Courier recording rules and
+alert rules.
 
 Example PromQL queries:
 
@@ -93,7 +96,42 @@ The dashboard is provisioned under:
 
 ```text
 Dashboards -> Z-Courier -> Z-Courier Overview
+Dashboards -> Z-Courier -> Z-Courier Production Signals
 ```
+
+`Z-Courier Overview` is the raw operations dashboard. `Z-Courier Production
+Signals` focuses on alert-oriented signals: target health, firing alerts, auth
+failure ratio, overload rejects, upstream failures, downlink push or ACK
+problems, retry worker failures, stale routes, HMAC failures, JWKS refresh
+failures, and peer push latency.
+
+## Alert Rules
+
+Prometheus loads:
+
+```text
+deploy/monitoring/prometheus/rules/z-courier-alerts.yml
+```
+
+The rules are example production defaults. They are intentionally conservative
+enough for staging and demos, but production teams should tune thresholds and
+`for` windows to their traffic patterns.
+
+The rule file includes:
+
+- recording rules for common 5-minute rates and latency percentiles
+- target-down alerts
+- ingress rejection spike alerts
+- auth and HMAC failure alerts
+- upstream failure and overload alerts
+- downlink push, ACK latency, retry, and stale-route alerts
+- peer push and JWKS refresh failure alerts
+
+Alert annotations link to the production runbook for first-response actions.
+
+This stack does not include Alertmanager. Prometheus evaluates the rules and
+Grafana can visualize the signals, but paging or chat notifications require an
+Alertmanager or platform-specific alerting integration.
 
 ## Gateway Target
 

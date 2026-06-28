@@ -104,6 +104,33 @@ before changing message state.
 | Retry | retry scans run without sustained failed claim or store errors |
 | Cluster | peer push success increases when cross-node delivery is expected |
 
+## Prometheus Alerts
+
+The bundled alert rules live at
+`deploy/monitoring/prometheus/rules/z-courier-alerts.yml`. Local and production
+Compose Prometheus configs load them automatically. Kubernetes users with
+Prometheus Operator can start from
+`deploy/helm/z-courier/examples/prometheusrule.yaml`.
+
+Default thresholds are examples. Tune rates and `for` windows to production
+traffic before paging humans.
+
+| Alert | Probable Source | First Action |
+| --- | --- | --- |
+| `ZCourierGatewayTargetDown` | Gateway down, internal HTTP unreachable, scrape config wrong | Check `/readyz`, container status, and Prometheus targets |
+| `ZCourierIngressRejectedSpike` | Bad AUTH/BIND packets, invalid protocol, rate limiting | Run `cmd/admin diagnose`; inspect ingress rejects and auth metrics |
+| `ZCourierAuthFailureRatioHigh` | Auth backend/JWT issue or client token rollout problem | Check auth provider status and rejected bind logs |
+| `ZCourierHMACSignatureFailures` | Wrong key ID, secret mismatch, clock skew, replay | Check internal and peer HMAC config on both caller and gateway |
+| `ZCourierUpstreamFailureRatioHigh` | Business backend, NSQ, network, or route config problem | Run `cmd/admin routes` and `cmd/admin check`; inspect upstream logs |
+| `ZCourierUpstreamOverloadRejects` | Upstream capacity limit reached | Check backend latency, route `max_in_flight`, and load-test traffic |
+| `ZCourierInternalHTTPOverloadRejects` | Backend push/admin pressure exceeds gateway limit | Check internal push rate and `internal_http.max_in_flight` |
+| `ZCourierDownlinkPushFailures` | Missing route, peer push issue, storage/retry problem | Run `cmd/admin route` for affected client/device |
+| `ZCourierDownlinkACKLatencyHigh` | Slow clients, network trouble, retry pressure | Check client connection stability and peer push latency |
+| `ZCourierRetryWorkerFailures` | PostgreSQL or retry claim problem | Check Postgres health and gateway retry worker logs |
+| `ZCourierClusterPeerPushFailureRatioHigh` | Peer gateway unreachable or peer auth mismatch | Check peer internal HTTP, HMAC keys, and NetworkPolicy |
+| `ZCourierClusterStaleRoutesDetected` | Redis TTL/refresh issue or unbind cleanup problem | Inspect Redis route key and gateway disconnect logs |
+| `ZCourierJWKSRefreshFailures` | JWKS endpoint unreachable or malformed key set | Check JWKS endpoint status, response size, and key format |
+
 ## Admin Command Reference
 
 Inspect one gateway node:

@@ -114,6 +114,23 @@ Adjust namespace labels and dependency ports before applying it.
 If `clientService` is exposed directly through a cloud `LoadBalancer`, adjust
 the client ingress rule for your CNI and load balancer source behavior.
 
+## Prometheus Alerts
+
+The chart can render a `ServiceMonitor` when `serviceMonitor.enabled=true`, but
+it does not install Prometheus, Grafana, Alertmanager, or PrometheusRule
+resources by default.
+
+Prometheus Operator users can start from:
+
+```bash
+kubectl apply -f deploy/helm/z-courier/examples/prometheusrule.yaml
+```
+
+The example requires Prometheus Operator CRDs. Tune thresholds, labels, and
+notification routing before using it for production paging. The Compose
+monitoring stack uses the equivalent Prometheus rule file at
+`deploy/monitoring/prometheus/rules/z-courier-alerts.yml`.
+
 ## Required Secrets
 
 By default, the chart references an existing secret. The default key names are:

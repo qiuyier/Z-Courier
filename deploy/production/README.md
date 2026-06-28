@@ -234,6 +234,12 @@ curl http://127.0.0.1:9090/-/ready
 ```
 
 The gateway metrics target is `gateway:18080` inside the Compose network.
+Prometheus also loads the bundled Z-Courier recording and alert rules from
+`deploy/monitoring/prometheus/rules/z-courier-alerts.yml`. Open
+`Status -> Rules` in Prometheus to review active rules and firing alerts.
+
+This reference stack evaluates alerts but does not send notifications. Connect
+Alertmanager or your platform alerting system before using the rules for paging.
 
 ## CI Smoke
 

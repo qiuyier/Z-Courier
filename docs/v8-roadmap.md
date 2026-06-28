@@ -151,14 +151,22 @@ Acceptance criteria:
 
 Purpose: turn existing metrics into production signals.
 
+First-pass status:
+
+- Added bundled Prometheus recording and alert rules for the main gateway,
+  auth, upstream, downlink, retry, cluster, HMAC, and JWKS failure modes.
+- Added a Grafana `Z-Courier Production Signals` dashboard for alert-oriented
+  operational views.
+- Added runbook links to alert annotations.
+
 Candidate work:
 
-- Add example Prometheus alert rules for high-priority failure modes.
-- Add recording rules or documented PromQL for common rates and percentiles.
-- Extend Grafana dashboards for dependency health, admin diagnostics, stale
-  cluster routes, retry backlog, failed messages, overload rejections, HMAC
-  failures, auth failures, and peer push latency.
-- Add alert runbook links in annotations where practical.
+- Extend alert examples after real production traffic calibrates thresholds.
+- Add documented PromQL for dependency checks that are currently available
+  through `cmd/admin check` but not exported as Prometheus metrics.
+- Continue dashboard governance around stale cluster routes, retry backlog,
+  failed messages, overload rejections, HMAC failures, auth failures, and peer
+  push latency.
 - Keep load-test baseline comparisons informational unless the release process
   explicitly promotes them to a hard gate.
 

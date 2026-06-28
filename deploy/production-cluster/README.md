@@ -173,6 +173,13 @@ gateway-a:18080
 gateway-b:18080
 ```
 
+Prometheus also loads the bundled Z-Courier recording and alert rules from
+`deploy/monitoring/prometheus/rules/z-courier-alerts.yml`. Open
+`Status -> Rules` in Prometheus to review active rules and firing alerts.
+
+This reference stack evaluates alerts but does not send notifications. Connect
+Alertmanager or your platform alerting system before using the rules for paging.
+
 For a full runtime cluster delivery check, use the local verifier:
 
 ```bash

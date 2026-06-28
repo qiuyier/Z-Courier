@@ -1,0 +1,168 @@
+groups:
+  - name: z-courier.recording
+    rules:
+      - record: z_courier:ingress_rejected:rate5m
+        expr: sum by (job, instance, ack_code) (rate(z_courier_ingress_rejected_total[5m]))
+
+      - record: z_courier:auth_failures:rate5m
+        expr: sum by (job, instance, provider, result) (rate(z_courier_auth_verify_total{result!="success"}[5m]))
+
+      - record: z_courier:upstream_failures:rate5m
+        expr: sum by (job, instance, route, target_type, result) (rate(z_courier_upstream_forward_total{result!="success"}[5m]))
+
+      - record: z_courier:upstream_forward:p95_seconds
+        expr: histogram_quantile(0.95, sum by (job, instance, route, target_type, le) (rate(z_courier_upstream_forward_duration_seconds_bucket[5m])))
+
+      - record: z_courier:downlink_ack:p99_seconds
+        expr: histogram_quantile(0.99, sum by (job, instance, msg_id, le) (rate(z_courier_downlink_ack_latency_seconds_bucket[5m])))
+
+      - record: z_courier:peer_push_failures:rate5m
+        expr: sum by (job, instance, target_node, result) (rate(z_courier_cluster_peer_push_total{result!="success"}[5m]))
+
+      - record: z_courier:retry_failures:rate5m
+        expr: sum by (job, instance, result) (rate(z_courier_downlink_retry_scan_total{result!="success"}[5m]))
+
+  - name: z-courier.alerts
+    rules:
+      - alert: ZCourierGatewayTargetDown
+        expr: up{job=~"z-courier.*"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: gateway
+        annotations:
+          summary: "Z-Courier gateway metrics target is down"
+          description: "Prometheus cannot scrape {{ $labels.instance }} for job {{ $labels.job }}."
+          runbook_url: "https://github.com/qiuyier/Z-Courier/blob/main/docs/v5-production-runbook.md#gateway-unreachable"
+
+      - alert: ZCourierIngressRejectedSpike
+        expr: sum(rate(z_courier_ingress_rejected_total[5m])) > 5
+        for: 5m
+        labels:
+          severity: warning
+          component: ingress
+        annotations:
+          summary: "Z-Courier ingress rejects are elevated"
+          description: "Ingress rejects are above 5/sec for 5 minutes. Check auth/bind failures, malformed packets, and rate limits."
+          runbook_url: "https://github.com/qiuyier/Z-Courier/blob/main/docs/v5-production-runbook.md#client-cannot-connect-or-bind"
+
+      - alert: ZCourierAuthFailureRatioHigh
+        expr: (sum(rate(z_courier_auth_verify_total{result!="success"}[5m])) / clamp_min(sum(rate(z_courier_auth_verify_total[5m])), 1e-9)) > 0.05 and sum(rate(z_courier_auth_verify_total[5m])) > 1
+        for: 5m
+        labels:
+          severity: warning
+          component: auth
+        annotations:
+          summary: "Z-Courier auth failure ratio is high"
+          description: "More than 5% of auth verification attempts failed while auth traffic is above 1/sec."
+          runbook_url: "https://github.com/qiuyier/Z-Courier/blob/main/docs/v5-production-runbook.md#client-cannot-connect-or-bind"
+
+      - alert: ZCourierHMACSignatureFailures
+        expr: sum(rate(z_courier_internal_http_signature_total{result!="success"}[5m])) + sum(rate(z_courier_cluster_peer_signature_total{result!="success"}[5m])) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          component: internal-http
+        annotations:
+          summary: "Z-Courier HMAC signature failures detected"
+          description: "Internal HTTP or cluster peer HMAC verification is failing. Check key IDs, clock skew, nonce replay, and rollout overlap."
+          runbook_url: "https://github.com/qiuyier/Z-Courier/blob/main/docs/v5-production-runbook.md#internal-hmac-failures"
+
+      - alert: ZCourierUpstreamFailureRatioHigh
+        expr: (sum(rate(z_courier_upstream_forward_total{result!="success"}[5m])) / clamp_min(sum(rate(z_courier_upstream_forward_total[5m])), 1e-9)) > 0.05 and sum(rate(z_courier_upstream_forward_total[5m])) > 1
+        for: 5m
+        labels:
+          severity: warning
+          component: upstream
+        annotations:
+          summary: "Z-Courier upstream forwarding failure ratio is high"
+          description: "More than 5% of upstream forwards failed while upstream traffic is above 1/sec."
+          runbook_url: "https://github.com/qiuyier/Z-Courier/blob/main/docs/v5-production-runbook.md#upstream-forwarding-failures"
+
+      - alert: ZCourierUpstreamOverloadRejects
+        expr: sum(rate(z_courier_upstream_overload_rejected_total[5m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+          component: upstream
+        annotations:
+          summary: "Z-Courier upstream capacity limiter is rejecting messages"
+          description: "At least one upstream route is overloaded and rejecting forwards."
+          runbook_url: "https://github.com/qiuyier/Z-Courier/blob/main/docs/v5-production-runbook.md#capacity-or-overload-rejections"
+
+      - alert: ZCourierInternalHTTPOverloadRejects
+        expr: sum(rate(z_courier_internal_http_overload_rejected_total[5m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+          component: internal-http
+        annotations:
+          summary: "Z-Courier internal HTTP limiter is rejecting requests"
+          description: "Internal HTTP push/admin capacity is saturated. Check backend push rate and max_in_flight settings."
+          runbook_url: "https://github.com/qiuyier/Z-Courier/blob/main/docs/v5-production-runbook.md#capacity-or-overload-rejections"
+
+      - alert: ZCourierDownlinkPushFailures
+        expr: sum(rate(z_courier_downlink_push_total{result!~"sent|queued"}[5m])) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          component: downlink
+        annotations:
+          summary: "Z-Courier downlink push failures detected"
+          description: "Downlink push results other than sent or queued are above 0.1/sec."
+          runbook_url: "https://github.com/qiuyier/Z-Courier/blob/main/docs/v5-production-runbook.md#client-not-receiving-downlink"
+
+      - alert: ZCourierDownlinkACKLatencyHigh
+        expr: histogram_quantile(0.99, sum by (le) (rate(z_courier_downlink_ack_latency_seconds_bucket[5m]))) > 10
+        for: 10m
+        labels:
+          severity: warning
+          component: downlink
+        annotations:
+          summary: "Z-Courier downlink ACK p99 latency is high"
+          description: "ACK p99 latency is above 10 seconds for 10 minutes. Check client connectivity, peer push, and retry load."
+          runbook_url: "https://github.com/qiuyier/Z-Courier/blob/main/docs/v5-production-runbook.md#client-not-receiving-downlink"
+
+      - alert: ZCourierRetryWorkerFailures
+        expr: sum(rate(z_courier_downlink_retry_scan_total{result!="success"}[5m])) + sum(rate(z_courier_downlink_retry_claim_messages_total{result!="success"}[5m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+          component: downlink-retry
+        annotations:
+          summary: "Z-Courier downlink retry worker failures detected"
+          description: "Retry scan or claim operations are failing. Check PostgreSQL, leases, and gateway logs."
+          runbook_url: "https://github.com/qiuyier/Z-Courier/blob/main/docs/v5-production-runbook.md#retry-backlog-growing"
+
+      - alert: ZCourierClusterPeerPushFailureRatioHigh
+        expr: (sum(rate(z_courier_cluster_peer_push_total{result!="success"}[5m])) / clamp_min(sum(rate(z_courier_cluster_peer_push_total[5m])), 1e-9)) > 0.05 and sum(rate(z_courier_cluster_peer_push_total[5m])) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          component: cluster
+        annotations:
+          summary: "Z-Courier cluster peer push failure ratio is high"
+          description: "More than 5% of peer pushes failed. Check peer internal HTTP, HMAC config, and network policy."
+          runbook_url: "https://github.com/qiuyier/Z-Courier/blob/main/docs/v5-production-runbook.md#peer-push-failing"
+
+      - alert: ZCourierClusterStaleRoutesDetected
+        expr: sum(rate(z_courier_cluster_stale_routes_total[5m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+          component: cluster
+        annotations:
+          summary: "Z-Courier stale cluster routes detected"
+          description: "Gateway is observing stale online routes. Check Redis TTL, route refresh, and disconnect cleanup."
+          runbook_url: "https://github.com/qiuyier/Z-Courier/blob/main/docs/v5-production-runbook.md#redis-route-stale-or-wrong-node"
+
+      - alert: ZCourierJWKSRefreshFailures
+        expr: sum(rate(z_courier_auth_jwks_refresh_total{result!="success"}[5m])) > 0
+        for: 10m
+        labels:
+          severity: warning
+          component: auth
+        annotations:
+          summary: "Z-Courier JWKS refresh failures detected"
+          description: "JWT/JWKS refresh is failing. Check JWKS endpoint reachability, status code, response size, and key format."
+          runbook_url: "https://github.com/qiuyier/Z-Courier/blob/main/docs/v5-production-runbook.md#client-cannot-connect-or-bind"
