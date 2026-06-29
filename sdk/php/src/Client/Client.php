@@ -19,6 +19,8 @@ use ZCourier\Protocol\Packet;
 
 final class Client
 {
+    private const BLOCKING_READ_TIMEOUT_SECONDS = 2147483647;
+
     /** @var resource|null */
     private mixed $stream = null;
     private State $state = State::Disconnected;
@@ -93,7 +95,7 @@ final class Client
             $bind = $this->newBindPacket($token);
             $this->writeAll(FrameCodec::encode($bind, $this->config->maxFramePayloadSize));
             $binding = $this->waitForBindAck($bind->messageId);
-            $this->setReadTimeout(0.0);
+            $this->setBlockingReadTimeout();
 
             $this->binding = $binding;
             $this->token = $token;
@@ -184,7 +186,7 @@ final class Client
             try {
                 $ack = $this->waitForBusinessAck($request->msgId, $messageId);
             } finally {
-                $this->setReadTimeout(0.0);
+                $this->setBlockingReadTimeout();
             }
             return new SendResult($messageId, $ack);
         } catch (ProtocolException $error) {
@@ -210,7 +212,11 @@ final class Client
         }
 
         try {
-            $this->setReadTimeout($timeout ?? 0.0);
+            if ($timeout === null) {
+                $this->setBlockingReadTimeout();
+            } else {
+                $this->setReadTimeout($timeout);
+            }
             while (true) {
                 if ($this->inboundQueue !== []) {
                     /** @var Packet $packet */
@@ -239,7 +245,7 @@ final class Client
             throw $error;
         } finally {
             if (is_resource($this->stream)) {
-                $this->setReadTimeout(0.0);
+                $this->setBlockingReadTimeout();
             }
         }
     }
@@ -273,7 +279,7 @@ final class Client
                 return $this->waitForBusinessAck(Packet::MSG_ID_DOWNLINK_ACK, $messageId);
             } finally {
                 if (is_resource($this->stream)) {
-                    $this->setReadTimeout(0.0);
+                    $this->setBlockingReadTimeout();
                 }
             }
         } catch (ProtocolException $error) {
@@ -657,6 +663,16 @@ final class Client
         [$seconds, $microseconds] = self::timeoutParts($timeout);
         if (!stream_set_timeout($this->stream, $seconds, $microseconds)) {
             throw new ClientException(ClientException::IO_ERROR, 'cannot configure connection timeout');
+        }
+    }
+
+    private function setBlockingReadTimeout(): void
+    {
+        if (!is_resource($this->stream)) {
+            throw new ClientException(ClientException::IO_ERROR, 'connection stream is unavailable');
+        }
+        if (!stream_set_timeout($this->stream, self::BLOCKING_READ_TIMEOUT_SECONDS, 0)) {
+            throw new ClientException(ClientException::IO_ERROR, 'cannot configure blocking connection timeout');
         }
     }
 

@@ -36,7 +36,7 @@ final class PairConnector implements Connector
     {
         $stream = $this->stream;
         $this->stream = null;
-        return $stream;
+        return prepareClientStream($stream);
     }
 }
 
@@ -59,8 +59,19 @@ final class SequenceConnector implements Connector
         if ($connection instanceof Throwable) {
             throw $connection;
         }
-        return $connection;
+        return prepareClientStream($connection);
     }
+}
+
+function prepareClientStream(mixed $stream): mixed
+{
+    if (!is_resource($stream)) {
+        return $stream;
+    }
+    if (!stream_set_blocking($stream, true)) {
+        throw new RuntimeException('cannot enable blocking test stream mode');
+    }
+    return $stream;
 }
 
 $root = dirname(__DIR__, 3);
