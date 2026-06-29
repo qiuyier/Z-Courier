@@ -7,6 +7,8 @@ semantic versioning after the first public MVP tag.
 
 ## [Unreleased]
 
+## [v0.8.0] - 2026-06-30
+
 ### Added
 
 - V8 roadmap covering production diagnostics, configuration validation, admin
