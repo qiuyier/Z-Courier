@@ -171,6 +171,7 @@ downlink:
   delivery:
     retry_interval: 7s
     retry_delay: 11s
+    retry_jitter: 3s
     ack_timeout: 12s
     retry_lease: 13s
     max_attempts: 6
@@ -338,6 +339,9 @@ upstream:
 	}
 	if config.DownlinkDelivery.RetryDelay != 11*time.Second {
 		t.Fatalf("DownlinkDelivery RetryDelay = %v, want 11s", config.DownlinkDelivery.RetryDelay)
+	}
+	if config.DownlinkDelivery.RetryJitter != 3*time.Second {
+		t.Fatalf("DownlinkDelivery RetryJitter = %v, want 3s", config.DownlinkDelivery.RetryJitter)
 	}
 	if config.DownlinkDelivery.AckTimeout != 12*time.Second {
 		t.Fatalf("DownlinkDelivery AckTimeout = %v, want 12s", config.DownlinkDelivery.AckTimeout)
@@ -830,6 +834,19 @@ func TestLoadServerConfigInvalidDownlinkRetryLease(t *testing.T) {
 downlink:
   delivery:
     retry_lease: 0s
+`)
+
+	_, err := LoadServerConfig(path)
+	if err == nil {
+		t.Fatal("LoadServerConfig() error = nil, want error")
+	}
+}
+
+func TestLoadServerConfigInvalidDownlinkRetryJitter(t *testing.T) {
+	path := writeConfig(t, `
+downlink:
+  delivery:
+    retry_jitter: -1s
 `)
 
 	_, err := LoadServerConfig(path)

@@ -116,6 +116,7 @@ downlink:
   delivery:
     retryInterval: 5s
     retryDelay: 30s
+    retryJitter: 5s
     ackTimeout: 30s
     retryLease: 30s
     maxAttempts: 10

@@ -200,6 +200,7 @@
           "properties": {
             "retryInterval": { "$ref": "#/definitions/duration" },
             "retryDelay": { "$ref": "#/definitions/duration" },
+            "retryJitter": { "$ref": "#/definitions/duration" },
             "ackTimeout": { "$ref": "#/definitions/duration" },
             "retryLease": { "$ref": "#/definitions/duration" },
             "maxAttempts": { "$ref": "#/definitions/nonNegativeInteger" },

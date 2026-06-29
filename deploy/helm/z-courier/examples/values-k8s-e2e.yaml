@@ -76,6 +76,7 @@ downlink:
   delivery:
     retryInterval: 1s
     retryDelay: 1s
+    retryJitter: 0s
     ackTimeout: 1s
     retryLease: 5s
     maxAttempts: 5

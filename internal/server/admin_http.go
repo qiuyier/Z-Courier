@@ -67,6 +67,7 @@ type adminDownlinkSummary struct {
 	StoreConfigured bool   `json:"store_configured"`
 	RetryInterval   string `json:"retry_interval,omitempty"`
 	RetryDelay      string `json:"retry_delay,omitempty"`
+	RetryJitter     string `json:"retry_jitter,omitempty"`
 	AckTimeout      string `json:"ack_timeout,omitempty"`
 	RetryLease      string `json:"retry_lease,omitempty"`
 	MaxAttempts     int    `json:"max_attempts,omitempty"`
@@ -362,6 +363,7 @@ func adminDownlinkFromConfig(config Config) adminDownlinkSummary {
 		StoreConfigured: config.DownlinkStore != nil,
 		RetryInterval:   durationString(config.DownlinkDelivery.RetryInterval),
 		RetryDelay:      durationString(config.DownlinkDelivery.RetryDelay),
+		RetryJitter:     durationString(config.DownlinkDelivery.RetryJitter),
 		AckTimeout:      durationString(config.DownlinkDelivery.AckTimeout),
 		RetryLease:      durationString(config.DownlinkDelivery.RetryLease),
 		MaxAttempts:     config.DownlinkDelivery.MaxAttempts,

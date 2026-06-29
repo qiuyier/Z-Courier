@@ -199,7 +199,9 @@ Candidate work:
 
 - Review internal HTTP and upstream overload paths for consistent status codes,
   error bodies, metrics, and logs.
-- Add retry jitter where useful to avoid synchronized retry bursts.
+- Add retry jitter where useful to avoid synchronized retry bursts. First pass:
+  `downlink.delivery.retry_jitter` spreads failed downlink retries after
+  `retry_delay`.
 - Add clearer circuit-breaker or degraded-state behavior for repeated upstream,
   Redis, PostgreSQL, or auth-provider failures.
 - Make drain behavior more visible through diagnostics and metrics.

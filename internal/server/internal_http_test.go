@@ -231,6 +231,9 @@ func TestInternalHTTPAdminDiagnostics(t *testing.T) {
 		InternalHTTPAddr: "0.0.0.0:18080",
 		InternalToken:    "secret",
 		DownlinkStore:    store,
+		DownlinkDelivery: DownlinkDeliveryConfig{
+			RetryJitter: 5 * time.Second,
+		},
 		Cluster: ClusterConfig{
 			Enabled:      true,
 			InternalAddr: "http://gateway-a:18080",
@@ -298,6 +301,9 @@ func TestInternalHTTPAdminDiagnostics(t *testing.T) {
 	}
 	if resp.Capacity.InternalHTTPMaxInFlight == 0 || resp.Capacity.UpstreamLimitedRoutes != 1 {
 		t.Fatalf("capacity diagnostics = %+v, want configured limits", resp.Capacity)
+	}
+	if resp.Downlink.RetryJitter != "5s" {
+		t.Fatalf("downlink diagnostics retry_jitter = %q, want 5s", resp.Downlink.RetryJitter)
 	}
 	if len(resp.Dependencies) == 0 || len(resp.Warnings) == 0 {
 		t.Fatalf("dependencies/warnings = %+v/%+v, want non-empty", resp.Dependencies, resp.Warnings)

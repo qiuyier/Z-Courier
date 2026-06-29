@@ -82,6 +82,7 @@ data:
       delivery:
         retry_interval: {{ .Values.downlink.delivery.retryInterval | quote }}
         retry_delay: {{ .Values.downlink.delivery.retryDelay | quote }}
+        retry_jitter: {{ .Values.downlink.delivery.retryJitter | quote }}
         ack_timeout: {{ .Values.downlink.delivery.ackTimeout | quote }}
         retry_lease: {{ .Values.downlink.delivery.retryLease | quote }}
         max_attempts: {{ .Values.downlink.delivery.maxAttempts }}

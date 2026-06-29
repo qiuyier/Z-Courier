@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"net/http"
 	"time"
 
@@ -31,6 +32,8 @@ type Service struct {
 	store           Store
 	now             func() time.Time
 	retryDelay      time.Duration
+	retryJitter     time.Duration
+	retryJitterFunc func(time.Duration) time.Duration
 	ackTimeout      time.Duration
 	retryClaimOwner string
 	retryClaimLease time.Duration
@@ -59,6 +62,14 @@ func WithRetryDelay(delay time.Duration) ServiceOption {
 	return func(s *Service) {
 		if delay > 0 {
 			s.retryDelay = delay
+		}
+	}
+}
+
+func WithRetryJitter(jitter time.Duration) ServiceOption {
+	return func(s *Service) {
+		if jitter > 0 {
+			s.retryJitter = jitter
 		}
 	}
 }
@@ -102,6 +113,7 @@ func NewService(sessions SessionFinder, connections ConnectionFinder, options ..
 		connections:     connections,
 		now:             time.Now,
 		retryDelay:      30 * time.Second,
+		retryJitterFunc: randomRetryJitter,
 		ackTimeout:      30 * time.Second,
 		retryClaimLease: 30 * time.Second,
 		maxAttempts:     5,
@@ -276,7 +288,7 @@ func (s *Service) pushReliable(ctx context.Context, req PushRequest) (*PushRespo
 
 	sentResp, err := s.deliverOnline(ctx, pushRequestFromMessage(message))
 	if err != nil {
-		if err := s.store.MarkAttemptFailed(ctx, message.MessageID, err.Error(), s.now().Add(s.retryDelay)); err != nil {
+		if err := s.store.MarkAttemptFailed(ctx, message.MessageID, err.Error(), s.nextRetryAt(s.now())); err != nil {
 			return nil, fmt.Errorf("%w: %v", ErrStore, err)
 		}
 		return resp, nil
@@ -483,7 +495,7 @@ func (s *Service) retryMessage(ctx context.Context, message Message) (MessageSta
 			return MessageStatusFailed, nil
 		}
 
-		if err := s.store.MarkAttemptFailed(ctx, message.MessageID, err.Error(), s.now().Add(s.retryDelay)); err != nil {
+		if err := s.store.MarkAttemptFailed(ctx, message.MessageID, err.Error(), s.nextRetryAt(s.now())); err != nil {
 			return "", fmt.Errorf("%w: %v", ErrStore, err)
 		}
 		return MessageStatusPending, nil
@@ -502,6 +514,35 @@ func (s *Service) ackTimedOut(message Message) bool {
 	}
 
 	return !message.SentAt.Add(s.ackTimeout).After(s.now())
+}
+
+func (s *Service) nextRetryAt(now time.Time) time.Time {
+	return now.Add(s.retryDelay + s.nextRetryJitter())
+}
+
+func (s *Service) nextRetryJitter() time.Duration {
+	if s.retryJitter <= 0 {
+		return 0
+	}
+	jitterFunc := s.retryJitterFunc
+	if jitterFunc == nil {
+		jitterFunc = randomRetryJitter
+	}
+	jitter := jitterFunc(s.retryJitter)
+	if jitter < 0 {
+		return 0
+	}
+	if jitter > s.retryJitter {
+		return s.retryJitter
+	}
+	return jitter
+}
+
+func randomRetryJitter(max time.Duration) time.Duration {
+	if max <= 0 {
+		return 0
+	}
+	return time.Duration(rand.Int64N(int64(max)))
 }
 
 func (s *Service) pushOnline(req PushRequest) (*PushResponse, error) {

@@ -36,6 +36,8 @@ downlink:
     postgres:
       dsn: "postgres://zcourier:${ZCOURIER_POSTGRES_PASSWORD}@postgresql.z-courier.svc.cluster.local:5432/zcourier?sslmode=disable"
       autoMigrate: true
+  delivery:
+    retryJitter: 5s
 
 upstream:
   routes:

@@ -157,6 +157,52 @@ func TestServiceReliablePushQueuesOfflineMessage(t *testing.T) {
 	}
 }
 
+func TestServiceReliablePushAppliesRetryJitter(t *testing.T) {
+	now := time.UnixMilli(1760000000000)
+	store := NewMemoryStore()
+	service := NewService(
+		fakeSessions{},
+		fakeConnections{},
+		WithStore(store),
+		WithRetryDelay(10*time.Second),
+		WithRetryJitter(5*time.Second),
+	)
+	service.now = func() time.Time { return now }
+	service.retryJitterFunc = func(max time.Duration) time.Duration {
+		if max != 5*time.Second {
+			t.Fatalf("retry jitter max = %v, want 5s", max)
+		}
+		return 3 * time.Second
+	}
+	store.now = service.now
+
+	resp, err := service.Push(context.Background(), PushRequest{
+		ClientID:  "client-1",
+		DeviceID:  "device-1",
+		MsgID:     2001,
+		MessageID: "message-1",
+		Body:      []byte("hello"),
+	})
+	if err != nil {
+		t.Fatalf("Push() error = %v", err)
+	}
+	if resp.DeliveryState != DeliveryStateQueued {
+		t.Fatalf("DeliveryState = %q, want %q", resp.DeliveryState, DeliveryStateQueued)
+	}
+
+	stored, ok, err := store.Get(context.Background(), "message-1")
+	if err != nil {
+		t.Fatalf("store.Get() error = %v", err)
+	}
+	if !ok {
+		t.Fatal("stored message not found")
+	}
+	want := now.Add(13 * time.Second)
+	if !stored.NextRetryAt.Equal(want) {
+		t.Fatalf("stored NextRetryAt = %v, want %v", stored.NextRetryAt, want)
+	}
+}
+
 func TestServiceReliablePushSendsRemoteClusterMessage(t *testing.T) {
 	now := time.UnixMilli(1760000000000)
 	store := NewMemoryStore()

@@ -94,6 +94,7 @@ type DownlinkPostgresConfig struct {
 type DownlinkDeliveryConfig struct {
 	RetryInterval  time.Duration
 	RetryDelay     time.Duration
+	RetryJitter    time.Duration
 	AckTimeout     time.Duration
 	RetryLease     time.Duration
 	MaxAttempts    int
@@ -193,6 +194,7 @@ func DefaultConfig() Config {
 		DownlinkDelivery: DownlinkDeliveryConfig{
 			RetryInterval:  5 * time.Second,
 			RetryDelay:     30 * time.Second,
+			RetryJitter:    0,
 			AckTimeout:     30 * time.Second,
 			RetryLease:     30 * time.Second,
 			MaxAttempts:    5,
@@ -330,6 +332,9 @@ func normalizeConfig(config Config) Config {
 	}
 	if config.DownlinkDelivery.RetryDelay <= 0 {
 		config.DownlinkDelivery.RetryDelay = defaults.DownlinkDelivery.RetryDelay
+	}
+	if config.DownlinkDelivery.RetryJitter < 0 {
+		config.DownlinkDelivery.RetryJitter = 0
 	}
 	if config.DownlinkDelivery.AckTimeout <= 0 {
 		config.DownlinkDelivery.AckTimeout = defaults.DownlinkDelivery.AckTimeout

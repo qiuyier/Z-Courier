@@ -523,6 +523,7 @@ downlink:
   delivery:
     retry_interval: 5s
     retry_delay: 30s
+    retry_jitter: 5s
     ack_timeout: 30s
     retry_lease: 30s
     max_attempts: 5
@@ -544,6 +545,8 @@ for local development, but queued messages are lost on gateway restart.
 Stored messages are retried in three ways:
 
 - The retry worker scans due pending messages every `retry_interval`.
+- Failed sends are scheduled after `retry_delay` plus a random `retry_jitter`
+  window to avoid synchronized retry bursts across clients and gateway nodes.
 - When a client session is newly bound, the gateway immediately flushes pending
   messages for that `client_id` + `device_id`, up to `bind_flush_limit`.
 - Sent messages that require client ACK are retried after `ack_timeout` if the

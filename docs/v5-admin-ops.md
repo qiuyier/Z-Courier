@@ -59,6 +59,7 @@ Example:
     "store_configured": true,
     "retry_interval": "5s",
     "retry_delay": "30s",
+    "retry_jitter": "5s",
     "ack_timeout": "30s",
     "retry_lease": "30s",
     "max_attempts": 10,

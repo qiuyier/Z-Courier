@@ -365,6 +365,23 @@ Important fields:
 
 The audit log must not include internal tokens or HMAC secrets.
 
+### Retry Burst Tuning
+
+If many clients reconnect or a dependency recovers at the same time, failed
+downlink messages can become due together. Keep `retry_delay` as the minimum
+backoff and use `retry_jitter` to spread the next attempt across a small random
+window.
+
+Recommended starting point:
+
+- `retry_delay`: `30s`
+- `retry_jitter`: `5s`
+- `retry_interval`: `5s`
+
+Use `retry_jitter: 0s` for deterministic local tests. In production, prefer a
+jitter window around 10-25% of `retry_delay` unless the downstream dependency
+needs a wider recovery window.
+
 ### Upstream Is Not Forwarding
 
 Check route ranges:
