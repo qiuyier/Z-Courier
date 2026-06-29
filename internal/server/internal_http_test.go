@@ -201,7 +201,8 @@ func TestInternalHTTPAdminOverview(t *testing.T) {
 		t.Fatalf("downlink/upstream = %+v/%+v, want store configured and one route", resp.Downlink, resp.Upstream)
 	}
 
-	health.BeginDrain()
+	drainStartedAt := time.UnixMilli(1760000000000)
+	health.BeginDrainAt(drainStartedAt)
 	req = httptest.NewRequest(http.MethodGet, "/internal/admin/overview", nil)
 	req.Header.Set(downlink.InternalTokenHeader, "secret")
 	rec = httptest.NewRecorder()
@@ -214,6 +215,26 @@ func TestInternalHTTPAdminOverview(t *testing.T) {
 	}
 	if resp.Readiness.Ready || resp.Readiness.Status != "draining" {
 		t.Fatalf("draining readiness = %+v, want draining", resp.Readiness)
+	}
+	if !resp.Readiness.DrainingSince.Equal(drainStartedAt.UTC()) || resp.Readiness.DrainDuration == "" {
+		t.Fatalf("draining readiness timing = %+v, want since and duration", resp.Readiness)
+	}
+}
+
+func TestAdminReadinessIncludesDrainTiming(t *testing.T) {
+	health := &gatewayHealth{}
+	startedAt := time.UnixMilli(1760000000000)
+	health.BeginDrainAt(startedAt)
+
+	readiness := adminReadinessFromHealth(health, startedAt.Add(2*time.Second))
+	if readiness.Ready || readiness.Status != "draining" {
+		t.Fatalf("readiness = %+v, want draining", readiness)
+	}
+	if !readiness.DrainingSince.Equal(startedAt.UTC()) {
+		t.Fatalf("DrainingSince = %v, want %v", readiness.DrainingSince, startedAt.UTC())
+	}
+	if readiness.DrainDuration != "2s" {
+		t.Fatalf("DrainDuration = %q, want 2s", readiness.DrainDuration)
 	}
 }
 
@@ -554,7 +575,7 @@ func TestInternalHTTPHealthAndReady(t *testing.T) {
 		t.Fatalf("/readyz status = %d, want %d", rec.Code, http.StatusOK)
 	}
 
-	health.BeginDrain()
+	health.BeginDrainAt(time.UnixMilli(1760000000000))
 	req = httptest.NewRequest(http.MethodGet, "/readyz", nil)
 	rec = httptest.NewRecorder()
 	server.Handler.ServeHTTP(rec, req)

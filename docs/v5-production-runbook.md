@@ -97,6 +97,7 @@ before changing message state.
 | Readiness | `/readyz` returns `200` outside drain/shutdown |
 | Admin overview | `readiness.ready=true` and dependencies are available |
 | Prometheus | gateway target is `UP` |
+| Drain | `z_courier_gateway_readiness{status="ready"} == 1` outside shutdown |
 | Sessions | `z_courier_sessions_online` matches expected live connections |
 | Clients | `z_courier_clients_online` matches unique online ClientIDs |
 | Downlink | `downlink_push_total{result="sent"}` or `queued` increases as expected |
@@ -542,8 +543,19 @@ PromQL:
 ```promql
 sum by (instance) (z_courier_sessions_online)
 sum by (instance) (z_courier_clients_online)
+sum by (instance, status) (z_courier_gateway_readiness)
 sum by (reason) (rate(z_courier_cluster_stale_routes_total[1m]))
 ```
+
+If a node stays draining for more than the expected rollout window, run:
+
+```bash
+go run ./cmd/admin diagnostics \
+  -internal-url "$ZCOURIER_ADMIN_INTERNAL_URL"
+```
+
+Check `readiness.draining_since`, `readiness.drain_duration`, remaining online
+sessions, and cluster route cleanup logs.
 
 ## Load-Test And Baseline Review
 

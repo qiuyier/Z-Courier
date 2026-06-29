@@ -206,7 +206,9 @@ Candidate work:
   Redis, PostgreSQL, or auth-provider failures. First pass: HTTP upstream routes
   track `healthy`, `degraded`, and `unavailable` runtime states in diagnostics
   and expose `z_courier_upstream_route_degraded`.
-- Make drain behavior more visible through diagnostics and metrics.
+- Make drain behavior more visible through diagnostics and metrics. First pass:
+  readiness diagnostics include drain timing and Prometheus exposes
+  `z_courier_gateway_readiness`.
 - Document safe tuning ranges for retry delay, lease duration, scan limits,
   bind flush limits, and in-flight limits.
 

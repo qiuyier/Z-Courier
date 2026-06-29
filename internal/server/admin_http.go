@@ -37,8 +37,10 @@ type adminOverviewResponse struct {
 }
 
 type adminReadiness struct {
-	Ready  bool   `json:"ready"`
-	Status string `json:"status"`
+	Ready         bool      `json:"ready"`
+	Status        string    `json:"status"`
+	DrainingSince time.Time `json:"draining_since,omitempty"`
+	DrainDuration string    `json:"drain_duration,omitempty"`
 }
 
 type adminSessionSummary struct {
@@ -224,10 +226,8 @@ func (h *adminOverviewHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	}
 
 	config := h.config.config
-	readiness := adminReadiness{Ready: h.config.health.Ready(), Status: "ready"}
-	if !readiness.Ready {
-		readiness.Status = "draining"
-	}
+	now := time.Now()
+	readiness := adminReadinessFromHealth(h.config.health, now)
 
 	sessions := adminSessionSummary{}
 	if config.Sessions != nil {
@@ -297,7 +297,7 @@ func (h *adminDiagnosticsHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		Code:         "ok",
 		GatewayNode:  h.config.gatewayNode,
 		Runtime:      adminRuntimeFromRuntime(h.runtime, now),
-		Readiness:    adminReadinessFromHealth(h.config.health),
+		Readiness:    adminReadinessFromHealth(h.config.health, now),
 		Sessions:     adminSessionsFromConfig(config),
 		Auth:         adminAuthFromConfig(config),
 		InternalHTTP: adminInternalHTTPFromConfig(config),
@@ -325,10 +325,14 @@ func adminRuntimeFromRuntime(runtime *gatewayRuntime, now time.Time) adminRuntim
 	return out
 }
 
-func adminReadinessFromHealth(health *gatewayHealth) adminReadiness {
+func adminReadinessFromHealth(health *gatewayHealth, now time.Time) adminReadiness {
 	readiness := adminReadiness{Ready: health.Ready(), Status: "ready"}
 	if !readiness.Ready {
 		readiness.Status = "draining"
+		if since, ok := health.DrainingSince(); ok {
+			readiness.DrainingSince = since.UTC()
+			readiness.DrainDuration = durationString(health.DrainDuration(now))
+		}
 	}
 	return readiness
 }

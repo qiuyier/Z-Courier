@@ -3,10 +3,12 @@ package server
 import (
 	"net/http"
 	"sync/atomic"
+	"time"
 )
 
 type gatewayHealth struct {
-	draining atomic.Bool
+	draining             atomic.Bool
+	drainStartedUnixNano atomic.Int64
 }
 
 func (h *gatewayHealth) Ready() bool {
@@ -14,11 +16,44 @@ func (h *gatewayHealth) Ready() bool {
 }
 
 func (h *gatewayHealth) BeginDrain() {
+	h.BeginDrainAt(time.Now())
+}
+
+func (h *gatewayHealth) BeginDrainAt(now time.Time) {
 	if h == nil {
 		return
 	}
+	if now.IsZero() {
+		now = time.Now()
+	}
 
 	h.draining.Store(true)
+	h.drainStartedUnixNano.CompareAndSwap(0, now.UnixNano())
+}
+
+func (h *gatewayHealth) DrainingSince() (time.Time, bool) {
+	if h == nil || !h.draining.Load() {
+		return time.Time{}, false
+	}
+	raw := h.drainStartedUnixNano.Load()
+	if raw == 0 {
+		return time.Time{}, false
+	}
+	return time.Unix(0, raw), true
+}
+
+func (h *gatewayHealth) DrainDuration(now time.Time) time.Duration {
+	startedAt, ok := h.DrainingSince()
+	if !ok {
+		return 0
+	}
+	if now.IsZero() {
+		now = time.Now()
+	}
+	if now.Before(startedAt) {
+		return 0
+	}
+	return now.Sub(startedAt)
 }
 
 func newHealthHandler() http.Handler {

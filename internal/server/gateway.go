@@ -191,6 +191,7 @@ func (g *Gateway) Start() {
 	}
 
 	g.runtime.MarkStarted(time.Now())
+	metrics.SetGatewayReadiness("ready")
 	g.startInternalHTTP()
 	g.startDownlinkRetryWorker()
 	g.startDownlinkCleanupWorker()
@@ -206,6 +207,7 @@ func (g *Gateway) Shutdown(ctx context.Context) error {
 		}
 		g.logger.Info("starting gateway graceful shutdown")
 		g.health.BeginDrain()
+		metrics.SetGatewayReadiness("draining")
 
 		g.shutdownClusterRouteRefresher()
 		g.shutdownZinxServer()

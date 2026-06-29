@@ -35,6 +35,17 @@ groups:
           description: "Prometheus cannot scrape {{ $labels.instance }} for job {{ $labels.job }}."
           runbook_url: "https://github.com/qiuyier/Z-Courier/blob/main/docs/v5-production-runbook.md#gateway-unreachable"
 
+      - alert: ZCourierGatewayDrainingTooLong
+        expr: sum by (job, instance) (z_courier_gateway_readiness{status="draining"}) > 0
+        for: 10m
+        labels:
+          severity: warning
+          component: gateway
+        annotations:
+          summary: "Z-Courier gateway has been draining for too long"
+          description: "Gateway {{ $labels.instance }} has remained in readiness drain for more than 10 minutes. Check online sessions, cluster route cleanup, and shutdown logs."
+          runbook_url: "https://github.com/qiuyier/Z-Courier/blob/main/docs/v5-production-runbook.md#graceful-shutdown"
+
       - alert: ZCourierIngressRejectedSpike
         expr: sum(rate(z_courier_ingress_rejected_total[5m])) > 5
         for: 5m

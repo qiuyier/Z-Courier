@@ -62,6 +62,14 @@ var (
 		[]string{"result"},
 	)
 
+	gatewayReadiness = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "z_courier_gateway_readiness",
+			Help: "Current gateway readiness state as a one-hot gauge.",
+		},
+		[]string{"status"},
+	)
+
 	ingressPackets = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "z_courier_ingress_packets_total",
@@ -364,6 +372,19 @@ func RecordAuthJWKSRefresh(result string, duration time.Duration) {
 	authJWKSRefresh.WithLabelValues(result).Inc()
 	if duration >= 0 {
 		authJWKSRefreshDuration.WithLabelValues(result).Observe(duration.Seconds())
+	}
+}
+
+func SetGatewayReadiness(status string) {
+	if status != "draining" {
+		status = "ready"
+	}
+	for _, candidate := range []string{"ready", "draining"} {
+		value := 0.0
+		if candidate == status {
+			value = 1
+		}
+		gatewayReadiness.WithLabelValues(candidate).Set(value)
 	}
 }
 

@@ -145,6 +145,17 @@ tokens, NSQ auth secrets, PostgreSQL DSNs, Redis passwords, URL user-info,
 queries, fragments, and message bodies must not be exposed through this
 endpoint.
 
+When graceful shutdown begins, readiness changes to:
+
+```json
+{
+  "ready": false,
+  "status": "draining",
+  "draining_since": "2026-06-29T10:00:00Z",
+  "drain_duration": "2m30s"
+}
+```
+
 HTTP upstream route states are runtime signals. A route starts as `healthy`,
 becomes `degraded` after repeated safe-to-classify forwarding failures, becomes
 `unavailable` after a longer failure streak, and returns to `healthy` after the

@@ -264,7 +264,8 @@ internal_http:
 `/healthz` returns `200` while the internal HTTP server is alive. `/readyz`
 returns `200` while the gateway can receive traffic and `503` after graceful
 shutdown begins. Use `/readyz` for load balancer or Kubernetes readiness
-checks.
+checks. Prometheus also exposes `z_courier_gateway_readiness{status="ready"}` and
+`z_courier_gateway_readiness{status="draining"}` as one-hot readiness gauges.
 
 For HMAC mode, remove `token` and configure one or more rotation-friendly key
 IDs:
