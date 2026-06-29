@@ -54,6 +54,17 @@ spec:
             description: "More than 5% of upstream forwards failed while upstream traffic is above 1/sec."
             runbook_url: "https://github.com/qiuyier/Z-Courier/blob/main/docs/v5-production-runbook.md#upstream-forwarding-failures"
 
+        - alert: ZCourierUpstreamRouteDegraded
+          expr: sum by (job, instance, route, target_type) (z_courier_upstream_route_degraded) > 0
+          for: 2m
+          labels:
+            severity: warning
+            component: upstream
+          annotations:
+            summary: "Z-Courier upstream route is degraded"
+            description: "At least one HTTP upstream route has repeated forwarding failures. Check cmd/admin diagnostics for route state and last_reason."
+            runbook_url: "https://github.com/qiuyier/Z-Courier/blob/main/docs/v5-production-runbook.md#upstream-forwarding-failures"
+
         - alert: ZCourierOverloadRejects
           expr: sum(rate(z_courier_upstream_overload_rejected_total[5m])) + sum(rate(z_courier_internal_http_overload_rejected_total[5m])) > 0
           for: 5m

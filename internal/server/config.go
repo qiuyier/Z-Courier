@@ -31,6 +31,7 @@ type Config struct {
 	InternalMaxRequestBodySize int64
 	InternalPushMaxInFlight    int
 	UpstreamRoutes             []UpstreamRouteConfig
+	UpstreamRuntime            *UpstreamRuntime
 	Pipeline                   pipeline.Config
 	DownlinkStore              downlink.Store
 	DownlinkStorage            DownlinkStorageConfig

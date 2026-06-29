@@ -2,7 +2,9 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strconv"
 
 	"github.com/qiuyier/Z-Courier/internal/adapter/httpforwarder"
 	"github.com/qiuyier/Z-Courier/internal/adapter/nsqforwarder"
@@ -29,6 +31,14 @@ func newUpstreamEngine(config Config) (*router.Engine, error) {
 			continue
 		}
 		targetType := routeTargetType(routeConfig)
+		if routeConfig.HTTP != nil && config.UpstreamRuntime != nil {
+			forwarder = newDependencyTrackingForwarder(
+				routeConfig.Name,
+				targetType,
+				config.UpstreamRuntime.ensureRoute(routeConfig.Name, targetType),
+				forwarder,
+			)
+		}
 		if routeConfig.MaxInFlight > 0 {
 			forwarder = newCapacityForwarder(routeConfig.Name, targetType, routeConfig.MaxInFlight, forwarder)
 		}
@@ -133,4 +143,79 @@ func (f *capacityForwarder) Close() error {
 	}
 
 	return closer.Close()
+}
+
+type dependencyTrackingForwarder struct {
+	routeName  string
+	targetType string
+	tracker    dependencyTracker
+	next       router.Forwarder
+}
+
+type dependencyTracker interface {
+	MarkSuccess() resilience.DependencySnapshot
+	MarkFailure(string) resilience.DependencySnapshot
+}
+
+func newDependencyTrackingForwarder(routeName, targetType string, tracker dependencyTracker, next router.Forwarder) router.Forwarder {
+	metrics.SetUpstreamRouteDegraded(routeName, targetType, false)
+	return &dependencyTrackingForwarder{
+		routeName:  routeName,
+		targetType: targetType,
+		tracker:    tracker,
+		next:       next,
+	}
+}
+
+func (f *dependencyTrackingForwarder) Forward(ctx context.Context, packet *protocol.Packet) (*router.ForwardResult, error) {
+	if f == nil || f.next == nil {
+		return nil, router.ErrRouteNotFound
+	}
+
+	result, err := f.next.Forward(ctx, packet)
+	if err != nil {
+		f.markFailure(safeUpstreamFailureReason(result, err))
+		return result, err
+	}
+
+	f.markSuccess()
+	return result, nil
+}
+
+func (f *dependencyTrackingForwarder) markSuccess() {
+	if f.tracker != nil {
+		f.tracker.MarkSuccess()
+	}
+	metrics.SetUpstreamRouteDegraded(f.routeName, f.targetType, false)
+}
+
+func (f *dependencyTrackingForwarder) markFailure(reason string) {
+	degraded := true
+	if f.tracker != nil {
+		snapshot := f.tracker.MarkFailure(reason)
+		degraded = snapshot.Status != resilience.DependencyStatusHealthy
+	}
+	metrics.SetUpstreamRouteDegraded(f.routeName, f.targetType, degraded)
+}
+
+func (f *dependencyTrackingForwarder) Close() error {
+	closer, ok := f.next.(interface{ Close() error })
+	if !ok {
+		return nil
+	}
+
+	return closer.Close()
+}
+
+func safeUpstreamFailureReason(result *router.ForwardResult, err error) string {
+	if result != nil && result.StatusCode > 0 {
+		return "http_status_" + strconv.Itoa(result.StatusCode)
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "timeout"
+	}
+	if errors.Is(err, context.Canceled) {
+		return "canceled"
+	}
+	return "request_failed"
 }

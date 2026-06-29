@@ -120,7 +120,14 @@ Example:
     "routes": 2,
     "http_routes": 1,
     "nsq_routes": 1,
-    "routes_with_capacity_limit": 2
+    "routes_with_capacity_limit": 2,
+    "http_route_states": [
+      {
+        "name": "production-http-upstream",
+        "target_type": "http",
+        "status": "healthy"
+      }
+    ]
   },
   "capacity": {
     "internal_http_max_in_flight": 2000,
@@ -137,6 +144,13 @@ Diagnostics intentionally omit secrets. Internal tokens, HMAC secrets, upstream
 tokens, NSQ auth secrets, PostgreSQL DSNs, Redis passwords, URL user-info,
 queries, fragments, and message bodies must not be exposed through this
 endpoint.
+
+HTTP upstream route states are runtime signals. A route starts as `healthy`,
+becomes `degraded` after repeated safe-to-classify forwarding failures, becomes
+`unavailable` after a longer failure streak, and returns to `healthy` after the
+next successful forward. The `last_reason` field uses sanitized values such as
+`http_status_502`, `timeout`, `canceled`, or `request_failed`; upstream response
+bodies are not exposed.
 
 ### `GET /internal/admin/check`
 

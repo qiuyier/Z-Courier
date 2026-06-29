@@ -12,6 +12,7 @@ import (
 	"github.com/qiuyier/Z-Courier/internal/auth"
 	"github.com/qiuyier/Z-Courier/internal/cluster"
 	"github.com/qiuyier/Z-Courier/internal/downlink"
+	"github.com/qiuyier/Z-Courier/internal/resilience"
 )
 
 type adminHandlerConfig struct {
@@ -108,10 +109,22 @@ type adminAuthDiagnostics struct {
 }
 
 type adminUpstreamDiagnostics struct {
-	Routes             int `json:"routes"`
-	HTTPRoutes         int `json:"http_routes"`
-	NSQRoutes          int `json:"nsq_routes"`
-	RoutesWithCapacity int `json:"routes_with_capacity_limit"`
+	Routes             int                         `json:"routes"`
+	HTTPRoutes         int                         `json:"http_routes"`
+	NSQRoutes          int                         `json:"nsq_routes"`
+	RoutesWithCapacity int                         `json:"routes_with_capacity_limit"`
+	HTTPRouteStates    []adminUpstreamRouteRuntime `json:"http_route_states,omitempty"`
+}
+
+type adminUpstreamRouteRuntime struct {
+	Name                string    `json:"name"`
+	TargetType          string    `json:"target_type"`
+	Status              string    `json:"status"`
+	ConsecutiveFailures int       `json:"consecutive_failures,omitempty"`
+	LastReason          string    `json:"last_reason,omitempty"`
+	LastFailureAt       time.Time `json:"last_failure_at,omitempty"`
+	LastSuccessAt       time.Time `json:"last_success_at,omitempty"`
+	UpdatedAt           time.Time `json:"updated_at,omitempty"`
 }
 
 type adminCapacityDiagnostics struct {
@@ -421,6 +434,15 @@ func adminDiagnosticDependencies(config Config, registry cluster.OnlineRegistry,
 	if upstream.HTTPRoutes > 0 {
 		dependencies[3].Status = "configured"
 		dependencies[3].Reason = "configured routes: " + intString(upstream.HTTPRoutes)
+		unavailable, degraded := adminUpstreamStateCounts(upstream.HTTPRouteStates)
+		switch {
+		case unavailable > 0:
+			dependencies[3].Status = "unavailable"
+			dependencies[3].Reason = "unavailable routes: " + intString(unavailable) + "/" + intString(upstream.HTTPRoutes)
+		case degraded > 0:
+			dependencies[3].Status = "degraded"
+			dependencies[3].Reason = "degraded routes: " + intString(degraded) + "/" + intString(upstream.HTTPRoutes)
+		}
 	}
 	if upstream.NSQRoutes > 0 {
 		dependencies[4].Status = "configured"
@@ -435,6 +457,9 @@ func adminUpstreamDiagnosticsFromConfig(config Config) adminUpstreamDiagnostics 
 		switch {
 		case route.HTTP != nil:
 			out.HTTPRoutes++
+			if snapshot, ok := config.UpstreamRuntime.snapshot(route.Name); ok {
+				out.HTTPRouteStates = append(out.HTTPRouteStates, adminUpstreamRouteRuntimeFromSnapshot(snapshot))
+			}
 		case route.NSQ != nil:
 			out.NSQRoutes++
 		}
@@ -443,6 +468,32 @@ func adminUpstreamDiagnosticsFromConfig(config Config) adminUpstreamDiagnostics 
 		}
 	}
 	return out
+}
+
+func adminUpstreamRouteRuntimeFromSnapshot(snapshot upstreamRouteRuntimeSnapshot) adminUpstreamRouteRuntime {
+	dependency := snapshot.Snapshot
+	return adminUpstreamRouteRuntime{
+		Name:                snapshot.RouteName,
+		TargetType:          snapshot.TargetType,
+		Status:              dependency.Status,
+		ConsecutiveFailures: dependency.ConsecutiveFailures,
+		LastReason:          dependency.LastReason,
+		LastFailureAt:       dependency.LastFailureAt.UTC(),
+		LastSuccessAt:       dependency.LastSuccessAt.UTC(),
+		UpdatedAt:           dependency.UpdatedAt.UTC(),
+	}
+}
+
+func adminUpstreamStateCounts(states []adminUpstreamRouteRuntime) (unavailable int, degraded int) {
+	for _, state := range states {
+		switch state.Status {
+		case resilience.DependencyStatusUnavailable:
+			unavailable++
+		case resilience.DependencyStatusDegraded:
+			degraded++
+		}
+	}
+	return unavailable, degraded
 }
 
 func adminCapacityFromConfig(config Config) adminCapacityDiagnostics {

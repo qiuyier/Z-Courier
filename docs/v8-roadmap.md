@@ -203,7 +203,9 @@ Candidate work:
   `downlink.delivery.retry_jitter` spreads failed downlink retries after
   `retry_delay`.
 - Add clearer circuit-breaker or degraded-state behavior for repeated upstream,
-  Redis, PostgreSQL, or auth-provider failures.
+  Redis, PostgreSQL, or auth-provider failures. First pass: HTTP upstream routes
+  track `healthy`, `degraded`, and `unavailable` runtime states in diagnostics
+  and expose `z_courier_upstream_route_degraded`.
 - Make drain behavior more visible through diagnostics and metrics.
 - Document safe tuning ranges for retry delay, lease duration, scan limits,
   bind flush limits, and in-flight limits.

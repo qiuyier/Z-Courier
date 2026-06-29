@@ -12,6 +12,7 @@ import (
 	"github.com/qiuyier/Z-Courier/internal/cluster"
 	"github.com/qiuyier/Z-Courier/internal/downlink"
 	"github.com/qiuyier/Z-Courier/internal/httpauth"
+	"github.com/qiuyier/Z-Courier/internal/resilience"
 	"github.com/qiuyier/Z-Courier/internal/session"
 	sdkbackend "github.com/qiuyier/Z-Courier/pkg/sdk/backend"
 	"github.com/qiuyier/Z-Courier/pkg/sdk/signing"
@@ -265,6 +266,7 @@ func TestInternalHTTPAdminDiagnostics(t *testing.T) {
 			},
 		},
 	})
+	config.UpstreamRuntime = newUpstreamRuntime(config.UpstreamRoutes)
 
 	health := &gatewayHealth{}
 	server := mustInternalHTTPServer(t, config, service, health, registry)
@@ -299,6 +301,9 @@ func TestInternalHTTPAdminDiagnostics(t *testing.T) {
 	if resp.Upstream.Routes != 2 || resp.Upstream.HTTPRoutes != 1 || resp.Upstream.NSQRoutes != 1 || resp.Upstream.RoutesWithCapacity != 1 {
 		t.Fatalf("upstream diagnostics = %+v, want http/nsq/capacity counts", resp.Upstream)
 	}
+	if len(resp.Upstream.HTTPRouteStates) != 1 || resp.Upstream.HTTPRouteStates[0].Name != "http-route" || resp.Upstream.HTTPRouteStates[0].Status != resilience.DependencyStatusHealthy {
+		t.Fatalf("upstream route states = %+v, want healthy http-route", resp.Upstream.HTTPRouteStates)
+	}
 	if resp.Capacity.InternalHTTPMaxInFlight == 0 || resp.Capacity.UpstreamLimitedRoutes != 1 {
 		t.Fatalf("capacity diagnostics = %+v, want configured limits", resp.Capacity)
 	}
@@ -307,6 +312,60 @@ func TestInternalHTTPAdminDiagnostics(t *testing.T) {
 	}
 	if len(resp.Dependencies) == 0 || len(resp.Warnings) == 0 {
 		t.Fatalf("dependencies/warnings = %+v/%+v, want non-empty", resp.Dependencies, resp.Warnings)
+	}
+}
+
+func TestInternalHTTPAdminDiagnosticsReportsDegradedHTTPUpstream(t *testing.T) {
+	routes := []UpstreamRouteConfig{{
+		Name:     "http-route",
+		MsgIDMin: 1001,
+		MsgIDMax: 1999,
+		HTTP: &HTTPUpstreamConfig{
+			URL: "http://backend.local/gateway/upstream",
+		},
+	}}
+	runtime := newUpstreamRuntime(routes)
+	tracker := runtime.ensureRoute("http-route", "http")
+	for range 3 {
+		tracker.MarkFailure("http_status_502")
+	}
+	config := normalizeConfig(Config{
+		InternalToken:   "secret",
+		UpstreamRoutes:  routes,
+		UpstreamRuntime: runtime,
+	})
+
+	health := &gatewayHealth{}
+	server := mustInternalHTTPServer(t, config, downlink.NewService(nil, nil), health, nil)
+	req := httptest.NewRequest(http.MethodGet, "/internal/admin/diagnostics", nil)
+	req.Header.Set(downlink.InternalTokenHeader, "secret")
+	rec := httptest.NewRecorder()
+	server.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var resp adminDiagnosticsResponse
+	if err := sonic.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if len(resp.Upstream.HTTPRouteStates) != 1 {
+		t.Fatalf("HTTPRouteStates = %+v, want one route state", resp.Upstream.HTTPRouteStates)
+	}
+	state := resp.Upstream.HTTPRouteStates[0]
+	if state.Status != resilience.DependencyStatusDegraded || state.ConsecutiveFailures != 3 || state.LastReason != "http_status_502" {
+		t.Fatalf("HTTP route state = %+v, want degraded state", state)
+	}
+	var httpDependency adminDependency
+	for _, dependency := range resp.Dependencies {
+		if dependency.Name == "http_upstream" {
+			httpDependency = dependency
+			break
+		}
+	}
+	if httpDependency.Status != "degraded" || httpDependency.Reason != "degraded routes: 1/1" {
+		t.Fatalf("http dependency = %+v, want degraded", httpDependency)
 	}
 }
 

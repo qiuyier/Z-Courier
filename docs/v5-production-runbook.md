@@ -397,12 +397,14 @@ sum by (route, target_type, result) (rate(z_courier_upstream_forward_total[1m]))
 histogram_quantile(0.95, sum by (le, route, target_type) (rate(z_courier_upstream_forward_duration_seconds_bucket[5m])))
 sum by (route, target_type) (z_courier_upstream_inflight)
 sum by (route, target_type) (rate(z_courier_upstream_overload_rejected_total[1m]))
+sum by (route, target_type) (z_courier_upstream_route_degraded)
 ```
 
 Look for:
 
 - MsgID outside all configured route ranges
 - HTTP upstream returning non-2xx
+- HTTP upstream route state `degraded` or `unavailable` in `cmd/admin diagnostics`
 - NSQ address or topic mismatch
 - route disabled in YAML
 - in-flight limiter saturation

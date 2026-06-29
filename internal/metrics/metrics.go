@@ -111,6 +111,14 @@ var (
 		[]string{"route", "target_type"},
 	)
 
+	upstreamRouteDegraded = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "z_courier_upstream_route_degraded",
+			Help: "Whether an upstream route is currently degraded or unavailable after consecutive failures.",
+		},
+		[]string{"route", "target_type"},
+	)
+
 	sessionsOnline = promauto.NewGauge(
 		prometheus.GaugeOpts{
 			Name: "z_courier_sessions_online",
@@ -379,6 +387,14 @@ func AddUpstreamInFlight(route, targetType string, delta float64) {
 
 func RecordUpstreamOverloadRejected(route, targetType string) {
 	upstreamOverloadRejected.WithLabelValues(nonEmpty(route, "unknown"), nonEmpty(targetType, "unknown")).Inc()
+}
+
+func SetUpstreamRouteDegraded(route, targetType string, degraded bool) {
+	value := 0.0
+	if degraded {
+		value = 1
+	}
+	upstreamRouteDegraded.WithLabelValues(nonEmpty(route, "unknown"), nonEmpty(targetType, "unknown")).Set(value)
 }
 
 func SetSessionsOnline(count int) {

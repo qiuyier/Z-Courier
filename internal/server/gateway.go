@@ -69,8 +69,8 @@ func New(config Config, logger *zap.Logger) (*Gateway, error) {
 		closeWithLog(authVerifierCloser, logger, "authentication verifier")
 		return nil, err
 	}
-	upstream, err :=
-		newUpstreamEngine(config)
+	config.UpstreamRuntime = newUpstreamRuntime(config.UpstreamRoutes)
+	upstream, err := newUpstreamEngine(config)
 	if err != nil {
 		closeWithLog(authVerifierCloser, logger, "authentication verifier")
 		return nil, err
