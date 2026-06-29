@@ -12,6 +12,37 @@ semantic versioning after the first public MVP tag.
 - V8 roadmap covering production diagnostics, configuration validation, admin
   diagnosis bundles, alerting, dashboards, resilience controls, and completion
   criteria for the `v0.8.0` planning track.
+- Static gateway config validation through `cmd/gateway -check-config`, with CI
+  coverage for local, integration, and cluster example configurations.
+- Runtime admin diagnostics for gateway identity, readiness/drain state,
+  sanitized config summaries, dependency summaries, upstream route runtime
+  state, cluster/session state, capacity indicators, and warnings.
+- Active dependency checks through `cmd/admin check`.
+- Safe diagnosis bundle collection through `cmd/admin diagnose`, including
+  overview, diagnostics, active dependency checks, routes, failed message
+  summaries, and optional client/device route plus local session inspection.
+- Bundled Prometheus recording and alert rules, Alertmanager configuration and
+  notification examples, and a Grafana production-signal dashboard.
+- Readiness drain diagnostics and `z_courier_gateway_readiness` metrics.
+- HTTP upstream route health tracking with healthy, degraded, and unavailable
+  runtime states plus `z_courier_upstream_route_degraded`.
+- Downlink retry jitter configuration to avoid synchronized retry bursts after
+  delivery failures.
+- V8 release guide covering scope, compatibility, verification commands,
+  release notes, known boundaries, and tagging checklist.
+
+### Changed
+
+- CI now validates Prometheus rules/configs, Alertmanager configs, Grafana
+  dashboard JSON, Docker Compose configs, Helm chart rendering, and gateway
+  static configs as part of the main validation job.
+- Gateway and admin diagnostics now expose clearer readiness and dependency
+  state without leaking tokens, HMAC secrets, DSNs, or message bodies.
+
+### Fixed
+
+- PHP SDK receive loops now keep a blocking read posture across reconnect and
+  ACK timeout transitions, avoiding spurious downlink receive timeouts in CI.
 
 ## [v0.7.0] - 2026-06-26
 

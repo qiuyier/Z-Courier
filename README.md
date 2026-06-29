@@ -24,6 +24,9 @@ A high-performance message push gateway based on the `zinx` network framework.
 - Optional timestamped HMAC authentication and replay protection for internal
   backend requests and gateway peer push, with separate key rings
 - Production-oriented Docker image build path with CI smoke validation
+- Static config validation, admin diagnostics, dependency checks, safe diagnosis
+  bundles, Prometheus alert rules, Alertmanager examples, and production
+  Grafana dashboards
 - Graceful shutdown with readiness drain and cluster route cleanup
 - MIT Licensed
 
@@ -70,7 +73,8 @@ V7 Docker image publishing is tracked in
 `v0.7.0` release guide is in [docs/v7-release.md](docs/v7-release.md).
 
 V8 production operations governance is tracked in
-[docs/v8-roadmap.md](docs/v8-roadmap.md).
+[docs/v8-roadmap.md](docs/v8-roadmap.md), and the `v0.8.0` release-prep
+checklist is in [docs/v8-release.md](docs/v8-release.md).
 
 ## Quick Start
 
@@ -259,10 +263,17 @@ chart versioning guidance. See
 [docs/v6-helm-versioning.md](docs/v6-helm-versioning.md), and
 [docs/v6-release.md](docs/v6-release.md).
 
-V7 is being prepared for `v0.7.0`. It focuses on publishing the gateway image
+V7 was published as `v0.7.0`. It focuses on publishing the gateway image
 itself to GHCR, then wiring that official image into the Helm production path.
 See [docs/v7-docker-image-release.md](docs/v7-docker-image-release.md) and
 [docs/v7-release.md](docs/v7-release.md).
+
+V8 is being prepared for `v0.8.0`. It focuses on production operations
+governance: static configuration validation, runtime diagnostics, admin
+diagnosis bundles, dependency checks, Prometheus alert rules, Alertmanager
+examples, production-signal dashboards, readiness drain visibility, upstream
+route health state, and retry jitter. See [docs/v8-roadmap.md](docs/v8-roadmap.md)
+and [docs/v8-release.md](docs/v8-release.md).
 
 ## Development
 
