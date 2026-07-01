@@ -76,6 +76,9 @@ V8 production operations governance is tracked in
 [docs/v8-roadmap.md](docs/v8-roadmap.md), and the `v0.8.0` release-prep
 checklist is in [docs/v8-release.md](docs/v8-release.md).
 
+V9 Web admin console work is tracked in
+[docs/v9-roadmap.md](docs/v9-roadmap.md).
+
 ## Quick Start
 
 Run the single-node integration verifier from the repository root:

@@ -7,6 +7,13 @@ semantic versioning after the first public MVP tag.
 
 ## [Unreleased]
 
+### Added
+
+- V9 roadmap covering the browser-based admin console, including overview,
+  route inspection, session and cluster lookup, downlink message repair,
+  diagnostics, dependency checks, deployment, and security boundaries for the
+  `v0.9.0` planning track.
+
 ## [v0.8.1] - 2026-07-01
 
 ### Fixed
