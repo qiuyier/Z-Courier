@@ -45,6 +45,9 @@ semantic versioning after the first public MVP tag.
 
 - PHP SDK receive loops now keep a blocking read posture across reconnect and
   ACK timeout transitions, avoiding spurious downlink receive timeouts in CI.
+- Reliable online downlink pushes now claim newly stored messages before
+  sending, preventing bind-time pending flushes from duplicating the same
+  message during the save/send/mark-sent window.
 
 ## [v0.7.0] - 2026-06-26
 
