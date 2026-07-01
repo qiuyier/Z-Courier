@@ -17,8 +17,19 @@ import {
   Warning,
   XCircle,
 } from "@phosphor-icons/react";
-import { discardMessage, fetchDiagnostics, fetchMessage, fetchMessages, fetchOverview, fetchRoutes, requeueMessage } from "./api";
+import {
+  discardMessage,
+  fetchAdminCheck,
+  fetchDiagnostics,
+  fetchMessage,
+  fetchMessages,
+  fetchOverview,
+  fetchRoutes,
+  requeueMessage,
+} from "./api";
 import type {
+  AdminCheck,
+  AdminCheckResult,
   AdminDiagnostics,
   AdminMessages,
   AdminOverview,
@@ -38,7 +49,7 @@ type RemoteState<T> =
   | { status: "ready"; data: T; error?: undefined }
   | { status: "error"; data?: T; error: string };
 
-type PageID = "overview" | "routes" | "messages" | "diagnostics";
+type PageID = "overview" | "routes" | "messages" | "checks" | "diagnostics";
 type MessageAction = "requeue" | "discard";
 type MessageActionDialogState = {
   action: MessageAction;
@@ -51,6 +62,7 @@ const navItems = [
   { id: "overview" as const, label: "Overview", icon: Pulse, disabled: false },
   { id: "routes" as const, label: "Routes", icon: GitBranch, disabled: false },
   { id: "messages" as const, label: "Messages", icon: Database, disabled: false },
+  { id: "checks" as const, label: "Checks", icon: ShieldCheck, disabled: false },
   { id: "diagnostics" as const, label: "Diagnostics", icon: Gauge, disabled: false },
 ];
 
@@ -62,8 +74,11 @@ export default function App() {
   );
   const [routeState, setRouteState] = useState<RemoteState<AdminRoutes>>({ status: "idle" });
   const [diagnosticsState, setDiagnosticsState] = useState<RemoteState<AdminDiagnostics>>({ status: "idle" });
+  const [checkState, setCheckState] = useState<RemoteState<AdminCheck>>({ status: "idle" });
   const [messagesState, setMessagesState] = useState<RemoteState<AdminMessages>>({ status: "idle" });
   const [messageLookupState, setMessageLookupState] = useState<RemoteState<MessageStatusResponse>>({ status: "idle" });
+  const [checkTimeout, setCheckTimeout] = useState("2s");
+  const [checkRanAt, setCheckRanAt] = useState<Date | null>(null);
   const [messageStatus, setMessageStatus] = useState<MessageStatus>("failed");
   const [messageLimit, setMessageLimit] = useState(100);
   const [messageLookupID, setMessageLookupID] = useState("");
@@ -142,6 +157,28 @@ export default function App() {
       }
     },
     [activeToken],
+  );
+
+  const runCheck = useCallback(
+    async (signal?: AbortSignal) => {
+      if (activeToken.trim() === "") {
+        setCheckState({ status: "idle" });
+        return;
+      }
+      setCheckState((current) => ({ status: "loading", data: current.data }));
+      try {
+        const data = await fetchAdminCheck(activeToken, checkTimeout, signal);
+        setCheckState({ status: "ready", data });
+        setCheckRanAt(new Date());
+      } catch (error) {
+        if (signal?.aborted) {
+          return;
+        }
+        const message = error instanceof Error ? error.message : "unknown_error";
+        setCheckState((current) => ({ status: "error", data: current.data, error: message }));
+      }
+    },
+    [activeToken, checkTimeout],
   );
 
   const refreshMessages = useCallback(
@@ -310,9 +347,11 @@ export default function App() {
       setState({ status: "idle" });
       setRouteState({ status: "idle" });
       setDiagnosticsState({ status: "idle" });
+      setCheckState({ status: "idle" });
       setMessagesState({ status: "idle" });
       setMessageLookupState({ status: "idle" });
       setMessageActionDialog(null);
+      setCheckRanAt(null);
       setUpdatedAt(null);
     }
   }, [draftToken]);
@@ -330,8 +369,12 @@ export default function App() {
       void refreshMessages();
       return;
     }
+    if (activePage === "checks") {
+      void runCheck();
+      return;
+    }
     void refresh();
-  }, [activePage, refresh, refreshDiagnostics, refreshMessages, refreshRoutes]);
+  }, [activePage, refresh, refreshDiagnostics, refreshMessages, refreshRoutes, runCheck]);
 
   const overview = state.data;
   const ready = overview?.readiness.ready ?? false;
@@ -341,9 +384,11 @@ export default function App() {
       ? "Routes"
       : activePage === "messages"
         ? "Messages"
-        : activePage === "diagnostics"
-          ? "Diagnostics"
-          : "Operations Overview";
+        : activePage === "checks"
+          ? "Checks"
+          : activePage === "diagnostics"
+            ? "Diagnostics"
+            : "Operations Overview";
 
   return (
     <main className="min-h-[100dvh] bg-mist text-ink">
@@ -442,6 +487,7 @@ export default function App() {
           {activePage === "overview" && state.status === "error" && <ErrorBanner message={state.error} />}
           {activePage === "routes" && routeState.status === "error" && <ErrorBanner message={routeState.error} />}
           {activePage === "messages" && messagesState.status === "error" && <ErrorBanner message={messagesState.error} />}
+          {activePage === "checks" && checkState.status === "error" && <ErrorBanner message={checkState.error} />}
           {activePage === "diagnostics" && diagnosticsState.status === "error" && <ErrorBanner message={diagnosticsState.error} />}
 
           {activePage === "overview" && overview ? (
@@ -462,6 +508,14 @@ export default function App() {
               onStatusChange={setMessageStatus}
               selectedStatus={messageStatus}
               state={messagesState}
+            />
+          ) : activePage === "checks" && activeToken.trim() !== "" && (checkState.status !== "error" || checkState.data) ? (
+            <ChecksPage
+              onRun={runCheck}
+              onTimeoutChange={setCheckTimeout}
+              ranAt={checkRanAt}
+              state={checkState}
+              timeout={checkTimeout}
             />
           ) : activePage === "diagnostics" && activeToken.trim() !== "" && (diagnosticsState.status !== "error" || diagnosticsState.data) ? (
             <DiagnosticsPage state={diagnosticsState} />
@@ -625,6 +679,153 @@ function RoutesPage({ state }: { state: RemoteState<AdminRoutes> }) {
         ))}
       </section>
     </div>
+  );
+}
+
+function ChecksPage({
+  onRun,
+  onTimeoutChange,
+  ranAt,
+  state,
+  timeout,
+}: {
+  onRun: () => void | Promise<void>;
+  onTimeoutChange: (timeout: string) => void;
+  ranAt: Date | null;
+  state: RemoteState<AdminCheck>;
+  timeout: string;
+}) {
+  const checks = state.data?.checks ?? [];
+  const counts = checkCounts(checks);
+  const aggregateStatus = state.data?.status ?? "skipped";
+  const running = state.status === "loading";
+
+  return (
+    <div className="grid gap-5">
+      <section className="rounded-lg border border-line bg-white p-5 shadow-diffusion">
+        <div className="grid gap-5 xl:grid-cols-[0.95fr_1.05fr]">
+          <div>
+            <p className="text-sm font-medium text-zinc-500">Dependency Check</p>
+            <div className="mt-2 flex flex-wrap items-end gap-3">
+              <h2 className="font-mono text-5xl tracking-tight text-ink">{checks.length.toLocaleString()}</h2>
+              <CheckStatusBadge status={aggregateStatus} />
+            </div>
+            <p className="mt-2 text-sm text-zinc-500">gateway node: {state.data?.gateway_node ?? "--"}</p>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <MetricRow label="OK" value={counts.ok.toLocaleString()} />
+            <MetricRow label="Degraded" value={counts.degraded.toLocaleString()} />
+            <MetricRow label="Failed" value={counts.failed.toLocaleString()} />
+            <MetricRow label="Skipped" value={counts.skipped.toLocaleString()} />
+          </div>
+        </div>
+      </section>
+
+      <section className="grid gap-5 xl:grid-cols-[0.8fr_1.2fr]">
+        <article className="rounded-lg border border-line bg-white p-5 shadow-diffusion">
+          <p className="text-sm font-medium text-zinc-500">Run Check</p>
+          <label className="mt-5 block text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500" htmlFor="check-timeout">
+            Timeout
+          </label>
+          <div className="mt-2 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+            <input
+              className="min-w-0 rounded-lg border border-line bg-white px-3 py-2 font-mono text-sm outline-none transition duration-300 focus:border-accent"
+              id="check-timeout"
+              onChange={(event) => onTimeoutChange(event.target.value)}
+              placeholder="2s"
+              value={timeout}
+            />
+            <button
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-zinc-950 px-4 py-2 text-sm font-medium text-white transition duration-300 hover:bg-zinc-800 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={running}
+              onClick={() => void onRun()}
+              type="button"
+            >
+              <ShieldCheck size={16} weight="bold" />
+              {running ? "Checking..." : "Run Check"}
+            </button>
+          </div>
+          <p className="mt-3 text-xs text-zinc-500">Examples: 1s, 2s, 5s. Max timeout is 30s.</p>
+        </article>
+
+        <article className="rounded-lg border border-line bg-zinc-950 p-5 text-white shadow-diffusion">
+          <p className="text-sm text-zinc-400">Last Result</p>
+          <h3 className="mt-1 text-2xl font-semibold tracking-tight">{state.data?.status ?? "not run"}</h3>
+          <div className="mt-6 grid gap-3 border-t border-white/10 pt-4">
+            <DarkLineItem label="Timeout" value={state.data?.timeout || timeout || "--"} />
+            <DarkLineItem label="Last Run" value={ranAt ? ranAt.toLocaleTimeString() : "--"} />
+            <DarkLineItem label="Refresh State" value={state.status} />
+            <DarkLineItem label="Checks" value={checks.length.toLocaleString()} />
+          </div>
+        </article>
+      </section>
+
+      {state.status === "loading" && !state.data ? (
+        <ChecksSkeleton />
+      ) : checks.length === 0 ? (
+        <ChecksEmptyState onRun={onRun} running={running} />
+      ) : (
+        <section className="grid gap-3">
+          {checks.map((check, index) => (
+            <CheckResultCard check={check} index={index} key={`${check.name}-${index}`} />
+          ))}
+        </section>
+      )}
+    </div>
+  );
+}
+
+function CheckResultCard({ check, index }: { check: AdminCheckResult; index: number }) {
+  return (
+    <article
+      className="animate-rise overflow-hidden rounded-lg border border-line bg-white shadow-diffusion"
+      style={{ animationDelay: `${index * 45}ms` }}
+    >
+      <div className="grid gap-4 p-4 lg:grid-cols-[0.7fr_1.3fr] lg:p-5">
+        <div className="min-w-0">
+          <CheckStatusBadge status={check.status} />
+          <h3 className="mt-4 break-words font-mono text-lg font-semibold tracking-tight">{check.name}</h3>
+          <p className="mt-2 break-words text-sm text-zinc-500">{check.target || "--"}</p>
+        </div>
+        <div className="grid min-w-0 gap-3 md:grid-cols-2">
+          <MessageField label="Latency" value={check.latency || "--"} />
+          <MessageField label="Status" value={check.status} />
+          <MessageField label="Target" value={check.target || "--"} />
+          <MessageField label="Error" value={check.error || "--"} wide />
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function CheckStatusBadge({ status }: { status?: string }) {
+  const normalized = status || "--";
+  const tone =
+    normalized === "ok"
+      ? "bg-emerald-50 text-emerald-800"
+      : normalized === "degraded"
+        ? "bg-amber-50 text-amber-800"
+        : normalized === "failed"
+          ? "bg-rose-50 text-rose-800"
+          : "bg-zinc-100 text-zinc-700";
+
+  return (
+    <span className={["inline-flex items-center gap-2 rounded-md px-2.5 py-1 font-mono text-xs font-medium uppercase", tone].join(" ")}>
+      <span
+        className={[
+          "size-1.5 rounded-full",
+          normalized === "ok"
+            ? "bg-accent"
+            : normalized === "degraded"
+              ? "bg-amber-500"
+              : normalized === "failed"
+                ? "bg-rose-500"
+                : "bg-zinc-400",
+        ].join(" ")}
+      />
+      {normalized}
+    </span>
   );
 }
 
@@ -1414,6 +1615,31 @@ function MessagesEmptyState({ status }: { status: MessageStatus }) {
   );
 }
 
+function ChecksEmptyState({ onRun, running }: { onRun: () => void | Promise<void>; running: boolean }) {
+  return (
+    <div className="rounded-lg border border-line bg-white px-5 py-8 shadow-diffusion">
+      <div className="max-w-xl">
+        <div className="grid size-12 place-items-center rounded-lg border border-line bg-zinc-50 text-accent">
+          <ShieldCheck size={22} weight="duotone" />
+        </div>
+        <h2 className="mt-5 text-2xl font-semibold tracking-tight">No Check Result</h2>
+        <p className="mt-2 text-sm leading-relaxed text-zinc-500">
+          Run a dependency check to inspect auth, storage, cluster registry, and upstream targets.
+        </p>
+        <button
+          className="mt-5 inline-flex items-center justify-center gap-2 rounded-lg bg-zinc-950 px-4 py-2 text-sm font-medium text-white transition duration-300 hover:bg-zinc-800 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50"
+          disabled={running}
+          onClick={() => void onRun()}
+          type="button"
+        >
+          <ShieldCheck size={16} weight="bold" />
+          {running ? "Checking..." : "Run Check"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function DiagnosticsEmptyState() {
   return (
     <div className="rounded-lg border border-line bg-white px-5 py-8 shadow-diffusion">
@@ -1426,6 +1652,16 @@ function DiagnosticsEmptyState() {
           The gateway did not return diagnostic data.
         </p>
       </div>
+    </div>
+  );
+}
+
+function ChecksSkeleton() {
+  return (
+    <div className="grid gap-5">
+      <SkeletonPanel className="h-40" />
+      <SkeletonPanel className="h-40" />
+      <SkeletonPanel className="h-40" />
     </div>
   );
 }
@@ -1511,6 +1747,18 @@ function routeDetails(route: AdminRoute): Array<{ label: string; value: string }
 
 function healthyDependencyStatus(status: string): boolean {
   return status === "configured" || status === "ok" || status === "healthy" || status === "disabled";
+}
+
+function checkCounts(checks: AdminCheckResult[]): Record<"ok" | "degraded" | "failed" | "skipped", number> {
+  return checks.reduce(
+    (counts, check) => {
+      if (check.status === "ok" || check.status === "degraded" || check.status === "failed" || check.status === "skipped") {
+        counts[check.status] += 1;
+      }
+      return counts;
+    },
+    { ok: 0, degraded: 0, failed: 0, skipped: 0 },
+  );
 }
 
 function canRequeue(status?: MessageStatus | string): boolean {

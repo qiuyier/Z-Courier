@@ -187,3 +187,21 @@ export type AdminMessages = {
   total: number;
   messages?: MessageStatusResponse[];
 };
+
+export type AdminCheckStatus = "ok" | "degraded" | "failed" | "skipped";
+
+export type AdminCheckResult = {
+  name: string;
+  status: AdminCheckStatus;
+  target?: string;
+  latency?: string;
+  error?: string;
+};
+
+export type AdminCheck = {
+  code: string;
+  gateway_node: string;
+  status: AdminCheckStatus;
+  timeout?: string;
+  checks: AdminCheckResult[];
+};

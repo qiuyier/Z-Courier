@@ -1,4 +1,12 @@
-import type { AdminDiagnostics, AdminMessages, AdminOverview, AdminRoutes, MessageStatus, MessageStatusResponse } from "./types";
+import type {
+  AdminCheck,
+  AdminDiagnostics,
+  AdminMessages,
+  AdminOverview,
+  AdminRoutes,
+  MessageStatus,
+  MessageStatusResponse,
+} from "./types";
 
 const internalTokenHeader = "X-ZCourier-Internal-Token";
 
@@ -82,6 +90,15 @@ export async function fetchRoutes(token: string, signal?: AbortSignal): Promise<
 
 export async function fetchDiagnostics(token: string, signal?: AbortSignal): Promise<AdminDiagnostics> {
   return fetchAdminJSON<AdminDiagnostics>("/internal/admin/diagnostics", token, signal);
+}
+
+export async function fetchAdminCheck(token: string, timeout: string, signal?: AbortSignal): Promise<AdminCheck> {
+  const query = new URLSearchParams();
+  if (timeout.trim() !== "") {
+    query.set("timeout", timeout.trim());
+  }
+  const suffix = query.toString() ? `?${query.toString()}` : "";
+  return fetchAdminJSON<AdminCheck>(`/internal/admin/check${suffix}`, token, signal);
 }
 
 export async function fetchMessages(
