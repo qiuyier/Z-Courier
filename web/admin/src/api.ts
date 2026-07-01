@@ -1,4 +1,4 @@
-import type { AdminOverview } from "./types";
+import type { AdminOverview, AdminRoutes } from "./types";
 
 const internalTokenHeader = "X-ZCourier-Internal-Token";
 
@@ -12,13 +12,13 @@ export class APIError extends Error {
   }
 }
 
-export async function fetchOverview(token: string, signal?: AbortSignal): Promise<AdminOverview> {
+async function fetchAdminJSON<T>(path: string, token: string, signal?: AbortSignal): Promise<T> {
   const headers = new Headers();
   if (token.trim() !== "") {
     headers.set(internalTokenHeader, token.trim());
   }
 
-  const response = await fetch("/internal/admin/overview", {
+  const response = await fetch(path, {
     method: "GET",
     headers,
     signal,
@@ -37,5 +37,13 @@ export async function fetchOverview(token: string, signal?: AbortSignal): Promis
     throw new APIError(message, response.status);
   }
 
-  return (await response.json()) as AdminOverview;
+  return (await response.json()) as T;
+}
+
+export async function fetchOverview(token: string, signal?: AbortSignal): Promise<AdminOverview> {
+  return fetchAdminJSON<AdminOverview>("/internal/admin/overview", token, signal);
+}
+
+export async function fetchRoutes(token: string, signal?: AbortSignal): Promise<AdminRoutes> {
+  return fetchAdminJSON<AdminRoutes>("/internal/admin/routes", token, signal);
 }

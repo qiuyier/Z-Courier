@@ -61,3 +61,35 @@ export type AdminOverview = {
   upstream: UpstreamSummary;
   dependencies: Dependency[];
 };
+
+export type AdminHTTPRoute = {
+  url: string;
+  timeout?: string;
+};
+
+export type AdminNSQRoute = {
+  addresses?: string[];
+  topic: string;
+  dial_timeout?: string;
+  read_timeout?: string;
+  write_timeout?: string;
+  publish_mode?: string;
+  retry_attempts?: number;
+};
+
+export type AdminRoute = {
+  name: string;
+  msg_id_min: number;
+  msg_id_max?: number;
+  target_type: string;
+  max_in_flight?: number;
+  http?: AdminHTTPRoute;
+  nsq?: AdminNSQRoute;
+};
+
+export type AdminRoutes = {
+  code: string;
+  gateway_node: string;
+  total: number;
+  routes: AdminRoute[];
+};

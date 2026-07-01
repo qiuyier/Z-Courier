@@ -15,30 +15,34 @@ import {
   Warning,
   XCircle,
 } from "@phosphor-icons/react";
-import { fetchOverview } from "./api";
-import type { AdminOverview, Dependency } from "./types";
+import { fetchOverview, fetchRoutes } from "./api";
+import type { AdminOverview, AdminRoute, AdminRoutes, Dependency } from "./types";
 
 const tokenStorageKey = "z-courier-console-token";
 
-type LoadState =
+type RemoteState<T> =
   | { status: "idle"; data?: undefined; error?: undefined }
-  | { status: "loading"; data?: AdminOverview; error?: undefined }
-  | { status: "ready"; data: AdminOverview; error?: undefined }
-  | { status: "error"; data?: AdminOverview; error: string };
+  | { status: "loading"; data?: T; error?: undefined }
+  | { status: "ready"; data: T; error?: undefined }
+  | { status: "error"; data?: T; error: string };
+
+type PageID = "overview" | "routes" | "messages" | "diagnostics";
 
 const navItems = [
-  { label: "Overview", icon: Pulse, active: true },
-  { label: "Routes", icon: GitBranch, active: false },
-  { label: "Messages", icon: Database, active: false },
-  { label: "Diagnostics", icon: Pulse, active: false },
+  { id: "overview" as const, label: "Overview", icon: Pulse, disabled: false },
+  { id: "routes" as const, label: "Routes", icon: GitBranch, disabled: false },
+  { id: "messages" as const, label: "Messages", icon: Database, disabled: true },
+  { id: "diagnostics" as const, label: "Diagnostics", icon: Pulse, disabled: true },
 ];
 
 export default function App() {
   const [draftToken, setDraftToken] = useState(() => window.sessionStorage.getItem(tokenStorageKey) ?? "");
   const [activeToken, setActiveToken] = useState(() => window.sessionStorage.getItem(tokenStorageKey) ?? "");
-  const [state, setState] = useState<LoadState>(() =>
+  const [state, setState] = useState<RemoteState<AdminOverview>>(() =>
     window.sessionStorage.getItem(tokenStorageKey) ? { status: "loading" } : { status: "idle" },
   );
+  const [routeState, setRouteState] = useState<RemoteState<AdminRoutes>>({ status: "idle" });
+  const [activePage, setActivePage] = useState<PageID>("overview");
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
 
   useEffect(() => {
@@ -71,6 +75,27 @@ export default function App() {
     [activeToken],
   );
 
+  const refreshRoutes = useCallback(
+    async (signal?: AbortSignal) => {
+      if (activeToken.trim() === "") {
+        setRouteState({ status: "idle" });
+        return;
+      }
+      setRouteState((current) => ({ status: "loading", data: current.data }));
+      try {
+        const data = await fetchRoutes(activeToken, signal);
+        setRouteState({ status: "ready", data });
+      } catch (error) {
+        if (signal?.aborted) {
+          return;
+        }
+        const message = error instanceof Error ? error.message : "unknown_error";
+        setRouteState((current) => ({ status: "error", data: current.data, error: message }));
+      }
+    },
+    [activeToken],
+  );
+
   useEffect(() => {
     if (activeToken.trim() === "") {
       setState({ status: "idle" });
@@ -89,18 +114,44 @@ export default function App() {
     };
   }, [activeToken, refresh]);
 
+  useEffect(() => {
+    if (activePage !== "routes") {
+      return;
+    }
+    if (activeToken.trim() === "") {
+      setRouteState({ status: "idle" });
+      return;
+    }
+
+    const controller = new AbortController();
+    void refreshRoutes(controller.signal);
+    return () => {
+      controller.abort();
+    };
+  }, [activePage, activeToken, refreshRoutes]);
+
   const connect = useCallback(() => {
     const nextToken = draftToken.trim();
     setActiveToken(nextToken);
     if (nextToken === "") {
       setState({ status: "idle" });
+      setRouteState({ status: "idle" });
       setUpdatedAt(null);
     }
   }, [draftToken]);
 
+  const refreshCurrentPage = useCallback(() => {
+    if (activePage === "routes") {
+      void refreshRoutes();
+      return;
+    }
+    void refresh();
+  }, [activePage, refresh, refreshRoutes]);
+
   const overview = state.data;
   const ready = overview?.readiness.ready ?? false;
   const statusText = overview?.readiness.status ?? (state.status === "error" ? "not connected" : activeToken ? "connecting" : "auth required");
+  const pageTitle = activePage === "routes" ? "Routes" : "Operations Overview";
 
   return (
     <main className="min-h-[100dvh] bg-mist text-ink">
@@ -119,19 +170,22 @@ export default function App() {
           <nav className="mt-5 grid gap-1">
             {navItems.map((item) => {
               const Icon = item.icon;
+              const active = item.id === activePage;
               return (
                 <button
                   key={item.label}
                   className={[
-                    "group flex items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition duration-300 active:translate-y-px",
-                    item.active
+                    "group flex items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition duration-300 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-45",
+                    active
                       ? "bg-zinc-950 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]"
                       : "text-zinc-600 hover:bg-zinc-100 hover:text-ink",
                   ].join(" ")}
+                  disabled={item.disabled}
+                  onClick={() => setActivePage(item.id)}
                   type="button"
                 >
-                  <Icon size={18} weight={item.active ? "duotone" : "regular"} />
-                  <span>{item.label}</span>
+                  <Icon size={18} weight={active ? "duotone" : "regular"} />
+                  <span className="min-w-0 truncate">{item.label}</span>
                 </button>
               );
             })}
@@ -175,14 +229,14 @@ export default function App() {
           <header className="flex flex-col justify-between gap-4 rounded-lg border border-line bg-white px-5 py-4 shadow-diffusion md:flex-row md:items-center">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Gateway Control Plane</p>
-              <h1 className="mt-1 text-2xl font-semibold tracking-tight text-ink md:text-3xl">Operations Overview</h1>
+              <h1 className="mt-1 text-2xl font-semibold tracking-tight text-ink md:text-3xl">{pageTitle}</h1>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <StatusPill ready={ready} status={statusText} />
               <button
                 className="inline-flex items-center gap-2 rounded-lg border border-line bg-white px-3 py-2 text-sm font-medium text-ink transition duration-300 hover:border-zinc-300 hover:bg-zinc-50 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-45"
                 disabled={activeToken.trim() === ""}
-                onClick={() => void refresh()}
+                onClick={refreshCurrentPage}
                 type="button"
               >
                 <ArrowClockwise size={16} weight="bold" />
@@ -192,12 +246,16 @@ export default function App() {
           </header>
 
           {state.status === "idle" && <AuthEmptyState />}
-          {state.status === "error" && <ErrorBanner message={state.error} />}
 
-          {overview ? (
+          {activePage === "overview" && state.status === "error" && <ErrorBanner message={state.error} />}
+          {activePage === "routes" && routeState.status === "error" && <ErrorBanner message={routeState.error} />}
+
+          {activePage === "overview" && overview ? (
             <Dashboard overview={overview} updatedAt={updatedAt} />
-          ) : state.status === "loading" ? (
+          ) : activePage === "overview" && state.status === "loading" ? (
             <OverviewSkeleton />
+          ) : activePage === "routes" && activeToken.trim() !== "" && (routeState.status !== "error" || routeState.data) ? (
+            <RoutesPage state={routeState} />
           ) : null}
         </section>
       </div>
@@ -311,6 +369,93 @@ function Dashboard({ overview, updatedAt }: { overview: AdminOverview; updatedAt
   );
 }
 
+function RoutesPage({ state }: { state: RemoteState<AdminRoutes> }) {
+  const routes = state.data?.routes ?? [];
+  const httpRoutes = routes.filter((route) => route.target_type === "http").length;
+  const nsqRoutes = routes.filter((route) => route.target_type === "nsq").length;
+  const limitedRoutes = routes.filter((route) => (route.max_in_flight ?? 0) > 0).length;
+
+  if (state.status === "loading" && !state.data) {
+    return <RoutesSkeleton />;
+  }
+
+  if (state.status !== "loading" && routes.length === 0) {
+    return <RoutesEmptyState />;
+  }
+
+  return (
+    <div className="grid gap-5">
+      <section className="rounded-lg border border-line bg-white p-5 shadow-diffusion">
+        <div className="grid gap-5 lg:grid-cols-[0.85fr_1.15fr]">
+          <div>
+            <p className="text-sm font-medium text-zinc-500">Route Table</p>
+            <h2 className="mt-1 font-mono text-5xl tracking-tight text-ink">{state.data?.total ?? routes.length}</h2>
+            <p className="mt-2 text-sm text-zinc-500">gateway node: {state.data?.gateway_node ?? "--"}</p>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            <MetricRow label="HTTP targets" value={httpRoutes.toLocaleString()} />
+            <MetricRow label="NSQ targets" value={nsqRoutes.toLocaleString()} />
+            <MetricRow label="Capacity limits" value={limitedRoutes.toLocaleString()} />
+            <MetricRow label="Refresh state" value={state.status} />
+          </div>
+        </div>
+      </section>
+
+      <section className="grid gap-3">
+        {routes.map((route, index) => (
+          <RouteCard key={`${route.name}-${route.msg_id_min}-${route.msg_id_max ?? "single"}`} route={route} index={index} />
+        ))}
+      </section>
+    </div>
+  );
+}
+
+function RouteCard({ route, index }: { route: AdminRoute; index: number }) {
+  const detailRows = routeDetails(route);
+
+  return (
+    <article
+      className="animate-rise overflow-hidden rounded-lg border border-line bg-white shadow-diffusion"
+      style={{ animationDelay: `${index * 45}ms` }}
+    >
+      <div className="grid gap-4 p-4 lg:grid-cols-[0.7fr_1.3fr] lg:p-5">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-md bg-zinc-950 px-2.5 py-1 font-mono text-xs font-medium text-white">
+              {route.target_type.toUpperCase()}
+            </span>
+            <span className="rounded-md border border-line bg-zinc-50 px-2.5 py-1 font-mono text-xs text-zinc-600">
+              {routeRangeLabel(route)}
+            </span>
+          </div>
+          <h3 className="mt-4 truncate text-xl font-semibold tracking-tight">{route.name}</h3>
+          <p className="mt-2 text-sm text-zinc-500">
+            max in-flight: <span className="font-mono text-ink">{route.max_in_flight?.toLocaleString() ?? "--"}</span>
+          </p>
+        </div>
+
+        <div className="grid min-w-0 gap-3 md:grid-cols-2">
+          {detailRows.map((item) => (
+            <div className="min-w-0 rounded-lg border border-line bg-zinc-50 px-3 py-2" key={item.label}>
+              <p className="text-xs uppercase tracking-[0.14em] text-zinc-500">{item.label}</p>
+              <p className="mt-1 break-words font-mono text-sm text-ink">{item.value}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function MetricRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-line bg-zinc-50 px-4 py-3">
+      <span className="text-sm text-zinc-500">{label}</span>
+      <span className="truncate text-right font-mono text-sm font-medium text-ink">{value}</span>
+    </div>
+  );
+}
+
 function DependencyList({ dependencies }: { dependencies: Dependency[] }) {
   if (dependencies.length === 0) {
     return (
@@ -420,6 +565,32 @@ function AuthEmptyState() {
   );
 }
 
+function RoutesEmptyState() {
+  return (
+    <div className="rounded-lg border border-line bg-white px-5 py-8 shadow-diffusion">
+      <div className="max-w-xl">
+        <div className="grid size-12 place-items-center rounded-lg border border-line bg-zinc-50 text-accent">
+          <GitBranch size={22} weight="duotone" />
+        </div>
+        <h2 className="mt-5 text-2xl font-semibold tracking-tight">No Routes</h2>
+        <p className="mt-2 text-sm leading-relaxed text-zinc-500">
+          No upstream route definitions were returned by the gateway.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function RoutesSkeleton() {
+  return (
+    <div className="grid gap-5">
+      <SkeletonPanel className="h-52" />
+      <SkeletonPanel className="h-36" />
+      <SkeletonPanel className="h-36" />
+    </div>
+  );
+}
+
 function OverviewSkeleton() {
   return (
     <div className="grid gap-5 xl:grid-cols-[1.35fr_0.85fr]">
@@ -428,6 +599,38 @@ function OverviewSkeleton() {
       <SkeletonPanel className="h-80 xl:col-span-2" />
     </div>
   );
+}
+
+function routeRangeLabel(route: AdminRoute): string {
+  if (!route.msg_id_max || route.msg_id_max === route.msg_id_min) {
+    return `MsgID ${route.msg_id_min}`;
+  }
+  return `MsgID ${route.msg_id_min}-${route.msg_id_max}`;
+}
+
+function routeDetails(route: AdminRoute): Array<{ label: string; value: string }> {
+  if (route.http) {
+    return [
+      { label: "URL", value: route.http.url || "--" },
+      { label: "Timeout", value: route.http.timeout || "--" },
+      { label: "Target", value: "HTTP" },
+      { label: "Range", value: routeRangeLabel(route) },
+    ];
+  }
+
+  if (route.nsq) {
+    return [
+      { label: "Topic", value: route.nsq.topic || "--" },
+      { label: "Addresses", value: route.nsq.addresses?.join(", ") || "--" },
+      { label: "Publish Mode", value: route.nsq.publish_mode || "--" },
+      { label: "Retry Attempts", value: route.nsq.retry_attempts?.toLocaleString() ?? "--" },
+    ];
+  }
+
+  return [
+    { label: "Target", value: route.target_type || "--" },
+    { label: "Range", value: routeRangeLabel(route) },
+  ];
 }
 
 function SkeletonPanel({ className }: { className: string }) {
