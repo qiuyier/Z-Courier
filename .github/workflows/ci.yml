@@ -30,11 +30,23 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/admin/package-lock.json
+
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
           php-version: "8.2"
           coverage: none
+
+      - name: Build admin console
+        run: |
+          npm ci --prefix web/admin
+          npm run build --prefix web/admin
 
       - name: Test Go
         run: go test ./...
@@ -166,7 +178,7 @@ jobs:
       - name: Smoke gateway image
         run: |
           docker run --rm --entrypoint /bin/sh z-courier-gateway:ci -c \
-            'test -x /usr/local/bin/z-courier-gateway && test -f /app/configs/z-courier.yaml && test -f /app/conf/zinx.json'
+            'test -x /usr/local/bin/z-courier-gateway && test -f /app/configs/z-courier.yaml && test -f /app/conf/zinx.json && test -f /app/web/admin/dist/index.html'
           docker run --rm z-courier-gateway:ci -h >/tmp/z-courier-gateway-help.txt 2>&1
 
   production-smoke:

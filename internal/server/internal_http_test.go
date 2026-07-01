@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -218,6 +220,63 @@ func TestInternalHTTPAdminOverview(t *testing.T) {
 	}
 	if !resp.Readiness.DrainingSince.Equal(drainStartedAt.UTC()) || resp.Readiness.DrainDuration == "" {
 		t.Fatalf("draining readiness timing = %+v, want since and duration", resp.Readiness)
+	}
+}
+
+func TestInternalHTTPAdminConsoleServesSPA(t *testing.T) {
+	assetsDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(assetsDir, "index.html"), []byte("<html>console</html>"), 0o644); err != nil {
+		t.Fatalf("WriteFile(index) error = %v", err)
+	}
+	if err := os.Mkdir(filepath.Join(assetsDir, "assets"), 0o755); err != nil {
+		t.Fatalf("Mkdir(assets) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(assetsDir, "assets", "app.js"), []byte("console.log('ok')"), 0o644); err != nil {
+		t.Fatalf("WriteFile(asset) error = %v", err)
+	}
+
+	service := downlink.NewService(testSessionFinder{}, testConnectionFinder{})
+	config := normalizeConfig(Config{
+		InternalHTTPAddr: "127.0.0.1:18080",
+		AdminConsole: AdminConsoleConfig{
+			Enabled:   true,
+			Path:      "/console/",
+			AssetsDir: assetsDir,
+		},
+	})
+
+	server := mustInternalHTTPServer(t, config, service, &gatewayHealth{}, nil)
+	if server == nil {
+		t.Fatal("newInternalHTTPServer() = nil")
+	}
+
+	tests := []struct {
+		name       string
+		method     string
+		path       string
+		wantStatus int
+		wantBody   string
+	}{
+		{name: "index", method: http.MethodGet, path: "/console/", wantStatus: http.StatusOK, wantBody: "console"},
+		{name: "asset", method: http.MethodGet, path: "/console/assets/app.js", wantStatus: http.StatusOK, wantBody: "ok"},
+		{name: "spa route", method: http.MethodGet, path: "/console/routes", wantStatus: http.StatusOK, wantBody: "console"},
+		{name: "missing asset", method: http.MethodGet, path: "/console/assets/missing.js", wantStatus: http.StatusNotFound},
+		{name: "method", method: http.MethodPost, path: "/console/", wantStatus: http.StatusMethodNotAllowed},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(tt.method, tt.path, nil)
+			rec := httptest.NewRecorder()
+			server.Handler.ServeHTTP(rec, req)
+
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d, body = %s", rec.Code, tt.wantStatus, rec.Body.String())
+			}
+			if tt.wantBody != "" && !strings.Contains(rec.Body.String(), tt.wantBody) {
+				t.Fatalf("body = %q, want substring %q", rec.Body.String(), tt.wantBody)
+			}
+		})
 	}
 }
 

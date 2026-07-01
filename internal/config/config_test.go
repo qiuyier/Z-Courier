@@ -450,6 +450,48 @@ upstream:
 	}
 }
 
+func TestLoadServerConfigAdminConsole(t *testing.T) {
+	path := writeConfig(t, `
+internal_http:
+  enabled: true
+admin_console:
+  enabled: true
+  path: /ops
+  assets_dir: web/admin/dist
+`)
+
+	config, err := LoadServerConfig(path)
+	if err != nil {
+		t.Fatalf("LoadServerConfig() error = %v", err)
+	}
+	if !config.AdminConsole.Enabled {
+		t.Fatal("AdminConsole.Enabled = false, want true")
+	}
+	if config.AdminConsole.Path != "/ops/" {
+		t.Fatalf("AdminConsole.Path = %q, want /ops/", config.AdminConsole.Path)
+	}
+	if config.AdminConsole.AssetsDir != "web/admin/dist" {
+		t.Fatalf("AdminConsole.AssetsDir = %q, want web/admin/dist", config.AdminConsole.AssetsDir)
+	}
+}
+
+func TestLoadServerConfigRejectsInvalidAdminConsolePath(t *testing.T) {
+	path := writeConfig(t, `
+admin_console:
+  enabled: true
+  path: /internal/admin
+  assets_dir: web/admin/dist
+`)
+
+	_, err := LoadServerConfig(path)
+	if err == nil {
+		t.Fatal("LoadServerConfig() error = nil, want admin console path error")
+	}
+	if !strings.Contains(err.Error(), "conflicts with internal HTTP routes") {
+		t.Fatalf("LoadServerConfig() error = %q, want conflict message", err)
+	}
+}
+
 func TestLoadServerConfigClusterDefaults(t *testing.T) {
 	path := writeConfig(t, `{}`)
 

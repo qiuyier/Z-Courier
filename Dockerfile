@@ -18,6 +18,17 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} \
     go build -trimpath -ldflags="-s -w" \
     -o /out/z-courier-gateway ./cmd/gateway
 
+FROM --platform=$BUILDPLATFORM node:24-alpine AS admin-console
+
+WORKDIR /src/web/admin
+
+COPY web/admin/package.json web/admin/package-lock.json ./
+RUN npm ci
+
+COPY web/admin/index.html web/admin/postcss.config.cjs web/admin/tailwind.config.js web/admin/tsconfig.json web/admin/vite.config.ts ./
+COPY web/admin/src ./src
+RUN npm run build
+
 FROM alpine:3.22
 
 RUN apk add --no-cache ca-certificates tzdata \
@@ -27,11 +38,12 @@ RUN apk add --no-cache ca-certificates tzdata \
 WORKDIR /app
 
 COPY --from=build /out/z-courier-gateway /usr/local/bin/z-courier-gateway
+COPY --from=admin-console /src/web/admin/dist /app/web/admin/dist
 COPY configs ./configs
 COPY conf ./conf
 
 RUN mkdir -p /app/log \
-    && chown -R zcourier:zcourier /app/log /app/configs /app/conf
+    && chown -R zcourier:zcourier /app/log /app/configs /app/conf /app/web
 
 USER zcourier
 

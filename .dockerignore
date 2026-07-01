@@ -10,6 +10,10 @@ reports
 sdk/php/vendor
 sdk/php/composer.lock
 
+web/admin/node_modules
+web/admin/dist
+web/admin/tsconfig.tsbuildinfo
+
 .DS_Store
 *.test
 *.out

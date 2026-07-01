@@ -81,6 +81,9 @@ func newInternalHTTPServer(config Config, logger *zap.Logger, service *downlink.
 	mux.Handle("/internal/admin/check", newAdminCheckHandler(handlerConfig, service, registry))
 	mux.Handle("/internal/debug/route", newDebugRouteHandler(handlerConfig, registry))
 	mux.Handle("/internal/debug/sessions", newDebugSessionsHandler(handlerConfig))
+	if config.AdminConsole.Enabled {
+		mux.Handle(config.AdminConsole.Path, newAdminConsoleHandler(config.AdminConsole))
+	}
 	if config.Cluster.Enabled {
 		switch config.Cluster.Peer.Auth.Mode {
 		case ClusterPeerAuthModeToken, ClusterPeerAuthModeHMAC:

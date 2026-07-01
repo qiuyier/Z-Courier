@@ -19,6 +19,11 @@ internal_http:
   max_request_body_size: 10485760
   max_in_flight: 1000
 
+admin_console:
+  enabled: true
+  path: /console/
+  assets_dir: web/admin/dist
+
 cluster:
   enabled: false
   internal_addr: http://127.0.0.1:18080

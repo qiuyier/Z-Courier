@@ -30,6 +30,7 @@ type Config struct {
 	InternalHTTPAuth           InternalHTTPAuthConfig
 	InternalMaxRequestBodySize int64
 	InternalPushMaxInFlight    int
+	AdminConsole               AdminConsoleConfig
 	UpstreamRoutes             []UpstreamRouteConfig
 	UpstreamRuntime            *UpstreamRuntime
 	Pipeline                   pipeline.Config
@@ -49,6 +50,12 @@ type InternalHTTPHMACConfig struct {
 	MaxClockSkew    time.Duration
 	NonceTTL        time.Duration
 	MaxNonceEntries int
+}
+
+type AdminConsoleConfig struct {
+	Enabled   bool
+	Path      string
+	AssetsDir string
 }
 
 type UpstreamRouteConfig struct {
@@ -185,6 +192,10 @@ func DefaultConfig() Config {
 		},
 		InternalMaxRequestBodySize: 10 << 20,
 		InternalPushMaxInFlight:    1000,
+		AdminConsole: AdminConsoleConfig{
+			Path:      "/console/",
+			AssetsDir: "web/admin/dist",
+		},
 		DownlinkStorage: DownlinkStorageConfig{
 			Type: "memory",
 			Postgres: DownlinkPostgresConfig{
@@ -320,6 +331,12 @@ func normalizeConfig(config Config) Config {
 	}
 	if config.InternalPushMaxInFlight <= 0 {
 		config.InternalPushMaxInFlight = defaults.InternalPushMaxInFlight
+	}
+	if config.AdminConsole.Path == "" {
+		config.AdminConsole.Path = defaults.AdminConsole.Path
+	}
+	if config.AdminConsole.AssetsDir == "" {
+		config.AdminConsole.AssetsDir = defaults.AdminConsole.AssetsDir
 	}
 	if config.DownlinkStorage.Type == "" {
 		config.DownlinkStorage.Type = defaults.DownlinkStorage.Type

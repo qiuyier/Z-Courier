@@ -83,6 +83,9 @@ func (c *File) validateShape() error {
 	if err := applyInternalHTTPConfig(&out, c.InternalHTTP); err != nil {
 		return err
 	}
+	if err := applyAdminConsoleConfig(&out, c.AdminConsole); err != nil {
+		return err
+	}
 	if err := applyClusterConfig(&out, c.Cluster); err != nil {
 		return err
 	}

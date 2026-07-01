@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"path"
 	"sort"
 	"strings"
 	"time"
@@ -27,6 +28,7 @@ type File struct {
 	Auth         AuthConfig         `yaml:"auth"`
 	Cluster      ClusterConfig      `yaml:"cluster"`
 	InternalHTTP InternalHTTPConfig `yaml:"internal_http"`
+	AdminConsole AdminConsoleConfig `yaml:"admin_console"`
 	Downlink     DownlinkConfig     `yaml:"downlink"`
 	Upstream     UpstreamConfig     `yaml:"upstream"`
 	Pipeline     PipelineConfig     `yaml:"pipeline"`
@@ -94,6 +96,12 @@ type InternalHTTPHMACConfig struct {
 	MaxClockSkew    string            `yaml:"max_clock_skew"`
 	NonceTTL        string            `yaml:"nonce_ttl"`
 	MaxNonceEntries int               `yaml:"max_nonce_entries"`
+}
+
+type AdminConsoleConfig struct {
+	Enabled   bool   `yaml:"enabled"`
+	Path      string `yaml:"path"`
+	AssetsDir string `yaml:"assets_dir"`
 }
 
 type ClusterConfig struct {
@@ -345,6 +353,9 @@ func (c *File) ToServerConfig() (server.Config, error) {
 		out.RouteMsgIDs = append([]uint32(nil), c.RouteMsgIDs...)
 	}
 	if err := applyInternalHTTPConfig(&out, c.InternalHTTP); err != nil {
+		return server.Config{}, err
+	}
+	if err := applyAdminConsoleConfig(&out, c.AdminConsole); err != nil {
 		return server.Config{}, err
 	}
 	if err := applyClusterConfig(&out, c.Cluster); err != nil {
@@ -656,6 +667,46 @@ func toInternalHTTPHMACConfig(config InternalHTTPHMACConfig) (server.InternalHTT
 
 func internalHTTPHMACConfigSet(config InternalHTTPHMACConfig) bool {
 	return len(config.Keys) > 0 || config.MaxClockSkew != "" || config.NonceTTL != "" || config.MaxNonceEntries != 0
+}
+
+func applyAdminConsoleConfig(out *server.Config, config AdminConsoleConfig) error {
+	out.AdminConsole.Enabled = config.Enabled
+	if config.Path != "" {
+		consolePath, err := normalizeAdminConsolePath(config.Path)
+		if err != nil {
+			return err
+		}
+		out.AdminConsole.Path = consolePath
+	}
+	if config.AssetsDir != "" {
+		out.AdminConsole.AssetsDir = strings.TrimSpace(config.AssetsDir)
+	}
+	if out.AdminConsole.Enabled && out.AdminConsole.AssetsDir == "" {
+		return fmt.Errorf("config: admin_console assets_dir is required when admin console is enabled")
+	}
+	return nil
+}
+
+func normalizeAdminConsolePath(value string) (string, error) {
+	consolePath := strings.TrimSpace(value)
+	if consolePath == "" {
+		return "", fmt.Errorf("config: admin_console path must not be empty")
+	}
+	if !strings.HasPrefix(consolePath, "/") {
+		return "", fmt.Errorf("config: admin_console path must start with /")
+	}
+
+	consolePath = path.Clean(consolePath)
+	if consolePath == "/" {
+		return "", fmt.Errorf("config: admin_console path must not be /")
+	}
+	if strings.HasPrefix(consolePath, "/internal") ||
+		consolePath == "/metrics" ||
+		consolePath == "/healthz" ||
+		consolePath == "/readyz" {
+		return "", fmt.Errorf("config: admin_console path %q conflicts with internal HTTP routes", value)
+	}
+	return strings.TrimRight(consolePath, "/") + "/", nil
 }
 
 func applyClusterConfig(out *server.Config, config ClusterConfig) error {
