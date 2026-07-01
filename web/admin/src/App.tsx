@@ -6,6 +6,7 @@ import {
   CheckCircle,
   Circuitry,
   Database,
+  Gauge,
   GitBranch,
   PlugsConnected,
   LockKey,
@@ -15,8 +16,8 @@ import {
   Warning,
   XCircle,
 } from "@phosphor-icons/react";
-import { fetchOverview, fetchRoutes } from "./api";
-import type { AdminOverview, AdminRoute, AdminRoutes, Dependency } from "./types";
+import { fetchDiagnostics, fetchOverview, fetchRoutes } from "./api";
+import type { AdminDiagnostics, AdminOverview, AdminRoute, AdminRoutes, Dependency } from "./types";
 
 const tokenStorageKey = "z-courier-console-token";
 
@@ -32,7 +33,7 @@ const navItems = [
   { id: "overview" as const, label: "Overview", icon: Pulse, disabled: false },
   { id: "routes" as const, label: "Routes", icon: GitBranch, disabled: false },
   { id: "messages" as const, label: "Messages", icon: Database, disabled: true },
-  { id: "diagnostics" as const, label: "Diagnostics", icon: Pulse, disabled: true },
+  { id: "diagnostics" as const, label: "Diagnostics", icon: Gauge, disabled: false },
 ];
 
 export default function App() {
@@ -42,6 +43,7 @@ export default function App() {
     window.sessionStorage.getItem(tokenStorageKey) ? { status: "loading" } : { status: "idle" },
   );
   const [routeState, setRouteState] = useState<RemoteState<AdminRoutes>>({ status: "idle" });
+  const [diagnosticsState, setDiagnosticsState] = useState<RemoteState<AdminDiagnostics>>({ status: "idle" });
   const [activePage, setActivePage] = useState<PageID>("overview");
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
 
@@ -96,6 +98,27 @@ export default function App() {
     [activeToken],
   );
 
+  const refreshDiagnostics = useCallback(
+    async (signal?: AbortSignal) => {
+      if (activeToken.trim() === "") {
+        setDiagnosticsState({ status: "idle" });
+        return;
+      }
+      setDiagnosticsState((current) => ({ status: "loading", data: current.data }));
+      try {
+        const data = await fetchDiagnostics(activeToken, signal);
+        setDiagnosticsState({ status: "ready", data });
+      } catch (error) {
+        if (signal?.aborted) {
+          return;
+        }
+        const message = error instanceof Error ? error.message : "unknown_error";
+        setDiagnosticsState((current) => ({ status: "error", data: current.data, error: message }));
+      }
+    },
+    [activeToken],
+  );
+
   useEffect(() => {
     if (activeToken.trim() === "") {
       setState({ status: "idle" });
@@ -130,12 +153,29 @@ export default function App() {
     };
   }, [activePage, activeToken, refreshRoutes]);
 
+  useEffect(() => {
+    if (activePage !== "diagnostics") {
+      return;
+    }
+    if (activeToken.trim() === "") {
+      setDiagnosticsState({ status: "idle" });
+      return;
+    }
+
+    const controller = new AbortController();
+    void refreshDiagnostics(controller.signal);
+    return () => {
+      controller.abort();
+    };
+  }, [activePage, activeToken, refreshDiagnostics]);
+
   const connect = useCallback(() => {
     const nextToken = draftToken.trim();
     setActiveToken(nextToken);
     if (nextToken === "") {
       setState({ status: "idle" });
       setRouteState({ status: "idle" });
+      setDiagnosticsState({ status: "idle" });
       setUpdatedAt(null);
     }
   }, [draftToken]);
@@ -145,13 +185,17 @@ export default function App() {
       void refreshRoutes();
       return;
     }
+    if (activePage === "diagnostics") {
+      void refreshDiagnostics();
+      return;
+    }
     void refresh();
-  }, [activePage, refresh, refreshRoutes]);
+  }, [activePage, refresh, refreshDiagnostics, refreshRoutes]);
 
   const overview = state.data;
   const ready = overview?.readiness.ready ?? false;
   const statusText = overview?.readiness.status ?? (state.status === "error" ? "not connected" : activeToken ? "connecting" : "auth required");
-  const pageTitle = activePage === "routes" ? "Routes" : "Operations Overview";
+  const pageTitle = activePage === "routes" ? "Routes" : activePage === "diagnostics" ? "Diagnostics" : "Operations Overview";
 
   return (
     <main className="min-h-[100dvh] bg-mist text-ink">
@@ -249,6 +293,7 @@ export default function App() {
 
           {activePage === "overview" && state.status === "error" && <ErrorBanner message={state.error} />}
           {activePage === "routes" && routeState.status === "error" && <ErrorBanner message={routeState.error} />}
+          {activePage === "diagnostics" && diagnosticsState.status === "error" && <ErrorBanner message={diagnosticsState.error} />}
 
           {activePage === "overview" && overview ? (
             <Dashboard overview={overview} updatedAt={updatedAt} />
@@ -256,6 +301,8 @@ export default function App() {
             <OverviewSkeleton />
           ) : activePage === "routes" && activeToken.trim() !== "" && (routeState.status !== "error" || routeState.data) ? (
             <RoutesPage state={routeState} />
+          ) : activePage === "diagnostics" && activeToken.trim() !== "" && (diagnosticsState.status !== "error" || diagnosticsState.data) ? (
+            <DiagnosticsPage state={diagnosticsState} />
           ) : null}
         </section>
       </div>
@@ -410,6 +457,146 @@ function RoutesPage({ state }: { state: RemoteState<AdminRoutes> }) {
   );
 }
 
+function DiagnosticsPage({ state }: { state: RemoteState<AdminDiagnostics> }) {
+  const diagnostics = state.data;
+  if (state.status === "loading" && !diagnostics) {
+    return <DiagnosticsSkeleton />;
+  }
+  if (!diagnostics) {
+    return <DiagnosticsEmptyState />;
+  }
+
+  const warnings = diagnostics.warnings ?? [];
+  const httpRouteStates = diagnostics.upstream.http_route_states ?? [];
+  const dependencyIssues = diagnostics.dependencies.filter((dependency) => !healthyDependencyStatus(dependency.status)).length;
+
+  return (
+    <div className="grid gap-5">
+      <section className="rounded-lg border border-line bg-white p-5 shadow-diffusion">
+        <div className="grid gap-5 xl:grid-cols-[0.95fr_1.05fr]">
+          <div>
+            <p className="text-sm font-medium text-zinc-500">Gateway Node</p>
+            <h2 className="mt-1 text-3xl font-semibold tracking-tight md:text-4xl">{diagnostics.gateway_node}</h2>
+            <div className="mt-5 flex flex-wrap gap-2">
+              <StatusBadge label={diagnostics.readiness.status} tone={diagnostics.readiness.ready ? "ok" : "warn"} />
+              <StatusBadge label={diagnostics.runtime.started ? "runtime started" : "runtime idle"} tone={diagnostics.runtime.started ? "ok" : "warn"} />
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <MetricRow label="Uptime" value={diagnostics.runtime.uptime || "--"} />
+            <MetricRow label="Online Sessions" value={diagnostics.sessions.online.toLocaleString()} />
+            <MetricRow label="Unique Clients" value={diagnostics.sessions.unique_clients.toLocaleString()} />
+            <MetricRow label="Warnings" value={warnings.length.toLocaleString()} />
+          </div>
+        </div>
+      </section>
+
+      {warnings.length > 0 && (
+        <section className="grid gap-3">
+          {warnings.map((warning, index) => (
+            <article
+              className="animate-rise rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-amber-950"
+              key={warning.code}
+              style={{ animationDelay: `${index * 45}ms` }}
+            >
+              <div className="flex items-start gap-3">
+                <Warning size={18} className="mt-0.5 shrink-0" weight="duotone" />
+                <div className="min-w-0">
+                  <p className="font-mono text-xs font-semibold uppercase tracking-[0.14em]">{warning.code}</p>
+                  <p className="mt-1 break-words text-sm">{warning.message}</p>
+                </div>
+              </div>
+            </article>
+          ))}
+        </section>
+      )}
+
+      <section className="grid gap-5 xl:grid-cols-[1.05fr_0.95fr]">
+        <article className="rounded-lg border border-line bg-white p-5 shadow-diffusion">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium text-zinc-500">Dependencies</p>
+              <h3 className="mt-1 text-2xl font-semibold tracking-tight">
+                {dependencyIssues === 0 ? "Healthy" : `${dependencyIssues} issue${dependencyIssues > 1 ? "s" : ""}`}
+              </h3>
+            </div>
+            <ShieldCheck size={24} className="text-accent" weight="duotone" />
+          </div>
+          <DependencyList dependencies={diagnostics.dependencies} />
+        </article>
+
+        <article className="rounded-lg border border-line bg-zinc-950 p-5 text-white shadow-diffusion">
+          <p className="text-sm text-zinc-400">Auth and Capacity</p>
+          <h3 className="mt-1 text-2xl font-semibold tracking-tight">{diagnostics.auth.provider}</h3>
+          <div className="mt-6 grid gap-3 border-t border-white/10 pt-4">
+            <DarkLineItem label="Verifier" value={diagnostics.auth.verifier_loaded ? "loaded" : "missing"} />
+            <DarkLineItem label="Rate Limit" value={diagnostics.capacity.rate_limit_enabled ? "enabled" : "disabled"} />
+            <DarkLineItem label="Rate Window" value={diagnostics.capacity.rate_limit_window || "--"} />
+            <DarkLineItem label="Internal In-Flight" value={diagnostics.capacity.internal_http_max_in_flight?.toLocaleString() ?? "--"} />
+          </div>
+        </article>
+      </section>
+
+      <section className="rounded-lg border border-line bg-white p-5 shadow-diffusion">
+        <div className="grid gap-5 lg:grid-cols-[0.9fr_1.1fr]">
+          <div>
+            <p className="text-sm font-medium text-zinc-500">Traffic Runtime</p>
+            <h3 className="mt-1 text-2xl font-semibold tracking-tight">{diagnostics.upstream.routes.toLocaleString()} upstream routes</h3>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            <MetricRow label="HTTP Routes" value={diagnostics.upstream.http_routes.toLocaleString()} />
+            <MetricRow label="NSQ Routes" value={diagnostics.upstream.nsq_routes.toLocaleString()} />
+            <MetricRow label="Capacity-Limited" value={diagnostics.upstream.routes_with_capacity_limit.toLocaleString()} />
+            <MetricRow label="Downlink Store" value={diagnostics.downlink.store_configured ? diagnostics.downlink.storage_type : "not configured"} />
+          </div>
+        </div>
+      </section>
+
+      {httpRouteStates.length > 0 && (
+        <section className="grid gap-3">
+          {httpRouteStates.map((route, index) => (
+            <article
+              className="animate-rise rounded-lg border border-line bg-white p-4 shadow-diffusion"
+              key={route.name}
+              style={{ animationDelay: `${index * 45}ms` }}
+            >
+              <div className="grid gap-4 lg:grid-cols-[0.75fr_1.25fr]">
+                <div className="min-w-0">
+                  <StatusBadge label={route.status} tone={route.status === "healthy" ? "ok" : "warn"} />
+                  <h3 className="mt-3 truncate text-xl font-semibold tracking-tight">{route.name}</h3>
+                  <p className="mt-1 text-sm text-zinc-500">{route.target_type}</p>
+                </div>
+                <div className="grid min-w-0 gap-3 md:grid-cols-2">
+                  <MetricRow label="Failures" value={(route.consecutive_failures ?? 0).toLocaleString()} />
+                  <MetricRow label="Updated" value={formatOptionalDate(route.updated_at)} />
+                  <MetricRow label="Last Success" value={formatOptionalDate(route.last_success_at)} />
+                  <MetricRow label="Reason" value={route.last_reason || "--"} />
+                </div>
+              </div>
+            </article>
+          ))}
+        </section>
+      )}
+
+      <section className="grid gap-5 xl:grid-cols-2">
+        <DiagnosticsConfigPanel title="Internal HTTP" rows={[
+          ["Enabled", diagnostics.internal_http.enabled ? "enabled" : "disabled"],
+          ["Address", diagnostics.internal_http.addr || "--"],
+          ["Auth Mode", diagnostics.internal_http.auth_mode || "--"],
+          ["Max Body", diagnostics.internal_http.max_request_body_size?.toLocaleString() ?? "--"],
+        ]} />
+        <DiagnosticsConfigPanel title="Cluster" rows={[
+          ["Enabled", diagnostics.cluster.enabled ? "enabled" : "disabled"],
+          ["Registry", diagnostics.cluster.registry_type || "--"],
+          ["Registry TTL", diagnostics.cluster.registry_ttl || "--"],
+          ["Peer Auth", diagnostics.cluster.peer_auth_mode || "--"],
+        ]} />
+      </section>
+    </div>
+  );
+}
+
 function RouteCard({ route, index }: { route: AdminRoute; index: number }) {
   const detailRows = routeDetails(route);
 
@@ -453,6 +640,42 @@ function MetricRow({ label, value }: { label: string; value: string }) {
       <span className="text-sm text-zinc-500">{label}</span>
       <span className="truncate text-right font-mono text-sm font-medium text-ink">{value}</span>
     </div>
+  );
+}
+
+function DarkLineItem({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex min-w-0 items-center justify-between gap-3 border-b border-white/10 pb-2 last:border-0 last:pb-0">
+      <span className="text-sm text-zinc-400">{label}</span>
+      <span className="truncate text-right font-mono text-sm text-white">{value}</span>
+    </div>
+  );
+}
+
+function StatusBadge({ label, tone }: { label: string; tone: "ok" | "warn" }) {
+  return (
+    <span
+      className={[
+        "inline-flex items-center gap-2 rounded-md px-2.5 py-1 text-xs font-medium",
+        tone === "ok" ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-800",
+      ].join(" ")}
+    >
+      <span className={["size-1.5 rounded-full", tone === "ok" ? "bg-accent" : "bg-amber-500"].join(" ")} />
+      {label}
+    </span>
+  );
+}
+
+function DiagnosticsConfigPanel({ title, rows }: { title: string; rows: Array<[string, string]> }) {
+  return (
+    <article className="rounded-lg border border-line bg-white p-5 shadow-diffusion">
+      <p className="text-sm font-medium text-zinc-500">{title}</p>
+      <div className="mt-5 grid gap-3">
+        {rows.map(([label, value]) => (
+          <LineItem key={label} label={label} value={value} />
+        ))}
+      </div>
+    </article>
   );
 }
 
@@ -581,12 +804,41 @@ function RoutesEmptyState() {
   );
 }
 
+function DiagnosticsEmptyState() {
+  return (
+    <div className="rounded-lg border border-line bg-white px-5 py-8 shadow-diffusion">
+      <div className="max-w-xl">
+        <div className="grid size-12 place-items-center rounded-lg border border-line bg-zinc-50 text-accent">
+          <Gauge size={22} weight="duotone" />
+        </div>
+        <h2 className="mt-5 text-2xl font-semibold tracking-tight">No Diagnostics</h2>
+        <p className="mt-2 text-sm leading-relaxed text-zinc-500">
+          The gateway did not return diagnostic data.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function RoutesSkeleton() {
   return (
     <div className="grid gap-5">
       <SkeletonPanel className="h-52" />
       <SkeletonPanel className="h-36" />
       <SkeletonPanel className="h-36" />
+    </div>
+  );
+}
+
+function DiagnosticsSkeleton() {
+  return (
+    <div className="grid gap-5">
+      <SkeletonPanel className="h-56" />
+      <div className="grid gap-5 xl:grid-cols-2">
+        <SkeletonPanel className="h-72" />
+        <SkeletonPanel className="h-72" />
+      </div>
+      <SkeletonPanel className="h-52" />
     </div>
   );
 }
@@ -631,6 +883,21 @@ function routeDetails(route: AdminRoute): Array<{ label: string; value: string }
     { label: "Target", value: route.target_type || "--" },
     { label: "Range", value: routeRangeLabel(route) },
   ];
+}
+
+function healthyDependencyStatus(status: string): boolean {
+  return status === "configured" || status === "ok" || status === "healthy" || status === "disabled";
+}
+
+function formatOptionalDate(value?: string): string {
+  if (!value || value.startsWith("0001-01-01")) {
+    return "--";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "--";
+  }
+  return date.toLocaleString();
 }
 
 function SkeletonPanel({ className }: { className: string }) {

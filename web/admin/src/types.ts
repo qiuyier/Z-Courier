@@ -93,3 +93,63 @@ export type AdminRoutes = {
   total: number;
   routes: AdminRoute[];
 };
+
+export type RuntimeDiagnostics = {
+  started: boolean;
+  started_at?: string;
+  uptime?: string;
+};
+
+export type AuthDiagnostics = {
+  provider: string;
+  cache_wrapped?: boolean;
+  verifier_loaded: boolean;
+};
+
+export type UpstreamRouteRuntime = {
+  name: string;
+  target_type: string;
+  status: string;
+  consecutive_failures?: number;
+  last_reason?: string;
+  last_failure_at?: string;
+  last_success_at?: string;
+  updated_at?: string;
+};
+
+export type UpstreamDiagnostics = {
+  routes: number;
+  http_routes: number;
+  nsq_routes: number;
+  routes_with_capacity_limit: number;
+  http_route_states?: UpstreamRouteRuntime[];
+};
+
+export type CapacityDiagnostics = {
+  internal_http_max_in_flight?: number;
+  upstream_limited_routes?: number;
+  rate_limit_enabled: boolean;
+  rate_limit_max_requests?: number;
+  rate_limit_window?: string;
+};
+
+export type DiagnosticWarning = {
+  code: string;
+  message: string;
+};
+
+export type AdminDiagnostics = {
+  code: string;
+  gateway_node: string;
+  runtime: RuntimeDiagnostics;
+  readiness: Readiness;
+  sessions: SessionSummary;
+  auth: AuthDiagnostics;
+  internal_http: InternalHTTPSummary;
+  cluster: ClusterSummary;
+  downlink: DownlinkSummary;
+  upstream: UpstreamDiagnostics;
+  capacity: CapacityDiagnostics;
+  dependencies: Dependency[];
+  warnings?: DiagnosticWarning[];
+};

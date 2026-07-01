@@ -1,4 +1,4 @@
-import type { AdminOverview, AdminRoutes } from "./types";
+import type { AdminDiagnostics, AdminOverview, AdminRoutes } from "./types";
 
 const internalTokenHeader = "X-ZCourier-Internal-Token";
 
@@ -46,4 +46,8 @@ export async function fetchOverview(token: string, signal?: AbortSignal): Promis
 
 export async function fetchRoutes(token: string, signal?: AbortSignal): Promise<AdminRoutes> {
   return fetchAdminJSON<AdminRoutes>("/internal/admin/routes", token, signal);
+}
+
+export async function fetchDiagnostics(token: string, signal?: AbortSignal): Promise<AdminDiagnostics> {
+  return fetchAdminJSON<AdminDiagnostics>("/internal/admin/diagnostics", token, signal);
 }
