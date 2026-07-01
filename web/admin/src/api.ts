@@ -1,4 +1,4 @@
-import type { AdminDiagnostics, AdminOverview, AdminRoutes } from "./types";
+import type { AdminDiagnostics, AdminMessages, AdminOverview, AdminRoutes, MessageStatus, MessageStatusResponse } from "./types";
 
 const internalTokenHeader = "X-ZCourier-Internal-Token";
 
@@ -40,6 +40,38 @@ async function fetchAdminJSON<T>(path: string, token: string, signal?: AbortSign
   return (await response.json()) as T;
 }
 
+async function postAdminJSON<T>(path: string, token: string, body: unknown, signal?: AbortSignal): Promise<T> {
+  const headers = new Headers();
+  headers.set("Content-Type", "application/json");
+  if (token.trim() !== "") {
+    headers.set(internalTokenHeader, token.trim());
+  }
+
+  const response = await fetch(path, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+    signal,
+  });
+
+  if (!response.ok) {
+    let message = `Request failed with ${response.status}`;
+    try {
+      const responseBody = (await response.json()) as { code?: string; reason?: string };
+      if (responseBody.code && responseBody.reason) {
+        message = `${responseBody.code}: ${responseBody.reason}`;
+      } else if (responseBody.code) {
+        message = responseBody.code;
+      }
+    } catch {
+      // Keep the HTTP status message when the response is not JSON.
+    }
+    throw new APIError(message, response.status);
+  }
+
+  return (await response.json()) as T;
+}
+
 export async function fetchOverview(token: string, signal?: AbortSignal): Promise<AdminOverview> {
   return fetchAdminJSON<AdminOverview>("/internal/admin/overview", token, signal);
 }
@@ -50,4 +82,35 @@ export async function fetchRoutes(token: string, signal?: AbortSignal): Promise<
 
 export async function fetchDiagnostics(token: string, signal?: AbortSignal): Promise<AdminDiagnostics> {
   return fetchAdminJSON<AdminDiagnostics>("/internal/admin/diagnostics", token, signal);
+}
+
+export async function fetchMessages(
+  token: string,
+  status: MessageStatus,
+  limit: number,
+  signal?: AbortSignal,
+): Promise<AdminMessages> {
+  const query = new URLSearchParams({
+    status,
+    limit: String(limit),
+  });
+  return fetchAdminJSON<AdminMessages>(`/internal/messages?${query.toString()}`, token, signal);
+}
+
+export async function fetchMessage(token: string, messageID: string, signal?: AbortSignal): Promise<MessageStatusResponse> {
+  const query = new URLSearchParams({ message_id: messageID });
+  return fetchAdminJSON<MessageStatusResponse>(`/internal/message/status?${query.toString()}`, token, signal);
+}
+
+export async function requeueMessage(token: string, messageID: string, signal?: AbortSignal): Promise<MessageStatusResponse> {
+  return postAdminJSON<MessageStatusResponse>("/internal/message/requeue", token, { message_id: messageID }, signal);
+}
+
+export async function discardMessage(
+  token: string,
+  messageID: string,
+  reason: string,
+  signal?: AbortSignal,
+): Promise<MessageStatusResponse> {
+  return postAdminJSON<MessageStatusResponse>("/internal/message/discard", token, { message_id: messageID, reason }, signal);
 }

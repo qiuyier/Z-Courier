@@ -10,16 +10,27 @@ import {
   GitBranch,
   PlugsConnected,
   LockKey,
+  MagnifyingGlass,
   Pulse,
   RadioButton,
   ShieldCheck,
   Warning,
   XCircle,
 } from "@phosphor-icons/react";
-import { fetchDiagnostics, fetchOverview, fetchRoutes } from "./api";
-import type { AdminDiagnostics, AdminOverview, AdminRoute, AdminRoutes, Dependency } from "./types";
+import { discardMessage, fetchDiagnostics, fetchMessage, fetchMessages, fetchOverview, fetchRoutes, requeueMessage } from "./api";
+import type {
+  AdminDiagnostics,
+  AdminMessages,
+  AdminOverview,
+  AdminRoute,
+  AdminRoutes,
+  Dependency,
+  MessageStatus,
+  MessageStatusResponse,
+} from "./types";
 
 const tokenStorageKey = "z-courier-console-token";
+const messageStatuses: MessageStatus[] = ["failed", "pending", "sent", "delivered", "discarded"];
 
 type RemoteState<T> =
   | { status: "idle"; data?: undefined; error?: undefined }
@@ -28,11 +39,18 @@ type RemoteState<T> =
   | { status: "error"; data?: T; error: string };
 
 type PageID = "overview" | "routes" | "messages" | "diagnostics";
+type MessageAction = "requeue" | "discard";
+type MessageActionDialogState = {
+  action: MessageAction;
+  message: MessageStatusResponse;
+  reason: string;
+  error?: string;
+} | null;
 
 const navItems = [
   { id: "overview" as const, label: "Overview", icon: Pulse, disabled: false },
   { id: "routes" as const, label: "Routes", icon: GitBranch, disabled: false },
-  { id: "messages" as const, label: "Messages", icon: Database, disabled: true },
+  { id: "messages" as const, label: "Messages", icon: Database, disabled: false },
   { id: "diagnostics" as const, label: "Diagnostics", icon: Gauge, disabled: false },
 ];
 
@@ -44,6 +62,13 @@ export default function App() {
   );
   const [routeState, setRouteState] = useState<RemoteState<AdminRoutes>>({ status: "idle" });
   const [diagnosticsState, setDiagnosticsState] = useState<RemoteState<AdminDiagnostics>>({ status: "idle" });
+  const [messagesState, setMessagesState] = useState<RemoteState<AdminMessages>>({ status: "idle" });
+  const [messageLookupState, setMessageLookupState] = useState<RemoteState<MessageStatusResponse>>({ status: "idle" });
+  const [messageStatus, setMessageStatus] = useState<MessageStatus>("failed");
+  const [messageLimit, setMessageLimit] = useState(100);
+  const [messageLookupID, setMessageLookupID] = useState("");
+  const [messageActionDialog, setMessageActionDialog] = useState<MessageActionDialogState>(null);
+  const [messageActionPending, setMessageActionPending] = useState(false);
   const [activePage, setActivePage] = useState<PageID>("overview");
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
 
@@ -119,6 +144,99 @@ export default function App() {
     [activeToken],
   );
 
+  const refreshMessages = useCallback(
+    async (signal?: AbortSignal) => {
+      if (activeToken.trim() === "") {
+        setMessagesState({ status: "idle" });
+        return;
+      }
+      setMessagesState((current) => ({ status: "loading", data: current.data }));
+      try {
+        const data = await fetchMessages(activeToken, messageStatus, messageLimit, signal);
+        setMessagesState({ status: "ready", data });
+      } catch (error) {
+        if (signal?.aborted) {
+          return;
+        }
+        const message = error instanceof Error ? error.message : "unknown_error";
+        setMessagesState((current) => ({ status: "error", data: current.data, error: message }));
+      }
+    },
+    [activeToken, messageLimit, messageStatus],
+  );
+
+  const lookupMessage = useCallback(
+    async (signal?: AbortSignal) => {
+      const messageID = messageLookupID.trim();
+      if (activeToken.trim() === "" || messageID === "") {
+        setMessageLookupState({ status: "idle" });
+        return;
+      }
+      setMessageLookupState((current) => ({ status: "loading", data: current.data }));
+      try {
+        const data = await fetchMessage(activeToken, messageID, signal);
+        setMessageLookupState({ status: "ready", data });
+      } catch (error) {
+        if (signal?.aborted) {
+          return;
+        }
+        const message = error instanceof Error ? error.message : "unknown_error";
+        setMessageLookupState((current) => ({ status: "error", data: current.data, error: message }));
+      }
+    },
+    [activeToken, messageLookupID],
+  );
+
+  const openMessageAction = useCallback((action: MessageAction, message: MessageStatusResponse) => {
+    setMessageActionDialog({ action, message, reason: "" });
+  }, []);
+
+  const closeMessageAction = useCallback(() => {
+    if (messageActionPending) {
+      return;
+    }
+    setMessageActionDialog(null);
+  }, [messageActionPending]);
+
+  const updateMessageActionReason = useCallback((reason: string) => {
+    setMessageActionDialog((current) => current ? { ...current, reason, error: undefined } : current);
+  }, []);
+
+  const confirmMessageAction = useCallback(async () => {
+    if (!messageActionDialog || activeToken.trim() === "") {
+      return;
+    }
+
+    const messageID = messageActionDialog.message.message_id?.trim() ?? "";
+    const reason = messageActionDialog.reason.trim();
+    if (messageID === "") {
+      setMessageActionDialog((current) => current ? { ...current, error: "message_id is required" } : current);
+      return;
+    }
+    if (messageActionDialog.action === "discard" && reason === "") {
+      setMessageActionDialog((current) => current ? { ...current, error: "discard reason is required" } : current);
+      return;
+    }
+
+    setMessageActionPending(true);
+    try {
+      const updated =
+        messageActionDialog.action === "requeue"
+          ? await requeueMessage(activeToken, messageID)
+          : await discardMessage(activeToken, messageID, reason);
+      if (messageLookupID.trim() === messageID) {
+        setMessageLookupState({ status: "ready", data: updated });
+      }
+      setMessageActionDialog(null);
+      await refreshMessages();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "unknown_error";
+      setMessageActionDialog((current) => current ? { ...current, error: message } : current);
+    } finally {
+      setMessageActionPending(false);
+    }
+  }, [activeToken, messageActionDialog, messageLookupID, refreshMessages]);
+
   useEffect(() => {
     if (activeToken.trim() === "") {
       setState({ status: "idle" });
@@ -169,6 +287,22 @@ export default function App() {
     };
   }, [activePage, activeToken, refreshDiagnostics]);
 
+  useEffect(() => {
+    if (activePage !== "messages") {
+      return;
+    }
+    if (activeToken.trim() === "") {
+      setMessagesState({ status: "idle" });
+      return;
+    }
+
+    const controller = new AbortController();
+    void refreshMessages(controller.signal);
+    return () => {
+      controller.abort();
+    };
+  }, [activePage, activeToken, refreshMessages]);
+
   const connect = useCallback(() => {
     const nextToken = draftToken.trim();
     setActiveToken(nextToken);
@@ -176,6 +310,9 @@ export default function App() {
       setState({ status: "idle" });
       setRouteState({ status: "idle" });
       setDiagnosticsState({ status: "idle" });
+      setMessagesState({ status: "idle" });
+      setMessageLookupState({ status: "idle" });
+      setMessageActionDialog(null);
       setUpdatedAt(null);
     }
   }, [draftToken]);
@@ -189,13 +326,24 @@ export default function App() {
       void refreshDiagnostics();
       return;
     }
+    if (activePage === "messages") {
+      void refreshMessages();
+      return;
+    }
     void refresh();
-  }, [activePage, refresh, refreshDiagnostics, refreshRoutes]);
+  }, [activePage, refresh, refreshDiagnostics, refreshMessages, refreshRoutes]);
 
   const overview = state.data;
   const ready = overview?.readiness.ready ?? false;
   const statusText = overview?.readiness.status ?? (state.status === "error" ? "not connected" : activeToken ? "connecting" : "auth required");
-  const pageTitle = activePage === "routes" ? "Routes" : activePage === "diagnostics" ? "Diagnostics" : "Operations Overview";
+  const pageTitle =
+    activePage === "routes"
+      ? "Routes"
+      : activePage === "messages"
+        ? "Messages"
+        : activePage === "diagnostics"
+          ? "Diagnostics"
+          : "Operations Overview";
 
   return (
     <main className="min-h-[100dvh] bg-mist text-ink">
@@ -293,6 +441,7 @@ export default function App() {
 
           {activePage === "overview" && state.status === "error" && <ErrorBanner message={state.error} />}
           {activePage === "routes" && routeState.status === "error" && <ErrorBanner message={routeState.error} />}
+          {activePage === "messages" && messagesState.status === "error" && <ErrorBanner message={messagesState.error} />}
           {activePage === "diagnostics" && diagnosticsState.status === "error" && <ErrorBanner message={diagnosticsState.error} />}
 
           {activePage === "overview" && overview ? (
@@ -301,11 +450,33 @@ export default function App() {
             <OverviewSkeleton />
           ) : activePage === "routes" && activeToken.trim() !== "" && (routeState.status !== "error" || routeState.data) ? (
             <RoutesPage state={routeState} />
+          ) : activePage === "messages" && activeToken.trim() !== "" && (messagesState.status !== "error" || messagesState.data) ? (
+            <MessagesPage
+              limit={messageLimit}
+              lookupID={messageLookupID}
+              lookupState={messageLookupState}
+              onLimitChange={setMessageLimit}
+              onMessageAction={openMessageAction}
+              onLookupIDChange={setMessageLookupID}
+              onLookupSubmit={lookupMessage}
+              onStatusChange={setMessageStatus}
+              selectedStatus={messageStatus}
+              state={messagesState}
+            />
           ) : activePage === "diagnostics" && activeToken.trim() !== "" && (diagnosticsState.status !== "error" || diagnosticsState.data) ? (
             <DiagnosticsPage state={diagnosticsState} />
           ) : null}
         </section>
       </div>
+      {messageActionDialog && (
+        <MessageActionDialog
+          dialog={messageActionDialog}
+          onClose={closeMessageAction}
+          onConfirm={confirmMessageAction}
+          onReasonChange={updateMessageActionReason}
+          pending={messageActionPending}
+        />
+      )}
     </main>
   );
 }
@@ -454,6 +625,429 @@ function RoutesPage({ state }: { state: RemoteState<AdminRoutes> }) {
         ))}
       </section>
     </div>
+  );
+}
+
+function MessagesPage({
+  limit,
+  lookupID,
+  lookupState,
+  onLimitChange,
+  onLookupIDChange,
+  onLookupSubmit,
+  onMessageAction,
+  onStatusChange,
+  selectedStatus,
+  state,
+}: {
+  limit: number;
+  lookupID: string;
+  lookupState: RemoteState<MessageStatusResponse>;
+  onLimitChange: (limit: number) => void;
+  onLookupIDChange: (messageID: string) => void;
+  onLookupSubmit: () => void | Promise<void>;
+  onMessageAction: (action: MessageAction, message: MessageStatusResponse) => void;
+  onStatusChange: (status: MessageStatus) => void;
+  selectedStatus: MessageStatus;
+  state: RemoteState<AdminMessages>;
+}) {
+  const messages = state.data?.messages ?? [];
+  const total = state.data?.total ?? messages.length;
+  const ackRequired = messages.filter((message) => message.ack_required).length;
+  const retryScheduled = messages.filter((message) => Boolean(message.next_retry_at)).length;
+
+  if (state.status === "loading" && !state.data) {
+    return <MessagesSkeleton />;
+  }
+
+  return (
+    <div className="grid gap-5">
+      <section className="rounded-lg border border-line bg-white p-5 shadow-diffusion">
+        <div className="grid gap-5 xl:grid-cols-[0.95fr_1.05fr]">
+          <div>
+            <p className="text-sm font-medium text-zinc-500">Stored Messages</p>
+            <div className="mt-2 flex flex-wrap items-end gap-3">
+              <h2 className="font-mono text-5xl tracking-tight text-ink">{total.toLocaleString()}</h2>
+              <MessageStatusBadge status={selectedStatus} />
+            </div>
+            <div className="mt-5 flex flex-wrap gap-2" role="tablist" aria-label="Message status">
+              {messageStatuses.map((status) => {
+                const active = status === selectedStatus;
+                return (
+                  <button
+                    aria-pressed={active}
+                    className={[
+                      "rounded-lg border px-3 py-2 text-sm font-medium capitalize transition duration-300 active:translate-y-px",
+                      active
+                        ? "border-zinc-950 bg-zinc-950 text-white"
+                        : "border-line bg-white text-zinc-600 hover:border-zinc-300 hover:bg-zinc-50 hover:text-ink",
+                    ].join(" ")}
+                    key={status}
+                    onClick={() => onStatusChange(status)}
+                    type="button"
+                  >
+                    {status}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <MetricRow label="Loaded" value={messages.length.toLocaleString()} />
+            <MetricRow label="Limit" value={limit.toLocaleString()} />
+            <MetricRow label="ACK Required" value={ackRequired.toLocaleString()} />
+            <MetricRow label="Retry Scheduled" value={retryScheduled.toLocaleString()} />
+          </div>
+        </div>
+      </section>
+
+      <section className="grid gap-5 xl:grid-cols-[0.8fr_1.2fr]">
+        <article className="rounded-lg border border-line bg-white p-5 shadow-diffusion">
+          <p className="text-sm font-medium text-zinc-500">List Filter</p>
+          <label className="mt-5 block text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500" htmlFor="message-limit">
+            Limit
+          </label>
+          <input
+            className="mt-2 w-full rounded-lg border border-line bg-white px-3 py-2 font-mono text-sm outline-none transition duration-300 focus:border-accent"
+            id="message-limit"
+            max={1000}
+            min={1}
+            onChange={(event) => onLimitChange(clampMessageLimit(event.target.value))}
+            type="number"
+            value={limit}
+          />
+          <p className="mt-3 text-xs text-zinc-500">Gateway caps list responses at 1000 rows.</p>
+        </article>
+
+        <MessageLookupPanel
+          lookupID={lookupID}
+          lookupState={lookupState}
+          onMessageAction={onMessageAction}
+          onLookupIDChange={onLookupIDChange}
+          onLookupSubmit={onLookupSubmit}
+        />
+      </section>
+
+      {state.status !== "loading" && messages.length === 0 ? (
+        <MessagesEmptyState status={selectedStatus} />
+      ) : (
+        <section className="grid gap-3">
+          {messages.map((message, index) => (
+            <MessageCard
+              key={message.message_id || `${message.status}-${index}`}
+              message={message}
+              index={index}
+              onAction={onMessageAction}
+            />
+          ))}
+        </section>
+      )}
+    </div>
+  );
+}
+
+function MessageLookupPanel({
+  lookupID,
+  lookupState,
+  onMessageAction,
+  onLookupIDChange,
+  onLookupSubmit,
+}: {
+  lookupID: string;
+  lookupState: RemoteState<MessageStatusResponse>;
+  onMessageAction: (action: MessageAction, message: MessageStatusResponse) => void;
+  onLookupIDChange: (messageID: string) => void;
+  onLookupSubmit: () => void | Promise<void>;
+}) {
+  return (
+    <article className="rounded-lg border border-line bg-zinc-950 p-5 text-white shadow-diffusion">
+      <form
+        className="grid gap-3"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void onLookupSubmit();
+        }}
+      >
+        <label className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-400" htmlFor="message-lookup">
+          MessageID
+        </label>
+        <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto]">
+          <input
+            className="min-w-0 rounded-lg border border-white/10 bg-white/10 px-3 py-2 font-mono text-sm text-white outline-none transition duration-300 placeholder:text-zinc-500 focus:border-emerald-400"
+            id="message-lookup"
+            onChange={(event) => onLookupIDChange(event.target.value)}
+            placeholder="message-1"
+            value={lookupID}
+          />
+          <button
+            className="inline-flex items-center justify-center gap-2 rounded-lg bg-white px-3 py-2 text-sm font-medium text-zinc-950 transition duration-300 hover:bg-zinc-100 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-45"
+            disabled={lookupID.trim() === "" || lookupState.status === "loading"}
+            type="submit"
+          >
+            <MagnifyingGlass size={16} weight="bold" />
+            Lookup
+          </button>
+        </div>
+      </form>
+
+      {lookupState.status === "loading" && (
+        <div className="mt-5 rounded-lg border border-white/10 bg-white/10 p-4">
+          <div className="h-4 w-36 rounded bg-white/10" />
+          <div className="mt-4 grid gap-2">
+            <div className="h-10 rounded bg-white/10" />
+            <div className="h-10 rounded bg-white/10" />
+          </div>
+        </div>
+      )}
+
+      {lookupState.status === "error" && (
+        <div className="mt-5 rounded-lg border border-amber-300/30 bg-amber-300/10 px-4 py-3 text-sm text-amber-100">
+          <p className="font-semibold">Lookup failed</p>
+          <p className="mt-1 break-words font-mono text-xs">{lookupState.error}</p>
+        </div>
+      )}
+
+      {lookupState.data && (
+        <div className="mt-5 rounded-lg border border-white/10 bg-white/10 p-4">
+          <div className="flex min-w-0 items-center justify-between gap-3">
+            <p className="truncate font-mono text-sm font-medium">{lookupState.data.message_id || "--"}</p>
+            <MessageStatusBadge status={lookupState.data.status} />
+          </div>
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            <DarkLineItem label="Client" value={lookupState.data.client_id || "--"} />
+            <DarkLineItem label="Device" value={lookupState.data.device_id || "--"} />
+            <DarkLineItem label="MsgID" value={lookupState.data.msg_id?.toLocaleString() ?? "--"} />
+            <DarkLineItem label="Attempts" value={lookupState.data.attempts?.toLocaleString() ?? "0"} />
+          </div>
+          <div className="mt-4 border-t border-white/10 pt-4">
+            <MessageActionButtons message={lookupState.data} onAction={onMessageAction} variant="dark" />
+          </div>
+        </div>
+      )}
+    </article>
+  );
+}
+
+function MessageCard({
+  message,
+  index,
+  onAction,
+}: {
+  message: MessageStatusResponse;
+  index: number;
+  onAction: (action: MessageAction, message: MessageStatusResponse) => void;
+}) {
+  return (
+    <article
+      className="animate-rise overflow-hidden rounded-lg border border-line bg-white shadow-diffusion"
+      style={{ animationDelay: `${index * 45}ms` }}
+    >
+      <div className="grid gap-4 p-4 lg:grid-cols-[0.75fr_1.25fr] lg:p-5">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <MessageStatusBadge status={message.status} />
+            <span className="rounded-md border border-line bg-zinc-50 px-2.5 py-1 font-mono text-xs text-zinc-600">
+              MsgID {message.msg_id?.toLocaleString() ?? "--"}
+            </span>
+          </div>
+          <h3 className="mt-4 truncate font-mono text-lg font-semibold tracking-tight">{message.message_id || "--"}</h3>
+          <p className="mt-2 truncate text-sm text-zinc-500">
+            {message.client_id || "--"} / {message.device_id || "--"}
+          </p>
+          <div className="mt-5">
+            <MessageActionButtons message={message} onAction={onAction} />
+          </div>
+        </div>
+
+        <div className="grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-3">
+          <MessageField label="Attempts" value={message.attempts?.toLocaleString() ?? "0"} />
+          <MessageField label="ACK" value={message.ack_required ? "required" : "not required"} />
+          <MessageField label="Body" value={`${message.body_size_bytes?.toLocaleString() ?? 0} bytes`} />
+          <MessageField label="Updated" value={formatOptionalDate(message.updated_at)} />
+          <MessageField label="Next Retry" value={formatOptionalDate(message.next_retry_at)} />
+          <MessageField label="Claim" value={message.claim_owner || "--"} />
+          <MessageField label="Claim Until" value={formatOptionalDate(message.claim_until)} />
+          <MessageField label="Sent" value={formatOptionalDate(message.sent_at)} />
+          <MessageField label="Delivered" value={formatOptionalDate(message.delivered_at)} />
+          <MessageField label="Last Error" value={message.last_error || "--"} wide />
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function MessageActionButtons({
+  message,
+  onAction,
+  variant = "light",
+}: {
+  message: MessageStatusResponse;
+  onAction: (action: MessageAction, message: MessageStatusResponse) => void;
+  variant?: "light" | "dark";
+}) {
+  const canRequeueMessage = canRequeue(message.status) && Boolean(message.message_id);
+  const canDiscardMessage = canDiscard(message.status) && Boolean(message.message_id);
+  const lightRequeue =
+    "border-line bg-white text-ink hover:border-zinc-300 hover:bg-zinc-50 disabled:bg-zinc-50 disabled:text-zinc-400";
+  const lightDiscard =
+    "border-rose-200 bg-rose-50 text-rose-800 hover:border-rose-300 hover:bg-rose-100 disabled:border-line disabled:bg-zinc-50 disabled:text-zinc-400";
+  const darkRequeue =
+    "border-white/10 bg-white/10 text-white hover:bg-white/15 disabled:text-zinc-500";
+  const darkDiscard =
+    "border-rose-300/30 bg-rose-300/10 text-rose-100 hover:bg-rose-300/15 disabled:border-white/10 disabled:bg-white/5 disabled:text-zinc-500";
+
+  return (
+    <div className="flex min-w-0 flex-wrap gap-2">
+      <button
+        className={[
+          "inline-flex min-w-0 items-center justify-center gap-2 rounded-lg border px-3 py-2 text-xs font-medium transition duration-300 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-60",
+          variant === "dark" ? darkRequeue : lightRequeue,
+        ].join(" ")}
+        disabled={!canRequeueMessage}
+        onClick={() => onAction("requeue", message)}
+        title={canRequeueMessage ? "Requeue message" : "This message cannot be requeued"}
+        type="button"
+      >
+        <ArrowClockwise size={14} weight="bold" />
+        Requeue
+      </button>
+      <button
+        className={[
+          "inline-flex min-w-0 items-center justify-center gap-2 rounded-lg border px-3 py-2 text-xs font-medium transition duration-300 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-60",
+          variant === "dark" ? darkDiscard : lightDiscard,
+        ].join(" ")}
+        disabled={!canDiscardMessage}
+        onClick={() => onAction("discard", message)}
+        title={canDiscardMessage ? "Discard message" : "This message cannot be discarded"}
+        type="button"
+      >
+        <XCircle size={14} weight="bold" />
+        Discard
+      </button>
+    </div>
+  );
+}
+
+function MessageActionDialog({
+  dialog,
+  onClose,
+  onConfirm,
+  onReasonChange,
+  pending,
+}: {
+  dialog: NonNullable<MessageActionDialogState>;
+  onClose: () => void;
+  onConfirm: () => void | Promise<void>;
+  onReasonChange: (reason: string) => void;
+  pending: boolean;
+}) {
+  const messageID = dialog.message.message_id || "--";
+  const isDiscard = dialog.action === "discard";
+  const confirmDisabled = pending || messageID === "--" || (isDiscard && dialog.reason.trim() === "");
+
+  return (
+    <div className="fixed inset-0 z-30 grid place-items-center bg-zinc-950/45 px-4 py-6 backdrop-blur-sm" role="dialog" aria-modal="true">
+      <form
+        className="w-full max-w-lg animate-rise overflow-hidden rounded-lg border border-white/10 bg-white shadow-[0_24px_80px_-32px_rgba(0,0,0,0.45)]"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void onConfirm();
+        }}
+      >
+        <div className="border-b border-line bg-zinc-50 px-5 py-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">
+            {isDiscard ? "Discard Message" : "Requeue Message"}
+          </p>
+          <h2 className="mt-2 break-words font-mono text-lg font-semibold tracking-tight text-ink">{messageID}</h2>
+        </div>
+
+        <div className="grid gap-4 p-5">
+          <div className="rounded-lg border border-line bg-white px-4 py-3">
+            <LineItem label="Current Status" value={dialog.message.status || "--"} />
+            <LineItem label="Attempts" value={dialog.message.attempts?.toLocaleString() ?? "0"} />
+            <LineItem label="Client" value={dialog.message.client_id || "--"} />
+          </div>
+
+          <p className="text-sm leading-relaxed text-zinc-600">
+            {isDiscard
+              ? "Discard stops retry delivery for this message and stores the reason as the latest error."
+              : "Requeue moves this message back to pending and clears attempts, retry time, claim, sent state, and last error."}
+          </p>
+
+          {isDiscard && (
+            <div className="grid gap-2">
+              <label className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500" htmlFor="discard-reason">
+                Reason
+              </label>
+              <textarea
+                className="min-h-24 resize-y rounded-lg border border-line bg-white px-3 py-2 text-sm outline-none transition duration-300 placeholder:text-zinc-400 focus:border-accent"
+                id="discard-reason"
+                onChange={(event) => onReasonChange(event.target.value)}
+                placeholder="manual discard after backend confirmation"
+                value={dialog.reason}
+              />
+              <p className="text-xs text-zinc-500">Required. This will be visible in the message last_error field.</p>
+            </div>
+          )}
+
+          {dialog.error && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              <p className="font-semibold">Action failed</p>
+              <p className="mt-1 break-words font-mono text-xs">{dialog.error}</p>
+            </div>
+          )}
+        </div>
+
+        <div className="flex flex-col-reverse gap-2 border-t border-line bg-zinc-50 px-5 py-4 sm:flex-row sm:justify-end">
+          <button
+            className="inline-flex items-center justify-center rounded-lg border border-line bg-white px-4 py-2 text-sm font-medium text-ink transition duration-300 hover:bg-zinc-50 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={pending}
+            onClick={onClose}
+            type="button"
+          >
+            Cancel
+          </button>
+          <button
+            className={[
+              "inline-flex items-center justify-center rounded-lg px-4 py-2 text-sm font-medium text-white transition duration-300 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50",
+              isDiscard ? "bg-rose-700 hover:bg-rose-800" : "bg-zinc-950 hover:bg-zinc-800",
+            ].join(" ")}
+            disabled={confirmDisabled}
+            type="submit"
+          >
+            {pending ? "Working..." : isDiscard ? "Discard" : "Requeue"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function MessageField({ label, value, wide = false }: { label: string; value: string; wide?: boolean }) {
+  return (
+    <div className={["min-w-0 rounded-lg border border-line bg-zinc-50 px-3 py-2", wide ? "xl:col-span-2" : ""].join(" ")}>
+      <p className="text-xs uppercase tracking-[0.14em] text-zinc-500">{label}</p>
+      <p className="mt-1 break-words font-mono text-sm text-ink">{value}</p>
+    </div>
+  );
+}
+
+function MessageStatusBadge({ status }: { status?: MessageStatus | string }) {
+  const normalized = status || "--";
+  const tone =
+    normalized === "delivered"
+      ? "bg-emerald-50 text-emerald-800"
+      : normalized === "failed" || normalized === "discarded"
+        ? "bg-rose-50 text-rose-800"
+        : normalized === "sent"
+          ? "bg-sky-50 text-sky-800"
+          : "bg-amber-50 text-amber-800";
+
+  return (
+    <span className={["rounded-md px-2.5 py-1 font-mono text-xs font-medium uppercase", tone].join(" ")}>
+      {normalized}
+    </span>
   );
 }
 
@@ -804,6 +1398,22 @@ function RoutesEmptyState() {
   );
 }
 
+function MessagesEmptyState({ status }: { status: MessageStatus }) {
+  return (
+    <div className="rounded-lg border border-line bg-white px-5 py-8 shadow-diffusion">
+      <div className="max-w-xl">
+        <div className="grid size-12 place-items-center rounded-lg border border-line bg-zinc-50 text-accent">
+          <Database size={22} weight="duotone" />
+        </div>
+        <h2 className="mt-5 text-2xl font-semibold tracking-tight">No {status} Messages</h2>
+        <p className="mt-2 text-sm leading-relaxed text-zinc-500">
+          The gateway returned an empty message list for this status.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function DiagnosticsEmptyState() {
   return (
     <div className="rounded-lg border border-line bg-white px-5 py-8 shadow-diffusion">
@@ -816,6 +1426,20 @@ function DiagnosticsEmptyState() {
           The gateway did not return diagnostic data.
         </p>
       </div>
+    </div>
+  );
+}
+
+function MessagesSkeleton() {
+  return (
+    <div className="grid gap-5">
+      <SkeletonPanel className="h-52" />
+      <div className="grid gap-5 xl:grid-cols-[0.8fr_1.2fr]">
+        <SkeletonPanel className="h-48" />
+        <SkeletonPanel className="h-48" />
+      </div>
+      <SkeletonPanel className="h-40" />
+      <SkeletonPanel className="h-40" />
     </div>
   );
 }
@@ -889,7 +1513,15 @@ function healthyDependencyStatus(status: string): boolean {
   return status === "configured" || status === "ok" || status === "healthy" || status === "disabled";
 }
 
-function formatOptionalDate(value?: string): string {
+function canRequeue(status?: MessageStatus | string): boolean {
+  return Boolean(status) && status !== "delivered" && status !== "discarded";
+}
+
+function canDiscard(status?: MessageStatus | string): boolean {
+  return Boolean(status) && status !== "delivered" && status !== "discarded";
+}
+
+function formatOptionalDate(value?: string | null): string {
   if (!value || value.startsWith("0001-01-01")) {
     return "--";
   }
@@ -898,6 +1530,14 @@ function formatOptionalDate(value?: string): string {
     return "--";
   }
   return date.toLocaleString();
+}
+
+function clampMessageLimit(value: string): number {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed)) {
+    return 1;
+  }
+  return Math.min(1000, Math.max(1, parsed));
 }
 
 function SkeletonPanel({ className }: { className: string }) {

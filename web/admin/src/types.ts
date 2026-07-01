@@ -153,3 +153,37 @@ export type AdminDiagnostics = {
   dependencies: Dependency[];
   warnings?: DiagnosticWarning[];
 };
+
+export type MessageStatus = "pending" | "sent" | "delivered" | "failed" | "discarded";
+
+export type MessageStatusResponse = {
+  code: string;
+  reason?: string;
+  message_id?: string;
+  client_id?: string;
+  device_id?: string;
+  msg_id?: number;
+  trace_id?: string;
+  session_id?: string;
+  status?: MessageStatus;
+  attempts?: number;
+  last_error?: string;
+  next_retry_at?: string | null;
+  claim_owner?: string;
+  claim_until?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  sent_at?: string | null;
+  delivered_at?: string | null;
+  ack_required?: boolean;
+  body_size_bytes?: number;
+};
+
+export type AdminMessages = {
+  code: string;
+  reason?: string;
+  status?: MessageStatus;
+  limit?: number;
+  total: number;
+  messages?: MessageStatusResponse[];
+};
