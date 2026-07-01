@@ -94,6 +94,53 @@ export type AdminRoutes = {
   routes: AdminRoute[];
 };
 
+export type AdminSession = {
+  session_id: string;
+  conn_id: number;
+  client_id: string;
+  device_id: string;
+  token_id?: string;
+  gateway_node?: string;
+  connected_at?: string;
+  last_seen_at?: string;
+};
+
+export type AdminSessions = {
+  code: string;
+  reason?: string;
+  gateway_node: string;
+  client_id?: string;
+  limit: number;
+  total: number;
+  unique_clients: number;
+  sessions: AdminSession[];
+};
+
+export type AdminClusterRoute = {
+  client_id: string;
+  device_id: string;
+  session_id: string;
+  gateway_node: string;
+  internal_addr?: string;
+  token_id?: string;
+  updated_at?: string;
+  expires_at?: string;
+  expires_in_ms?: number;
+};
+
+export type AdminClientRouteLookup = {
+  code: string;
+  reason?: string;
+  gateway_node: string;
+  client_id?: string;
+  device_id?: string;
+  local_session_found: boolean;
+  local_session?: AdminSession;
+  cluster_enabled: boolean;
+  cluster_route_found: boolean;
+  cluster_route?: AdminClusterRoute;
+};
+
 export type RuntimeDiagnostics = {
   started: boolean;
   started_at?: string;

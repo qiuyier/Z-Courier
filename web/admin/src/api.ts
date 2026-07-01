@@ -1,9 +1,11 @@
 import type {
   AdminCheck,
+  AdminClientRouteLookup,
   AdminDiagnostics,
   AdminMessages,
   AdminOverview,
   AdminRoutes,
+  AdminSessions,
   MessageStatus,
   MessageStatusResponse,
 } from "./types";
@@ -86,6 +88,32 @@ export async function fetchOverview(token: string, signal?: AbortSignal): Promis
 
 export async function fetchRoutes(token: string, signal?: AbortSignal): Promise<AdminRoutes> {
   return fetchAdminJSON<AdminRoutes>("/internal/admin/routes", token, signal);
+}
+
+export async function fetchSessions(
+  token: string,
+  clientID: string,
+  limit: number,
+  signal?: AbortSignal,
+): Promise<AdminSessions> {
+  const query = new URLSearchParams({ limit: String(limit) });
+  if (clientID.trim() !== "") {
+    query.set("client_id", clientID.trim());
+  }
+  return fetchAdminJSON<AdminSessions>(`/internal/debug/sessions?${query.toString()}`, token, signal);
+}
+
+export async function fetchClientRoute(
+  token: string,
+  clientID: string,
+  deviceID: string,
+  signal?: AbortSignal,
+): Promise<AdminClientRouteLookup> {
+  const query = new URLSearchParams({
+    client_id: clientID.trim(),
+    device_id: deviceID.trim(),
+  });
+  return fetchAdminJSON<AdminClientRouteLookup>(`/internal/debug/route?${query.toString()}`, token, signal);
 }
 
 export async function fetchDiagnostics(token: string, signal?: AbortSignal): Promise<AdminDiagnostics> {

@@ -20,21 +20,26 @@ import {
 import {
   discardMessage,
   fetchAdminCheck,
+  fetchClientRoute,
   fetchDiagnostics,
   fetchMessage,
   fetchMessages,
   fetchOverview,
   fetchRoutes,
+  fetchSessions,
   requeueMessage,
 } from "./api";
 import type {
   AdminCheck,
   AdminCheckResult,
+  AdminClientRouteLookup,
   AdminDiagnostics,
   AdminMessages,
   AdminOverview,
   AdminRoute,
   AdminRoutes,
+  AdminSession,
+  AdminSessions,
   Dependency,
   MessageStatus,
   MessageStatusResponse,
@@ -49,8 +54,9 @@ type RemoteState<T> =
   | { status: "ready"; data: T; error?: undefined }
   | { status: "error"; data?: T; error: string };
 
-type PageID = "overview" | "routes" | "messages" | "checks" | "diagnostics";
+type PageID = "overview" | "routes" | "sessions" | "messages" | "checks" | "diagnostics";
 type MessageAction = "requeue" | "discard";
+type ClientRouteStatus = "idle" | "local" | "remote" | "offline" | "stale";
 type MessageActionDialogState = {
   action: MessageAction;
   message: MessageStatusResponse;
@@ -61,6 +67,7 @@ type MessageActionDialogState = {
 const navItems = [
   { id: "overview" as const, label: "Overview", icon: Pulse, disabled: false },
   { id: "routes" as const, label: "Routes", icon: GitBranch, disabled: false },
+  { id: "sessions" as const, label: "Sessions", icon: RadioButton, disabled: false },
   { id: "messages" as const, label: "Messages", icon: Database, disabled: false },
   { id: "checks" as const, label: "Checks", icon: ShieldCheck, disabled: false },
   { id: "diagnostics" as const, label: "Diagnostics", icon: Gauge, disabled: false },
@@ -73,12 +80,17 @@ export default function App() {
     window.sessionStorage.getItem(tokenStorageKey) ? { status: "loading" } : { status: "idle" },
   );
   const [routeState, setRouteState] = useState<RemoteState<AdminRoutes>>({ status: "idle" });
+  const [sessionsState, setSessionsState] = useState<RemoteState<AdminSessions>>({ status: "idle" });
+  const [clientRouteState, setClientRouteState] = useState<RemoteState<AdminClientRouteLookup>>({ status: "idle" });
   const [diagnosticsState, setDiagnosticsState] = useState<RemoteState<AdminDiagnostics>>({ status: "idle" });
   const [checkState, setCheckState] = useState<RemoteState<AdminCheck>>({ status: "idle" });
   const [messagesState, setMessagesState] = useState<RemoteState<AdminMessages>>({ status: "idle" });
   const [messageLookupState, setMessageLookupState] = useState<RemoteState<MessageStatusResponse>>({ status: "idle" });
   const [checkTimeout, setCheckTimeout] = useState("2s");
   const [checkRanAt, setCheckRanAt] = useState<Date | null>(null);
+  const [sessionClientID, setSessionClientID] = useState("");
+  const [sessionDeviceID, setSessionDeviceID] = useState("");
+  const [sessionLimit, setSessionLimit] = useState(100);
   const [messageStatus, setMessageStatus] = useState<MessageStatus>("failed");
   const [messageLimit, setMessageLimit] = useState(100);
   const [messageLookupID, setMessageLookupID] = useState("");
@@ -136,6 +148,59 @@ export default function App() {
       }
     },
     [activeToken],
+  );
+
+  const refreshSessions = useCallback(
+    async (signal?: AbortSignal) => {
+      if (activeToken.trim() === "") {
+        setSessionsState({ status: "idle" });
+        return;
+      }
+      setSessionsState((current) => ({ status: "loading", data: current.data }));
+      try {
+        const data = await fetchSessions(activeToken, sessionClientID, sessionLimit, signal);
+        setSessionsState({ status: "ready", data });
+      } catch (error) {
+        if (signal?.aborted) {
+          return;
+        }
+        const message = error instanceof Error ? error.message : "unknown_error";
+        setSessionsState((current) => ({ status: "error", data: current.data, error: message }));
+      }
+    },
+    [activeToken, sessionClientID, sessionLimit],
+  );
+
+  const lookupClientRoute = useCallback(
+    async (clientIDOverride?: string, deviceIDOverride?: string, signal?: AbortSignal) => {
+      const clientID = (clientIDOverride ?? sessionClientID).trim();
+      const deviceID = (deviceIDOverride ?? sessionDeviceID).trim();
+      if (activeToken.trim() === "" || clientID === "" || deviceID === "") {
+        setClientRouteState({ status: "idle" });
+        return;
+      }
+      setClientRouteState((current) => ({ status: "loading", data: current.data }));
+      try {
+        const data = await fetchClientRoute(activeToken, clientID, deviceID, signal);
+        setClientRouteState({ status: "ready", data });
+      } catch (error) {
+        if (signal?.aborted) {
+          return;
+        }
+        const message = error instanceof Error ? error.message : "unknown_error";
+        setClientRouteState((current) => ({ status: "error", data: current.data, error: message }));
+      }
+    },
+    [activeToken, sessionClientID, sessionDeviceID],
+  );
+
+  const lookupSessionRoute = useCallback(
+    (session: AdminSession) => {
+      setSessionClientID(session.client_id);
+      setSessionDeviceID(session.device_id);
+      void lookupClientRoute(session.client_id, session.device_id);
+    },
+    [lookupClientRoute],
   );
 
   const refreshDiagnostics = useCallback(
@@ -309,6 +374,23 @@ export default function App() {
   }, [activePage, activeToken, refreshRoutes]);
 
   useEffect(() => {
+    if (activePage !== "sessions") {
+      return;
+    }
+    if (activeToken.trim() === "") {
+      setSessionsState({ status: "idle" });
+      setClientRouteState({ status: "idle" });
+      return;
+    }
+
+    const controller = new AbortController();
+    void refreshSessions(controller.signal);
+    return () => {
+      controller.abort();
+    };
+  }, [activePage, activeToken, refreshSessions]);
+
+  useEffect(() => {
     if (activePage !== "diagnostics") {
       return;
     }
@@ -346,6 +428,8 @@ export default function App() {
     if (nextToken === "") {
       setState({ status: "idle" });
       setRouteState({ status: "idle" });
+      setSessionsState({ status: "idle" });
+      setClientRouteState({ status: "idle" });
       setDiagnosticsState({ status: "idle" });
       setCheckState({ status: "idle" });
       setMessagesState({ status: "idle" });
@@ -361,6 +445,13 @@ export default function App() {
       void refreshRoutes();
       return;
     }
+    if (activePage === "sessions") {
+      void refreshSessions();
+      if (sessionClientID.trim() !== "" && sessionDeviceID.trim() !== "") {
+        void lookupClientRoute();
+      }
+      return;
+    }
     if (activePage === "diagnostics") {
       void refreshDiagnostics();
       return;
@@ -374,7 +465,18 @@ export default function App() {
       return;
     }
     void refresh();
-  }, [activePage, refresh, refreshDiagnostics, refreshMessages, refreshRoutes, runCheck]);
+  }, [
+    activePage,
+    lookupClientRoute,
+    refresh,
+    refreshDiagnostics,
+    refreshMessages,
+    refreshRoutes,
+    refreshSessions,
+    runCheck,
+    sessionClientID,
+    sessionDeviceID,
+  ]);
 
   const overview = state.data;
   const ready = overview?.readiness.ready ?? false;
@@ -382,13 +484,15 @@ export default function App() {
   const pageTitle =
     activePage === "routes"
       ? "Routes"
-      : activePage === "messages"
-        ? "Messages"
-        : activePage === "checks"
-          ? "Checks"
-          : activePage === "diagnostics"
-            ? "Diagnostics"
-            : "Operations Overview";
+      : activePage === "sessions"
+        ? "Sessions"
+        : activePage === "messages"
+          ? "Messages"
+          : activePage === "checks"
+            ? "Checks"
+            : activePage === "diagnostics"
+              ? "Diagnostics"
+              : "Operations Overview";
 
   return (
     <main className="min-h-[100dvh] bg-mist text-ink">
@@ -486,6 +590,8 @@ export default function App() {
 
           {activePage === "overview" && state.status === "error" && <ErrorBanner message={state.error} />}
           {activePage === "routes" && routeState.status === "error" && <ErrorBanner message={routeState.error} />}
+          {activePage === "sessions" && sessionsState.status === "error" && <ErrorBanner message={sessionsState.error} />}
+          {activePage === "sessions" && clientRouteState.status === "error" && <ErrorBanner message={clientRouteState.error} />}
           {activePage === "messages" && messagesState.status === "error" && <ErrorBanner message={messagesState.error} />}
           {activePage === "checks" && checkState.status === "error" && <ErrorBanner message={checkState.error} />}
           {activePage === "diagnostics" && diagnosticsState.status === "error" && <ErrorBanner message={diagnosticsState.error} />}
@@ -496,6 +602,20 @@ export default function App() {
             <OverviewSkeleton />
           ) : activePage === "routes" && activeToken.trim() !== "" && (routeState.status !== "error" || routeState.data) ? (
             <RoutesPage state={routeState} />
+          ) : activePage === "sessions" && activeToken.trim() !== "" && (sessionsState.status !== "error" || sessionsState.data) ? (
+            <SessionsPage
+              clientID={sessionClientID}
+              deviceID={sessionDeviceID}
+              limit={sessionLimit}
+              onClientIDChange={setSessionClientID}
+              onDeviceIDChange={setSessionDeviceID}
+              onLimitChange={setSessionLimit}
+              onLookupRoute={() => lookupClientRoute()}
+              onSessionRouteLookup={lookupSessionRoute}
+              onSessionsRefresh={refreshSessions}
+              routeState={clientRouteState}
+              state={sessionsState}
+            />
           ) : activePage === "messages" && activeToken.trim() !== "" && (messagesState.status !== "error" || messagesState.data) ? (
             <MessagesPage
               limit={messageLimit}
@@ -682,6 +802,328 @@ function RoutesPage({ state }: { state: RemoteState<AdminRoutes> }) {
   );
 }
 
+function SessionsPage({
+  clientID,
+  deviceID,
+  limit,
+  onClientIDChange,
+  onDeviceIDChange,
+  onLimitChange,
+  onLookupRoute,
+  onSessionRouteLookup,
+  onSessionsRefresh,
+  routeState,
+  state,
+}: {
+  clientID: string;
+  deviceID: string;
+  limit: number;
+  onClientIDChange: (clientID: string) => void;
+  onDeviceIDChange: (deviceID: string) => void;
+  onLimitChange: (limit: number) => void;
+  onLookupRoute: () => void | Promise<void>;
+  onSessionRouteLookup: (session: AdminSession) => void;
+  onSessionsRefresh: () => void | Promise<void>;
+  routeState: RemoteState<AdminClientRouteLookup>;
+  state: RemoteState<AdminSessions>;
+}) {
+  const sessions = state.data?.sessions ?? [];
+  const total = state.data?.total ?? sessions.length;
+  const uniqueClients = state.data?.unique_clients ?? new Set(sessions.map((session) => session.client_id)).size;
+  const routeStatus = clientRouteStatus(routeState.data);
+  const loadingSessions = state.status === "loading";
+  const loadingRoute = routeState.status === "loading";
+
+  if (state.status === "loading" && !state.data) {
+    return <SessionsSkeleton />;
+  }
+
+  return (
+    <div className="grid gap-5">
+      <section className="rounded-lg border border-line bg-white p-5 shadow-diffusion">
+        <div className="grid gap-5 xl:grid-cols-[0.95fr_1.05fr]">
+          <div>
+            <p className="text-sm font-medium text-zinc-500">Local Sessions</p>
+            <div className="mt-2 flex flex-wrap items-end gap-3">
+              <h2 className="font-mono text-5xl tracking-tight text-ink">{total.toLocaleString()}</h2>
+              <RouteStatusBadge status={routeStatus} />
+            </div>
+            <p className="mt-2 text-sm text-zinc-500">gateway node: {state.data?.gateway_node ?? "--"}</p>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <MetricRow label="Loaded" value={sessions.length.toLocaleString()} />
+            <MetricRow label="Unique Clients" value={uniqueClients.toLocaleString()} />
+            <MetricRow label="Limit" value={(state.data?.limit ?? limit).toLocaleString()} />
+            <MetricRow label="Refresh State" value={state.status} />
+          </div>
+        </div>
+      </section>
+
+      <section className="grid gap-5 xl:grid-cols-[0.82fr_1.18fr]">
+        <article className="rounded-lg border border-line bg-white p-5 shadow-diffusion">
+          <form
+            className="grid gap-3"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void onSessionsRefresh();
+            }}
+          >
+            <p className="text-sm font-medium text-zinc-500">Session Filter</p>
+            <label className="mt-2 text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500" htmlFor="session-client-filter">
+              ClientID
+            </label>
+            <input
+              className="min-w-0 rounded-lg border border-line bg-white px-3 py-2 font-mono text-sm outline-none transition duration-300 placeholder:text-zinc-400 focus:border-accent"
+              id="session-client-filter"
+              onChange={(event) => onClientIDChange(event.target.value)}
+              placeholder="load-client-0"
+              value={clientID}
+            />
+
+            <label className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500" htmlFor="session-limit">
+              Limit
+            </label>
+            <input
+              className="min-w-0 rounded-lg border border-line bg-white px-3 py-2 font-mono text-sm outline-none transition duration-300 focus:border-accent"
+              id="session-limit"
+              max={1000}
+              min={1}
+              onChange={(event) => onLimitChange(clampSessionLimit(event.target.value))}
+              type="number"
+              value={limit}
+            />
+
+            <button
+              className="mt-2 inline-flex items-center justify-center gap-2 rounded-lg bg-zinc-950 px-4 py-2 text-sm font-medium text-white transition duration-300 hover:bg-zinc-800 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={loadingSessions}
+              type="submit"
+            >
+              <ArrowClockwise size={16} weight="bold" />
+              {loadingSessions ? "Loading..." : "Refresh Sessions"}
+            </button>
+          </form>
+        </article>
+
+        <SessionRouteLookupPanel
+          clientID={clientID}
+          deviceID={deviceID}
+          onClientIDChange={onClientIDChange}
+          onDeviceIDChange={onDeviceIDChange}
+          onLookupRoute={onLookupRoute}
+          routeState={routeState}
+          running={loadingRoute}
+        />
+      </section>
+
+      {state.status !== "loading" && sessions.length === 0 ? (
+        <SessionsEmptyState filtered={(state.data?.client_id ?? "") !== ""} />
+      ) : (
+        <section className="grid gap-3">
+          {sessions.map((session, index) => (
+            <SessionCard
+              index={index}
+              key={`${session.session_id}-${session.conn_id}`}
+              onLookupRoute={onSessionRouteLookup}
+              session={session}
+            />
+          ))}
+        </section>
+      )}
+    </div>
+  );
+}
+
+function SessionRouteLookupPanel({
+  clientID,
+  deviceID,
+  onClientIDChange,
+  onDeviceIDChange,
+  onLookupRoute,
+  routeState,
+  running,
+}: {
+  clientID: string;
+  deviceID: string;
+  onClientIDChange: (clientID: string) => void;
+  onDeviceIDChange: (deviceID: string) => void;
+  onLookupRoute: () => void | Promise<void>;
+  routeState: RemoteState<AdminClientRouteLookup>;
+  running: boolean;
+}) {
+  return (
+    <article className="rounded-lg border border-line bg-zinc-950 p-5 text-white shadow-diffusion">
+      <form
+        className="grid gap-3"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void onLookupRoute();
+        }}
+      >
+        <p className="text-sm text-zinc-400">Client Route Lookup</p>
+        <div className="grid gap-3 md:grid-cols-2">
+          <div className="grid gap-2">
+            <label className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-400" htmlFor="route-client-id">
+              ClientID
+            </label>
+            <input
+              className="min-w-0 rounded-lg border border-white/10 bg-white/10 px-3 py-2 font-mono text-sm text-white outline-none transition duration-300 placeholder:text-zinc-500 focus:border-emerald-400"
+              id="route-client-id"
+              onChange={(event) => onClientIDChange(event.target.value)}
+              placeholder="load-client-0"
+              value={clientID}
+            />
+          </div>
+          <div className="grid gap-2">
+            <label className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-400" htmlFor="route-device-id">
+              DeviceID
+            </label>
+            <input
+              className="min-w-0 rounded-lg border border-white/10 bg-white/10 px-3 py-2 font-mono text-sm text-white outline-none transition duration-300 placeholder:text-zinc-500 focus:border-emerald-400"
+              id="route-device-id"
+              onChange={(event) => onDeviceIDChange(event.target.value)}
+              placeholder="device-0"
+              value={deviceID}
+            />
+          </div>
+        </div>
+        <button
+          className="inline-flex items-center justify-center gap-2 rounded-lg bg-white px-4 py-2 text-sm font-medium text-zinc-950 transition duration-300 hover:bg-zinc-100 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-45"
+          disabled={clientID.trim() === "" || deviceID.trim() === "" || running}
+          type="submit"
+        >
+          <MagnifyingGlass size={16} weight="bold" />
+          {running ? "Looking..." : "Lookup Route"}
+        </button>
+      </form>
+
+      {routeState.status === "loading" && (
+        <div className="mt-5 rounded-lg border border-white/10 bg-white/10 p-4">
+          <div className="h-4 w-36 rounded bg-white/10" />
+          <div className="mt-4 grid gap-2">
+            <div className="h-10 rounded bg-white/10" />
+            <div className="h-10 rounded bg-white/10" />
+          </div>
+        </div>
+      )}
+
+      {routeState.data && <ClientRouteResult lookup={routeState.data} />}
+    </article>
+  );
+}
+
+function ClientRouteResult({ lookup }: { lookup: AdminClientRouteLookup }) {
+  const status = clientRouteStatus(lookup);
+  const local = lookup.local_session;
+  const clusterRoute = lookup.cluster_route;
+
+  return (
+    <div className="mt-5 grid gap-4">
+      <div className="rounded-lg border border-white/10 bg-white/10 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0">
+            <RouteStatusBadge status={status} />
+            <h3 className="mt-3 break-words font-mono text-lg font-semibold tracking-tight">
+              {lookup.client_id || "--"} / {lookup.device_id || "--"}
+            </h3>
+          </div>
+          <p className="font-mono text-xs text-zinc-400">{lookup.gateway_node}</p>
+        </div>
+        <div className="mt-4 grid gap-3 border-t border-white/10 pt-4 md:grid-cols-2">
+          <DarkLineItem label="Local Session" value={lookup.local_session_found ? "found" : "missing"} />
+          <DarkLineItem label="Cluster" value={lookup.cluster_enabled ? "enabled" : "disabled"} />
+          <DarkLineItem label="Cluster Route" value={lookup.cluster_route_found ? "found" : "missing"} />
+          <DarkLineItem label="Resolved As" value={status} />
+        </div>
+      </div>
+
+      {local && (
+        <div className="rounded-lg border border-emerald-300/20 bg-emerald-300/10 p-4">
+          <p className="text-sm font-medium text-emerald-100">Local Session</p>
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            <DarkLineItem label="SessionID" value={local.session_id || "--"} />
+            <DarkLineItem label="ConnID" value={local.conn_id?.toLocaleString() ?? "--"} />
+            <DarkLineItem label="Gateway" value={local.gateway_node || "--"} />
+            <DarkLineItem label="Token" value={local.token_id || "--"} />
+            <DarkLineItem label="Connected" value={formatOptionalDate(local.connected_at)} />
+            <DarkLineItem label="Last Seen" value={formatOptionalDate(local.last_seen_at)} />
+          </div>
+        </div>
+      )}
+
+      {clusterRoute && (
+        <div className="rounded-lg border border-sky-300/20 bg-sky-300/10 p-4">
+          <p className="text-sm font-medium text-sky-100">Cluster Route</p>
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            <DarkLineItem label="Gateway" value={clusterRoute.gateway_node || "--"} />
+            <DarkLineItem label="Internal" value={clusterRoute.internal_addr || "--"} />
+            <DarkLineItem label="SessionID" value={clusterRoute.session_id || "--"} />
+            <DarkLineItem label="Token" value={clusterRoute.token_id || "--"} />
+            <DarkLineItem label="Updated" value={formatOptionalDate(clusterRoute.updated_at)} />
+            <DarkLineItem label="Expires In" value={formatMillis(clusterRoute.expires_in_ms)} />
+          </div>
+        </div>
+      )}
+
+      {!local && !clusterRoute && (
+        <div className="rounded-lg border border-white/10 bg-white/10 px-4 py-5">
+          <p className="font-medium text-white">No online route found</p>
+          <p className="mt-1 text-sm text-zinc-400">
+            {lookup.cluster_enabled ? "No local session or cluster route matched this client/device." : "Cluster registry is disabled on this gateway."}
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SessionCard({
+  index,
+  onLookupRoute,
+  session,
+}: {
+  index: number;
+  onLookupRoute: (session: AdminSession) => void;
+  session: AdminSession;
+}) {
+  return (
+    <article
+      className="animate-rise overflow-hidden rounded-lg border border-line bg-white shadow-diffusion"
+      style={{ animationDelay: `${index * 45}ms` }}
+    >
+      <div className="grid gap-4 p-4 lg:grid-cols-[0.75fr_1.25fr] lg:p-5">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <StatusBadge label="online" tone="ok" />
+            <span className="rounded-md border border-line bg-zinc-50 px-2.5 py-1 font-mono text-xs text-zinc-600">
+              conn {session.conn_id?.toLocaleString() ?? "--"}
+            </span>
+          </div>
+          <h3 className="mt-4 break-words font-mono text-lg font-semibold tracking-tight">{session.client_id || "--"}</h3>
+          <p className="mt-2 break-words text-sm text-zinc-500">{session.device_id || "--"}</p>
+          <button
+            className="mt-5 inline-flex items-center justify-center gap-2 rounded-lg border border-line bg-white px-3 py-2 text-xs font-medium text-ink transition duration-300 hover:border-zinc-300 hover:bg-zinc-50 active:translate-y-px"
+            onClick={() => onLookupRoute(session)}
+            type="button"
+          >
+            <MagnifyingGlass size={14} weight="bold" />
+            Lookup Route
+          </button>
+        </div>
+
+        <div className="grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-3">
+          <MessageField label="SessionID" value={session.session_id || "--"} wide />
+          <MessageField label="Gateway" value={session.gateway_node || "--"} />
+          <MessageField label="Token" value={session.token_id || "--"} />
+          <MessageField label="Connected" value={formatOptionalDate(session.connected_at)} />
+          <MessageField label="Last Seen" value={formatOptionalDate(session.last_seen_at)} />
+          <MessageField label="DeviceID" value={session.device_id || "--"} />
+        </div>
+      </div>
+    </article>
+  );
+}
+
 function ChecksPage({
   onRun,
   onTimeoutChange,
@@ -825,6 +1267,36 @@ function CheckStatusBadge({ status }: { status?: string }) {
         ].join(" ")}
       />
       {normalized}
+    </span>
+  );
+}
+
+function RouteStatusBadge({ status }: { status: ClientRouteStatus }) {
+  const tone =
+    status === "local"
+      ? "bg-emerald-50 text-emerald-800"
+      : status === "remote"
+        ? "bg-sky-50 text-sky-800"
+        : status === "stale"
+          ? "bg-amber-50 text-amber-800"
+          : status === "offline"
+            ? "bg-rose-50 text-rose-800"
+            : "bg-zinc-100 text-zinc-700";
+  const dot =
+    status === "local"
+      ? "bg-accent"
+      : status === "remote"
+        ? "bg-sky-500"
+        : status === "stale"
+          ? "bg-amber-500"
+          : status === "offline"
+            ? "bg-rose-500"
+            : "bg-zinc-400";
+
+  return (
+    <span className={["inline-flex items-center gap-2 rounded-md px-2.5 py-1 font-mono text-xs font-medium uppercase", tone].join(" ")}>
+      <span className={["size-1.5 rounded-full", dot].join(" ")} />
+      {status}
     </span>
   );
 }
@@ -1599,6 +2071,22 @@ function RoutesEmptyState() {
   );
 }
 
+function SessionsEmptyState({ filtered }: { filtered: boolean }) {
+  return (
+    <div className="rounded-lg border border-line bg-white px-5 py-8 shadow-diffusion">
+      <div className="max-w-xl">
+        <div className="grid size-12 place-items-center rounded-lg border border-line bg-zinc-50 text-accent">
+          <RadioButton size={22} weight="duotone" />
+        </div>
+        <h2 className="mt-5 text-2xl font-semibold tracking-tight">No Sessions</h2>
+        <p className="mt-2 text-sm leading-relaxed text-zinc-500">
+          {filtered ? "No local session matched this client filter." : "This gateway did not return local online sessions."}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function MessagesEmptyState({ status }: { status: MessageStatus }) {
   return (
     <div className="rounded-lg border border-line bg-white px-5 py-8 shadow-diffusion">
@@ -1680,6 +2168,20 @@ function MessagesSkeleton() {
   );
 }
 
+function SessionsSkeleton() {
+  return (
+    <div className="grid gap-5">
+      <SkeletonPanel className="h-52" />
+      <div className="grid gap-5 xl:grid-cols-[0.82fr_1.18fr]">
+        <SkeletonPanel className="h-64" />
+        <SkeletonPanel className="h-64" />
+      </div>
+      <SkeletonPanel className="h-40" />
+      <SkeletonPanel className="h-40" />
+    </div>
+  );
+}
+
 function RoutesSkeleton() {
   return (
     <div className="grid gap-5">
@@ -1749,6 +2251,22 @@ function healthyDependencyStatus(status: string): boolean {
   return status === "configured" || status === "ok" || status === "healthy" || status === "disabled";
 }
 
+function clientRouteStatus(lookup?: AdminClientRouteLookup): ClientRouteStatus {
+  if (!lookup) {
+    return "idle";
+  }
+  if (lookup.local_session_found) {
+    return "local";
+  }
+  if (lookup.cluster_route_found) {
+    if ((lookup.cluster_route?.expires_in_ms ?? 1) <= 0) {
+      return "stale";
+    }
+    return "remote";
+  }
+  return "offline";
+}
+
 function checkCounts(checks: AdminCheckResult[]): Record<"ok" | "degraded" | "failed" | "skipped", number> {
   return checks.reduce(
     (counts, check) => {
@@ -1780,7 +2298,29 @@ function formatOptionalDate(value?: string | null): string {
   return date.toLocaleString();
 }
 
+function formatMillis(value?: number): string {
+  if (value == null) {
+    return "--";
+  }
+  if (value <= 0) {
+    return "expired";
+  }
+  if (value < 1000) {
+    return `${value}ms`;
+  }
+  const seconds = value / 1000;
+  return `${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds).toLocaleString()}s`;
+}
+
 function clampMessageLimit(value: string): number {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed)) {
+    return 1;
+  }
+  return Math.min(1000, Math.max(1, parsed));
+}
+
+function clampSessionLimit(value: string): number {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isFinite(parsed)) {
     return 1;
