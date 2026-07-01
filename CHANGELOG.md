@@ -7,6 +7,16 @@ semantic versioning after the first public MVP tag.
 
 ## [Unreleased]
 
+## [v0.8.1] - 2026-07-01
+
+### Fixed
+
+- Helm chart metadata now publishes chart version `0.3.0` with `appVersion`
+  `v0.8.1`, so default Helm installs use the current gateway image instead of
+  the previous `v0.7.0` image.
+- The production Helm values example now pins
+  `ghcr.io/qiuyier/z-courier-gateway:v0.8.1`.
+
 ## [v0.8.0] - 2026-06-30
 
 ### Added
