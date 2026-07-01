@@ -53,6 +53,49 @@ func TestMemoryStoreListDuePending(t *testing.T) {
 	}
 }
 
+func TestMemoryStoreListDueRetrySkipsActiveClaim(t *testing.T) {
+	store := NewMemoryStore()
+	now := time.UnixMilli(1760000000000)
+	store.now = func() time.Time { return now }
+
+	for _, message := range []Message{
+		{
+			MessageID:   "claimed",
+			ClientID:    "c1",
+			DeviceID:    "d1",
+			MsgID:       2001,
+			Status:      MessageStatusPending,
+			NextRetryAt: now,
+			ClaimOwner:  "gateway-a",
+			ClaimUntil:  now.Add(time.Minute),
+			CreatedAt:   now,
+		},
+		{
+			MessageID:   "expired-claim",
+			ClientID:    "c1",
+			DeviceID:    "d1",
+			MsgID:       2001,
+			Status:      MessageStatusPending,
+			NextRetryAt: now,
+			ClaimOwner:  "gateway-a",
+			ClaimUntil:  now.Add(-time.Second),
+			CreatedAt:   now.Add(time.Second),
+		},
+	} {
+		if _, err := store.Save(context.Background(), message); err != nil {
+			t.Fatalf("Save %s error = %v", message.MessageID, err)
+		}
+	}
+
+	messages, err := store.ListDueRetry(context.Background(), now, time.Second, 10)
+	if err != nil {
+		t.Fatalf("ListDueRetry() error = %v", err)
+	}
+	if len(messages) != 1 || messages[0].MessageID != "expired-claim" {
+		t.Fatalf("ListDueRetry() = %+v, want only expired-claim", messages)
+	}
+}
+
 func TestMemoryStoreListDueRetryIncludesAckTimeout(t *testing.T) {
 	store := NewMemoryStore()
 	now := time.UnixMilli(1760000000000)
@@ -172,9 +215,24 @@ func TestMemoryStoreListPendingByClientDeviceIgnoresRetryTime(t *testing.T) {
 		MsgID:       2001,
 		Status:      MessageStatusPending,
 		NextRetryAt: now.Add(time.Minute),
+		ClaimOwner:  "gateway-a",
+		ClaimUntil:  now.Add(time.Minute),
 		CreatedAt:   now,
 	}); err != nil {
 		t.Fatalf("Save future error = %v", err)
+	}
+	if _, err := store.Save(context.Background(), Message{
+		MessageID:   "expired-claim",
+		ClientID:    "c1",
+		DeviceID:    "d1",
+		MsgID:       2001,
+		Status:      MessageStatusPending,
+		NextRetryAt: now.Add(time.Minute),
+		ClaimOwner:  "gateway-a",
+		ClaimUntil:  now.Add(-time.Second),
+		CreatedAt:   now.Add(time.Second),
+	}); err != nil {
+		t.Fatalf("Save expired claim error = %v", err)
 	}
 	if _, err := store.Save(context.Background(), Message{
 		MessageID: "other-device",
@@ -191,8 +249,8 @@ func TestMemoryStoreListPendingByClientDeviceIgnoresRetryTime(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListPendingByClientDevice() error = %v", err)
 	}
-	if len(messages) != 1 || messages[0].MessageID != "future" {
-		t.Fatalf("ListPendingByClientDevice() = %+v, want only future", messages)
+	if len(messages) != 1 || messages[0].MessageID != "expired-claim" {
+		t.Fatalf("ListPendingByClientDevice() = %+v, want only expired-claim", messages)
 	}
 }
 

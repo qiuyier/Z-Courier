@@ -272,7 +272,13 @@ func (s *Service) PushPeer(ctx context.Context, req PeerPushRequest, gatewayNode
 }
 
 func (s *Service) pushReliable(ctx context.Context, req PushRequest) (*PushResponse, error) {
-	message, err := s.store.Save(ctx, messageFromPushRequest(req, s.now()))
+	message := messageFromPushRequest(req, s.now())
+	if s.retryClaimOwner != "" && s.retryClaimLease > 0 {
+		message.ClaimOwner = s.retryClaimOwner
+		message.ClaimUntil = message.CreatedAt.Add(s.retryClaimLease)
+	}
+
+	message, err := s.store.Save(ctx, message)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrStore, err)
 	}

@@ -113,6 +113,10 @@ func (s *MemoryStore) ListDueRetry(ctx context.Context, now time.Time, ackTimeou
 }
 
 func messageDueForRetry(message Message, now time.Time, ackTimeout time.Duration) bool {
+	if claimActive(message, now) {
+		return false
+	}
+
 	switch message.Status {
 	case MessageStatusPending:
 		return message.NextRetryAt.IsZero() || !message.NextRetryAt.After(now)
@@ -139,6 +143,9 @@ func (s *MemoryStore) ListPendingByClientDevice(ctx context.Context, clientID, d
 		if message.Status != MessageStatusPending {
 			continue
 		}
+		if claimActive(message, s.now()) {
+			continue
+		}
 		if message.ClientID != clientID || message.DeviceID != deviceID {
 			continue
 		}
@@ -146,6 +153,10 @@ func (s *MemoryStore) ListPendingByClientDevice(ctx context.Context, clientID, d
 	}
 
 	return limitMessages(messages, limit), nil
+}
+
+func claimActive(message Message, now time.Time) bool {
+	return !message.ClaimUntil.IsZero() && message.ClaimUntil.After(now)
 }
 
 func (s *MemoryStore) MarkSent(ctx context.Context, messageID, sessionID string, sentAt time.Time) error {

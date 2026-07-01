@@ -116,6 +116,64 @@ func TestServiceReliablePushStoresAndSendsOnlineMessage(t *testing.T) {
 	}
 }
 
+func TestServiceReliablePushClaimsMessageDuringOnlineSend(t *testing.T) {
+	now := time.UnixMilli(1760000000000)
+	store := NewMemoryStore()
+	store.now = func() time.Time { return now }
+
+	var pendingDuringSend []Message
+	conn := &fakeConnection{
+		beforeSend: func() {
+			var err error
+			pendingDuringSend, err = store.ListPendingByClientDevice(context.Background(), "client-1", "device-1", 10)
+			if err != nil {
+				t.Fatalf("ListPendingByClientDevice() error = %v", err)
+			}
+		},
+	}
+	service := NewService(
+		fakeSessions{session: &session.Session{
+			SessionID: "session-1",
+			ConnID:    7,
+			ClientID:  "client-1",
+			DeviceID:  "device-1",
+		}},
+		fakeConnections{conn: conn},
+		WithStore(store),
+		WithRetryClaim("gateway-a", time.Minute),
+	)
+	service.now = func() time.Time { return now }
+
+	resp, err := service.Push(context.Background(), PushRequest{
+		ClientID:    "client-1",
+		DeviceID:    "device-1",
+		MsgID:       2001,
+		MessageID:   "message-1",
+		AckRequired: true,
+		Body:        []byte("hello"),
+	})
+	if err != nil {
+		t.Fatalf("Push() error = %v", err)
+	}
+	if resp.DeliveryState != DeliveryStateSent {
+		t.Fatalf("DeliveryState = %q, want %q", resp.DeliveryState, DeliveryStateSent)
+	}
+	if len(pendingDuringSend) != 0 {
+		t.Fatalf("pending messages during online send = %+v, want none", pendingDuringSend)
+	}
+
+	stored, ok, err := store.Get(context.Background(), "message-1")
+	if err != nil {
+		t.Fatalf("store.Get() error = %v", err)
+	}
+	if !ok {
+		t.Fatal("stored message not found")
+	}
+	if stored.ClaimOwner != "" || !stored.ClaimUntil.IsZero() {
+		t.Fatalf("claim after MarkSent = owner:%q until:%v, want cleared", stored.ClaimOwner, stored.ClaimUntil)
+	}
+}
+
 func TestServiceReliablePushQueuesOfflineMessage(t *testing.T) {
 	store := NewMemoryStore()
 	service := NewService(fakeSessions{}, fakeConnections{}, WithStore(store))
@@ -1360,14 +1418,18 @@ func (f *fakeClaimStore) ClaimDueRetry(ctx context.Context, now time.Time, ackTi
 }
 
 type fakeConnection struct {
-	msgID uint32
-	data  []byte
-	err   error
+	msgID      uint32
+	data       []byte
+	err        error
+	beforeSend func()
 }
 
 func (f *fakeConnection) SendMsg(msgID uint32, data []byte) error {
 	if f.err != nil {
 		return f.err
+	}
+	if f.beforeSend != nil {
+		f.beforeSend()
 	}
 
 	f.msgID = msgID
