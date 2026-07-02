@@ -27,6 +27,8 @@ A high-performance message push gateway based on the `zinx` network framework.
 - Static config validation, admin diagnostics, dependency checks, safe diagnosis
   bundles, Prometheus alert rules, Alertmanager examples, and production
   Grafana dashboards
+- Optional embedded Web admin console for read-only operations, diagnostics,
+  session/route/message inspection, and guarded downlink repair actions
 - Graceful shutdown with readiness drain and cluster route cleanup
 - MIT Licensed
 
@@ -77,7 +79,8 @@ V8 production operations governance is tracked in
 checklist is in [docs/v8-release.md](docs/v8-release.md).
 
 V9 Web admin console work is tracked in
-[docs/v9-roadmap.md](docs/v9-roadmap.md).
+[docs/v9-roadmap.md](docs/v9-roadmap.md), and the `v0.9.0` release-prep
+checklist is in [docs/v9-release.md](docs/v9-release.md).
 
 ## Quick Start
 
@@ -200,29 +203,15 @@ queries is in [docs/v5-production-runbook.md](docs/v5-production-runbook.md).
 For a full release check, run:
 
 ```bash
-actionlint
-go test -count=1 -timeout=120s ./...
-go test -race -count=1 -timeout=90s \
-  ./pkg/sdk/protocol ./pkg/sdk/client ./pkg/sdk/backend ./pkg/sdk/signing \
-  ./internal/auth ./internal/downlink \
-  ./internal/server ./internal/config
-go vet ./...
-php -d error_reporting=E_ALL sdk/php/tests/run.php
-find sdk/php -name '*.php' -print0 | xargs -0 -n1 php -l
-composer --working-dir=sdk/php install --no-interaction --prefer-dist
-composer --working-dir=sdk/php analyse
-bash scripts/e2e.sh
-bash scripts/e2e_cluster.sh
-bash scripts/loadtest_smoke.sh
-bash scripts/production_smoke.sh
-bash scripts/production_cluster_smoke.sh
-docker build --tag z-courier-gateway:release-check .
-docker run --rm --entrypoint /bin/sh z-courier-gateway:release-check -c \
-  'test -x /usr/local/bin/z-courier-gateway && test -f /app/configs/z-courier.yaml && test -f /app/conf/zinx.json'
-git diff --check
+ZCOURIER_RELEASE_RUN_DOCKER=1 \
+ZCOURIER_RELEASE_RUN_SLOW=1 \
+ZCOURIER_RELEASE_RUN_K8S=1 \
+bash scripts/release_check.sh
 ```
 
-This is the checklist used before creating a version tag.
+For a faster local pass that avoids Docker-backed and long-running checks, run
+`bash scripts/release_check.sh`. This is the checklist used before creating a
+version tag.
 
 ## Release Status
 
@@ -271,12 +260,19 @@ itself to GHCR, then wiring that official image into the Helm production path.
 See [docs/v7-docker-image-release.md](docs/v7-docker-image-release.md) and
 [docs/v7-release.md](docs/v7-release.md).
 
-V8 is being prepared for `v0.8.0`. It focuses on production operations
-governance: static configuration validation, runtime diagnostics, admin
-diagnosis bundles, dependency checks, Prometheus alert rules, Alertmanager
-examples, production-signal dashboards, readiness drain visibility, upstream
-route health state, and retry jitter. See [docs/v8-roadmap.md](docs/v8-roadmap.md)
-and [docs/v8-release.md](docs/v8-release.md).
+V8 was published as `v0.8.0`, with `v0.8.1` aligning Helm chart metadata and
+default image tags. It focuses on production operations governance: static
+configuration validation, runtime diagnostics, admin diagnosis bundles,
+dependency checks, Prometheus alert rules, Alertmanager examples,
+production-signal dashboards, readiness drain visibility, upstream route health
+state, and retry jitter. See [docs/v8-roadmap.md](docs/v8-roadmap.md) and
+[docs/v8-release.md](docs/v8-release.md).
+
+V9 is being prepared for `v0.9.0`. It adds the optional embedded Web admin
+console for overview, routes, sessions, messages, dependency checks,
+diagnostics, diagnosis bundles, metrics context, and guarded downlink repair.
+See [docs/v9-roadmap.md](docs/v9-roadmap.md) and
+[docs/v9-release.md](docs/v9-release.md).
 
 ## Development
 

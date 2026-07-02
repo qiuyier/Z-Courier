@@ -256,7 +256,7 @@ Acceptance criteria:
 - The console remains useful even when Prometheus and Grafana links are not
   configured.
 
-Implemented so far:
+Release readiness:
 
 - `admin_console.monitoring` config exposes Prometheus, Grafana, and dashboard
   links through the authenticated admin APIs.
@@ -307,6 +307,13 @@ Implemented so far:
 9. Add Docker, Compose, and Helm documentation.
 10. Write the `v0.9.0` release guide and run release verification.
 
+Implemented so far:
+
+- The `v0.9.0` release guide is maintained in
+  [v9-release.md](v9-release.md).
+- `scripts/release_check.sh` provides fast local release checks and optional
+  Docker-backed, smoke, E2E, and kind/Helm release validation.
+
 ## Completion Criteria
 
 `v0.9.0` is complete when:
@@ -324,6 +331,10 @@ Implemented so far:
 - Existing CLI workflows remain supported.
 - A `v0.9.0` release guide documents scope, configuration, verification,
   security boundaries, known limitations, and rollback.
+
+Current status: the release guide and release-check helper are in place. Final
+completion still requires the exact release commit to pass GitHub Actions and
+the release checklist in [v9-release.md](v9-release.md).
 
 ## Known Boundaries
 

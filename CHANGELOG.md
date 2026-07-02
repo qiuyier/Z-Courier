@@ -13,6 +13,33 @@ semantic versioning after the first public MVP tag.
   route inspection, session and cluster lookup, downlink message repair,
   diagnostics, dependency checks, deployment, and security boundaries for the
   `v0.9.0` planning track.
+- Embedded Web admin console served from the gateway internal HTTP listener,
+  with a React/Vite frontend under `web/admin`.
+- Admin console overview, routes, sessions, messages, checks, and diagnostics
+  pages backed by the existing internal admin APIs.
+- Browser workflows for local session search, cluster route lookup, downlink
+  message lookup/listing, guarded requeue/discard actions, active dependency
+  checks, and sanitized diagnosis bundle download.
+- Admin console monitoring links and PromQL context snippets for Prometheus
+  and Grafana workflows.
+- Docker image build packaging for compiled console assets.
+- Helm and gateway configuration for opt-in console deployment.
+- V9 release guide and reusable `scripts/release_check.sh` release verification
+  helper.
+
+### Changed
+
+- CI now builds the admin console and verifies the Docker image contains
+  `/app/web/admin/dist/index.html`.
+- Production Compose and Helm documentation now clarify that `/console/` and
+  `/internal/*` are private admin-plane endpoints.
+
+### Security
+
+- Console static responses now set CSP, no-referrer, nosniff, frame-deny,
+  permission-deny, and cache-control headers.
+- Production and Helm defaults keep the admin console disabled unless an
+  operator opts in.
 
 ## [v0.8.1] - 2026-07-01
 
