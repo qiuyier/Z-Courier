@@ -269,12 +269,13 @@ func TestInternalHTTPAdminConsoleServesSPA(t *testing.T) {
 		path       string
 		wantStatus int
 		wantBody   string
+		wantCache  string
 	}{
-		{name: "index", method: http.MethodGet, path: "/console/", wantStatus: http.StatusOK, wantBody: "console"},
-		{name: "asset", method: http.MethodGet, path: "/console/assets/app.js", wantStatus: http.StatusOK, wantBody: "ok"},
-		{name: "spa route", method: http.MethodGet, path: "/console/routes", wantStatus: http.StatusOK, wantBody: "console"},
-		{name: "missing asset", method: http.MethodGet, path: "/console/assets/missing.js", wantStatus: http.StatusNotFound},
-		{name: "method", method: http.MethodPost, path: "/console/", wantStatus: http.StatusMethodNotAllowed},
+		{name: "index", method: http.MethodGet, path: "/console/", wantStatus: http.StatusOK, wantBody: "console", wantCache: adminConsoleIndexCacheControl},
+		{name: "asset", method: http.MethodGet, path: "/console/assets/app.js", wantStatus: http.StatusOK, wantBody: "ok", wantCache: adminConsoleAssetCacheControl},
+		{name: "spa route", method: http.MethodGet, path: "/console/routes", wantStatus: http.StatusOK, wantBody: "console", wantCache: adminConsoleIndexCacheControl},
+		{name: "missing asset", method: http.MethodGet, path: "/console/assets/missing.js", wantStatus: http.StatusNotFound, wantCache: adminConsoleIndexCacheControl},
+		{name: "method", method: http.MethodPost, path: "/console/", wantStatus: http.StatusMethodNotAllowed, wantCache: adminConsoleIndexCacheControl},
 	}
 
 	for _, tt := range tests {
@@ -289,7 +290,52 @@ func TestInternalHTTPAdminConsoleServesSPA(t *testing.T) {
 			if tt.wantBody != "" && !strings.Contains(rec.Body.String(), tt.wantBody) {
 				t.Fatalf("body = %q, want substring %q", rec.Body.String(), tt.wantBody)
 			}
+			if got := rec.Header().Get("Cache-Control"); got != tt.wantCache {
+				t.Fatalf("Cache-Control = %q, want %q", got, tt.wantCache)
+			}
+			if got := rec.Header().Get("Content-Security-Policy"); got != adminConsoleCSP {
+				t.Fatalf("Content-Security-Policy = %q, want %q", got, adminConsoleCSP)
+			}
+			if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+				t.Fatalf("X-Content-Type-Options = %q, want nosniff", got)
+			}
+			if got := rec.Header().Get("X-Frame-Options"); got != "DENY" {
+				t.Fatalf("X-Frame-Options = %q, want DENY", got)
+			}
 		})
+	}
+}
+
+func TestInternalHTTPAdminConsoleDisabled(t *testing.T) {
+	assetsDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(assetsDir, "index.html"), []byte("<html>console</html>"), 0o644); err != nil {
+		t.Fatalf("WriteFile(index) error = %v", err)
+	}
+
+	service := downlink.NewService(testSessionFinder{}, testConnectionFinder{})
+	config := normalizeConfig(Config{
+		InternalHTTPAddr: "127.0.0.1:18080",
+		AdminConsole: AdminConsoleConfig{
+			Enabled:   false,
+			Path:      "/console/",
+			AssetsDir: assetsDir,
+		},
+	})
+
+	server := mustInternalHTTPServer(t, config, service, &gatewayHealth{}, nil)
+	if server == nil {
+		t.Fatal("newInternalHTTPServer() = nil")
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/console/", nil)
+	rec := httptest.NewRecorder()
+	server.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusNotFound, rec.Body.String())
+	}
+	if got := rec.Header().Get("Content-Security-Policy"); got != "" {
+		t.Fatalf("Content-Security-Policy = %q, want empty when console is disabled", got)
 	}
 }
 

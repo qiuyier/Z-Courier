@@ -98,6 +98,13 @@ its local sessions. If the client is not local, it reads Redis, finds
 This is the same runtime behavior tested by the local cluster E2E, but using
 container service names instead of host loopback ports.
 
+Internal HTTP is a private control-plane surface for backend downlink, peer
+push, health, metrics, admin APIs, and the optional browser console. The
+production cluster reference config keeps `admin_console.enabled: false` on
+both gateway nodes. If you enable it, expose `/console/` only through VPN,
+bastion, private ingress, or an authenticating reverse proxy. Do not publish
+`/console/` or `/internal/*` directly to the public internet.
+
 ## Required Environment
 
 Copy `deploy/production-cluster/.env.example` to

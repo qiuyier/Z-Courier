@@ -147,6 +147,13 @@ Keep the internal service private. These links do not install monitoring
 components; they only make existing monitoring surfaces easier to reach from
 the console.
 
+The chart defaults `adminConsole.enabled=false`. When enabling it, keep the
+internal service on private networking and prefer VPN, bastion, private ingress,
+or an authenticating reverse proxy for operator access. In production HMAC mode,
+browser JavaScript cannot call `/internal/*` APIs unless a deployment-side proxy
+signs those requests; direct HMAC operations remain available through
+`cmd/admin`.
+
 ## Required Secrets
 
 By default, the chart references an existing secret. The default key names are:

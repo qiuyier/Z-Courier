@@ -285,6 +285,15 @@ Acceptance criteria:
 - Production documentation explains that the console is not a public endpoint.
 - Redaction behavior matches CLI diagnostics.
 
+Implemented so far:
+
+- Console static responses set CSP, no-referrer, nosniff, frame-deny,
+  permission-deny, and cache headers.
+- The gateway returns 404 for the console path when `admin_console.enabled` is
+  false.
+- Configuration, production Compose, and Helm documentation describe private
+  access boundaries and HMAC/reverse-proxy expectations.
+
 ## Suggested Implementation Order
 
 1. Add console configuration and static asset serving.

@@ -293,6 +293,41 @@ Z-Courier YAML loader before parsing. The exact cross-language signing contract
 and TLS requirements are documented in
 [internal-http-signing.md](internal-http-signing.md).
 
+## Admin Console
+
+```yaml
+admin_console:
+  enabled: true
+  path: /console/
+  assets_dir: web/admin/dist
+  monitoring:
+    prometheus_url: http://127.0.0.1:19090
+    grafana_url: http://127.0.0.1:13000
+    dashboard_url: http://127.0.0.1:13000/d/z-courier-overview/z-courier-overview
+```
+
+- `enabled`: serves the embedded browser console from internal HTTP when true.
+- `path`: base path for the single-page app. It must not overlap `/internal`,
+  `/metrics`, `/healthz`, or `/readyz`.
+- `assets_dir`: directory containing the built console assets.
+- `monitoring.prometheus_url`: optional Prometheus UI URL used to build query
+  shortcuts.
+- `monitoring.grafana_url`: optional Grafana entrypoint.
+- `monitoring.dashboard_url`: optional preferred Z-Courier dashboard link.
+
+The console is an internal operations UI, not a public endpoint. Production
+deployments should keep it on private networking and expose it only through a
+VPN, bastion, private ingress, or an authenticating reverse proxy. The console
+static responses include a restrictive Content Security Policy, no-referrer,
+nosniff, frame-deny, and disabled browser permission headers. `index.html` is
+served with `Cache-Control: no-store`; hashed assets under `assets/` are served
+with long immutable caching.
+
+When `internal_http.auth.mode` is `hmac`, browser JavaScript cannot call
+`/internal/*` APIs directly unless a deployment-side proxy signs requests. For
+production, prefer a private authenticated reverse proxy or continue using the
+`cmd/admin` CLI for direct HMAC-signed operations.
+
 ## Cluster
 
 ```yaml

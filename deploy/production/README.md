@@ -137,6 +137,10 @@ not a production security model.
 
 Use private networking for internal HTTP in production. Public clients should
 only reach the TCP listener or a TLS-terminating proxy in front of it.
+The embedded admin console is disabled in the production reference config.
+If you enable `admin_console.enabled`, expose it only through VPN, bastion,
+private ingress, or an authenticating reverse proxy. Do not publish `/console/`
+or `/internal/*` directly to the public internet.
 
 The reference Compose file publishes:
 
@@ -169,6 +173,8 @@ The reference gateway config uses:
   `downlink.storage.type: postgres`
 - Redis registry settings that are ready for cluster mode:
   `cluster.registry.type: redis`
+- Admin console disabled by default:
+  `admin_console.enabled: false`
 - HTTP upstream for `MsgID 1001-1999`
 - NSQ upstream for `MsgID 2000-2999`
 - A basic per-client ingress rate limit
