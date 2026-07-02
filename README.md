@@ -716,6 +716,13 @@ at `http://127.0.0.1:9093`, and Grafana is available at
 See [deploy/monitoring/README.md](deploy/monitoring/README.md) for alert rules,
 dashboards, and scrape-target details.
 
+The embedded admin console can show monitoring shortcuts and PromQL snippets
+when `admin_console.monitoring` is configured. The local development config
+points the console at `http://127.0.0.1:19090` for Prometheus and
+`http://127.0.0.1:13000` for Grafana when using
+`deploy/local/docker-compose.yml`. These links are operator conveniences only;
+Grafana remains the source of truth for historical charts and alert context.
+
 ## Project Structure
 - `cmd/gateway`: Gateway entry point
 - `cmd/admin`: Operator CLI for gateway overview, diagnostics, dependency

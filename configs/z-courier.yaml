@@ -23,6 +23,10 @@ admin_console:
   enabled: true
   path: /console/
   assets_dir: web/admin/dist
+  monitoring:
+    prometheus_url: http://127.0.0.1:19090
+    grafana_url: http://127.0.0.1:13000
+    dashboard_url: http://127.0.0.1:13000/d/z-courier-overview/z-courier-overview
 
 cluster:
   enabled: false

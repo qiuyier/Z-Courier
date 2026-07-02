@@ -42,6 +42,15 @@ data:
       max_request_body_size: {{ int .Values.internalHttp.maxRequestBodySize }}
       max_in_flight: {{ .Values.internalHttp.maxInFlight }}
 
+    admin_console:
+      enabled: {{ .Values.adminConsole.enabled }}
+      path: {{ .Values.adminConsole.path | quote }}
+      assets_dir: {{ .Values.adminConsole.assetsDir | quote }}
+      monitoring:
+        prometheus_url: {{ .Values.adminConsole.monitoring.prometheusURL | quote }}
+        grafana_url: {{ .Values.adminConsole.monitoring.grafanaURL | quote }}
+        dashboard_url: {{ .Values.adminConsole.monitoring.dashboardURL | quote }}
+
     cluster:
       enabled: {{ .Values.cluster.enabled }}
       internal_addr: {{ include "z-courier.podInternalAddr" . | quote }}

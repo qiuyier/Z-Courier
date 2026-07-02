@@ -150,6 +150,16 @@ func TestInternalHTTPAdminOverview(t *testing.T) {
 		InternalHTTPAddr: "127.0.0.1:18080",
 		InternalToken:    "secret",
 		DownlinkStore:    store,
+		AdminConsole: AdminConsoleConfig{
+			Enabled:   true,
+			Path:      "/console/",
+			AssetsDir: "web/admin/dist",
+			Monitoring: AdminConsoleMonitoringConfig{
+				PrometheusURL: "http://prometheus.local:9090",
+				GrafanaURL:    "http://grafana.local:3000",
+				DashboardURL:  "http://grafana.local:3000/d/z-courier-overview",
+			},
+		},
 		Cluster: ClusterConfig{
 			Enabled:      true,
 			InternalAddr: "http://gateway-a:18080",
@@ -201,6 +211,9 @@ func TestInternalHTTPAdminOverview(t *testing.T) {
 	}
 	if !resp.Downlink.StoreConfigured || resp.Upstream.Routes != 1 {
 		t.Fatalf("downlink/upstream = %+v/%+v, want store configured and one route", resp.Downlink, resp.Upstream)
+	}
+	if !resp.AdminConsole.Enabled || resp.AdminConsole.Monitoring.PrometheusURL != "http://prometheus.local:9090" {
+		t.Fatalf("admin console = %+v, want enabled monitoring links", resp.AdminConsole)
 	}
 
 	drainStartedAt := time.UnixMilli(1760000000000)

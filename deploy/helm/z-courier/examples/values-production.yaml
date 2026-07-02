@@ -20,6 +20,14 @@ internalService:
   type: ClusterIP
   port: 18080
 
+adminConsole:
+  enabled: false
+  path: /console/
+  monitoring:
+    prometheusURL: https://prometheus.example.internal
+    grafanaURL: https://grafana.example.internal
+    dashboardURL: https://grafana.example.internal/d/z-courier-overview/z-courier-overview
+
 auth:
   http:
     url: http://auth-backend.z-courier.svc.cluster.local:8080/gateway/auth/verify

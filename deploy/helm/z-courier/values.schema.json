@@ -124,6 +124,24 @@
         }
       }
     },
+    "adminConsole": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "path": { "type": "string", "minLength": 1 },
+        "assetsDir": { "type": "string", "minLength": 1 },
+        "monitoring": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "prometheusURL": { "type": "string" },
+            "grafanaURL": { "type": "string" },
+            "dashboardURL": { "type": "string" }
+          }
+        }
+      }
+    },
     "cluster": {
       "type": "object",
       "additionalProperties": false,

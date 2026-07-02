@@ -78,6 +78,15 @@ internalHttp:
       nonceTTL: 2m
       maxNonceEntries: 100000
 
+adminConsole:
+  enabled: false
+  path: /console/
+  assetsDir: web/admin/dist
+  monitoring:
+    prometheusURL: ""
+    grafanaURL: ""
+    dashboardURL: ""
+
 cluster:
   enabled: true
   routeRefreshInterval: 10s

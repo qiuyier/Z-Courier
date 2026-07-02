@@ -458,6 +458,10 @@ admin_console:
   enabled: true
   path: /ops
   assets_dir: web/admin/dist
+  monitoring:
+    prometheus_url: http://prometheus.local:9090
+    grafana_url: /grafana
+    dashboard_url: https://grafana.local/d/z-courier-overview
 `)
 
 	config, err := LoadServerConfig(path)
@@ -472,6 +476,15 @@ admin_console:
 	}
 	if config.AdminConsole.AssetsDir != "web/admin/dist" {
 		t.Fatalf("AdminConsole.AssetsDir = %q, want web/admin/dist", config.AdminConsole.AssetsDir)
+	}
+	if config.AdminConsole.Monitoring.PrometheusURL != "http://prometheus.local:9090" {
+		t.Fatalf("AdminConsole.Monitoring.PrometheusURL = %q", config.AdminConsole.Monitoring.PrometheusURL)
+	}
+	if config.AdminConsole.Monitoring.GrafanaURL != "/grafana" {
+		t.Fatalf("AdminConsole.Monitoring.GrafanaURL = %q", config.AdminConsole.Monitoring.GrafanaURL)
+	}
+	if config.AdminConsole.Monitoring.DashboardURL != "https://grafana.local/d/z-courier-overview" {
+		t.Fatalf("AdminConsole.Monitoring.DashboardURL = %q", config.AdminConsole.Monitoring.DashboardURL)
 	}
 }
 
@@ -489,6 +502,22 @@ admin_console:
 	}
 	if !strings.Contains(err.Error(), "conflicts with internal HTTP routes") {
 		t.Fatalf("LoadServerConfig() error = %q, want conflict message", err)
+	}
+}
+
+func TestLoadServerConfigRejectsInvalidAdminConsoleMonitoringLink(t *testing.T) {
+	path := writeConfig(t, `
+admin_console:
+  monitoring:
+    prometheus_url: javascript:alert(1)
+`)
+
+	_, err := LoadServerConfig(path)
+	if err == nil {
+		t.Fatal("LoadServerConfig() error = nil, want monitoring link error")
+	}
+	if !strings.Contains(err.Error(), "admin_console.monitoring.prometheus_url") {
+		t.Fatalf("LoadServerConfig() error = %q, want monitoring field", err)
 	}
 }
 

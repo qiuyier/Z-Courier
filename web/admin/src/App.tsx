@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import {
   ArrowClockwise,
+  ArrowSquareOut,
   ChartLineUp,
   CheckCircle,
   Circuitry,
@@ -38,6 +39,7 @@ import type {
   AdminClientRouteLookup,
   AdminDiagnosisBundle,
   AdminDiagnostics,
+  AdminMonitoringLinks,
   AdminMessages,
   AdminOverview,
   AdminRoute,
@@ -51,6 +53,79 @@ import type {
 
 const tokenStorageKey = "z-courier-console-token";
 const messageStatuses: MessageStatus[] = ["failed", "pending", "sent", "delivered", "discarded"];
+
+type MetricContext = {
+  label: string;
+  metric: string;
+  promql: string;
+  hint: string;
+};
+
+const overviewMetricContexts: MetricContext[] = [
+  {
+    label: "Readiness",
+    metric: "z_courier_gateway_readiness",
+    promql: 'z_courier_gateway_readiness{status="ready"}',
+    hint: "Use this to confirm whether this gateway should receive traffic.",
+  },
+  {
+    label: "Online Sessions",
+    metric: "z_courier_sessions_online",
+    promql: "z_courier_sessions_online",
+    hint: "Tracks local TCP sessions on the selected gateway node.",
+  },
+  {
+    label: "Unique Clients",
+    metric: "z_courier_clients_online",
+    promql: "z_courier_clients_online",
+    hint: "Separates client cardinality from multi-device session count.",
+  },
+  {
+    label: "Upstream Forwarding",
+    metric: "z_courier_upstream_forward_total",
+    promql: "sum by (route, target_type, result) (rate(z_courier_upstream_forward_total[5m]))",
+    hint: "Shows whether client packets are reaching HTTP or NSQ upstream routes.",
+  },
+];
+
+const diagnosticsMetricContexts: MetricContext[] = [
+  {
+    label: "Route Degradation",
+    metric: "z_courier_upstream_route_degraded",
+    promql: "z_courier_upstream_route_degraded",
+    hint: "One-hot route state for HTTP upstream routes with consecutive failures.",
+  },
+  {
+    label: "Internal HTTP Pressure",
+    metric: "z_courier_internal_http_inflight",
+    promql: "sum by (path) (z_courier_internal_http_inflight)",
+    hint: "Useful when backend push, admin, or peer requests compete for capacity.",
+  },
+  {
+    label: "Retry Worker",
+    metric: "z_courier_downlink_retry_messages_total",
+    promql: "sum by (result) (rate(z_courier_downlink_retry_messages_total[5m]))",
+    hint: "Confirms whether queued downlink messages are being retried or failing.",
+  },
+  {
+    label: "Peer Push",
+    metric: "z_courier_cluster_peer_push_total",
+    promql: "sum by (target_node, result) (rate(z_courier_cluster_peer_push_total[5m]))",
+    hint: "Use this when a client is connected to a different gateway node.",
+  },
+  {
+    label: "ACK Latency",
+    metric: "z_courier_downlink_ack_latency_seconds",
+    promql: "histogram_quantile(0.99, sum by (le, msg_id) (rate(z_courier_downlink_ack_latency_seconds_bucket[5m])))",
+    hint: "Tracks the tail latency between gateway send and client ACK.",
+  },
+  {
+    label: "Rate Limit Rejects",
+    metric: "z_courier_rate_limit_rejected_total",
+    promql: "sum by (msg_id) (rate(z_courier_rate_limit_rejected_total[5m]))",
+    hint: "Separates legitimate load from packets blocked by gateway rate limiting.",
+  },
+];
 
 type RemoteState<T> =
   | { status: "idle"; data?: undefined; error?: undefined }
@@ -816,6 +891,14 @@ function Dashboard({ overview, updatedAt }: { overview: AdminOverview; updatedAt
           </div>
         </div>
       </section>
+
+      <MonitoringContextPanel
+        className="xl:col-span-2"
+        description="Open the configured monitoring surfaces or copy the PromQL snippets into Prometheus when investigating this gateway node."
+        metrics={overviewMetricContexts}
+        monitoring={overview.admin_console?.monitoring}
+        title="Monitoring Context"
+      />
     </div>
   );
 }
@@ -1922,6 +2005,13 @@ function DiagnosticsPage({
         </div>
       </section>
 
+      <MonitoringContextPanel
+        description="Use these signals beside dependency checks to separate gateway pressure, upstream failure, retry behavior, and cluster peer delivery issues."
+        metrics={diagnosticsMetricContexts}
+        monitoring={diagnostics.admin_console?.monitoring}
+        title="Operational Signals"
+      />
+
       {httpRouteStates.length > 0 && (
         <section className="grid gap-3">
           {httpRouteStates.map((route, index) => (
@@ -2135,6 +2225,118 @@ function DiagnosisBundlePanel({
         )}
       </article>
     </section>
+  );
+}
+
+function MonitoringContextPanel({
+  className = "",
+  description,
+  metrics,
+  monitoring,
+  title,
+}: {
+  className?: string;
+  description: string;
+  metrics: MetricContext[];
+  monitoring?: AdminMonitoringLinks;
+  title: string;
+}) {
+  const prometheusURL = monitoring?.prometheus_url?.trim() ?? "";
+  const grafanaURL = monitoring?.grafana_url?.trim() ?? "";
+  const dashboardURL = monitoring?.dashboard_url?.trim() ?? "";
+  const configuredLinks = [
+    { label: "Prometheus", value: prometheusURL },
+    { label: "Grafana", value: grafanaURL },
+    { label: "Dashboard", value: dashboardURL },
+  ].filter((item) => item.value !== "");
+
+  return (
+    <section className={["rounded-lg border border-line bg-white p-5 shadow-diffusion", className].join(" ")}>
+      <div className="grid gap-5 xl:grid-cols-[0.72fr_1.28fr]">
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-zinc-500">{title}</p>
+          <h3 className="mt-1 text-2xl font-semibold tracking-tight">Metrics and runbook links</h3>
+          <p className="mt-3 max-w-[64ch] text-sm leading-relaxed text-zinc-500">{description}</p>
+
+          <div className="mt-5 grid gap-2">
+            {configuredLinks.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-line bg-zinc-50 px-4 py-4 text-sm text-zinc-500">
+                Monitoring links are not configured for this gateway.
+              </div>
+            ) : (
+              configuredLinks.map((link) => (
+                <a
+                  className="group inline-flex min-w-0 items-center justify-between gap-3 rounded-lg border border-line bg-zinc-50 px-4 py-3 text-sm font-medium text-ink transition duration-300 hover:border-zinc-300 hover:bg-white active:translate-y-px"
+                  href={link.value}
+                  key={link.label}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  <span className="min-w-0 truncate">{link.label}</span>
+                  <ArrowSquareOut size={16} className="shrink-0 text-zinc-400 transition duration-300 group-hover:text-accent" weight="bold" />
+                </a>
+              ))
+            )}
+          </div>
+        </div>
+
+        <div className="grid min-w-0 gap-3">
+          {metrics.map((metric, index) => (
+            <MetricContextCard
+              key={`${metric.metric}-${index}`}
+              metric={metric}
+              prometheusURL={prometheusURL}
+              styleDelay={index * 45}
+            />
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function MetricContextCard({
+  metric,
+  prometheusURL,
+  styleDelay,
+}: {
+  metric: MetricContext;
+  prometheusURL: string;
+  styleDelay: number;
+}) {
+  const queryURL = prometheusQueryURL(prometheusURL, metric.promql);
+
+  return (
+    <article
+      className="animate-rise rounded-lg border border-line bg-zinc-50 px-4 py-3"
+      style={{ animationDelay: `${styleDelay}ms` }}
+    >
+      <div className="grid gap-3 lg:grid-cols-[0.52fr_1.48fr]">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold tracking-tight text-ink">{metric.label}</p>
+          <p className="mt-1 break-words font-mono text-xs text-zinc-500">{metric.metric}</p>
+        </div>
+        <div className="min-w-0">
+          <div className="rounded-lg border border-line bg-white px-3 py-2">
+            <p className="break-words font-mono text-xs leading-relaxed text-zinc-700">{metric.promql}</p>
+          </div>
+          <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <p className="min-w-0 text-xs leading-relaxed text-zinc-500">{metric.hint}</p>
+            {queryURL && (
+              <a
+                className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-line bg-white px-3 py-2 text-xs font-medium text-ink transition duration-300 hover:border-zinc-300 hover:bg-zinc-100 active:translate-y-px"
+                href={queryURL}
+                rel="noreferrer"
+                target="_blank"
+              >
+                Open Query
+                <ArrowSquareOut size={13} weight="bold" />
+              </a>
+            )}
+          </div>
+        </div>
+      </div>
+    </article>
   );
 }
 
@@ -2610,6 +2812,19 @@ function diagnosisBundleFilename(bundle: AdminDiagnosisBundle): string {
   const timestamp = bundle.generated_at ? new Date(bundle.generated_at) : new Date();
   const value = Number.isNaN(timestamp.getTime()) ? new Date() : timestamp;
   return `z-courier-diagnose-${value.toISOString().replace(/[:.]/g, "-")}.json`;
+}
+
+function prometheusQueryURL(baseURL: string, expression: string): string {
+  const base = baseURL.trim().replace(/\/+$/, "");
+  if (base === "") {
+    return "";
+  }
+  const query = new URLSearchParams({
+    "g0.expr": expression,
+    "g0.range_input": "1h",
+    "g0.tab": "0",
+  });
+  return `${base}/graph?${query.toString()}`;
 }
 
 function downloadJSON(value: unknown, filename: string) {

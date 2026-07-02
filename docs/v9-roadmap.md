@@ -256,6 +256,13 @@ Acceptance criteria:
 - The console remains useful even when Prometheus and Grafana links are not
   configured.
 
+Implemented so far:
+
+- `admin_console.monitoring` config exposes Prometheus, Grafana, and dashboard
+  links through the authenticated admin APIs.
+- Overview and Diagnostics render metric names, PromQL snippets, and configured
+  external links without embedding time-series charts.
+
 ### V9.8 Security And Deployment Hardening
 
 Purpose: keep a Web console from weakening the internal admin boundary.

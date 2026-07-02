@@ -3,6 +3,7 @@ package config
 import (
 	"bytes"
 	"fmt"
+	"net/url"
 	"os"
 	"path"
 	"sort"
@@ -99,9 +100,16 @@ type InternalHTTPHMACConfig struct {
 }
 
 type AdminConsoleConfig struct {
-	Enabled   bool   `yaml:"enabled"`
-	Path      string `yaml:"path"`
-	AssetsDir string `yaml:"assets_dir"`
+	Enabled    bool                         `yaml:"enabled"`
+	Path       string                       `yaml:"path"`
+	AssetsDir  string                       `yaml:"assets_dir"`
+	Monitoring AdminConsoleMonitoringConfig `yaml:"monitoring"`
+}
+
+type AdminConsoleMonitoringConfig struct {
+	PrometheusURL string `yaml:"prometheus_url"`
+	GrafanaURL    string `yaml:"grafana_url"`
+	DashboardURL  string `yaml:"dashboard_url"`
 }
 
 type ClusterConfig struct {
@@ -684,6 +692,24 @@ func applyAdminConsoleConfig(out *server.Config, config AdminConsoleConfig) erro
 	if out.AdminConsole.Enabled && out.AdminConsole.AssetsDir == "" {
 		return fmt.Errorf("config: admin_console assets_dir is required when admin console is enabled")
 	}
+
+	prometheusURL, err := normalizeAdminConsoleLink(config.Monitoring.PrometheusURL, "admin_console.monitoring.prometheus_url")
+	if err != nil {
+		return err
+	}
+	grafanaURL, err := normalizeAdminConsoleLink(config.Monitoring.GrafanaURL, "admin_console.monitoring.grafana_url")
+	if err != nil {
+		return err
+	}
+	dashboardURL, err := normalizeAdminConsoleLink(config.Monitoring.DashboardURL, "admin_console.monitoring.dashboard_url")
+	if err != nil {
+		return err
+	}
+	out.AdminConsole.Monitoring = server.AdminConsoleMonitoringConfig{
+		PrometheusURL: prometheusURL,
+		GrafanaURL:    grafanaURL,
+		DashboardURL:  dashboardURL,
+	}
 	return nil
 }
 
@@ -707,6 +733,31 @@ func normalizeAdminConsolePath(value string) (string, error) {
 		return "", fmt.Errorf("config: admin_console path %q conflicts with internal HTTP routes", value)
 	}
 	return strings.TrimRight(consolePath, "/") + "/", nil
+}
+
+func normalizeAdminConsoleLink(value string, field string) (string, error) {
+	link := strings.TrimSpace(value)
+	if link == "" {
+		return "", nil
+	}
+
+	if strings.HasPrefix(link, "/") && !strings.HasPrefix(link, "//") {
+		return link, nil
+	}
+
+	parsed, err := url.Parse(link)
+	if err != nil {
+		return "", fmt.Errorf("config: %s is invalid: %w", field, err)
+	}
+	switch strings.ToLower(parsed.Scheme) {
+	case "http", "https":
+		if parsed.Host == "" {
+			return "", fmt.Errorf("config: %s must include a host", field)
+		}
+		return link, nil
+	default:
+		return "", fmt.Errorf("config: %s must be an http(s) URL or an absolute path", field)
+	}
 }
 
 func applyClusterConfig(out *server.Config, config ClusterConfig) error {

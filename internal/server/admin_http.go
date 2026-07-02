@@ -31,6 +31,7 @@ type adminOverviewResponse struct {
 	Sessions     adminSessionSummary      `json:"sessions"`
 	Cluster      adminClusterSummary      `json:"cluster"`
 	InternalHTTP adminInternalHTTPSummary `json:"internal_http"`
+	AdminConsole adminConsoleSummary      `json:"admin_console"`
 	Downlink     adminDownlinkSummary     `json:"downlink"`
 	Upstream     adminUpstreamSummary     `json:"upstream"`
 	Dependencies []adminDependency        `json:"dependencies"`
@@ -65,6 +66,19 @@ type adminInternalHTTPSummary struct {
 	MaxInFlight        int    `json:"max_in_flight,omitempty"`
 }
 
+type adminConsoleSummary struct {
+	Enabled    bool                   `json:"enabled"`
+	Path       string                 `json:"path,omitempty"`
+	AssetsDir  string                 `json:"assets_dir,omitempty"`
+	Monitoring adminMonitoringSummary `json:"monitoring"`
+}
+
+type adminMonitoringSummary struct {
+	PrometheusURL string `json:"prometheus_url,omitempty"`
+	GrafanaURL    string `json:"grafana_url,omitempty"`
+	DashboardURL  string `json:"dashboard_url,omitempty"`
+}
+
 type adminDownlinkSummary struct {
 	StorageType     string `json:"storage_type"`
 	StoreConfigured bool   `json:"store_configured"`
@@ -90,6 +104,7 @@ type adminDiagnosticsResponse struct {
 	Sessions     adminSessionSummary      `json:"sessions"`
 	Auth         adminAuthDiagnostics     `json:"auth"`
 	InternalHTTP adminInternalHTTPSummary `json:"internal_http"`
+	AdminConsole adminConsoleSummary      `json:"admin_console"`
 	Cluster      adminClusterSummary      `json:"cluster"`
 	Downlink     adminDownlinkSummary     `json:"downlink"`
 	Upstream     adminUpstreamDiagnostics `json:"upstream"`
@@ -242,6 +257,7 @@ func (h *adminOverviewHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		Sessions:     sessions,
 		Cluster:      adminClusterFromConfig(config),
 		InternalHTTP: adminInternalHTTPFromConfig(config),
+		AdminConsole: adminConsoleFromConfig(config),
 		Downlink:     adminDownlinkFromConfig(config),
 		Upstream:     adminUpstreamSummary{Routes: len(config.UpstreamRoutes)},
 		Dependencies: adminDependencies(config, h.config.registry, h.config.clusterEnabled),
@@ -301,6 +317,7 @@ func (h *adminDiagnosticsHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		Sessions:     adminSessionsFromConfig(config),
 		Auth:         adminAuthFromConfig(config),
 		InternalHTTP: adminInternalHTTPFromConfig(config),
+		AdminConsole: adminConsoleFromConfig(config),
 		Cluster:      adminClusterFromConfig(config),
 		Downlink:     adminDownlinkFromConfig(config),
 		Upstream:     adminUpstreamDiagnosticsFromConfig(config),
@@ -371,6 +388,19 @@ func adminInternalHTTPFromConfig(config Config) adminInternalHTTPSummary {
 		AuthMode:           config.InternalHTTPAuth.Mode,
 		MaxRequestBodySize: config.InternalMaxRequestBodySize,
 		MaxInFlight:        config.InternalPushMaxInFlight,
+	}
+}
+
+func adminConsoleFromConfig(config Config) adminConsoleSummary {
+	return adminConsoleSummary{
+		Enabled:   config.AdminConsole.Enabled,
+		Path:      config.AdminConsole.Path,
+		AssetsDir: config.AdminConsole.AssetsDir,
+		Monitoring: adminMonitoringSummary{
+			PrometheusURL: config.AdminConsole.Monitoring.PrometheusURL,
+			GrafanaURL:    config.AdminConsole.Monitoring.GrafanaURL,
+			DashboardURL:  config.AdminConsole.Monitoring.DashboardURL,
+		},
 	}
 }
 

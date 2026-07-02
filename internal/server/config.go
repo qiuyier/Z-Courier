@@ -53,9 +53,16 @@ type InternalHTTPHMACConfig struct {
 }
 
 type AdminConsoleConfig struct {
-	Enabled   bool
-	Path      string
-	AssetsDir string
+	Enabled    bool
+	Path       string
+	AssetsDir  string
+	Monitoring AdminConsoleMonitoringConfig
+}
+
+type AdminConsoleMonitoringConfig struct {
+	PrometheusURL string
+	GrafanaURL    string
+	DashboardURL  string
 }
 
 type UpstreamRouteConfig struct {

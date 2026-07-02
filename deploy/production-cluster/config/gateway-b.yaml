@@ -29,6 +29,15 @@ internal_http:
   max_request_body_size: 10485760
   max_in_flight: 2000
 
+admin_console:
+  enabled: false
+  path: /console/
+  assets_dir: web/admin/dist
+  monitoring:
+    prometheus_url: ""
+    grafana_url: ""
+    dashboard_url: ""
+
 cluster:
   enabled: true
   internal_addr: http://gateway-b:18080

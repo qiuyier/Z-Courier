@@ -131,6 +131,22 @@ notification routing before using it for production paging. The Compose
 monitoring stack uses the equivalent Prometheus rule file at
 `deploy/monitoring/prometheus/rules/z-courier-alerts.yml`.
 
+The embedded admin console can link operators to Prometheus, Grafana, and a
+preferred dashboard when `adminConsole.monitoring` values are set:
+
+```yaml
+adminConsole:
+  enabled: true
+  monitoring:
+    prometheusURL: https://prometheus.example.internal
+    grafanaURL: https://grafana.example.internal
+    dashboardURL: https://grafana.example.internal/d/z-courier-overview/z-courier-overview
+```
+
+Keep the internal service private. These links do not install monitoring
+components; they only make existing monitoring surfaces easier to reach from
+the console.
+
 ## Required Secrets
 
 By default, the chart references an existing secret. The default key names are:

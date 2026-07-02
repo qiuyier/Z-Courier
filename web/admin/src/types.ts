@@ -27,6 +27,19 @@ export type InternalHTTPSummary = {
   max_in_flight?: number;
 };
 
+export type AdminMonitoringLinks = {
+  prometheus_url?: string;
+  grafana_url?: string;
+  dashboard_url?: string;
+};
+
+export type AdminConsoleSummary = {
+  enabled: boolean;
+  path?: string;
+  assets_dir?: string;
+  monitoring?: AdminMonitoringLinks;
+};
+
 export type DownlinkSummary = {
   storage_type: string;
   store_configured: boolean;
@@ -57,6 +70,7 @@ export type AdminOverview = {
   sessions: SessionSummary;
   cluster: ClusterSummary;
   internal_http: InternalHTTPSummary;
+  admin_console: AdminConsoleSummary;
   downlink: DownlinkSummary;
   upstream: UpstreamSummary;
   dependencies: Dependency[];
@@ -193,6 +207,7 @@ export type AdminDiagnostics = {
   sessions: SessionSummary;
   auth: AuthDiagnostics;
   internal_http: InternalHTTPSummary;
+  admin_console: AdminConsoleSummary;
   cluster: ClusterSummary;
   downlink: DownlinkSummary;
   upstream: UpstreamDiagnostics;
