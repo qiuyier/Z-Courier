@@ -101,6 +101,12 @@ adminConsole:
 ```yaml
 adminConsole:
   enabled: true
+  session:
+    enabled: true
+    ttl: 8h
+    cookieName: zcourier_admin_session
+    cookieSecure: true
+    cookieSameSite: lax
   monitoring:
     prometheusURL: https://prometheus.example.internal
     grafanaURL: https://grafana.example.internal
@@ -109,7 +115,9 @@ adminConsole:
 
 console 只应该通过私有网络、VPN、堡垒机、私有 ingress 或带认证的反向代理访问。
 生产 HMAC 模式下，浏览器 JavaScript 不适合直接持有 HMAC secret；可以让反向代理
-完成 operator 鉴权和内部签名。
+完成 operator 鉴权和内部签名。`adminConsole.session.enabled=true` 时，登录成功后
+浏览器拿到短期 HTTP-only cookie；当前 session 是单 Pod 内存态，Pod 重启后需要重新
+登录。
 
 ## ServiceMonitor 和告警
 

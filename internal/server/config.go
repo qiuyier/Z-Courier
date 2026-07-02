@@ -57,12 +57,21 @@ type AdminConsoleConfig struct {
 	Path       string
 	AssetsDir  string
 	Monitoring AdminConsoleMonitoringConfig
+	Session    AdminConsoleSessionConfig
 }
 
 type AdminConsoleMonitoringConfig struct {
 	PrometheusURL string
 	GrafanaURL    string
 	DashboardURL  string
+}
+
+type AdminConsoleSessionConfig struct {
+	Enabled        bool
+	TTL            time.Duration
+	CookieName     string
+	CookieSecure   bool
+	CookieSameSite string
 }
 
 type UpstreamRouteConfig struct {
@@ -202,6 +211,11 @@ func DefaultConfig() Config {
 		AdminConsole: AdminConsoleConfig{
 			Path:      "/console/",
 			AssetsDir: "web/admin/dist",
+			Session: AdminConsoleSessionConfig{
+				TTL:            8 * time.Hour,
+				CookieName:     "zcourier_admin_session",
+				CookieSameSite: "lax",
+			},
 		},
 		DownlinkStorage: DownlinkStorageConfig{
 			Type: "memory",
@@ -344,6 +358,15 @@ func normalizeConfig(config Config) Config {
 	}
 	if config.AdminConsole.AssetsDir == "" {
 		config.AdminConsole.AssetsDir = defaults.AdminConsole.AssetsDir
+	}
+	if config.AdminConsole.Session.TTL <= 0 {
+		config.AdminConsole.Session.TTL = defaults.AdminConsole.Session.TTL
+	}
+	if config.AdminConsole.Session.CookieName == "" {
+		config.AdminConsole.Session.CookieName = defaults.AdminConsole.Session.CookieName
+	}
+	if config.AdminConsole.Session.CookieSameSite == "" {
+		config.AdminConsole.Session.CookieSameSite = defaults.AdminConsole.Session.CookieSameSite
 	}
 	if config.DownlinkStorage.Type == "" {
 		config.DownlinkStorage.Type = defaults.DownlinkStorage.Type

@@ -218,6 +218,12 @@ admin_console:
     prometheus_url: http://127.0.0.1:9090
     grafana_url: http://127.0.0.1:3000
     dashboard_url: http://127.0.0.1:3000/d/z-courier
+  session:
+    enabled: true
+    ttl: 8h
+    cookie_name: zcourier_admin_session
+    cookie_secure: false
+    cookie_same_site: lax
 ```
 
 注意：
@@ -225,8 +231,16 @@ admin_console:
 - 生产 Compose 和 Helm 默认关闭 console。
 - 不要把 `/console/` 或 `/internal/*` 暴露到公网。
 - 推荐通过 VPN、堡垒机、私有 ingress 或带认证的反向代理访问。
-- HMAC 模式下，浏览器直接持有 HMAC secret 并不理想，生产更适合由反向代理完成
-  operator 鉴权，再转发到 gateway internal HTTP。
+- `session.enabled=true` 时，gateway 会开放
+  `POST /internal/admin/session/login`、`GET /internal/admin/session/me` 和
+  `POST /internal/admin/session/logout`。login 会把有效 internal token，或已经通过
+  HMAC 验签的请求，换成一个短期 HTTP-only cookie。
+- 当前 admin session 是单节点内存态，gateway 重启后会失效。
+- `cookie_same_site` 可选 `lax`、`strict`、`none`；`none` 必须配合
+  `cookie_secure=true`。
+- HMAC 模式下，浏览器直接持有 HMAC secret 并不理想，也无法自己完成安全签名链路。
+  生产更适合由反向代理完成 operator 鉴权和内部签名，再转发到 gateway internal
+  HTTP。
 
 ## Cluster
 

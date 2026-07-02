@@ -38,6 +38,13 @@ export type AdminConsoleSummary = {
   path?: string;
   assets_dir?: string;
   monitoring?: AdminMonitoringLinks;
+  session?: {
+    enabled: boolean;
+    ttl?: string;
+    cookie_name?: string;
+    cookie_secure: boolean;
+    cookie_same_site?: string;
+  };
 };
 
 export type DownlinkSummary = {

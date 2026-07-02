@@ -28,6 +28,11 @@ func newInternalHTTPServer(config Config, logger *zap.Logger, service *downlink.
 	if config.InternalHTTPAuth.Mode == InternalHTTPAuthModeHMAC {
 		handlerConfig.InternalToken = ""
 	}
+	adminSessions := newAdminSessionManager(config.AdminConsole.Session)
+	adminSessionConfig := newAdminSessionHTTPConfig(handlerConfig, adminSessions)
+	withConsoleSession := func(handler http.Handler) http.Handler {
+		return withAdminSessionAuth(handler, adminSessions, adminSessionConfig.sessionConfig, handlerConfig.InternalToken)
+	}
 	pushLimiter := capacity.NewLimiter(config.InternalPushMaxInFlight)
 	mux.Handle("/healthz", newHealthHandler())
 	mux.Handle("/readyz", newReadyHandler(health))
@@ -47,41 +52,46 @@ func newInternalHTTPServer(config Config, logger *zap.Logger, service *downlink.
 		PushLimiter:        pushLimiter,
 		Logger:             logger,
 	}))
-	mux.Handle("/internal/message/status", downlink.NewStatusHandler(downlink.HandlerConfig{
+	mux.Handle("/internal/message/status", withConsoleSession(downlink.NewStatusHandler(downlink.HandlerConfig{
 		Service:            service,
 		InternalToken:      handlerConfig.InternalToken,
 		MaxRequestBodySize: config.InternalMaxRequestBodySize,
 		GatewayNode:        config.GatewayNode,
 		Logger:             logger,
-	}))
-	mux.Handle("/internal/messages", downlink.NewMessageListHandler(downlink.HandlerConfig{
+	})))
+	mux.Handle("/internal/messages", withConsoleSession(downlink.NewMessageListHandler(downlink.HandlerConfig{
 		Service:            service,
 		InternalToken:      handlerConfig.InternalToken,
 		MaxRequestBodySize: config.InternalMaxRequestBodySize,
 		GatewayNode:        config.GatewayNode,
 		Logger:             logger,
-	}))
-	mux.Handle("/internal/message/requeue", downlink.NewRequeueHandler(downlink.HandlerConfig{
+	})))
+	mux.Handle("/internal/message/requeue", withConsoleSession(downlink.NewRequeueHandler(downlink.HandlerConfig{
 		Service:            service,
 		InternalToken:      handlerConfig.InternalToken,
 		MaxRequestBodySize: config.InternalMaxRequestBodySize,
 		GatewayNode:        config.GatewayNode,
 		Logger:             logger,
-	}))
-	mux.Handle("/internal/message/discard", downlink.NewDiscardHandler(downlink.HandlerConfig{
+	})))
+	mux.Handle("/internal/message/discard", withConsoleSession(downlink.NewDiscardHandler(downlink.HandlerConfig{
 		Service:            service,
 		InternalToken:      handlerConfig.InternalToken,
 		MaxRequestBodySize: config.InternalMaxRequestBodySize,
 		GatewayNode:        config.GatewayNode,
 		Logger:             logger,
-	}))
-	mux.Handle("/internal/admin/overview", newAdminOverviewHandler(handlerConfig, health, registry))
-	mux.Handle("/internal/admin/routes", newAdminRoutesHandler(handlerConfig))
-	mux.Handle("/internal/admin/diagnostics", newAdminDiagnosticsHandler(handlerConfig, health, registry, runtime, service.HasStore()))
-	mux.Handle("/internal/admin/check", newAdminCheckHandler(handlerConfig, service, registry))
-	mux.Handle("/internal/admin/diagnose", newAdminDiagnoseHandler(handlerConfig, health, registry, runtime, service))
-	mux.Handle("/internal/debug/route", newDebugRouteHandler(handlerConfig, registry))
-	mux.Handle("/internal/debug/sessions", newDebugSessionsHandler(handlerConfig))
+	})))
+	if adminSessions != nil {
+		mux.Handle(adminSessionLoginPath, newAdminSessionLoginHandler(adminSessionConfig))
+		mux.Handle(adminSessionMePath, newAdminSessionMeHandler(adminSessionConfig))
+		mux.Handle(adminSessionLogoutPath, newAdminSessionLogoutHandler(adminSessionConfig))
+	}
+	mux.Handle("/internal/admin/overview", withConsoleSession(newAdminOverviewHandler(handlerConfig, health, registry)))
+	mux.Handle("/internal/admin/routes", withConsoleSession(newAdminRoutesHandler(handlerConfig)))
+	mux.Handle("/internal/admin/diagnostics", withConsoleSession(newAdminDiagnosticsHandler(handlerConfig, health, registry, runtime, service.HasStore())))
+	mux.Handle("/internal/admin/check", withConsoleSession(newAdminCheckHandler(handlerConfig, service, registry)))
+	mux.Handle("/internal/admin/diagnose", withConsoleSession(newAdminDiagnoseHandler(handlerConfig, health, registry, runtime, service)))
+	mux.Handle("/internal/debug/route", withConsoleSession(newDebugRouteHandler(handlerConfig, registry)))
+	mux.Handle("/internal/debug/sessions", withConsoleSession(newDebugSessionsHandler(handlerConfig)))
 	if config.AdminConsole.Enabled {
 		mux.Handle(config.AdminConsole.Path, newAdminConsoleHandler(config.AdminConsole))
 	}
@@ -116,10 +126,11 @@ func newInternalHTTPServer(config Config, logger *zap.Logger, service *downlink.
 	var handler http.Handler = mux
 	if config.InternalHTTPAuth.Mode == InternalHTTPAuthModeHMAC {
 		var err error
-		handler, err = newInternalHMACHandler(mux, config, logger)
+		hmacHandler, err := newInternalHMACHandler(mux, config, logger)
 		if err != nil {
 			return nil, fmt.Errorf("internal HTTP HMAC: %w", err)
 		}
+		handler = newAdminSessionHMACBypassHandler(mux, hmacHandler, adminSessions, adminSessionConfig.sessionConfig)
 	}
 
 	return &http.Server{

@@ -27,6 +27,12 @@ admin_console:
     prometheus_url: http://127.0.0.1:19090
     grafana_url: http://127.0.0.1:13000
     dashboard_url: http://127.0.0.1:13000/d/z-courier-overview/z-courier-overview
+  session:
+    enabled: true
+    ttl: 8h
+    cookie_name: zcourier_admin_session
+    cookie_secure: false
+    cookie_same_site: lax
 
 cluster:
   enabled: false

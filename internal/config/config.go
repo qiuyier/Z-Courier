@@ -104,12 +104,21 @@ type AdminConsoleConfig struct {
 	Path       string                       `yaml:"path"`
 	AssetsDir  string                       `yaml:"assets_dir"`
 	Monitoring AdminConsoleMonitoringConfig `yaml:"monitoring"`
+	Session    AdminConsoleSessionConfig    `yaml:"session"`
 }
 
 type AdminConsoleMonitoringConfig struct {
 	PrometheusURL string `yaml:"prometheus_url"`
 	GrafanaURL    string `yaml:"grafana_url"`
 	DashboardURL  string `yaml:"dashboard_url"`
+}
+
+type AdminConsoleSessionConfig struct {
+	Enabled        bool   `yaml:"enabled"`
+	TTL            string `yaml:"ttl"`
+	CookieName     string `yaml:"cookie_name"`
+	CookieSecure   bool   `yaml:"cookie_secure"`
+	CookieSameSite string `yaml:"cookie_same_site"`
 }
 
 type ClusterConfig struct {
@@ -710,7 +719,71 @@ func applyAdminConsoleConfig(out *server.Config, config AdminConsoleConfig) erro
 		GrafanaURL:    grafanaURL,
 		DashboardURL:  dashboardURL,
 	}
+
+	sessionConfig, err := toAdminConsoleSessionConfig(config.Session)
+	if err != nil {
+		return err
+	}
+	out.AdminConsole.Session = sessionConfig
 	return nil
+}
+
+func toAdminConsoleSessionConfig(config AdminConsoleSessionConfig) (server.AdminConsoleSessionConfig, error) {
+	defaults := server.DefaultConfig().AdminConsole.Session
+	ttl, err := parseOptionalPositiveDuration(config.TTL)
+	if err != nil {
+		return server.AdminConsoleSessionConfig{}, fmt.Errorf("config: admin_console.session.ttl: %w", err)
+	}
+	if ttl == 0 {
+		ttl = defaults.TTL
+	}
+
+	cookieName := strings.TrimSpace(config.CookieName)
+	if cookieName == "" {
+		cookieName = defaults.CookieName
+	}
+	if !validCookieName(cookieName) {
+		return server.AdminConsoleSessionConfig{}, fmt.Errorf("config: admin_console.session.cookie_name is invalid")
+	}
+
+	sameSite := strings.ToLower(strings.TrimSpace(config.CookieSameSite))
+	if sameSite == "" {
+		sameSite = defaults.CookieSameSite
+	}
+	switch sameSite {
+	case "lax", "strict":
+	case "none":
+		if !config.CookieSecure {
+			return server.AdminConsoleSessionConfig{}, fmt.Errorf("config: admin_console.session.cookie_secure must be true when cookie_same_site is none")
+		}
+	default:
+		return server.AdminConsoleSessionConfig{}, fmt.Errorf("config: admin_console.session.cookie_same_site must be one of lax, strict, none")
+	}
+
+	return server.AdminConsoleSessionConfig{
+		Enabled:        config.Enabled,
+		TTL:            ttl,
+		CookieName:     cookieName,
+		CookieSecure:   config.CookieSecure,
+		CookieSameSite: sameSite,
+	}, nil
+}
+
+func validCookieName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for index := range len(name) {
+		char := name[index]
+		if char <= 0x20 || char >= 0x7f {
+			return false
+		}
+		switch char {
+		case '(', ')', '<', '>', '@', ',', ';', ':', '\\', '"', '/', '[', ']', '?', '=', '{', '}':
+			return false
+		}
+	}
+	return true
 }
 
 func normalizeAdminConsolePath(value string) (string, error) {

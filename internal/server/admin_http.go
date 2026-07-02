@@ -67,16 +67,25 @@ type adminInternalHTTPSummary struct {
 }
 
 type adminConsoleSummary struct {
-	Enabled    bool                   `json:"enabled"`
-	Path       string                 `json:"path,omitempty"`
-	AssetsDir  string                 `json:"assets_dir,omitempty"`
-	Monitoring adminMonitoringSummary `json:"monitoring"`
+	Enabled    bool                       `json:"enabled"`
+	Path       string                     `json:"path,omitempty"`
+	AssetsDir  string                     `json:"assets_dir,omitempty"`
+	Monitoring adminMonitoringSummary     `json:"monitoring"`
+	Session    adminConsoleSessionSummary `json:"session"`
 }
 
 type adminMonitoringSummary struct {
 	PrometheusURL string `json:"prometheus_url,omitempty"`
 	GrafanaURL    string `json:"grafana_url,omitempty"`
 	DashboardURL  string `json:"dashboard_url,omitempty"`
+}
+
+type adminConsoleSessionSummary struct {
+	Enabled        bool   `json:"enabled"`
+	TTL            string `json:"ttl,omitempty"`
+	CookieName     string `json:"cookie_name,omitempty"`
+	CookieSecure   bool   `json:"cookie_secure"`
+	CookieSameSite string `json:"cookie_same_site,omitempty"`
 }
 
 type adminDownlinkSummary struct {
@@ -400,6 +409,13 @@ func adminConsoleFromConfig(config Config) adminConsoleSummary {
 			PrometheusURL: config.AdminConsole.Monitoring.PrometheusURL,
 			GrafanaURL:    config.AdminConsole.Monitoring.GrafanaURL,
 			DashboardURL:  config.AdminConsole.Monitoring.DashboardURL,
+		},
+		Session: adminConsoleSessionSummary{
+			Enabled:        config.AdminConsole.Session.Enabled,
+			TTL:            durationString(config.AdminConsole.Session.TTL),
+			CookieName:     config.AdminConsole.Session.CookieName,
+			CookieSecure:   config.AdminConsole.Session.CookieSecure,
+			CookieSameSite: config.AdminConsole.Session.CookieSameSite,
 		},
 	}
 }

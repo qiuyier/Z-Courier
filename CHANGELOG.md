@@ -12,6 +12,9 @@ semantic versioning after the first public MVP tag.
 - V10 roadmap covering the `v0.10.0` admin console operations planning track,
   including admin sessions, permissions, session operations, downlink debug
   pushes, retry/offline queue views, audit trail, and console UX hardening.
+- Backend admin console session foundation with configurable TTL/cookie
+  settings, `login`/`me`/`logout` internal endpoints, and session-cookie access
+  for existing console admin/debug/message APIs.
 
 ## [v0.9.1] - 2026-07-02
 

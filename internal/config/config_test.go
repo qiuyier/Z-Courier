@@ -140,6 +140,16 @@ internal_http:
   token: internal-a
   max_request_body_size: 12345
   max_in_flight: 321
+admin_console:
+  enabled: true
+  path: /ops/
+  assets_dir: web/admin/dist
+  session:
+    enabled: true
+    ttl: 2h
+    cookie_name: zcourier_ops_session
+    cookie_secure: true
+    cookie_same_site: strict
 cluster:
   enabled: true
   internal_addr: http://gateway-a:18082
@@ -264,6 +274,16 @@ upstream:
 	}
 	if config.InternalPushMaxInFlight != 321 {
 		t.Fatalf("InternalPushMaxInFlight = %d, want 321", config.InternalPushMaxInFlight)
+	}
+	if !config.AdminConsole.Enabled || config.AdminConsole.Path != "/ops/" {
+		t.Fatalf("AdminConsole = %+v, want enabled /ops/", config.AdminConsole)
+	}
+	if !config.AdminConsole.Session.Enabled ||
+		config.AdminConsole.Session.TTL != 2*time.Hour ||
+		config.AdminConsole.Session.CookieName != "zcourier_ops_session" ||
+		!config.AdminConsole.Session.CookieSecure ||
+		config.AdminConsole.Session.CookieSameSite != "strict" {
+		t.Fatalf("AdminConsole Session = %+v, want configured session", config.AdminConsole.Session)
 	}
 	if !config.Cluster.Enabled {
 		t.Fatal("Cluster Enabled = false, want true")

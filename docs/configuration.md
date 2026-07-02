@@ -304,6 +304,12 @@ admin_console:
     prometheus_url: http://127.0.0.1:19090
     grafana_url: http://127.0.0.1:13000
     dashboard_url: http://127.0.0.1:13000/d/z-courier-overview/z-courier-overview
+  session:
+    enabled: true
+    ttl: 8h
+    cookie_name: zcourier_admin_session
+    cookie_secure: false
+    cookie_same_site: lax
 ```
 
 - `enabled`: serves the embedded browser console from internal HTTP when true.
@@ -314,6 +320,13 @@ admin_console:
   shortcuts.
 - `monitoring.grafana_url`: optional Grafana entrypoint.
 - `monitoring.dashboard_url`: optional preferred Z-Courier dashboard link.
+- `session.enabled`: enables short-lived admin console sessions. Existing
+  internal token or HMAC authentication is still required to create a session.
+- `session.ttl`: maximum lifetime of one browser console session.
+- `session.cookie_name`: HTTP-only cookie name used by the browser.
+- `session.cookie_secure`: set true when the console is served over HTTPS.
+- `session.cookie_same_site`: one of `lax`, `strict`, or `none`. `none`
+  requires `session.cookie_secure=true`.
 
 The console is an internal operations UI, not a public endpoint. Production
 deployments should keep it on private networking and expose it only through a
@@ -323,10 +336,16 @@ nosniff, frame-deny, and disabled browser permission headers. `index.html` is
 served with `Cache-Control: no-store`; hashed assets under `assets/` are served
 with long immutable caching.
 
-When `internal_http.auth.mode` is `hmac`, browser JavaScript cannot call
-`/internal/*` APIs directly unless a deployment-side proxy signs requests. For
-production, prefer a private authenticated reverse proxy or continue using the
-`cmd/admin` CLI for direct HMAC-signed operations.
+When `admin_console.session.enabled=true`, the gateway exposes
+`POST /internal/admin/session/login`, `GET /internal/admin/session/me`, and
+`POST /internal/admin/session/logout`. The login endpoint exchanges a valid
+internal token, or a successfully HMAC-authenticated request, for a short-lived
+HTTP-only cookie. Current sessions are node-local and in-memory.
+
+When `internal_http.auth.mode` is `hmac`, browser JavaScript cannot create a
+session or call `/internal/*` APIs directly unless a deployment-side proxy
+signs the login request. For production, prefer a private authenticated reverse
+proxy or continue using the `cmd/admin` CLI for direct HMAC-signed operations.
 
 ## Cluster
 

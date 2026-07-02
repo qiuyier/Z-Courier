@@ -37,6 +37,12 @@ admin_console:
     prometheus_url: ""
     grafana_url: ""
     dashboard_url: ""
+  session:
+    enabled: false
+    ttl: 8h
+    cookie_name: zcourier_admin_session
+    cookie_secure: true
+    cookie_same_site: lax
 
 cluster:
   enabled: true

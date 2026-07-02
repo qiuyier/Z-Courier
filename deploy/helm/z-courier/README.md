@@ -137,6 +137,12 @@ preferred dashboard when `adminConsole.monitoring` values are set:
 ```yaml
 adminConsole:
   enabled: true
+  session:
+    enabled: true
+    ttl: 8h
+    cookieName: zcourier_admin_session
+    cookieSecure: true
+    cookieSameSite: lax
   monitoring:
     prometheusURL: https://prometheus.example.internal
     grafanaURL: https://grafana.example.internal
@@ -152,7 +158,11 @@ internal service on private networking and prefer VPN, bastion, private ingress,
 or an authenticating reverse proxy for operator access. In production HMAC mode,
 browser JavaScript cannot call `/internal/*` APIs unless a deployment-side proxy
 signs those requests; direct HMAC operations remain available through
-`cmd/admin`.
+`cmd/admin`. When `adminConsole.session.enabled=true`, the browser receives a
+short-lived HTTP-only session cookie after a valid internal token or
+HMAC-authenticated login request. Sessions are node-local and in-memory in this
+first implementation, so a gateway restart or pod move requires logging in
+again.
 
 ## Required Secrets
 

@@ -760,6 +760,112 @@ func TestInternalHTTPAdminRequiresToken(t *testing.T) {
 	}
 }
 
+func TestInternalHTTPAdminSessionTokenMode(t *testing.T) {
+	service := downlink.NewService(testSessionFinder{}, testConnectionFinder{}, downlink.WithStore(downlink.NewMemoryStore()))
+	config := normalizeConfig(Config{
+		InternalHTTPAddr: "127.0.0.1:18080",
+		InternalToken:    "secret",
+		AdminConsole: AdminConsoleConfig{
+			Session: AdminConsoleSessionConfig{
+				Enabled:        true,
+				TTL:            time.Hour,
+				CookieName:     "zcourier_admin_session",
+				CookieSameSite: "lax",
+			},
+		},
+	})
+
+	server := mustInternalHTTPServer(t, config, service, &gatewayHealth{}, nil)
+	loginReq := httptest.NewRequest(http.MethodPost, adminSessionLoginPath, strings.NewReader(`{"token":"secret"}`))
+	loginRec := httptest.NewRecorder()
+	server.Handler.ServeHTTP(loginRec, loginReq)
+	if loginRec.Code != http.StatusOK {
+		t.Fatalf("login status = %d, want %d, body = %s", loginRec.Code, http.StatusOK, loginRec.Body.String())
+	}
+	cookie := firstCookie(loginRec.Result(), config.AdminConsole.Session.CookieName)
+	if cookie == nil || cookie.Value == "" || !cookie.HttpOnly || cookie.SameSite != http.SameSiteLaxMode {
+		t.Fatalf("login cookie = %+v, want http-only lax cookie", cookie)
+	}
+
+	meReq := httptest.NewRequest(http.MethodGet, adminSessionMePath, nil)
+	meReq.AddCookie(cookie)
+	meRec := httptest.NewRecorder()
+	server.Handler.ServeHTTP(meRec, meReq)
+	if meRec.Code != http.StatusOK {
+		t.Fatalf("me status = %d, want %d, body = %s", meRec.Code, http.StatusOK, meRec.Body.String())
+	}
+	var sessionResp adminSessionResponse
+	if err := sonic.Unmarshal(meRec.Body.Bytes(), &sessionResp); err != nil {
+		t.Fatalf("Unmarshal(me) error = %v", err)
+	}
+	if sessionResp.Session == nil || sessionResp.Session.Role != adminSessionRoleAdmin || sessionResp.Session.Principal != "internal-token" {
+		t.Fatalf("me response = %+v, want admin internal-token session", sessionResp)
+	}
+
+	overviewReq := httptest.NewRequest(http.MethodGet, "/internal/admin/overview", nil)
+	overviewReq.AddCookie(cookie)
+	overviewRec := httptest.NewRecorder()
+	server.Handler.ServeHTTP(overviewRec, overviewReq)
+	if overviewRec.Code != http.StatusOK {
+		t.Fatalf("overview status = %d, want %d, body = %s", overviewRec.Code, http.StatusOK, overviewRec.Body.String())
+	}
+
+	messagesReq := httptest.NewRequest(http.MethodGet, "/internal/messages?status=failed", nil)
+	messagesReq.AddCookie(cookie)
+	messagesRec := httptest.NewRecorder()
+	server.Handler.ServeHTTP(messagesRec, messagesReq)
+	if messagesRec.Code != http.StatusOK {
+		t.Fatalf("messages status = %d, want %d, body = %s", messagesRec.Code, http.StatusOK, messagesRec.Body.String())
+	}
+
+	logoutReq := httptest.NewRequest(http.MethodPost, adminSessionLogoutPath, nil)
+	logoutReq.AddCookie(cookie)
+	logoutRec := httptest.NewRecorder()
+	server.Handler.ServeHTTP(logoutRec, logoutReq)
+	if logoutRec.Code != http.StatusOK {
+		t.Fatalf("logout status = %d, want %d, body = %s", logoutRec.Code, http.StatusOK, logoutRec.Body.String())
+	}
+	clearCookie := firstCookie(logoutRec.Result(), config.AdminConsole.Session.CookieName)
+	if clearCookie == nil || clearCookie.MaxAge >= 0 {
+		t.Fatalf("logout clear cookie = %+v, want MaxAge < 0", clearCookie)
+	}
+
+	afterLogoutReq := httptest.NewRequest(http.MethodGet, "/internal/admin/overview", nil)
+	afterLogoutReq.AddCookie(cookie)
+	afterLogoutRec := httptest.NewRecorder()
+	server.Handler.ServeHTTP(afterLogoutRec, afterLogoutReq)
+	if afterLogoutRec.Code != http.StatusUnauthorized {
+		t.Fatalf("after logout status = %d, want %d", afterLogoutRec.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestInternalHTTPAdminSessionRejectsInvalidToken(t *testing.T) {
+	service := downlink.NewService(testSessionFinder{}, testConnectionFinder{})
+	config := normalizeConfig(Config{
+		InternalHTTPAddr: "127.0.0.1:18080",
+		InternalToken:    "secret",
+		AdminConsole: AdminConsoleConfig{
+			Session: AdminConsoleSessionConfig{
+				Enabled:        true,
+				TTL:            time.Hour,
+				CookieName:     "zcourier_admin_session",
+				CookieSameSite: "lax",
+			},
+		},
+	})
+
+	server := mustInternalHTTPServer(t, config, service, &gatewayHealth{}, nil)
+	loginReq := httptest.NewRequest(http.MethodPost, adminSessionLoginPath, strings.NewReader(`{"token":"wrong"}`))
+	loginRec := httptest.NewRecorder()
+	server.Handler.ServeHTTP(loginRec, loginReq)
+	if loginRec.Code != http.StatusUnauthorized {
+		t.Fatalf("login status = %d, want %d", loginRec.Code, http.StatusUnauthorized)
+	}
+	if cookie := firstCookie(loginRec.Result(), config.AdminConsole.Session.CookieName); cookie != nil {
+		t.Fatalf("login set cookie = %+v, want nil", cookie)
+	}
+}
+
 func TestInternalHTTPHealthAndReady(t *testing.T) {
 	service := downlink.NewService(testSessionFinder{}, testConnectionFinder{})
 	health := &gatewayHealth{}
@@ -975,6 +1081,71 @@ func TestInternalHTTPHMACRequiresSignature(t *testing.T) {
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
 	}
+}
+
+func TestInternalHTTPAdminSessionBypassesHMACForConsoleAPIs(t *testing.T) {
+	service := downlink.NewService(testSessionFinder{}, testConnectionFinder{}, downlink.WithStore(downlink.NewMemoryStore()))
+	config := normalizeConfig(Config{
+		InternalHTTPAddr: "127.0.0.1:18080",
+		InternalHTTPAuth: InternalHTTPAuthConfig{
+			Mode: InternalHTTPAuthModeHMAC,
+			HMAC: InternalHTTPHMACConfig{
+				Keys: map[string][]byte{"backend-1": internalHMACTestSecret},
+			},
+		},
+		AdminConsole: AdminConsoleConfig{
+			Session: AdminConsoleSessionConfig{
+				Enabled:        true,
+				TTL:            time.Hour,
+				CookieName:     "zcourier_admin_session",
+				CookieSameSite: "lax",
+			},
+		},
+	})
+	server := mustInternalHTTPServer(t, config, service, &gatewayHealth{}, nil)
+	signer, err := signing.NewSigner(signing.SignerConfig{KeyID: "backend-1", Secret: internalHMACTestSecret})
+	if err != nil {
+		t.Fatalf("NewSigner() error = %v", err)
+	}
+
+	body := []byte(`{}`)
+	loginReq := httptest.NewRequest(http.MethodPost, adminSessionLoginPath, strings.NewReader(string(body)))
+	if err := signer.Sign(loginReq, body); err != nil {
+		t.Fatalf("Sign(login) error = %v", err)
+	}
+	loginRec := httptest.NewRecorder()
+	server.Handler.ServeHTTP(loginRec, loginReq)
+	if loginRec.Code != http.StatusOK {
+		t.Fatalf("login status = %d, want %d, body = %s", loginRec.Code, http.StatusOK, loginRec.Body.String())
+	}
+	cookie := firstCookie(loginRec.Result(), config.AdminConsole.Session.CookieName)
+	if cookie == nil || cookie.Value == "" {
+		t.Fatalf("login cookie = %+v, want session cookie", cookie)
+	}
+
+	messagesReq := httptest.NewRequest(http.MethodGet, "/internal/messages?status=failed", nil)
+	messagesReq.AddCookie(cookie)
+	messagesRec := httptest.NewRecorder()
+	server.Handler.ServeHTTP(messagesRec, messagesReq)
+	if messagesRec.Code != http.StatusOK {
+		t.Fatalf("messages status = %d, want %d, body = %s", messagesRec.Code, http.StatusOK, messagesRec.Body.String())
+	}
+
+	unsignedReq := httptest.NewRequest(http.MethodGet, "/internal/messages?status=failed", nil)
+	unsignedRec := httptest.NewRecorder()
+	server.Handler.ServeHTTP(unsignedRec, unsignedReq)
+	if unsignedRec.Code != http.StatusUnauthorized {
+		t.Fatalf("unsigned status = %d, want %d", unsignedRec.Code, http.StatusUnauthorized)
+	}
+}
+
+func firstCookie(resp *http.Response, name string) *http.Cookie {
+	for _, cookie := range resp.Cookies() {
+		if cookie.Name == name {
+			return cookie
+		}
+	}
+	return nil
 }
 
 func TestInternalHTTPPeerHMACAcceptsSignatureAndRejectsReplay(t *testing.T) {

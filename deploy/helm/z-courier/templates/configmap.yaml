@@ -50,6 +50,12 @@ data:
         prometheus_url: {{ .Values.adminConsole.monitoring.prometheusURL | quote }}
         grafana_url: {{ .Values.adminConsole.monitoring.grafanaURL | quote }}
         dashboard_url: {{ .Values.adminConsole.monitoring.dashboardURL | quote }}
+      session:
+        enabled: {{ .Values.adminConsole.session.enabled }}
+        ttl: {{ .Values.adminConsole.session.ttl | quote }}
+        cookie_name: {{ .Values.adminConsole.session.cookieName | quote }}
+        cookie_secure: {{ .Values.adminConsole.session.cookieSecure }}
+        cookie_same_site: {{ .Values.adminConsole.session.cookieSameSite | quote }}
 
     cluster:
       enabled: {{ .Values.cluster.enabled }}

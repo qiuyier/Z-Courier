@@ -74,6 +74,10 @@ http://127.0.0.1:18080/console/
 
 生产环境不要公开暴露 console。它是 internal admin plane 的 UI。
 
+如果启用了 `admin_console.session.enabled`，console 可以使用短期 HTTP-only cookie
+访问内部 admin/debug/message API。login 仍然需要有效 internal token，或者通过 HMAC
+验签的内部请求。当前 session 是 gateway 单节点内存态，重启后需要重新登录。
+
 ## Admin API
 
 ### `GET /internal/admin/overview`
