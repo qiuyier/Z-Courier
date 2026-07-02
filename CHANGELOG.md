@@ -7,6 +7,19 @@ semantic versioning after the first public MVP tag.
 
 ## [Unreleased]
 
+### Added
+
+- Chinese documentation set for `v0.9.1`, including project introduction,
+  architecture, configuration, protocol, Go SDK usage, internal HTTP HMAC
+  signing, local development, production deployment, Kubernetes/Helm,
+  admin operations, and production troubleshooting.
+
+### Fixed
+
+- Corrected the protocol documentation to match the current public SDK wire
+  format: the fixed header is 41 bytes and includes `Magic` plus 2-byte
+  `Flags`.
+
 ## [v0.9.0] - 2026-07-02
 
 ### Added

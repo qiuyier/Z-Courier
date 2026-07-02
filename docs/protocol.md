@@ -9,8 +9,9 @@ The body is opaque bytes owned by the business system.
 All integer fields use big-endian byte order.
 
 ```text
+Magic          uint16
 Version        uint8
-Flags          uint8
+Flags          uint16
 MsgID          uint32
 Seq            uint64
 Timestamp      int64
@@ -30,10 +31,11 @@ Token          bytes
 Body           bytes
 ```
 
-The fixed header is 36 bytes before variable-length strings and body bytes.
+The fixed header is 41 bytes before variable-length strings and body bytes.
 
 ## Important Fields
 
+- `Magic`: packet marker. The current value is `0x5A43`.
 - `Version`: protocol version. The current protocol uses `1`.
 - `Flags`: bit flags. The current protocol defines `ack_required`.
 - `MsgID`: command or business route identifier.

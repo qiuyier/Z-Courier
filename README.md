@@ -2,6 +2,8 @@
 
 A high-performance message push gateway based on the `zinx` network framework.
 
+[中文文档](README.zh-CN.md)
+
 ## Features
 - High concurrency based on zinx
 - Lightweight and efficient message routing
@@ -41,6 +43,10 @@ V2 cluster design is tracked in
 [docs/v2-cluster-architecture.md](docs/v2-cluster-architecture.md).
 
 Release history is tracked in [CHANGELOG.md](CHANGELOG.md).
+
+Chinese usage, architecture, configuration, protocol, SDK, deployment, and
+operations documentation starts at [README.zh-CN.md](README.zh-CN.md) and
+[docs/zh-CN/README.md](docs/zh-CN/README.md).
 
 The historical V2 release-candidate guide is
 [docs/v2-release-candidate.md](docs/v2-release-candidate.md).
