@@ -274,11 +274,18 @@ production-signal dashboards, readiness drain visibility, upstream route health
 state, and retry jitter. See [docs/v8-roadmap.md](docs/v8-roadmap.md) and
 [docs/v8-release.md](docs/v8-release.md).
 
-V9 is being prepared for `v0.9.0`. It adds the optional embedded Web admin
-console for overview, routes, sessions, messages, dependency checks,
-diagnostics, diagnosis bundles, metrics context, and guarded downlink repair.
-See [docs/v9-roadmap.md](docs/v9-roadmap.md) and
+V9 was published as `v0.9.0`, with `v0.9.1` adding the Chinese documentation
+set. It adds the optional embedded Web admin console for overview, routes,
+sessions, messages, dependency checks, diagnostics, diagnosis bundles, metrics
+context, and guarded downlink repair. See
+[docs/v9-roadmap.md](docs/v9-roadmap.md) and
 [docs/v9-release.md](docs/v9-release.md).
+
+V10 is being planned for `v0.10.0`. It focuses on turning the admin console
+from an inspection surface into a controlled operations surface: short-lived
+admin sessions, read-only/operator permissions, session operations, downlink
+debug pushes, retry/offline queue views, audit trail, and console UX hardening.
+See [docs/v10-roadmap.md](docs/v10-roadmap.md).
 
 ## Development
 
