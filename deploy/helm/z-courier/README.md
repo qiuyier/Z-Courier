@@ -49,7 +49,7 @@ Install with the published gateway image and private dependency addresses:
 helm upgrade --install z-courier ./deploy/helm/z-courier \
   --namespace z-courier \
   --set image.repository=ghcr.io/qiuyier/z-courier-gateway \
-  --set image.tag=v0.9.0 \
+  --set image.tag=v0.9.1 \
   --set secret.name=z-courier-secret \
   --set cluster.registry.redis.addr=redis-master.z-courier.svc.cluster.local:6379 \
   --set auth.http.url=http://auth-backend.z-courier.svc.cluster.local:8080/gateway/auth/verify \
@@ -70,7 +70,7 @@ the packaged chart from the OCI registry instead of cloning this repository:
 
 ```bash
 helm upgrade --install z-courier oci://ghcr.io/qiuyier/charts/z-courier \
-  --version 0.4.0 \
+  --version 0.4.1 \
   --namespace z-courier \
   -f values-production.yaml
 ```
