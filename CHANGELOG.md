@@ -7,6 +7,8 @@ semantic versioning after the first public MVP tag.
 
 ## [Unreleased]
 
+## [v0.9.0] - 2026-07-02
+
 ### Added
 
 - V9 roadmap covering the browser-based admin console, including overview,
