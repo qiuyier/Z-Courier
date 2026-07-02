@@ -7,6 +7,8 @@ semantic versioning after the first public MVP tag.
 
 ## [Unreleased]
 
+## [v0.9.1] - 2026-07-02
+
 ### Added
 
 - Chinese documentation set for `v0.9.1`, including project introduction,
