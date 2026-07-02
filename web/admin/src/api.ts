@@ -6,12 +6,11 @@ import type {
   AdminMessages,
   AdminOverview,
   AdminRoutes,
+  AdminSessionResponse,
   AdminSessions,
   MessageStatus,
   MessageStatusResponse,
 } from "./types";
-
-const internalTokenHeader = "X-ZCourier-Internal-Token";
 
 export type DiagnosisBundleParams = {
   probeTimeout: string;
@@ -31,15 +30,10 @@ export class APIError extends Error {
   }
 }
 
-async function fetchAdminJSON<T>(path: string, token: string, signal?: AbortSignal): Promise<T> {
-  const headers = new Headers();
-  if (token.trim() !== "") {
-    headers.set(internalTokenHeader, token.trim());
-  }
-
+async function fetchAdminJSON<T>(path: string, signal?: AbortSignal): Promise<T> {
   const response = await fetch(path, {
+    credentials: "same-origin",
     method: "GET",
-    headers,
     signal,
   });
 
@@ -59,14 +53,12 @@ async function fetchAdminJSON<T>(path: string, token: string, signal?: AbortSign
   return (await response.json()) as T;
 }
 
-async function postAdminJSON<T>(path: string, token: string, body: unknown, signal?: AbortSignal): Promise<T> {
+async function postAdminJSON<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
   const headers = new Headers();
   headers.set("Content-Type", "application/json");
-  if (token.trim() !== "") {
-    headers.set(internalTokenHeader, token.trim());
-  }
 
   const response = await fetch(path, {
+    credentials: "same-origin",
     method: "POST",
     headers,
     body: JSON.stringify(body),
@@ -91,16 +83,27 @@ async function postAdminJSON<T>(path: string, token: string, body: unknown, sign
   return (await response.json()) as T;
 }
 
-export async function fetchOverview(token: string, signal?: AbortSignal): Promise<AdminOverview> {
-  return fetchAdminJSON<AdminOverview>("/internal/admin/overview", token, signal);
+export async function loginAdminSession(token: string, signal?: AbortSignal): Promise<AdminSessionResponse> {
+  return postAdminJSON<AdminSessionResponse>("/internal/admin/session/login", { token }, signal);
 }
 
-export async function fetchRoutes(token: string, signal?: AbortSignal): Promise<AdminRoutes> {
-  return fetchAdminJSON<AdminRoutes>("/internal/admin/routes", token, signal);
+export async function fetchAdminSession(signal?: AbortSignal): Promise<AdminSessionResponse> {
+  return fetchAdminJSON<AdminSessionResponse>("/internal/admin/session/me", signal);
+}
+
+export async function logoutAdminSession(signal?: AbortSignal): Promise<AdminSessionResponse> {
+  return postAdminJSON<AdminSessionResponse>("/internal/admin/session/logout", {}, signal);
+}
+
+export async function fetchOverview(signal?: AbortSignal): Promise<AdminOverview> {
+  return fetchAdminJSON<AdminOverview>("/internal/admin/overview", signal);
+}
+
+export async function fetchRoutes(signal?: AbortSignal): Promise<AdminRoutes> {
+  return fetchAdminJSON<AdminRoutes>("/internal/admin/routes", signal);
 }
 
 export async function fetchSessions(
-  token: string,
   clientID: string,
   limit: number,
   signal?: AbortSignal,
@@ -109,11 +112,10 @@ export async function fetchSessions(
   if (clientID.trim() !== "") {
     query.set("client_id", clientID.trim());
   }
-  return fetchAdminJSON<AdminSessions>(`/internal/debug/sessions?${query.toString()}`, token, signal);
+  return fetchAdminJSON<AdminSessions>(`/internal/debug/sessions?${query.toString()}`, signal);
 }
 
 export async function fetchClientRoute(
-  token: string,
   clientID: string,
   deviceID: string,
   signal?: AbortSignal,
@@ -122,24 +124,23 @@ export async function fetchClientRoute(
     client_id: clientID.trim(),
     device_id: deviceID.trim(),
   });
-  return fetchAdminJSON<AdminClientRouteLookup>(`/internal/debug/route?${query.toString()}`, token, signal);
+  return fetchAdminJSON<AdminClientRouteLookup>(`/internal/debug/route?${query.toString()}`, signal);
 }
 
-export async function fetchDiagnostics(token: string, signal?: AbortSignal): Promise<AdminDiagnostics> {
-  return fetchAdminJSON<AdminDiagnostics>("/internal/admin/diagnostics", token, signal);
+export async function fetchDiagnostics(signal?: AbortSignal): Promise<AdminDiagnostics> {
+  return fetchAdminJSON<AdminDiagnostics>("/internal/admin/diagnostics", signal);
 }
 
-export async function fetchAdminCheck(token: string, timeout: string, signal?: AbortSignal): Promise<AdminCheck> {
+export async function fetchAdminCheck(timeout: string, signal?: AbortSignal): Promise<AdminCheck> {
   const query = new URLSearchParams();
   if (timeout.trim() !== "") {
     query.set("timeout", timeout.trim());
   }
   const suffix = query.toString() ? `?${query.toString()}` : "";
-  return fetchAdminJSON<AdminCheck>(`/internal/admin/check${suffix}`, token, signal);
+  return fetchAdminJSON<AdminCheck>(`/internal/admin/check${suffix}`, signal);
 }
 
 export async function fetchDiagnosisBundle(
-  token: string,
   params: DiagnosisBundleParams,
   signal?: AbortSignal,
 ): Promise<AdminDiagnosisBundle> {
@@ -154,11 +155,10 @@ export async function fetchDiagnosisBundle(
   if (params.deviceID.trim() !== "") {
     query.set("device_id", params.deviceID.trim());
   }
-  return fetchAdminJSON<AdminDiagnosisBundle>(`/internal/admin/diagnose?${query.toString()}`, token, signal);
+  return fetchAdminJSON<AdminDiagnosisBundle>(`/internal/admin/diagnose?${query.toString()}`, signal);
 }
 
 export async function fetchMessages(
-  token: string,
   status: MessageStatus,
   limit: number,
   signal?: AbortSignal,
@@ -167,23 +167,22 @@ export async function fetchMessages(
     status,
     limit: String(limit),
   });
-  return fetchAdminJSON<AdminMessages>(`/internal/messages?${query.toString()}`, token, signal);
+  return fetchAdminJSON<AdminMessages>(`/internal/messages?${query.toString()}`, signal);
 }
 
-export async function fetchMessage(token: string, messageID: string, signal?: AbortSignal): Promise<MessageStatusResponse> {
+export async function fetchMessage(messageID: string, signal?: AbortSignal): Promise<MessageStatusResponse> {
   const query = new URLSearchParams({ message_id: messageID });
-  return fetchAdminJSON<MessageStatusResponse>(`/internal/message/status?${query.toString()}`, token, signal);
+  return fetchAdminJSON<MessageStatusResponse>(`/internal/message/status?${query.toString()}`, signal);
 }
 
-export async function requeueMessage(token: string, messageID: string, signal?: AbortSignal): Promise<MessageStatusResponse> {
-  return postAdminJSON<MessageStatusResponse>("/internal/message/requeue", token, { message_id: messageID }, signal);
+export async function requeueMessage(messageID: string, signal?: AbortSignal): Promise<MessageStatusResponse> {
+  return postAdminJSON<MessageStatusResponse>("/internal/message/requeue", { message_id: messageID }, signal);
 }
 
 export async function discardMessage(
-  token: string,
   messageID: string,
   reason: string,
   signal?: AbortSignal,
 ): Promise<MessageStatusResponse> {
-  return postAdminJSON<MessageStatusResponse>("/internal/message/discard", token, { message_id: messageID, reason }, signal);
+  return postAdminJSON<MessageStatusResponse>("/internal/message/discard", { message_id: messageID, reason }, signal);
 }

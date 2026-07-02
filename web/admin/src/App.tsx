@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { ReactNode } from "react";
+import type { FormEvent, ReactNode } from "react";
 import {
   ArrowClockwise,
   ArrowSquareOut,
@@ -21,8 +21,10 @@ import {
   XCircle,
 } from "@phosphor-icons/react";
 import {
+  APIError,
   discardMessage,
   fetchAdminCheck,
+  fetchAdminSession,
   fetchClientRoute,
   fetchDiagnosisBundle,
   fetchDiagnostics,
@@ -31,12 +33,15 @@ import {
   fetchOverview,
   fetchRoutes,
   fetchSessions,
+  loginAdminSession,
+  logoutAdminSession,
   requeueMessage,
 } from "./api";
 import type {
   AdminCheck,
   AdminCheckResult,
   AdminClientRouteLookup,
+  AdminConsoleSession,
   AdminDiagnosisBundle,
   AdminDiagnostics,
   AdminMonitoringLinks,
@@ -51,7 +56,6 @@ import type {
   MessageStatusResponse,
 } from "./types";
 
-const tokenStorageKey = "z-courier-console-token";
 const messageStatuses: MessageStatus[] = ["failed", "pending", "sent", "delivered", "discarded"];
 
 type MetricContext = {
@@ -136,6 +140,10 @@ type RemoteState<T> =
 type PageID = "overview" | "routes" | "sessions" | "messages" | "checks" | "diagnostics";
 type MessageAction = "requeue" | "discard";
 type ClientRouteStatus = "idle" | "local" | "remote" | "offline" | "stale";
+type AuthState =
+  | { status: "checking"; session?: undefined; error?: string }
+  | { status: "anonymous"; session?: undefined; error?: string }
+  | { status: "authenticated"; session: AdminConsoleSession; error?: undefined };
 type MessageActionDialogState = {
   action: MessageAction;
   message: MessageStatusResponse;
@@ -153,11 +161,10 @@ const navItems = [
 ];
 
 export default function App() {
-  const [draftToken, setDraftToken] = useState(() => window.sessionStorage.getItem(tokenStorageKey) ?? "");
-  const [activeToken, setActiveToken] = useState(() => window.sessionStorage.getItem(tokenStorageKey) ?? "");
-  const [state, setState] = useState<RemoteState<AdminOverview>>(() =>
-    window.sessionStorage.getItem(tokenStorageKey) ? { status: "loading" } : { status: "idle" },
-  );
+  const [authState, setAuthState] = useState<AuthState>({ status: "checking" });
+  const [loginToken, setLoginToken] = useState("");
+  const [loginPending, setLoginPending] = useState(false);
+  const [state, setState] = useState<RemoteState<AdminOverview>>({ status: "idle" });
   const [routeState, setRouteState] = useState<RemoteState<AdminRoutes>>({ status: "idle" });
   const [sessionsState, setSessionsState] = useState<RemoteState<AdminSessions>>({ status: "idle" });
   const [clientRouteState, setClientRouteState] = useState<RemoteState<AdminClientRouteLookup>>({ status: "idle" });
@@ -183,100 +190,129 @@ export default function App() {
   const [messageActionPending, setMessageActionPending] = useState(false);
   const [activePage, setActivePage] = useState<PageID>("overview");
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
+  const authenticated = authState.status === "authenticated";
 
-  useEffect(() => {
-    if (activeToken.trim() === "") {
-      window.sessionStorage.removeItem(tokenStorageKey);
-    } else {
-      window.sessionStorage.setItem(tokenStorageKey, activeToken.trim());
-    }
-  }, [activeToken]);
+  const clearConsoleState = useCallback(() => {
+    setState({ status: "idle" });
+    setRouteState({ status: "idle" });
+    setSessionsState({ status: "idle" });
+    setClientRouteState({ status: "idle" });
+    setDiagnosticsState({ status: "idle" });
+    setDiagnosisBundleState({ status: "idle" });
+    setCheckState({ status: "idle" });
+    setMessagesState({ status: "idle" });
+    setMessageLookupState({ status: "idle" });
+    setMessageActionDialog(null);
+    setCheckRanAt(null);
+    setUpdatedAt(null);
+  }, []);
+
+  const expireSession = useCallback(() => {
+    clearConsoleState();
+    setAuthState({ status: "anonymous", error: "Session expired. Sign in again." });
+  }, [clearConsoleState]);
 
   const refresh = useCallback(
     async (signal?: AbortSignal) => {
-      if (activeToken.trim() === "") {
+      if (!authenticated) {
         setState({ status: "idle" });
         return;
       }
       setState((current) => ({ status: "loading", data: current.data }));
       try {
-        const data = await fetchOverview(activeToken, signal);
+        const data = await fetchOverview(signal);
         setState({ status: "ready", data });
         setUpdatedAt(new Date());
       } catch (error) {
         if (signal?.aborted) {
           return;
         }
-        const message = error instanceof Error ? error.message : "unknown_error";
+        if (isUnauthorized(error)) {
+          expireSession();
+          return;
+        }
+        const message = requestErrorMessage(error);
         setState((current) => ({ status: "error", data: current.data, error: message }));
       }
     },
-    [activeToken],
+    [authenticated, expireSession],
   );
 
   const refreshRoutes = useCallback(
     async (signal?: AbortSignal) => {
-      if (activeToken.trim() === "") {
+      if (!authenticated) {
         setRouteState({ status: "idle" });
         return;
       }
       setRouteState((current) => ({ status: "loading", data: current.data }));
       try {
-        const data = await fetchRoutes(activeToken, signal);
+        const data = await fetchRoutes(signal);
         setRouteState({ status: "ready", data });
       } catch (error) {
         if (signal?.aborted) {
           return;
         }
-        const message = error instanceof Error ? error.message : "unknown_error";
+        if (isUnauthorized(error)) {
+          expireSession();
+          return;
+        }
+        const message = requestErrorMessage(error);
         setRouteState((current) => ({ status: "error", data: current.data, error: message }));
       }
     },
-    [activeToken],
+    [authenticated, expireSession],
   );
 
   const refreshSessions = useCallback(
     async (signal?: AbortSignal) => {
-      if (activeToken.trim() === "") {
+      if (!authenticated) {
         setSessionsState({ status: "idle" });
         return;
       }
       setSessionsState((current) => ({ status: "loading", data: current.data }));
       try {
-        const data = await fetchSessions(activeToken, sessionClientID, sessionLimit, signal);
+        const data = await fetchSessions(sessionClientID, sessionLimit, signal);
         setSessionsState({ status: "ready", data });
       } catch (error) {
         if (signal?.aborted) {
           return;
         }
-        const message = error instanceof Error ? error.message : "unknown_error";
+        if (isUnauthorized(error)) {
+          expireSession();
+          return;
+        }
+        const message = requestErrorMessage(error);
         setSessionsState((current) => ({ status: "error", data: current.data, error: message }));
       }
     },
-    [activeToken, sessionClientID, sessionLimit],
+    [authenticated, expireSession, sessionClientID, sessionLimit],
   );
 
   const lookupClientRoute = useCallback(
     async (clientIDOverride?: string, deviceIDOverride?: string, signal?: AbortSignal) => {
       const clientID = (clientIDOverride ?? sessionClientID).trim();
       const deviceID = (deviceIDOverride ?? sessionDeviceID).trim();
-      if (activeToken.trim() === "" || clientID === "" || deviceID === "") {
+      if (!authenticated || clientID === "" || deviceID === "") {
         setClientRouteState({ status: "idle" });
         return;
       }
       setClientRouteState((current) => ({ status: "loading", data: current.data }));
       try {
-        const data = await fetchClientRoute(activeToken, clientID, deviceID, signal);
+        const data = await fetchClientRoute(clientID, deviceID, signal);
         setClientRouteState({ status: "ready", data });
       } catch (error) {
         if (signal?.aborted) {
           return;
         }
-        const message = error instanceof Error ? error.message : "unknown_error";
+        if (isUnauthorized(error)) {
+          expireSession();
+          return;
+        }
+        const message = requestErrorMessage(error);
         setClientRouteState((current) => ({ status: "error", data: current.data, error: message }));
       }
     },
-    [activeToken, sessionClientID, sessionDeviceID],
+    [authenticated, expireSession, sessionClientID, sessionDeviceID],
   );
 
   const lookupSessionRoute = useCallback(
@@ -290,27 +326,31 @@ export default function App() {
 
   const refreshDiagnostics = useCallback(
     async (signal?: AbortSignal) => {
-      if (activeToken.trim() === "") {
+      if (!authenticated) {
         setDiagnosticsState({ status: "idle" });
         return;
       }
       setDiagnosticsState((current) => ({ status: "loading", data: current.data }));
       try {
-        const data = await fetchDiagnostics(activeToken, signal);
+        const data = await fetchDiagnostics(signal);
         setDiagnosticsState({ status: "ready", data });
       } catch (error) {
         if (signal?.aborted) {
           return;
         }
-        const message = error instanceof Error ? error.message : "unknown_error";
+        if (isUnauthorized(error)) {
+          expireSession();
+          return;
+        }
+        const message = requestErrorMessage(error);
         setDiagnosticsState((current) => ({ status: "error", data: current.data, error: message }));
       }
     },
-    [activeToken],
+    [authenticated, expireSession],
   );
 
   const downloadDiagnosisBundle = useCallback(async () => {
-    if (activeToken.trim() === "") {
+    if (!authenticated) {
       setDiagnosisBundleState({ status: "idle" });
       return;
     }
@@ -321,7 +361,7 @@ export default function App() {
 
     setDiagnosisBundleState((current) => ({ status: "loading", data: current.data }));
     try {
-      const data = await fetchDiagnosisBundle(activeToken, {
+      const data = await fetchDiagnosisBundle({
         clientID: diagnosisClientID,
         deviceID: diagnosisDeviceID,
         messageLimit: diagnosisMessageLimit,
@@ -331,81 +371,98 @@ export default function App() {
       setDiagnosisBundleState({ status: "ready", data });
       downloadJSON(data, diagnosisBundleFilename(data));
     } catch (error) {
-      const message = error instanceof Error ? error.message : "unknown_error";
+      if (isUnauthorized(error)) {
+        expireSession();
+        return;
+      }
+      const message = requestErrorMessage(error);
       setDiagnosisBundleState((current) => ({ status: "error", data: current.data, error: message }));
     }
   }, [
-    activeToken,
+    authenticated,
     diagnosisClientID,
     diagnosisDeviceID,
     diagnosisMessageLimit,
     diagnosisProbeTimeout,
     diagnosisSessionLimit,
+    expireSession,
   ]);
 
   const runCheck = useCallback(
     async (signal?: AbortSignal) => {
-      if (activeToken.trim() === "") {
+      if (!authenticated) {
         setCheckState({ status: "idle" });
         return;
       }
       setCheckState((current) => ({ status: "loading", data: current.data }));
       try {
-        const data = await fetchAdminCheck(activeToken, checkTimeout, signal);
+        const data = await fetchAdminCheck(checkTimeout, signal);
         setCheckState({ status: "ready", data });
         setCheckRanAt(new Date());
       } catch (error) {
         if (signal?.aborted) {
           return;
         }
-        const message = error instanceof Error ? error.message : "unknown_error";
+        if (isUnauthorized(error)) {
+          expireSession();
+          return;
+        }
+        const message = requestErrorMessage(error);
         setCheckState((current) => ({ status: "error", data: current.data, error: message }));
       }
     },
-    [activeToken, checkTimeout],
+    [authenticated, checkTimeout, expireSession],
   );
 
   const refreshMessages = useCallback(
     async (signal?: AbortSignal) => {
-      if (activeToken.trim() === "") {
+      if (!authenticated) {
         setMessagesState({ status: "idle" });
         return;
       }
       setMessagesState((current) => ({ status: "loading", data: current.data }));
       try {
-        const data = await fetchMessages(activeToken, messageStatus, messageLimit, signal);
+        const data = await fetchMessages(messageStatus, messageLimit, signal);
         setMessagesState({ status: "ready", data });
       } catch (error) {
         if (signal?.aborted) {
           return;
         }
-        const message = error instanceof Error ? error.message : "unknown_error";
+        if (isUnauthorized(error)) {
+          expireSession();
+          return;
+        }
+        const message = requestErrorMessage(error);
         setMessagesState((current) => ({ status: "error", data: current.data, error: message }));
       }
     },
-    [activeToken, messageLimit, messageStatus],
+    [authenticated, expireSession, messageLimit, messageStatus],
   );
 
   const lookupMessage = useCallback(
     async (signal?: AbortSignal) => {
       const messageID = messageLookupID.trim();
-      if (activeToken.trim() === "" || messageID === "") {
+      if (!authenticated || messageID === "") {
         setMessageLookupState({ status: "idle" });
         return;
       }
       setMessageLookupState((current) => ({ status: "loading", data: current.data }));
       try {
-        const data = await fetchMessage(activeToken, messageID, signal);
+        const data = await fetchMessage(messageID, signal);
         setMessageLookupState({ status: "ready", data });
       } catch (error) {
         if (signal?.aborted) {
           return;
         }
-        const message = error instanceof Error ? error.message : "unknown_error";
+        if (isUnauthorized(error)) {
+          expireSession();
+          return;
+        }
+        const message = requestErrorMessage(error);
         setMessageLookupState((current) => ({ status: "error", data: current.data, error: message }));
       }
     },
-    [activeToken, messageLookupID],
+    [authenticated, expireSession, messageLookupID],
   );
 
   const openMessageAction = useCallback((action: MessageAction, message: MessageStatusResponse) => {
@@ -424,7 +481,7 @@ export default function App() {
   }, []);
 
   const confirmMessageAction = useCallback(async () => {
-    if (!messageActionDialog || activeToken.trim() === "") {
+    if (!messageActionDialog || !authenticated) {
       return;
     }
 
@@ -443,23 +500,57 @@ export default function App() {
     try {
       const updated =
         messageActionDialog.action === "requeue"
-          ? await requeueMessage(activeToken, messageID)
-          : await discardMessage(activeToken, messageID, reason);
+          ? await requeueMessage(messageID)
+          : await discardMessage(messageID, reason);
       if (messageLookupID.trim() === messageID) {
         setMessageLookupState({ status: "ready", data: updated });
       }
       setMessageActionDialog(null);
       await refreshMessages();
     } catch (error) {
-      const message = error instanceof Error ? error.message : "unknown_error";
+      if (isUnauthorized(error)) {
+        expireSession();
+        return;
+      }
+      const message = requestErrorMessage(error);
       setMessageActionDialog((current) => current ? { ...current, error: message } : current);
     } finally {
       setMessageActionPending(false);
     }
-  }, [activeToken, messageActionDialog, messageLookupID, refreshMessages]);
+  }, [authenticated, expireSession, messageActionDialog, messageLookupID, refreshMessages]);
 
   useEffect(() => {
-    if (activeToken.trim() === "") {
+    const controller = new AbortController();
+
+    void fetchAdminSession(controller.signal)
+      .then((response) => {
+        if (controller.signal.aborted) {
+          return;
+        }
+        if (response.session) {
+          setAuthState({ status: "authenticated", session: response.session });
+          return;
+        }
+        setAuthState({ status: "anonymous" });
+      })
+      .catch((error) => {
+        if (controller.signal.aborted) {
+          return;
+        }
+        if (isUnauthorized(error)) {
+          setAuthState({ status: "anonymous" });
+          return;
+        }
+        setAuthState({ status: "anonymous", error: requestErrorMessage(error) });
+      });
+
+    return () => {
+      controller.abort();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!authenticated) {
       setState({ status: "idle" });
       return;
     }
@@ -474,13 +565,13 @@ export default function App() {
       controller.abort();
       window.clearInterval(timer);
     };
-  }, [activeToken, refresh]);
+  }, [authenticated, refresh]);
 
   useEffect(() => {
     if (activePage !== "routes") {
       return;
     }
-    if (activeToken.trim() === "") {
+    if (!authenticated) {
       setRouteState({ status: "idle" });
       return;
     }
@@ -490,13 +581,13 @@ export default function App() {
     return () => {
       controller.abort();
     };
-  }, [activePage, activeToken, refreshRoutes]);
+  }, [activePage, authenticated, refreshRoutes]);
 
   useEffect(() => {
     if (activePage !== "sessions") {
       return;
     }
-    if (activeToken.trim() === "") {
+    if (!authenticated) {
       setSessionsState({ status: "idle" });
       setClientRouteState({ status: "idle" });
       return;
@@ -507,13 +598,13 @@ export default function App() {
     return () => {
       controller.abort();
     };
-  }, [activePage, activeToken, refreshSessions]);
+  }, [activePage, authenticated, refreshSessions]);
 
   useEffect(() => {
     if (activePage !== "diagnostics") {
       return;
     }
-    if (activeToken.trim() === "") {
+    if (!authenticated) {
       setDiagnosticsState({ status: "idle" });
       return;
     }
@@ -523,13 +614,13 @@ export default function App() {
     return () => {
       controller.abort();
     };
-  }, [activePage, activeToken, refreshDiagnostics]);
+  }, [activePage, authenticated, refreshDiagnostics]);
 
   useEffect(() => {
     if (activePage !== "messages") {
       return;
     }
-    if (activeToken.trim() === "") {
+    if (!authenticated) {
       setMessagesState({ status: "idle" });
       return;
     }
@@ -539,26 +630,47 @@ export default function App() {
     return () => {
       controller.abort();
     };
-  }, [activePage, activeToken, refreshMessages]);
+  }, [activePage, authenticated, refreshMessages]);
 
-  const connect = useCallback(() => {
-    const nextToken = draftToken.trim();
-    setActiveToken(nextToken);
-    if (nextToken === "") {
-      setState({ status: "idle" });
-      setRouteState({ status: "idle" });
-      setSessionsState({ status: "idle" });
-      setClientRouteState({ status: "idle" });
-      setDiagnosticsState({ status: "idle" });
-      setDiagnosisBundleState({ status: "idle" });
-      setCheckState({ status: "idle" });
-      setMessagesState({ status: "idle" });
-      setMessageLookupState({ status: "idle" });
-      setMessageActionDialog(null);
-      setCheckRanAt(null);
-      setUpdatedAt(null);
+  const login = useCallback(
+    async (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      const token = loginToken.trim();
+      if (token === "") {
+        setAuthState({ status: "anonymous", error: "internal token is required" });
+        return;
+      }
+
+      setLoginPending(true);
+      try {
+        const response = await loginAdminSession(token);
+        if (!response.session) {
+          throw new Error("login response did not include a session");
+        }
+        setAuthState({ status: "authenticated", session: response.session });
+        setLoginToken("");
+      } catch (error) {
+        clearConsoleState();
+        setAuthState({ status: "anonymous", error: requestErrorMessage(error) });
+      } finally {
+        setLoginPending(false);
+      }
+    },
+    [clearConsoleState, loginToken],
+  );
+
+  const logout = useCallback(async () => {
+    setLoginPending(true);
+    try {
+      await logoutAdminSession();
+    } catch {
+      // Local UI state is still cleared so a stale browser session is not trusted.
+    } finally {
+      clearConsoleState();
+      setAuthState({ status: "anonymous" });
+      setLoginPending(false);
     }
-  }, [draftToken]);
+  }, [clearConsoleState]);
 
   const refreshCurrentPage = useCallback(() => {
     if (activePage === "routes") {
@@ -600,7 +712,9 @@ export default function App() {
 
   const overview = state.data;
   const ready = overview?.readiness.ready ?? false;
-  const statusText = overview?.readiness.status ?? (state.status === "error" ? "not connected" : activeToken ? "connecting" : "auth required");
+  const statusText =
+    overview?.readiness.status ??
+    (authState.status === "checking" ? "checking session" : state.status === "error" ? "not connected" : authenticated ? "connecting" : "auth required");
   const pageTitle =
     activePage === "routes"
       ? "Routes"
@@ -653,36 +767,62 @@ export default function App() {
           </nav>
 
           <section className="mt-6 min-w-0 overflow-hidden rounded-lg border border-line bg-zinc-50 p-3">
-            <form
-              className="grid min-w-0 gap-2"
-              onSubmit={(event) => {
-                event.preventDefault();
-                connect();
-              }}
-            >
-              <label className="block text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500" htmlFor="internal-token">
-                Internal Token
-              </label>
-              <div className="flex min-w-0 items-center gap-2 overflow-hidden rounded-lg border border-line bg-white px-2.5 py-2 focus-within:border-accent">
-                <LockKey size={16} className="shrink-0 text-zinc-400" weight="duotone" />
-                <input
-                  id="internal-token"
-                  className="w-full min-w-0 flex-1 truncate bg-transparent text-sm outline-none placeholder:text-zinc-400"
-                  onChange={(event) => setDraftToken(event.target.value)}
-                  placeholder="dev-internal-token"
-                  type="password"
-                  value={draftToken}
-                />
+            {authState.status === "authenticated" ? (
+              <div className="grid min-w-0 gap-3">
+                <div className="flex min-w-0 items-center gap-2">
+                  <div className="grid size-8 shrink-0 place-items-center rounded-lg bg-emerald-50 text-emerald-700">
+                    <ShieldCheck size={16} weight="duotone" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-ink">{authState.session.principal}</p>
+                    <p className="truncate font-mono text-xs text-zinc-500">{authState.session.role}</p>
+                  </div>
+                </div>
+                <div className="grid min-w-0 gap-2 rounded-lg border border-line bg-white p-3">
+                  <LineItem label="Expires" value={formatMillis(authState.session.expires_in_ms)} />
+                  <LineItem label="Session" value={shortID(authState.session.session_id)} />
+                </div>
+                <button
+                  className="inline-flex w-full min-w-0 items-center justify-center gap-2 rounded-lg border border-line bg-white px-3 py-2 text-sm font-medium text-ink transition duration-300 hover:border-zinc-300 hover:bg-zinc-50 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-45"
+                  disabled={loginPending}
+                  onClick={() => void logout()}
+                  type="button"
+                >
+                  <XCircle size={16} className="shrink-0" weight="bold" />
+                  <span className="min-w-0 truncate">{loginPending ? "Signing out..." : "Sign Out"}</span>
+                </button>
               </div>
-              <button
-                className="mt-1 inline-flex w-full min-w-0 items-center justify-center gap-2 rounded-lg bg-zinc-950 px-3 py-2 text-sm font-medium text-white transition duration-300 hover:bg-zinc-800 active:translate-y-px"
-                type="submit"
-              >
-                <PlugsConnected size={16} className="shrink-0" weight="bold" />
-                <span className="min-w-0 truncate">Connect</span>
-              </button>
-              <p className="min-w-0 break-words text-xs leading-relaxed text-zinc-500">Stored in this browser session after connect.</p>
-            </form>
+            ) : (
+              <form className="grid min-w-0 gap-2" onSubmit={login}>
+                <label className="block text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500" htmlFor="internal-token">
+                  Internal Token
+                </label>
+                <div className="flex min-w-0 items-center gap-2 overflow-hidden rounded-lg border border-line bg-white px-2.5 py-2 focus-within:border-accent">
+                  <LockKey size={16} className="shrink-0 text-zinc-400" weight="duotone" />
+                  <input
+                    autoComplete="current-password"
+                    disabled={authState.status === "checking" || loginPending}
+                    id="internal-token"
+                    className="w-full min-w-0 flex-1 truncate bg-transparent text-sm outline-none placeholder:text-zinc-400 disabled:cursor-not-allowed disabled:opacity-60"
+                    onChange={(event) => setLoginToken(event.target.value)}
+                    placeholder="dev-internal-token"
+                    type="password"
+                    value={loginToken}
+                  />
+                </div>
+                <button
+                  className="mt-1 inline-flex w-full min-w-0 items-center justify-center gap-2 rounded-lg bg-zinc-950 px-3 py-2 text-sm font-medium text-white transition duration-300 hover:bg-zinc-800 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-45"
+                  disabled={authState.status === "checking" || loginPending}
+                  type="submit"
+                >
+                  <PlugsConnected size={16} className="shrink-0" weight="bold" />
+                  <span className="min-w-0 truncate">
+                    {authState.status === "checking" ? "Checking..." : loginPending ? "Signing in..." : "Sign In"}
+                  </span>
+                </button>
+                {authState.error && <p className="min-w-0 break-words font-mono text-xs leading-relaxed text-amber-700">{authState.error}</p>}
+              </form>
+            )}
           </section>
         </aside>
 
@@ -696,7 +836,7 @@ export default function App() {
               <StatusPill ready={ready} status={statusText} />
               <button
                 className="inline-flex items-center gap-2 rounded-lg border border-line bg-white px-3 py-2 text-sm font-medium text-ink transition duration-300 hover:border-zinc-300 hover:bg-zinc-50 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-45"
-                disabled={activeToken.trim() === ""}
+                disabled={!authenticated}
                 onClick={refreshCurrentPage}
                 type="button"
               >
@@ -706,7 +846,7 @@ export default function App() {
             </div>
           </header>
 
-          {state.status === "idle" && <AuthEmptyState />}
+          {state.status === "idle" && !authenticated && <AuthEmptyState checking={authState.status === "checking"} />}
 
           {activePage === "overview" && state.status === "error" && <ErrorBanner message={state.error} />}
           {activePage === "routes" && routeState.status === "error" && <ErrorBanner message={routeState.error} />}
@@ -720,9 +860,9 @@ export default function App() {
             <Dashboard overview={overview} updatedAt={updatedAt} />
           ) : activePage === "overview" && state.status === "loading" ? (
             <OverviewSkeleton />
-          ) : activePage === "routes" && activeToken.trim() !== "" && (routeState.status !== "error" || routeState.data) ? (
+          ) : activePage === "routes" && authenticated && (routeState.status !== "error" || routeState.data) ? (
             <RoutesPage state={routeState} />
-          ) : activePage === "sessions" && activeToken.trim() !== "" && (sessionsState.status !== "error" || sessionsState.data) ? (
+          ) : activePage === "sessions" && authenticated && (sessionsState.status !== "error" || sessionsState.data) ? (
             <SessionsPage
               clientID={sessionClientID}
               deviceID={sessionDeviceID}
@@ -736,7 +876,7 @@ export default function App() {
               routeState={clientRouteState}
               state={sessionsState}
             />
-          ) : activePage === "messages" && activeToken.trim() !== "" && (messagesState.status !== "error" || messagesState.data) ? (
+          ) : activePage === "messages" && authenticated && (messagesState.status !== "error" || messagesState.data) ? (
             <MessagesPage
               limit={messageLimit}
               lookupID={messageLookupID}
@@ -749,7 +889,7 @@ export default function App() {
               selectedStatus={messageStatus}
               state={messagesState}
             />
-          ) : activePage === "checks" && activeToken.trim() !== "" && (checkState.status !== "error" || checkState.data) ? (
+          ) : activePage === "checks" && authenticated && (checkState.status !== "error" || checkState.data) ? (
             <ChecksPage
               onRun={runCheck}
               onTimeoutChange={setCheckTimeout}
@@ -757,7 +897,7 @@ export default function App() {
               state={checkState}
               timeout={checkTimeout}
             />
-          ) : activePage === "diagnostics" && activeToken.trim() !== "" && (diagnosticsState.status !== "error" || diagnosticsState.data) ? (
+          ) : activePage === "diagnostics" && authenticated && (diagnosticsState.status !== "error" || diagnosticsState.data) ? (
             <DiagnosticsPage
               bundleState={diagnosisBundleState}
               clientID={diagnosisClientID}
@@ -2515,16 +2655,16 @@ function ErrorBanner({ message }: { message: string }) {
   );
 }
 
-function AuthEmptyState() {
+function AuthEmptyState({ checking }: { checking: boolean }) {
   return (
     <div className="rounded-lg border border-line bg-white px-5 py-8 shadow-diffusion">
       <div className="max-w-xl">
         <div className="grid size-12 place-items-center rounded-lg border border-line bg-zinc-50 text-accent">
           <LockKey size={22} weight="duotone" />
         </div>
-        <h2 className="mt-5 text-2xl font-semibold tracking-tight">Connect to Internal HTTP</h2>
+        <h2 className="mt-5 text-2xl font-semibold tracking-tight">{checking ? "Checking Admin Session" : "Sign In Required"}</h2>
         <p className="mt-2 text-sm leading-relaxed text-zinc-500">
-          Enter the internal token in the left panel to load gateway overview data.
+          {checking ? "Restoring the current browser session." : "Use the internal token in the left panel to create a short-lived session."}
         </p>
       </div>
     </div>
@@ -2767,6 +2907,21 @@ function canDiscard(status?: MessageStatus | string): boolean {
   return Boolean(status) && status !== "delivered" && status !== "discarded";
 }
 
+function isUnauthorized(error: unknown): boolean {
+  return error instanceof APIError && error.status === 401;
+}
+
+function requestErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "unknown_error";
+}
+
+function shortID(value: string): string {
+  if (value.length <= 12) {
+    return value;
+  }
+  return `${value.slice(0, 8)}...${value.slice(-4)}`;
+}
+
 function formatOptionalDate(value?: string | null): string {
   if (!value || value.startsWith("0001-01-01")) {
     return "--";
@@ -2789,7 +2944,19 @@ function formatMillis(value?: number): string {
     return `${value}ms`;
   }
   const seconds = value / 1000;
-  return `${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds).toLocaleString()}s`;
+  if (seconds < 60) {
+    return `${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds).toLocaleString()}s`;
+  }
+  const minutes = seconds / 60;
+  if (minutes < 60) {
+    return `${minutes < 10 ? minutes.toFixed(1) : Math.round(minutes).toLocaleString()}m`;
+  }
+  const hours = minutes / 60;
+  if (hours < 48) {
+    return `${hours < 10 ? hours.toFixed(1) : Math.round(hours).toLocaleString()}h`;
+  }
+  const days = hours / 24;
+  return `${days < 10 ? days.toFixed(1) : Math.round(days).toLocaleString()}d`;
 }
 
 function clampMessageLimit(value: string): number {

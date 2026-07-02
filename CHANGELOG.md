@@ -15,6 +15,9 @@ semantic versioning after the first public MVP tag.
 - Backend admin console session foundation with configurable TTL/cookie
   settings, `login`/`me`/`logout` internal endpoints, and session-cookie access
   for existing console admin/debug/message APIs.
+- Admin console login flow that exchanges the internal token for a short-lived
+  HTTP-only session cookie, restores existing sessions on refresh, and removes
+  browser-side token persistence from normal console API calls.
 
 ## [v0.9.1] - 2026-07-02
 

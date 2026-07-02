@@ -47,6 +47,23 @@ export type AdminConsoleSummary = {
   };
 };
 
+export type AdminConsoleSession = {
+  session_id: string;
+  principal: string;
+  role: string;
+  created_at: string;
+  expires_at: string;
+  last_seen_at: string;
+  expires_in_ms: number;
+};
+
+export type AdminSessionResponse = {
+  code: string;
+  reason?: string;
+  gateway_node: string;
+  session?: AdminConsoleSession;
+};
+
 export type DownlinkSummary = {
   storage_type: string;
   store_configured: boolean;
