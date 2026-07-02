@@ -201,6 +201,22 @@ export type AdminDiagnostics = {
   warnings?: DiagnosticWarning[];
 };
 
+export type AdminDiagnosisSection = {
+  endpoint: string;
+  http_status?: number;
+  error?: string;
+  body?: unknown;
+};
+
+export type AdminDiagnosisBundle = {
+  code: string;
+  reason?: string;
+  generated_at?: string;
+  target_url?: string;
+  collection_status?: string;
+  sections?: Record<string, AdminDiagnosisSection>;
+};
+
 export type MessageStatus = "pending" | "sent" | "delivered" | "failed" | "discarded";
 
 export type MessageStatusResponse = {

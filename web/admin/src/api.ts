@@ -1,6 +1,7 @@
 import type {
   AdminCheck,
   AdminClientRouteLookup,
+  AdminDiagnosisBundle,
   AdminDiagnostics,
   AdminMessages,
   AdminOverview,
@@ -11,6 +12,14 @@ import type {
 } from "./types";
 
 const internalTokenHeader = "X-ZCourier-Internal-Token";
+
+export type DiagnosisBundleParams = {
+  probeTimeout: string;
+  messageLimit: number;
+  sessionLimit: number;
+  clientID: string;
+  deviceID: string;
+};
 
 export class APIError extends Error {
   readonly status: number;
@@ -127,6 +136,25 @@ export async function fetchAdminCheck(token: string, timeout: string, signal?: A
   }
   const suffix = query.toString() ? `?${query.toString()}` : "";
   return fetchAdminJSON<AdminCheck>(`/internal/admin/check${suffix}`, token, signal);
+}
+
+export async function fetchDiagnosisBundle(
+  token: string,
+  params: DiagnosisBundleParams,
+  signal?: AbortSignal,
+): Promise<AdminDiagnosisBundle> {
+  const query = new URLSearchParams({
+    probe_timeout: params.probeTimeout.trim() || "2s",
+    message_limit: String(params.messageLimit),
+    session_limit: String(params.sessionLimit),
+  });
+  if (params.clientID.trim() !== "") {
+    query.set("client_id", params.clientID.trim());
+  }
+  if (params.deviceID.trim() !== "") {
+    query.set("device_id", params.deviceID.trim());
+  }
+  return fetchAdminJSON<AdminDiagnosisBundle>(`/internal/admin/diagnose?${query.toString()}`, token, signal);
 }
 
 export async function fetchMessages(

@@ -6,6 +6,8 @@ import {
   CheckCircle,
   Circuitry,
   Database,
+  DownloadSimple,
+  FileText,
   Gauge,
   GitBranch,
   PlugsConnected,
@@ -21,6 +23,7 @@ import {
   discardMessage,
   fetchAdminCheck,
   fetchClientRoute,
+  fetchDiagnosisBundle,
   fetchDiagnostics,
   fetchMessage,
   fetchMessages,
@@ -33,6 +36,7 @@ import type {
   AdminCheck,
   AdminCheckResult,
   AdminClientRouteLookup,
+  AdminDiagnosisBundle,
   AdminDiagnostics,
   AdminMessages,
   AdminOverview,
@@ -83,6 +87,7 @@ export default function App() {
   const [sessionsState, setSessionsState] = useState<RemoteState<AdminSessions>>({ status: "idle" });
   const [clientRouteState, setClientRouteState] = useState<RemoteState<AdminClientRouteLookup>>({ status: "idle" });
   const [diagnosticsState, setDiagnosticsState] = useState<RemoteState<AdminDiagnostics>>({ status: "idle" });
+  const [diagnosisBundleState, setDiagnosisBundleState] = useState<RemoteState<AdminDiagnosisBundle>>({ status: "idle" });
   const [checkState, setCheckState] = useState<RemoteState<AdminCheck>>({ status: "idle" });
   const [messagesState, setMessagesState] = useState<RemoteState<AdminMessages>>({ status: "idle" });
   const [messageLookupState, setMessageLookupState] = useState<RemoteState<MessageStatusResponse>>({ status: "idle" });
@@ -91,6 +96,11 @@ export default function App() {
   const [sessionClientID, setSessionClientID] = useState("");
   const [sessionDeviceID, setSessionDeviceID] = useState("");
   const [sessionLimit, setSessionLimit] = useState(100);
+  const [diagnosisClientID, setDiagnosisClientID] = useState("");
+  const [diagnosisDeviceID, setDiagnosisDeviceID] = useState("");
+  const [diagnosisProbeTimeout, setDiagnosisProbeTimeout] = useState("2s");
+  const [diagnosisMessageLimit, setDiagnosisMessageLimit] = useState(20);
+  const [diagnosisSessionLimit, setDiagnosisSessionLimit] = useState(100);
   const [messageStatus, setMessageStatus] = useState<MessageStatus>("failed");
   const [messageLimit, setMessageLimit] = useState(100);
   const [messageLookupID, setMessageLookupID] = useState("");
@@ -223,6 +233,40 @@ export default function App() {
     },
     [activeToken],
   );
+
+  const downloadDiagnosisBundle = useCallback(async () => {
+    if (activeToken.trim() === "") {
+      setDiagnosisBundleState({ status: "idle" });
+      return;
+    }
+    if (diagnosisDeviceID.trim() !== "" && diagnosisClientID.trim() === "") {
+      setDiagnosisBundleState({ status: "error", error: "client_id is required when device_id is set" });
+      return;
+    }
+
+    setDiagnosisBundleState((current) => ({ status: "loading", data: current.data }));
+    try {
+      const data = await fetchDiagnosisBundle(activeToken, {
+        clientID: diagnosisClientID,
+        deviceID: diagnosisDeviceID,
+        messageLimit: diagnosisMessageLimit,
+        probeTimeout: diagnosisProbeTimeout,
+        sessionLimit: diagnosisSessionLimit,
+      });
+      setDiagnosisBundleState({ status: "ready", data });
+      downloadJSON(data, diagnosisBundleFilename(data));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "unknown_error";
+      setDiagnosisBundleState((current) => ({ status: "error", data: current.data, error: message }));
+    }
+  }, [
+    activeToken,
+    diagnosisClientID,
+    diagnosisDeviceID,
+    diagnosisMessageLimit,
+    diagnosisProbeTimeout,
+    diagnosisSessionLimit,
+  ]);
 
   const runCheck = useCallback(
     async (signal?: AbortSignal) => {
@@ -431,6 +475,7 @@ export default function App() {
       setSessionsState({ status: "idle" });
       setClientRouteState({ status: "idle" });
       setDiagnosticsState({ status: "idle" });
+      setDiagnosisBundleState({ status: "idle" });
       setCheckState({ status: "idle" });
       setMessagesState({ status: "idle" });
       setMessageLookupState({ status: "idle" });
@@ -638,7 +683,21 @@ export default function App() {
               timeout={checkTimeout}
             />
           ) : activePage === "diagnostics" && activeToken.trim() !== "" && (diagnosticsState.status !== "error" || diagnosticsState.data) ? (
-            <DiagnosticsPage state={diagnosticsState} />
+            <DiagnosticsPage
+              bundleState={diagnosisBundleState}
+              clientID={diagnosisClientID}
+              deviceID={diagnosisDeviceID}
+              messageLimit={diagnosisMessageLimit}
+              onClientIDChange={setDiagnosisClientID}
+              onDeviceIDChange={setDiagnosisDeviceID}
+              onDownloadBundle={downloadDiagnosisBundle}
+              onMessageLimitChange={setDiagnosisMessageLimit}
+              onProbeTimeoutChange={setDiagnosisProbeTimeout}
+              onSessionLimitChange={setDiagnosisSessionLimit}
+              probeTimeout={diagnosisProbeTimeout}
+              sessionLimit={diagnosisSessionLimit}
+              state={diagnosticsState}
+            />
           ) : null}
         </section>
       </div>
@@ -1724,7 +1783,35 @@ function MessageStatusBadge({ status }: { status?: MessageStatus | string }) {
   );
 }
 
-function DiagnosticsPage({ state }: { state: RemoteState<AdminDiagnostics> }) {
+function DiagnosticsPage({
+  bundleState,
+  clientID,
+  deviceID,
+  messageLimit,
+  onClientIDChange,
+  onDeviceIDChange,
+  onDownloadBundle,
+  onMessageLimitChange,
+  onProbeTimeoutChange,
+  onSessionLimitChange,
+  probeTimeout,
+  sessionLimit,
+  state,
+}: {
+  bundleState: RemoteState<AdminDiagnosisBundle>;
+  clientID: string;
+  deviceID: string;
+  messageLimit: number;
+  onClientIDChange: (clientID: string) => void;
+  onDeviceIDChange: (deviceID: string) => void;
+  onDownloadBundle: () => void | Promise<void>;
+  onMessageLimitChange: (limit: number) => void;
+  onProbeTimeoutChange: (timeout: string) => void;
+  onSessionLimitChange: (limit: number) => void;
+  probeTimeout: string;
+  sessionLimit: number;
+  state: RemoteState<AdminDiagnostics>;
+}) {
   const diagnostics = state.data;
   if (state.status === "loading" && !diagnostics) {
     return <DiagnosticsSkeleton />;
@@ -1758,6 +1845,21 @@ function DiagnosticsPage({ state }: { state: RemoteState<AdminDiagnostics> }) {
           </div>
         </div>
       </section>
+
+      <DiagnosisBundlePanel
+        clientID={clientID}
+        deviceID={deviceID}
+        messageLimit={messageLimit}
+        onClientIDChange={onClientIDChange}
+        onDeviceIDChange={onDeviceIDChange}
+        onDownload={onDownloadBundle}
+        onMessageLimitChange={onMessageLimitChange}
+        onProbeTimeoutChange={onProbeTimeoutChange}
+        onSessionLimitChange={onSessionLimitChange}
+        probeTimeout={probeTimeout}
+        sessionLimit={sessionLimit}
+        state={bundleState}
+      />
 
       {warnings.length > 0 && (
         <section className="grid gap-3">
@@ -1861,6 +1963,178 @@ function DiagnosticsPage({ state }: { state: RemoteState<AdminDiagnostics> }) {
         ]} />
       </section>
     </div>
+  );
+}
+
+function DiagnosisBundlePanel({
+  clientID,
+  deviceID,
+  messageLimit,
+  onClientIDChange,
+  onDeviceIDChange,
+  onDownload,
+  onMessageLimitChange,
+  onProbeTimeoutChange,
+  onSessionLimitChange,
+  probeTimeout,
+  sessionLimit,
+  state,
+}: {
+  clientID: string;
+  deviceID: string;
+  messageLimit: number;
+  onClientIDChange: (clientID: string) => void;
+  onDeviceIDChange: (deviceID: string) => void;
+  onDownload: () => void | Promise<void>;
+  onMessageLimitChange: (limit: number) => void;
+  onProbeTimeoutChange: (timeout: string) => void;
+  onSessionLimitChange: (limit: number) => void;
+  probeTimeout: string;
+  sessionLimit: number;
+  state: RemoteState<AdminDiagnosisBundle>;
+}) {
+  const running = state.status === "loading";
+  const bundle = state.data;
+  const sections = Object.entries(bundle?.sections ?? {});
+  const failedSections = sections.filter(([, section]) => Boolean(section.error) || !successfulHTTPStatus(section.http_status));
+  const requiresClient = deviceID.trim() !== "" && clientID.trim() === "";
+
+  return (
+    <section className="grid gap-5 xl:grid-cols-[0.95fr_1.05fr]">
+      <article className="rounded-lg border border-line bg-white p-5 shadow-diffusion">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-sm font-medium text-zinc-500">Diagnosis Bundle</p>
+            <h3 className="mt-1 text-2xl font-semibold tracking-tight">Safe JSON attachment</h3>
+          </div>
+          <FileText size={24} className="text-accent" weight="duotone" />
+        </div>
+
+        <form
+          className="mt-5 grid gap-3"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void onDownload();
+          }}
+        >
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="grid gap-2">
+              <label className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500" htmlFor="diagnosis-client-id">
+                ClientID
+              </label>
+              <input
+                className="min-w-0 rounded-lg border border-line bg-white px-3 py-2 font-mono text-sm outline-none transition duration-300 placeholder:text-zinc-400 focus:border-accent"
+                id="diagnosis-client-id"
+                onChange={(event) => onClientIDChange(event.target.value)}
+                placeholder="optional"
+                value={clientID}
+              />
+            </div>
+            <div className="grid gap-2">
+              <label className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500" htmlFor="diagnosis-device-id">
+                DeviceID
+              </label>
+              <input
+                className="min-w-0 rounded-lg border border-line bg-white px-3 py-2 font-mono text-sm outline-none transition duration-300 placeholder:text-zinc-400 focus:border-accent"
+                id="diagnosis-device-id"
+                onChange={(event) => onDeviceIDChange(event.target.value)}
+                placeholder="optional"
+                value={deviceID}
+              />
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-3">
+            <div className="grid gap-2">
+              <label className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500" htmlFor="diagnosis-probe-timeout">
+                Probe Timeout
+              </label>
+              <input
+                className="min-w-0 rounded-lg border border-line bg-white px-3 py-2 font-mono text-sm outline-none transition duration-300 focus:border-accent"
+                id="diagnosis-probe-timeout"
+                onChange={(event) => onProbeTimeoutChange(event.target.value)}
+                placeholder="2s"
+                value={probeTimeout}
+              />
+            </div>
+            <div className="grid gap-2">
+              <label className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500" htmlFor="diagnosis-message-limit">
+                Message Limit
+              </label>
+              <input
+                className="min-w-0 rounded-lg border border-line bg-white px-3 py-2 font-mono text-sm outline-none transition duration-300 focus:border-accent"
+                id="diagnosis-message-limit"
+                max={1000}
+                min={1}
+                onChange={(event) => onMessageLimitChange(clampMessageLimit(event.target.value))}
+                type="number"
+                value={messageLimit}
+              />
+            </div>
+            <div className="grid gap-2">
+              <label className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500" htmlFor="diagnosis-session-limit">
+                Session Limit
+              </label>
+              <input
+                className="min-w-0 rounded-lg border border-line bg-white px-3 py-2 font-mono text-sm outline-none transition duration-300 focus:border-accent"
+                id="diagnosis-session-limit"
+                max={1000}
+                min={1}
+                onChange={(event) => onSessionLimitChange(clampSessionLimit(event.target.value))}
+                type="number"
+                value={sessionLimit}
+              />
+            </div>
+          </div>
+
+          <button
+            className="inline-flex items-center justify-center gap-2 rounded-lg bg-zinc-950 px-4 py-2 text-sm font-medium text-white transition duration-300 hover:bg-zinc-800 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={running || requiresClient}
+            type="submit"
+          >
+            <DownloadSimple size={16} weight="bold" />
+            {running ? "Collecting..." : "Download Bundle"}
+          </button>
+          <p className="text-xs leading-relaxed text-zinc-500">
+            Includes overview, diagnostics, dependency checks, routes, failed messages, and optional client route sections.
+          </p>
+        </form>
+
+        {requiresClient && (
+          <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            ClientID is required when DeviceID is set.
+          </div>
+        )}
+
+        {state.status === "error" && (
+          <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            <p className="font-semibold">Bundle collection failed</p>
+            <p className="mt-1 break-words font-mono text-xs">{state.error}</p>
+          </div>
+        )}
+      </article>
+
+      <article className="rounded-lg border border-line bg-zinc-950 p-5 text-white shadow-diffusion">
+        <p className="text-sm text-zinc-400">Last Bundle</p>
+        <h3 className="mt-1 text-2xl font-semibold tracking-tight">{bundle?.collection_status ?? "not collected"}</h3>
+        <div className="mt-6 grid gap-3 border-t border-white/10 pt-4">
+          <DarkLineItem label="Generated" value={formatOptionalDate(bundle?.generated_at)} />
+          <DarkLineItem label="Target" value={bundle?.target_url || "--"} />
+          <DarkLineItem label="Sections" value={sections.length.toLocaleString()} />
+          <DarkLineItem label="Failed" value={failedSections.length.toLocaleString()} />
+        </div>
+        {sections.length > 0 && (
+          <div className="mt-5 grid gap-2">
+            {sections.map(([name, section]) => (
+              <div className="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-white/10 bg-white/10 px-3 py-2" key={name}>
+                <span className="min-w-0 truncate font-mono text-xs text-zinc-200">{name}</span>
+                <span className="shrink-0 font-mono text-xs text-zinc-400">{section.error ? "error" : section.http_status ?? "--"}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </article>
+    </section>
   );
 }
 
@@ -2267,6 +2541,10 @@ function clientRouteStatus(lookup?: AdminClientRouteLookup): ClientRouteStatus {
   return "offline";
 }
 
+function successfulHTTPStatus(status?: number): boolean {
+  return status != null && status >= 200 && status < 300;
+}
+
 function checkCounts(checks: AdminCheckResult[]): Record<"ok" | "degraded" | "failed" | "skipped", number> {
   return checks.reduce(
     (counts, check) => {
@@ -2326,6 +2604,24 @@ function clampSessionLimit(value: string): number {
     return 1;
   }
   return Math.min(1000, Math.max(1, parsed));
+}
+
+function diagnosisBundleFilename(bundle: AdminDiagnosisBundle): string {
+  const timestamp = bundle.generated_at ? new Date(bundle.generated_at) : new Date();
+  const value = Number.isNaN(timestamp.getTime()) ? new Date() : timestamp;
+  return `z-courier-diagnose-${value.toISOString().replace(/[:.]/g, "-")}.json`;
+}
+
+function downloadJSON(value: unknown, filename: string) {
+  const blob = new Blob([`${JSON.stringify(value, null, 2)}\n`], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 function SkeletonPanel({ className }: { className: string }) {

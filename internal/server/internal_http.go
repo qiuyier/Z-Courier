@@ -79,6 +79,7 @@ func newInternalHTTPServer(config Config, logger *zap.Logger, service *downlink.
 	mux.Handle("/internal/admin/routes", newAdminRoutesHandler(handlerConfig))
 	mux.Handle("/internal/admin/diagnostics", newAdminDiagnosticsHandler(handlerConfig, health, registry, runtime, service.HasStore()))
 	mux.Handle("/internal/admin/check", newAdminCheckHandler(handlerConfig, service, registry))
+	mux.Handle("/internal/admin/diagnose", newAdminDiagnoseHandler(handlerConfig, health, registry, runtime, service))
 	mux.Handle("/internal/debug/route", newDebugRouteHandler(handlerConfig, registry))
 	mux.Handle("/internal/debug/sessions", newDebugSessionsHandler(handlerConfig))
 	if config.AdminConsole.Enabled {
