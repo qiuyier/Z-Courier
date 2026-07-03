@@ -10,6 +10,7 @@ import type {
   AdminSessionDisconnectRequest,
   AdminSessionDisconnectResponse,
   AdminSessions,
+  DownlinkTestPushResponse,
   MessageStatus,
   MessageStatusResponse,
 } from "./types";
@@ -27,6 +28,16 @@ export type SessionListParams = {
   deviceID: string;
   sessionID: string;
   limit: number;
+};
+
+export type DownlinkTestPushParams = {
+  clientID: string;
+  deviceID: string;
+  msgID: number;
+  messageID: string;
+  traceID: string;
+  ackRequired: boolean;
+  body: string;
 };
 
 export class APIError extends Error {
@@ -145,6 +156,27 @@ export async function disconnectSession(
   return postAdminJSON<AdminSessionDisconnectResponse>("/internal/debug/session/disconnect", request, signal);
 }
 
+export async function sendDownlinkTestPush(
+  params: DownlinkTestPushParams,
+  signal?: AbortSignal,
+): Promise<DownlinkTestPushResponse> {
+  const messageID = params.messageID.trim() || generatedTestPushID();
+  const traceID = params.traceID.trim() || messageID;
+  return postAdminJSON<DownlinkTestPushResponse>(
+    "/internal/debug/push",
+    {
+      client_id: params.clientID.trim(),
+      device_id: params.deviceID.trim(),
+      msg_id: params.msgID,
+      message_id: messageID,
+      trace_id: traceID,
+      ack_required: params.ackRequired,
+      body: encodeUTF8Base64(params.body),
+    },
+    signal,
+  );
+}
+
 export async function fetchDiagnostics(signal?: AbortSignal): Promise<AdminDiagnostics> {
   return fetchAdminJSON<AdminDiagnostics>("/internal/admin/diagnostics", signal);
 }
@@ -203,4 +235,19 @@ export async function discardMessage(
   signal?: AbortSignal,
 ): Promise<MessageStatusResponse> {
   return postAdminJSON<MessageStatusResponse>("/internal/message/discard", { message_id: messageID, reason }, signal);
+}
+
+function generatedTestPushID(): string {
+  return `console-push-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function encodeUTF8Base64(value: string): string {
+  const bytes = new TextEncoder().encode(value);
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    const chunk = bytes.subarray(index, index + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+  return btoa(binary);
 }

@@ -386,12 +386,13 @@ without calling the origin node.
 
 ## Internal Debug APIs
 
-The internal HTTP server exposes two debugging endpoints protected by the same
+The internal HTTP server exposes debugging endpoints protected by the same
 internal token as the downlink API:
 
 ```text
 GET /internal/debug/route?client_id=...&device_id=...
 GET /internal/debug/sessions?session_id=...&client_id=...&device_id=...&limit=...
+POST /internal/debug/push
 ```
 
 They answer different questions:
@@ -407,6 +408,11 @@ They answer different questions:
   Reads only the current node's in-memory session manager. It does not list
   cluster-wide online routes. It can filter by exact session_id, by client_id,
   or by client_id plus device_id.
+
+/internal/debug/push
+  "Can this gateway deliver one operator test downlink?"
+  Reuses the normal downlink delivery path, including cluster peer push when a
+  Redis-backed online route points to another gateway.
 ```
 
 Example: if the client is connected to `gateway-b` and the query is sent to

@@ -37,6 +37,7 @@ import {
   loginAdminSession,
   logoutAdminSession,
   requeueMessage,
+  sendDownlinkTestPush,
 } from "./api";
 import type {
   AdminCheck,
@@ -53,6 +54,7 @@ import type {
   AdminSession,
   AdminSessions,
   Dependency,
+  DownlinkTestPushResponse,
   MessageStatus,
   MessageStatusResponse,
 } from "./types";
@@ -60,6 +62,7 @@ import type {
 const messageStatuses: MessageStatus[] = ["failed", "pending", "sent", "delivered", "discarded"];
 const messageRepairPermission = "message:repair";
 const sessionDisconnectPermission = "session:disconnect";
+const downlinkTestPushPermission = "downlink:test_push";
 
 type MetricContext = {
   label: string;
@@ -134,6 +137,18 @@ const diagnosticsMetricContexts: MetricContext[] = [
   },
 ];
 
+function defaultDownlinkTestPushForm(): DownlinkTestPushForm {
+  return {
+    clientID: "",
+    deviceID: "",
+    msgID: "2001",
+    messageID: "",
+    traceID: "",
+    ackRequired: true,
+    body: "console-test",
+  };
+}
+
 type RemoteState<T> =
   | { status: "idle"; data?: undefined; error?: undefined }
   | { status: "loading"; data?: T; error?: undefined }
@@ -143,6 +158,15 @@ type RemoteState<T> =
 type PageID = "overview" | "routes" | "sessions" | "messages" | "checks" | "diagnostics";
 type MessageAction = "requeue" | "discard";
 type ClientRouteStatus = "idle" | "local" | "remote" | "offline" | "stale";
+type DownlinkTestPushForm = {
+  clientID: string;
+  deviceID: string;
+  msgID: string;
+  messageID: string;
+  traceID: string;
+  ackRequired: boolean;
+  body: string;
+};
 type AuthState =
   | { status: "checking"; session?: undefined; error?: string }
   | { status: "anonymous"; session?: undefined; error?: string }
@@ -180,6 +204,7 @@ export default function App() {
   const [checkState, setCheckState] = useState<RemoteState<AdminCheck>>({ status: "idle" });
   const [messagesState, setMessagesState] = useState<RemoteState<AdminMessages>>({ status: "idle" });
   const [messageLookupState, setMessageLookupState] = useState<RemoteState<MessageStatusResponse>>({ status: "idle" });
+  const [downlinkTestPushState, setDownlinkTestPushState] = useState<RemoteState<DownlinkTestPushResponse>>({ status: "idle" });
   const [checkTimeout, setCheckTimeout] = useState("2s");
   const [checkRanAt, setCheckRanAt] = useState<Date | null>(null);
   const [sessionID, setSessionID] = useState("");
@@ -195,6 +220,7 @@ export default function App() {
   const [messageStatus, setMessageStatus] = useState<MessageStatus>("failed");
   const [messageLimit, setMessageLimit] = useState(100);
   const [messageLookupID, setMessageLookupID] = useState("");
+  const [downlinkTestPushForm, setDownlinkTestPushForm] = useState<DownlinkTestPushForm>(() => defaultDownlinkTestPushForm());
   const [messageActionDialog, setMessageActionDialog] = useState<MessageActionDialogState>(null);
   const [messageActionPending, setMessageActionPending] = useState(false);
   const [sessionDisconnectDialog, setSessionDisconnectDialog] = useState<SessionDisconnectDialogState>(null);
@@ -203,6 +229,7 @@ export default function App() {
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
   const authenticated = authState.status === "authenticated";
   const canRepairMessages = authState.status === "authenticated" && adminSessionAllows(authState.session, messageRepairPermission);
+  const canTestDownlinkPush = authState.status === "authenticated" && adminSessionAllows(authState.session, downlinkTestPushPermission);
   const canDisconnectSessions =
     authState.status === "authenticated" && adminSessionAllows(authState.session, sessionDisconnectPermission);
 
@@ -216,6 +243,8 @@ export default function App() {
     setCheckState({ status: "idle" });
     setMessagesState({ status: "idle" });
     setMessageLookupState({ status: "idle" });
+    setDownlinkTestPushState({ status: "idle" });
+    setDownlinkTestPushForm(defaultDownlinkTestPushForm());
     setMessageActionDialog(null);
     setMessageActionPending(false);
     setSessionDisconnectDialog(null);
@@ -549,6 +578,70 @@ export default function App() {
       }
     },
     [authenticated, expireSession, messageLookupID],
+  );
+
+  const updateDownlinkTestPushForm = useCallback((patch: Partial<DownlinkTestPushForm>) => {
+    setDownlinkTestPushForm((current) => ({ ...current, ...patch }));
+  }, []);
+
+  const submitDownlinkTestPush = useCallback(
+    async (signal?: AbortSignal) => {
+      if (!authenticated) {
+        setDownlinkTestPushState({ status: "idle" });
+        return;
+      }
+      if (!canTestDownlinkPush) {
+        setDownlinkTestPushState({ status: "error", error: "permission_denied: requires operator role" });
+        return;
+      }
+
+      const clientID = downlinkTestPushForm.clientID.trim();
+      const deviceID = downlinkTestPushForm.deviceID.trim();
+      const msgID = Number.parseInt(downlinkTestPushForm.msgID.trim(), 10);
+      if (clientID === "") {
+        setDownlinkTestPushState({ status: "error", error: "client_id is required" });
+        return;
+      }
+      if (deviceID === "") {
+        setDownlinkTestPushState({ status: "error", error: "device_id is required" });
+        return;
+      }
+      if (!Number.isFinite(msgID) || msgID <= 0) {
+        setDownlinkTestPushState({ status: "error", error: "msg_id must be a positive integer" });
+        return;
+      }
+
+      setDownlinkTestPushState((current) => ({ status: "loading", data: current.data }));
+      try {
+        const data = await sendDownlinkTestPush(
+          {
+            clientID,
+            deviceID,
+            msgID,
+            messageID: downlinkTestPushForm.messageID,
+            traceID: downlinkTestPushForm.traceID,
+            ackRequired: downlinkTestPushForm.ackRequired,
+            body: downlinkTestPushForm.body,
+          },
+          signal,
+        );
+        setDownlinkTestPushState({ status: "ready", data });
+        if (data.message_id) {
+          setMessageLookupID(data.message_id);
+        }
+      } catch (error) {
+        if (signal?.aborted) {
+          return;
+        }
+        if (isUnauthorized(error)) {
+          expireSession();
+          return;
+        }
+        const message = requestErrorMessage(error);
+        setDownlinkTestPushState((current) => ({ status: "error", data: current.data, error: message }));
+      }
+    },
+    [authenticated, canTestDownlinkPush, downlinkTestPushForm, expireSession],
   );
 
   const openMessageAction = useCallback((action: MessageAction, message: MessageStatusResponse) => {
@@ -974,9 +1067,14 @@ export default function App() {
           ) : activePage === "messages" && authenticated && (messagesState.status !== "error" || messagesState.data) ? (
             <MessagesPage
               canRepairMessages={canRepairMessages}
+              canTestDownlinkPush={canTestDownlinkPush}
+              downlinkTestPushForm={downlinkTestPushForm}
+              downlinkTestPushState={downlinkTestPushState}
               limit={messageLimit}
               lookupID={messageLookupID}
               lookupState={messageLookupState}
+              onDownlinkTestPushFormChange={updateDownlinkTestPushForm}
+              onDownlinkTestPushSubmit={submitDownlinkTestPush}
               onLimitChange={setMessageLimit}
               onMessageAction={openMessageAction}
               onLookupIDChange={setMessageLookupID}
@@ -1900,9 +1998,14 @@ function RouteStatusBadge({ status }: { status: ClientRouteStatus }) {
 
 function MessagesPage({
   canRepairMessages,
+  canTestDownlinkPush,
+  downlinkTestPushForm,
+  downlinkTestPushState,
   limit,
   lookupID,
   lookupState,
+  onDownlinkTestPushFormChange,
+  onDownlinkTestPushSubmit,
   onLimitChange,
   onLookupIDChange,
   onLookupSubmit,
@@ -1912,9 +2015,14 @@ function MessagesPage({
   state,
 }: {
   canRepairMessages: boolean;
+  canTestDownlinkPush: boolean;
+  downlinkTestPushForm: DownlinkTestPushForm;
+  downlinkTestPushState: RemoteState<DownlinkTestPushResponse>;
   limit: number;
   lookupID: string;
   lookupState: RemoteState<MessageStatusResponse>;
+  onDownlinkTestPushFormChange: (patch: Partial<DownlinkTestPushForm>) => void;
+  onDownlinkTestPushSubmit: () => void | Promise<void>;
   onLimitChange: (limit: number) => void;
   onLookupIDChange: (messageID: string) => void;
   onLookupSubmit: () => void | Promise<void>;
@@ -1974,6 +2082,14 @@ function MessagesPage({
         </div>
       </section>
 
+      <DownlinkTestPushPanel
+        canTestDownlinkPush={canTestDownlinkPush}
+        form={downlinkTestPushForm}
+        onChange={onDownlinkTestPushFormChange}
+        onSubmit={onDownlinkTestPushSubmit}
+        state={downlinkTestPushState}
+      />
+
       <section className="grid gap-5 xl:grid-cols-[0.8fr_1.2fr]">
         <article className="rounded-lg border border-line bg-white p-5 shadow-diffusion">
           <p className="text-sm font-medium text-zinc-500">List Filter</p>
@@ -2018,6 +2134,205 @@ function MessagesPage({
         </section>
       )}
     </div>
+  );
+}
+
+function DownlinkTestPushPanel({
+  canTestDownlinkPush,
+  form,
+  onChange,
+  onSubmit,
+  state,
+}: {
+  canTestDownlinkPush: boolean;
+  form: DownlinkTestPushForm;
+  onChange: (patch: Partial<DownlinkTestPushForm>) => void;
+  onSubmit: () => void | Promise<void>;
+  state: RemoteState<DownlinkTestPushResponse>;
+}) {
+  const running = state.status === "loading";
+  const disabled = running || !canTestDownlinkPush;
+  const title = !canTestDownlinkPush ? "Requires operator role" : running ? "Sending test push" : "Send test push";
+
+  return (
+    <section className="grid gap-5 xl:grid-cols-[1.05fr_0.95fr]">
+      <article className="rounded-lg border border-line bg-white p-5 shadow-diffusion">
+        <form
+          className="grid gap-4"
+          onSubmit={(event: FormEvent<HTMLFormElement>) => {
+            event.preventDefault();
+            void onSubmit();
+          }}
+        >
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium text-zinc-500">Test Downlink</p>
+              <h2 className="mt-1 text-2xl font-semibold tracking-tight text-ink">Push Playground</h2>
+            </div>
+            <StatusBadge label={canTestDownlinkPush ? "operator" : "read only"} tone={canTestDownlinkPush ? "ok" : "warn"} />
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-3">
+            <div className="grid gap-2">
+              <label className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500" htmlFor="test-push-client">
+                ClientID
+              </label>
+              <input
+                className="min-w-0 rounded-lg border border-line bg-white px-3 py-2 font-mono text-sm outline-none transition duration-300 placeholder:text-zinc-400 focus:border-accent"
+                id="test-push-client"
+                onChange={(event) => onChange({ clientID: event.target.value })}
+                placeholder="e2e-client"
+                value={form.clientID}
+              />
+            </div>
+            <div className="grid gap-2">
+              <label className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500" htmlFor="test-push-device">
+                DeviceID
+              </label>
+              <input
+                className="min-w-0 rounded-lg border border-line bg-white px-3 py-2 font-mono text-sm outline-none transition duration-300 placeholder:text-zinc-400 focus:border-accent"
+                id="test-push-device"
+                onChange={(event) => onChange({ deviceID: event.target.value })}
+                placeholder="e2e-device"
+                value={form.deviceID}
+              />
+            </div>
+            <div className="grid gap-2">
+              <label className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500" htmlFor="test-push-msg-id">
+                MsgID
+              </label>
+              <input
+                className="min-w-0 rounded-lg border border-line bg-white px-3 py-2 font-mono text-sm outline-none transition duration-300 placeholder:text-zinc-400 focus:border-accent"
+                id="test-push-msg-id"
+                inputMode="numeric"
+                onChange={(event) => onChange({ msgID: event.target.value })}
+                placeholder="2001"
+                value={form.msgID}
+              />
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="grid gap-2">
+              <label className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500" htmlFor="test-push-message-id">
+                MessageID
+              </label>
+              <input
+                className="min-w-0 rounded-lg border border-line bg-white px-3 py-2 font-mono text-sm outline-none transition duration-300 placeholder:text-zinc-400 focus:border-accent"
+                id="test-push-message-id"
+                onChange={(event) => onChange({ messageID: event.target.value })}
+                placeholder="auto"
+                value={form.messageID}
+              />
+            </div>
+            <div className="grid gap-2">
+              <label className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500" htmlFor="test-push-trace-id">
+                TraceID
+              </label>
+              <input
+                className="min-w-0 rounded-lg border border-line bg-white px-3 py-2 font-mono text-sm outline-none transition duration-300 placeholder:text-zinc-400 focus:border-accent"
+                id="test-push-trace-id"
+                onChange={(event) => onChange({ traceID: event.target.value })}
+                placeholder="auto"
+                value={form.traceID}
+              />
+            </div>
+          </div>
+
+          <div className="grid gap-2">
+            <label className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500" htmlFor="test-push-body">
+              Body
+            </label>
+            <textarea
+              className="min-h-28 min-w-0 resize-y rounded-lg border border-line bg-white px-3 py-2 font-mono text-sm outline-none transition duration-300 placeholder:text-zinc-400 focus:border-accent"
+              id="test-push-body"
+              onChange={(event) => onChange({ body: event.target.value })}
+              placeholder="hello"
+              value={form.body}
+            />
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
+            <label className="inline-flex min-w-0 items-center gap-2 text-sm text-zinc-600" htmlFor="test-push-ack">
+              <input
+                checked={form.ackRequired}
+                className="size-4 rounded border-line text-emerald-600 focus:ring-emerald-500"
+                id="test-push-ack"
+                onChange={(event) => onChange({ ackRequired: event.target.checked })}
+                type="checkbox"
+              />
+              <span>ACK Required</span>
+            </label>
+
+            <button
+              className="inline-flex min-w-0 items-center justify-center gap-2 rounded-lg bg-zinc-950 px-4 py-2 text-sm font-medium text-white transition duration-300 hover:bg-zinc-800 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={disabled}
+              title={title}
+              type="submit"
+            >
+              <PlugsConnected size={16} weight="bold" />
+              {running ? "Sending..." : "Send Test Push"}
+            </button>
+          </div>
+
+          {!canTestDownlinkPush && <p className="break-words text-xs font-medium text-amber-700">Requires operator role.</p>}
+        </form>
+      </article>
+
+      <DownlinkTestPushResult state={state} />
+    </section>
+  );
+}
+
+function DownlinkTestPushResult({ state }: { state: RemoteState<DownlinkTestPushResponse> }) {
+  const data = state.data;
+  const code = data?.code ?? (state.status === "error" ? "failed" : state.status === "loading" ? "sending" : "not sent");
+  const deliveryState = data?.delivery_state ?? "--";
+  const resultTone = deliveryState === "sent" || deliveryState === "queued" ? "ok" : state.status === "error" ? "warn" : "warn";
+
+  return (
+    <article className="rounded-lg border border-line bg-zinc-950 p-5 text-white shadow-diffusion">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-sm text-zinc-400">Push Result</p>
+          <h2 className="mt-1 text-2xl font-semibold tracking-tight">{deliveryState !== "--" ? deliveryState : code}</h2>
+        </div>
+        <StatusBadge label={code} tone={resultTone} />
+      </div>
+
+      {state.status === "loading" && (
+        <div className="mt-6 grid gap-3">
+          <div className="h-11 rounded-lg bg-white/10" />
+          <div className="h-11 rounded-lg bg-white/10" />
+          <div className="h-11 rounded-lg bg-white/10" />
+        </div>
+      )}
+
+      {state.status === "error" && (
+        <div className="mt-6 rounded-lg border border-amber-300/30 bg-amber-300/10 px-4 py-3 text-sm text-amber-100">
+          <p className="font-semibold">Push failed</p>
+          <p className="mt-1 break-words font-mono text-xs">{state.error}</p>
+        </div>
+      )}
+
+      {state.status !== "loading" && state.status !== "error" && !data && (
+        <div className="mt-6 rounded-lg border border-white/10 bg-white/10 px-4 py-4 text-sm text-zinc-300">
+          No test push has been sent from this console session.
+        </div>
+      )}
+
+      {data && (
+        <div className="mt-6 grid gap-3 md:grid-cols-2">
+          <DarkLineItem label="Client" value={data.client_id || "--"} />
+          <DarkLineItem label="Device" value={data.device_id || "--"} />
+          <DarkLineItem label="SessionID" value={data.session_id || "--"} />
+          <DarkLineItem label="ConnID" value={data.conn_id?.toLocaleString() ?? "--"} />
+          <DarkLineItem label="MessageID" value={data.message_id || "--"} />
+          <DarkLineItem label="TraceID" value={data.trace_id || "--"} />
+          {data.reason && <DarkLineItem label="Reason" value={data.reason} />}
+        </div>
+      )}
+    </article>
   );
 }
 
@@ -3336,7 +3651,10 @@ function adminSessionAllows(session: AdminConsoleSession, permission: string): b
   if (session.role === "admin") {
     return true;
   }
-  return session.role === "operator" && (permission === messageRepairPermission || permission === sessionDisconnectPermission);
+  return (
+    session.role === "operator" &&
+    (permission === messageRepairPermission || permission === sessionDisconnectPermission || permission === downlinkTestPushPermission)
+  );
 }
 
 function shortID(value: string): string {

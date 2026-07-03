@@ -78,6 +78,14 @@ var (
 		[]string{"result"},
 	)
 
+	adminDownlinkTestPush = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "z_courier_admin_downlink_test_push_total",
+			Help: "Total number of admin console downlink test push attempts.",
+		},
+		[]string{"result"},
+	)
+
 	gatewayReadiness = promauto.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "z_courier_gateway_readiness",
@@ -397,6 +405,10 @@ func RecordAdminPermissionRejected(role string, permission string) {
 
 func RecordAdminSessionDisconnect(result string) {
 	adminSessionDisconnect.WithLabelValues(nonEmpty(result, "unknown")).Inc()
+}
+
+func RecordAdminDownlinkTestPush(result string) {
+	adminDownlinkTestPush.WithLabelValues(nonEmpty(result, "unknown")).Inc()
 }
 
 func SetGatewayReadiness(status string) {

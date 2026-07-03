@@ -69,7 +69,7 @@ http://127.0.0.1:18080/console/
 - Routes：upstream route、MsgID 范围、目标类型、运行状态。
 - Sessions：本机 session、Redis cluster route 查询，以及受权限保护的本机
   session 断开操作。
-- Messages：下行消息列表、状态查询、requeue、discard。
+- Messages：下行测试推送、消息列表、状态查询、requeue、discard。
 - Checks：主动依赖检查。
 - Diagnostics：诊断快照和 diagnosis bundle 下载。
 

@@ -304,6 +304,26 @@ binding. If the session is only visible through the cluster registry on another
 gateway, this endpoint returns a local-not-found response instead of performing
 a peer disconnect.
 
+### Downlink Test Push
+
+The browser console uses a dedicated debug endpoint for operator test pushes:
+
+```text
+POST /internal/debug/push
+```
+
+It accepts the same JSON envelope as `POST /internal/push`, including
+`client_id`, `device_id`, `msg_id`, optional `message_id`, optional `trace_id`,
+`ack_required`, and base64-encoded `body`. This endpoint is intended for
+operator diagnostics and is guarded by the `downlink:test_push` permission,
+which is granted to `operator` and `admin` roles.
+
+The response is the normal downlink push response and can return `sent`,
+`queued`, or a failure code. Test pushes increment
+`z_courier_admin_downlink_test_push_total` in addition to the regular downlink
+push metrics, and audit logs include the admin principal, role, target client,
+target device, message id, trace id, and result.
+
 ### Existing Message Inspection
 
 The existing message inspection endpoints also remain part of the read-only

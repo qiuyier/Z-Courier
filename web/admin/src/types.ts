@@ -305,6 +305,18 @@ export type MessageStatusResponse = {
   body_size_bytes?: number;
 };
 
+export type DownlinkTestPushResponse = {
+  code: string;
+  reason?: string;
+  delivery_state?: string;
+  client_id?: string;
+  device_id?: string;
+  session_id?: string;
+  conn_id?: number;
+  message_id?: string;
+  trace_id?: string;
+};
+
 export type AdminMessages = {
   code: string;
   reason?: string;

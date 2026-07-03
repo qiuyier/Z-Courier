@@ -96,6 +96,16 @@ func newInternalHTTPServer(config Config, logger *zap.Logger, service *downlink.
 	mux.Handle("/internal/debug/route", withConsolePermission(newDebugRouteHandler(handlerConfig, registry), adminPermissionRead))
 	mux.Handle("/internal/debug/sessions", withConsolePermission(newDebugSessionsHandler(handlerConfig), adminPermissionRead))
 	mux.Handle("/internal/debug/session/disconnect", withConsolePermission(newDebugSessionDisconnectHandler(handlerConfig, service.ConnectionFinder(), logger), adminPermissionSessionDisconnect))
+	debugPushConfig := debugConfig(handlerConfig, nil)
+	debugPushConfig.logger = logger
+	mux.Handle("/internal/debug/push", withConsolePermission(newDebugPushAuditHandler(downlink.NewHandler(downlink.HandlerConfig{
+		Service:            service,
+		InternalToken:      handlerConfig.InternalToken,
+		MaxRequestBodySize: config.InternalMaxRequestBodySize,
+		GatewayNode:        config.GatewayNode,
+		PushLimiter:        pushLimiter,
+		Logger:             logger,
+	}), debugPushConfig), adminPermissionDownlinkTestPush))
 	if config.AdminConsole.Enabled {
 		mux.Handle(config.AdminConsole.Path, newAdminConsoleHandler(config.AdminConsole))
 	}

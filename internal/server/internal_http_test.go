@@ -1591,6 +1591,102 @@ func TestInternalHTTPDebugSessionDisconnectReadonlyDenied(t *testing.T) {
 	}
 }
 
+func TestInternalHTTPDebugPushOperatorSendsDownlink(t *testing.T) {
+	sessions := session.NewManager()
+	if _, err := sessions.Bind(session.BindInput{
+		SessionID:   "session-1",
+		ConnID:      7,
+		ClientID:    "client-1",
+		DeviceID:    "device-1",
+		GatewayNode: "gateway-a",
+	}); err != nil {
+		t.Fatalf("Bind() error = %v", err)
+	}
+
+	conn := &testStoppableConnection{}
+	finder := &testStaticConnectionFinder{conn: conn}
+	service := downlink.NewService(sessions, finder)
+	config := normalizeConfig(Config{
+		Sessions:         sessions,
+		GatewayNode:      "gateway-a",
+		InternalHTTPAddr: "127.0.0.1:18080",
+		InternalToken:    "secret",
+		AdminConsole: AdminConsoleConfig{
+			Session: AdminConsoleSessionConfig{
+				Enabled:        true,
+				TTL:            time.Hour,
+				CookieName:     "zcourier_admin_session",
+				CookieSameSite: "lax",
+				Role:           adminSessionRoleOperator,
+			},
+		},
+	})
+
+	server := mustInternalHTTPServer(t, config, service, &gatewayHealth{}, nil)
+	cookie := loginAdminSessionCookie(t, server, config, "secret")
+	req := httptest.NewRequest(http.MethodPost, "/internal/debug/push", strings.NewReader(`{
+		"client_id":"client-1",
+		"device_id":"device-1",
+		"msg_id":2001,
+		"message_id":"message-1",
+		"trace_id":"trace-1",
+		"ack_required":true,
+		"body":"aGVsbG8="
+	}`))
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	server.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var resp downlink.PushResponse
+	if err := sonic.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if resp.Code != "ok" || resp.DeliveryState != sdkbackend.DeliveryStateSent || resp.SessionID != "session-1" || resp.ConnID != 7 {
+		t.Fatalf("response = %+v, want sent session-1 conn 7", resp)
+	}
+	if finder.gotConnID != 7 {
+		t.Fatalf("connection finder connID = %d, want 7", finder.gotConnID)
+	}
+}
+
+func TestInternalHTTPDebugPushReadonlyDenied(t *testing.T) {
+	service := downlink.NewService(testSessionFinder{}, testConnectionFinder{})
+	config := normalizeConfig(Config{
+		InternalHTTPAddr: "127.0.0.1:18080",
+		InternalToken:    "secret",
+		AdminConsole: AdminConsoleConfig{
+			Session: AdminConsoleSessionConfig{
+				Enabled:        true,
+				TTL:            time.Hour,
+				CookieName:     "zcourier_admin_session",
+				CookieSameSite: "lax",
+				Role:           adminSessionRoleReadonly,
+			},
+		},
+	})
+
+	server := mustInternalHTTPServer(t, config, service, &gatewayHealth{}, nil)
+	cookie := loginAdminSessionCookie(t, server, config, "secret")
+	req := httptest.NewRequest(http.MethodPost, "/internal/debug/push", strings.NewReader(`{"client_id":"client-1","device_id":"device-1","msg_id":2001}`))
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	server.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusForbidden, rec.Body.String())
+	}
+	var denied adminPermissionDeniedResponse
+	if err := sonic.Unmarshal(rec.Body.Bytes(), &denied); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if denied.Code != "permission_denied" || denied.Permission != adminPermissionDownlinkTestPush {
+		t.Fatalf("denied = %+v, want downlink test push permission denial", denied)
+	}
+}
+
 type testStoppableConnection struct {
 	stopped bool
 }

@@ -256,6 +256,7 @@ GET /internal/message/status
 GET /internal/messages
 POST /internal/message/requeue
 POST /internal/message/discard
+POST /internal/debug/push
 GET /internal/debug/route
 GET /internal/debug/sessions
 POST /internal/kick
@@ -267,6 +268,9 @@ session, if present, and the cluster online route, if cluster routing is enabled
 lists local sessions on the current gateway node. The filters are local-only:
 `session_id` is an exact lookup, while `client_id` and `device_id` narrow the
 local session list.
+`POST /internal/debug/push` is the browser-console test-push endpoint. It
+reuses the normal downlink delivery path and is protected by the
+`downlink:test_push` admin permission.
 
 Downlink request envelope:
 
