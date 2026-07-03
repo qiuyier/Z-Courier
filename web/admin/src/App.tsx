@@ -4,8 +4,10 @@ import {
   ArrowClockwise,
   ArrowSquareOut,
   ChartLineUp,
+  Check,
   CheckCircle,
   Circuitry,
+  CopySimple,
   Database,
   DownloadSimple,
   FileText,
@@ -1710,6 +1712,14 @@ function SessionDetailPanel({
               Disconnect
             </button>
           </div>
+          {!canDisconnectSessions && (
+            <PermissionNotice
+              className="mt-4"
+              compact
+              message="Disconnect requires operator permissions."
+              permission={sessionDisconnectPermission}
+            />
+          )}
         </div>
 
         <div className="grid gap-4 bg-zinc-50 p-5">
@@ -2273,6 +2283,13 @@ function MessagesPage({
         </div>
       </section>
 
+      {(!canRepairMessages || !canRunRetryScan || !canTestDownlinkPush) && (
+        <PermissionNotice
+          message="This admin session is read-only for one or more message operations. Mutation buttons stay visible but disabled until the session has operator permissions."
+          permission="operator role"
+        />
+      )}
+
       <RetryScanPanel canRunRetryScan={canRunRetryScan} onRun={onRetryScan} state={retryScanState} />
 
       <DownlinkTestPushPanel
@@ -2627,7 +2644,9 @@ function RetryScanPanel({
             <ArrowClockwise size={16} weight="bold" />
             {running ? "Scanning..." : "Run Retry Scan"}
           </button>
-          {!canRunRetryScan && <p className="mt-3 break-words text-xs font-medium text-amber-700">Requires operator role.</p>}
+          {!canRunRetryScan && (
+            <PermissionNotice className="mt-4" compact message="Retry scan requires operator permissions." permission={retryScanPermission} />
+          )}
         </div>
 
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
@@ -2795,7 +2814,9 @@ function DownlinkTestPushPanel({
             </button>
           </div>
 
-          {!canTestDownlinkPush && <p className="break-words text-xs font-medium text-amber-700">Requires operator role.</p>}
+          {!canTestDownlinkPush && (
+            <PermissionNotice compact message="Test pushes require operator permissions." permission={downlinkTestPushPermission} />
+          )}
         </form>
       </article>
 
@@ -3222,10 +3243,15 @@ function SessionDisconnectDialog({
 }
 
 function MessageField({ label, value, wide = false }: { label: string; value: string; wide?: boolean }) {
+  const copyValue = copyableValue(label, value);
+
   return (
     <div className={["min-w-0 rounded-lg border border-line bg-zinc-50 px-3 py-2", wide ? "xl:col-span-2" : ""].join(" ")}>
       <p className="text-xs uppercase tracking-[0.14em] text-zinc-500">{label}</p>
-      <p className="mt-1 break-words font-mono text-sm text-ink">{value}</p>
+      <div className="mt-1 flex min-w-0 items-start gap-2">
+        <p className="min-w-0 flex-1 break-words font-mono text-sm text-ink">{value}</p>
+        {copyValue && <CopyButton value={copyValue} />}
+      </div>
     </div>
   );
 }
@@ -3769,10 +3795,15 @@ function MetricRow({ label, value }: { label: string; value: string }) {
 }
 
 function DarkLineItem({ label, value }: { label: string; value: string }) {
+  const copyValue = copyableValue(label, value);
+
   return (
     <div className="flex min-w-0 items-center justify-between gap-3 border-b border-white/10 pb-2 last:border-0 last:pb-0">
       <span className="text-sm text-zinc-400">{label}</span>
-      <span className="truncate text-right font-mono text-sm text-white">{value}</span>
+      <span className="flex min-w-0 items-center justify-end gap-2">
+        <span className="min-w-0 truncate text-right font-mono text-sm text-white">{value}</span>
+        {copyValue && <CopyButton tone="dark" value={copyValue} />}
+      </span>
     </div>
   );
 }
@@ -3804,6 +3835,46 @@ function statusBadgeStyles(tone: StatusBadgeTone): { badge: string; dot: string 
     case "warn":
       return { badge: "bg-amber-50 text-amber-800", dot: "bg-amber-500" };
   }
+}
+
+function CopyButton({ tone = "light", value }: { tone?: "light" | "dark"; value: string }) {
+  const [state, setState] = useState<"idle" | "copied" | "error">("idle");
+  const copied = state === "copied";
+  const failed = state === "error";
+  const Icon = copied ? Check : CopySimple;
+  const title = copied ? "Copied" : failed ? "Copy failed" : "Copy";
+  const classes =
+    tone === "dark"
+      ? "border-white/10 bg-white/10 text-zinc-200 hover:bg-white/15"
+      : "border-line bg-white text-zinc-500 hover:border-zinc-300 hover:bg-zinc-50 hover:text-ink";
+
+  const onCopy = useCallback(async () => {
+    try {
+      await writeClipboardText(value);
+      setState("copied");
+      window.setTimeout(() => setState("idle"), 1400);
+    } catch {
+      setState("error");
+      window.setTimeout(() => setState("idle"), 1800);
+    }
+  }, [value]);
+
+  return (
+    <button
+      aria-label={title}
+      className={[
+        "inline-grid size-7 shrink-0 place-items-center rounded-md border transition duration-300 active:translate-y-px",
+        classes,
+        copied ? "text-emerald-700" : "",
+        failed ? "text-amber-700" : "",
+      ].join(" ")}
+      onClick={() => void onCopy()}
+      title={title}
+      type="button"
+    >
+      <Icon size={13} weight="bold" />
+    </button>
+  );
 }
 
 function DiagnosticsConfigPanel({ title, rows }: { title: string; rows: Array<[string, string]> }) {
@@ -3890,10 +3961,15 @@ function StatusPill({ ready, status }: { ready: boolean; status: string }) {
 }
 
 function LineItem({ label, value }: { label: string; value: string }) {
+  const copyValue = copyableValue(label, value);
+
   return (
     <div className="flex min-w-0 items-center justify-between gap-3 border-b border-line/70 pb-2 last:border-0 last:pb-0">
       <span className="text-sm text-zinc-500">{label}</span>
-      <span className="truncate text-right font-mono text-sm text-ink">{value}</span>
+      <span className="flex min-w-0 items-center justify-end gap-2">
+        <span className="min-w-0 truncate text-right font-mono text-sm text-ink">{value}</span>
+        {copyValue && <CopyButton value={copyValue} />}
+      </span>
     </div>
   );
 }
@@ -3906,6 +3982,32 @@ function ErrorBanner({ message }: { message: string }) {
         <div>
           <p className="font-semibold">Request failed</p>
           <p className="mt-1 font-mono text-xs">{message}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PermissionNotice({
+  className = "",
+  compact = false,
+  message,
+  permission,
+}: {
+  className?: string;
+  compact?: boolean;
+  message: string;
+  permission: string;
+}) {
+  return (
+    <div className={["rounded-lg border border-amber-200 bg-amber-50 text-amber-900", compact ? "px-3 py-2" : "px-4 py-3", className].join(" ")}>
+      <div className="flex min-w-0 items-start gap-3">
+        <Warning size={compact ? 16 : 18} className="mt-0.5 shrink-0" weight="duotone" />
+        <div className="min-w-0">
+          <p className="text-sm font-semibold">Permission required</p>
+          <p className="mt-1 break-words text-xs leading-relaxed text-amber-800">
+            {message} <span className="font-mono">{permission}</span>
+          </p>
         </div>
       </div>
     </div>
@@ -4196,6 +4298,51 @@ function canRequeue(status?: MessageStatus | string): boolean {
 
 function canDiscard(status?: MessageStatus | string): boolean {
   return Boolean(status) && status !== "delivered" && status !== "discarded";
+}
+
+const copyableLabels = new Set([
+  "Admin Session",
+  "Client",
+  "ClientID",
+  "ConnID",
+  "Device",
+  "DeviceID",
+  "MessageID",
+  "SessionID",
+  "Target Session",
+  "TraceID",
+]);
+
+function copyableValue(label: string, value: string): string {
+  const trimmed = value.trim();
+  if (!copyableLabels.has(label) || trimmed === "" || trimmed === "--") {
+    return "";
+  }
+  if (label === "ConnID") {
+    return trimmed.replaceAll(",", "");
+  }
+  return trimmed;
+}
+
+async function writeClipboardText(value: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.setAttribute("readonly", "true");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  textarea.style.top = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+  const copied = document.execCommand("copy");
+  textarea.remove();
+  if (!copied) {
+    throw new Error("copy failed");
+  }
 }
 
 function auditTone(result?: string): StatusBadgeTone {
