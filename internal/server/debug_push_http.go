@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/bytedance/sonic"
+	"github.com/qiuyier/Z-Courier/internal/adminaudit"
 	"github.com/qiuyier/Z-Courier/internal/downlink"
 	"github.com/qiuyier/Z-Courier/internal/metrics"
 	"go.uber.org/zap"
@@ -18,6 +19,7 @@ type debugPushAuditHandler struct {
 	gatewayNode   string
 	internalToken string
 	logger        *zap.Logger
+	audit         adminaudit.Recorder
 }
 
 func newDebugPushAuditHandler(next http.Handler, config debugHandlerConfig) http.Handler {
@@ -26,6 +28,7 @@ func newDebugPushAuditHandler(next http.Handler, config debugHandlerConfig) http
 		gatewayNode:   config.gatewayNode,
 		internalToken: config.internalToken,
 		logger:        config.logger,
+		audit:         config.audit,
 	}
 }
 
@@ -43,9 +46,6 @@ func (h *debugPushAuditHandler) recordAndAudit(r *http.Request, statusCode int, 
 
 	result := debugPushAuditResult(statusCode, resp)
 	metrics.RecordAdminDownlinkTestPush(result)
-	if h.logger == nil {
-		return
-	}
 
 	identity := debugAuthIdentity(r, h.internalToken)
 	role := strings.TrimSpace(identity.Role)
@@ -53,6 +53,33 @@ func (h *debugPushAuditHandler) recordAndAudit(r *http.Request, statusCode int, 
 		role = "unknown"
 	} else {
 		role = normalizeAdminRole(role)
+	}
+	adminaudit.Record(h.audit, adminaudit.Entry{
+		Action:          "admin_downlink_test_push",
+		Result:          result,
+		HTTPStatus:      statusCode,
+		GatewayNode:     h.gatewayNode,
+		AuthMode:        identity.Mode,
+		Principal:       identity.Principal,
+		Role:            role,
+		AdminSessionID:  identity.SessionID,
+		AuthKeyID:       identity.KeyID,
+		Method:          r.Method,
+		Path:            r.URL.Path,
+		RemoteAddr:      r.RemoteAddr,
+		TargetClientID:  resp.ClientID,
+		TargetDeviceID:  resp.DeviceID,
+		TargetSessionID: resp.SessionID,
+		TargetConnID:    resp.ConnID,
+		MessageID:       resp.MessageID,
+		TraceID:         resp.TraceID,
+		Reason:          resp.Reason,
+		Details: map[string]string{
+			"delivery_state": resp.DeliveryState,
+		},
+	})
+	if h.logger == nil {
+		return
 	}
 
 	fields := []zap.Field{

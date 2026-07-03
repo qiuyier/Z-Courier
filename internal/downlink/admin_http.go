@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/bytedance/sonic"
+	"github.com/qiuyier/Z-Courier/internal/adminaudit"
 	"github.com/qiuyier/Z-Courier/internal/httpauth"
 	"github.com/qiuyier/Z-Courier/internal/metrics"
 	"go.uber.org/zap"
@@ -181,16 +182,41 @@ func (h *retryScanHandler) record(result string) {
 }
 
 func (h *retryScanHandler) audit(r *http.Request, result string, statusCode int, limit int, scan RetryResult, err error) {
+	identity := adminAuthIdentity(r, h.config.InternalToken)
+	adminaudit.Record(h.config.Audit, adminaudit.Entry{
+		Action:         "admin_retry_scan",
+		Result:         result,
+		HTTPStatus:     statusCode,
+		GatewayNode:    h.config.GatewayNode,
+		AuthMode:       identity.Mode,
+		Principal:      identity.Principal,
+		Role:           identity.Role,
+		AdminSessionID: identity.SessionID,
+		AuthKeyID:      identity.KeyID,
+		Method:         r.Method,
+		Path:           r.URL.Path,
+		RemoteAddr:     r.RemoteAddr,
+		Reason:         errorReason(err),
+		Details: map[string]string{
+			"limit":   strconv.Itoa(limit),
+			"scanned": strconv.Itoa(scan.Scanned),
+			"sent":    strconv.Itoa(scan.Sent),
+			"queued":  strconv.Itoa(scan.Queued),
+			"failed":  strconv.Itoa(scan.Failed),
+		},
+	})
+
 	if h.config.Logger == nil {
 		return
 	}
 
-	identity := adminAuthIdentity(r, h.config.InternalToken)
 	fields := []zap.Field{
 		zap.String("audit_event", "admin_retry_scan"),
 		zap.String("result", result),
 		zap.Int("http_status", statusCode),
 		zap.String("auth_mode", identity.Mode),
+		zap.String("principal", identity.Principal),
+		zap.String("role", identity.Role),
 		zap.String("method", r.Method),
 		zap.String("path", r.URL.Path),
 		zap.String("remote_addr", r.RemoteAddr),
@@ -205,6 +231,9 @@ func (h *retryScanHandler) audit(r *http.Request, result string, statusCode int,
 	}
 	if identity.KeyID != "" {
 		fields = append(fields, zap.String("auth_key_id", identity.KeyID))
+	}
+	if identity.SessionID != "" {
+		fields = append(fields, zap.String("admin_session_id", identity.SessionID))
 	}
 	if err != nil {
 		fields = append(fields, zap.Error(err))
@@ -299,14 +328,38 @@ func (h *messageActionHandler) record(result string) {
 }
 
 func (h *messageActionHandler) audit(r *http.Request, result string, statusCode int, req MessageActionRequest, message Message, err error) {
-	if h.config.Logger == nil {
-		return
-	}
-
 	identity := h.authIdentity(r)
 	messageID := strings.TrimSpace(req.MessageID)
 	if messageID == "" {
 		messageID = message.MessageID
+	}
+	adminaudit.Record(h.config.Audit, adminaudit.Entry{
+		Action:          "downlink_message_action",
+		Result:          result,
+		HTTPStatus:      statusCode,
+		GatewayNode:     h.config.GatewayNode,
+		AuthMode:        identity.Mode,
+		Principal:       identity.Principal,
+		Role:            identity.Role,
+		AdminSessionID:  identity.SessionID,
+		AuthKeyID:       identity.KeyID,
+		Method:          r.Method,
+		Path:            r.URL.Path,
+		RemoteAddr:      r.RemoteAddr,
+		TargetClientID:  message.ClientID,
+		TargetDeviceID:  message.DeviceID,
+		TargetSessionID: message.SessionID,
+		MessageID:       messageID,
+		TraceID:         message.TraceID,
+		Reason:          nonEmpty(req.Reason, errorReason(err)),
+		Details: map[string]string{
+			"action":         h.action,
+			"message_status": string(message.Status),
+		},
+	})
+
+	if h.config.Logger == nil {
+		return
 	}
 
 	fields := []zap.Field{
@@ -315,6 +368,8 @@ func (h *messageActionHandler) audit(r *http.Request, result string, statusCode 
 		zap.String("result", result),
 		zap.Int("http_status", statusCode),
 		zap.String("auth_mode", identity.Mode),
+		zap.String("principal", identity.Principal),
+		zap.String("role", identity.Role),
 		zap.String("method", r.Method),
 		zap.String("path", r.URL.Path),
 		zap.String("remote_addr", r.RemoteAddr),
@@ -324,6 +379,9 @@ func (h *messageActionHandler) audit(r *http.Request, result string, statusCode 
 	}
 	if identity.KeyID != "" {
 		fields = append(fields, zap.String("auth_key_id", identity.KeyID))
+	}
+	if identity.SessionID != "" {
+		fields = append(fields, zap.String("admin_session_id", identity.SessionID))
 	}
 	if messageID != "" {
 		fields = append(fields, zap.String("message_id", messageID))
@@ -361,6 +419,13 @@ func adminAuthIdentity(r *http.Request, internalToken string) httpauth.Identity 
 		return httpauth.Identity{Mode: httpauth.ModeToken}
 	}
 	return httpauth.Identity{Mode: httpauth.ModeNone}
+}
+
+func errorReason(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 func parseMessageStatus(raw string) (MessageStatus, error) {

@@ -3081,6 +3081,17 @@
           "legendFormat": "retry scan {{result}}",
           "range": true,
           "refId": "D"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (action, result) (rate(z_courier_admin_action_total[1m]))",
+          "legendFormat": "{{action}} {{result}}",
+          "range": true,
+          "refId": "E"
         }
       ],
       "title": "Admin Actions / sec",

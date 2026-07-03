@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/bytedance/sonic"
+	"github.com/qiuyier/Z-Courier/internal/adminaudit"
 	"github.com/qiuyier/Z-Courier/internal/capacity"
 	"github.com/qiuyier/Z-Courier/internal/metrics"
 	"github.com/qiuyier/Z-Courier/internal/resilience"
@@ -21,6 +22,7 @@ type HandlerConfig struct {
 	GatewayNode        string
 	PushLimiter        *capacity.Limiter
 	Logger             *zap.Logger
+	Audit              adminaudit.Recorder
 }
 
 func NewHandler(config HandlerConfig) http.Handler {

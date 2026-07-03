@@ -356,6 +356,44 @@ When `limit` is omitted or zero, the gateway uses the configured
 `message:retry_scan` console permission, increments
 `z_courier_admin_retry_scan_total`, and emits an `admin_retry_scan` audit log.
 
+### Audit Trail
+
+The console exposes a bounded in-memory audit view for recent admin actions on
+the connected gateway node:
+
+```text
+GET /internal/admin/audit?limit=100
+```
+
+Optional filters:
+
+```text
+action=admin_retry_scan
+result=success
+principal=internal-token
+client_id=client-1
+session_id=zs_...
+message_id=message-1
+```
+
+The response is newest-first and capped at 1000 rows. It includes action,
+result, HTTP status, principal, role, admin session id, target client/session,
+message id, trace id, reason, and small structured details. It does not include
+internal tokens, HMAC secrets, message bodies, request bodies, or route secrets.
+
+The first implementation is node-local and in-memory. For production incident
+retention, keep shipping gateway logs and Prometheus metrics to your normal log
+or SIEM system. The audit list is meant for quick console review of recent
+browser/admin operations.
+
+Audited actions currently include admin session login/logout, permission
+denials, local session disconnect, downlink test push, retry scan, requeue, and
+discard. All audited events also increment:
+
+```text
+z_courier_admin_action_total{action=...,result=...}
+```
+
 ## CLI
 
 `cmd/admin` wraps the admin and debug APIs. Overview, diagnostics, dependency

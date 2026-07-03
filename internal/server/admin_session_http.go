@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/bytedance/sonic"
+	"github.com/qiuyier/Z-Courier/internal/adminaudit"
 	"github.com/qiuyier/Z-Courier/internal/downlink"
 	"github.com/qiuyier/Z-Courier/internal/httpauth"
 )
@@ -24,6 +25,7 @@ type adminSessionHTTPConfig struct {
 	maxRequestBodySize int64
 	sessionConfig      AdminConsoleSessionConfig
 	sessions           *adminSessionManager
+	audit              adminaudit.Recorder
 }
 
 type adminSessionLoginRequest struct {
@@ -60,7 +62,7 @@ type adminSessionLogoutHandler struct {
 	config adminSessionHTTPConfig
 }
 
-func newAdminSessionHTTPConfig(config Config, sessions *adminSessionManager) adminSessionHTTPConfig {
+func newAdminSessionHTTPConfig(config Config, sessions *adminSessionManager, audit adminaudit.Recorder) adminSessionHTTPConfig {
 	sessionConfig := config.AdminConsole.Session
 	if sessions != nil {
 		sessionConfig = sessions.config
@@ -72,6 +74,7 @@ func newAdminSessionHTTPConfig(config Config, sessions *adminSessionManager) adm
 		maxRequestBodySize: config.InternalMaxRequestBodySize,
 		sessionConfig:      sessionConfig,
 		sessions:           sessions,
+		audit:              audit,
 	}
 }
 
@@ -89,10 +92,12 @@ func newAdminSessionLogoutHandler(config adminSessionHTTPConfig) http.Handler {
 
 func (h *adminSessionLoginHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
+		h.recordLogin(r, "method_not_allowed", http.StatusMethodNotAllowed, "", adminSession{}, "method not allowed")
 		writeAdminSessionJSON(w, http.StatusMethodNotAllowed, adminSessionResponse{Code: "method_not_allowed", GatewayNode: h.config.gatewayNode})
 		return
 	}
 	if h.config.sessions == nil {
+		h.recordLogin(r, "not_found", http.StatusNotFound, "", adminSession{}, "admin session manager is not configured")
 		writeAdminSessionJSON(w, http.StatusNotFound, adminSessionResponse{Code: "not_found", GatewayNode: h.config.gatewayNode})
 		return
 	}
@@ -102,16 +107,19 @@ func (h *adminSessionLoginHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if !ok {
+		h.recordLogin(r, "unauthorized", http.StatusUnauthorized, "", adminSession{}, "invalid internal credential")
 		writeAdminSessionJSON(w, http.StatusUnauthorized, adminSessionResponse{Code: "unauthorized", GatewayNode: h.config.gatewayNode})
 		return
 	}
 
 	token, session, err := h.config.sessions.Create(principal)
 	if err != nil {
+		h.recordLogin(r, "session_create_failed", http.StatusInternalServerError, principal, adminSession{}, err.Error())
 		writeAdminSessionJSON(w, http.StatusInternalServerError, adminSessionResponse{Code: "session_create_failed", Reason: err.Error(), GatewayNode: h.config.gatewayNode})
 		return
 	}
 	setAdminSessionCookie(w, h.config.sessionConfig, token, session.ExpiresAt)
+	h.recordLogin(r, "success", http.StatusOK, principal, session, "")
 	writeAdminSessionJSON(w, http.StatusOK, adminSessionResponse{
 		Code:        "ok",
 		GatewayNode: h.config.gatewayNode,
@@ -152,6 +160,7 @@ func (h *adminSessionLoginHandler) loginRequest(w http.ResponseWriter, r *http.R
 	defer r.Body.Close()
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, h.config.maxRequestBodySize))
 	if err != nil {
+		h.recordLogin(r, "request_too_large", http.StatusRequestEntityTooLarge, "", adminSession{}, err.Error())
 		writeAdminSessionJSON(w, http.StatusRequestEntityTooLarge, adminSessionResponse{Code: "request_too_large", Reason: err.Error(), GatewayNode: h.config.gatewayNode})
 		return adminSessionLoginRequest{}, false
 	}
@@ -160,6 +169,7 @@ func (h *adminSessionLoginHandler) loginRequest(w http.ResponseWriter, r *http.R
 	}
 	var request adminSessionLoginRequest
 	if err := sonic.Unmarshal(body, &request); err != nil {
+		h.recordLogin(r, "bad_request", http.StatusBadRequest, "", adminSession{}, err.Error())
 		writeAdminSessionJSON(w, http.StatusBadRequest, adminSessionResponse{Code: "bad_request", Reason: err.Error(), GatewayNode: h.config.gatewayNode})
 		return adminSessionLoginRequest{}, false
 	}
@@ -185,22 +195,88 @@ func (h *adminSessionMeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 
 func (h *adminSessionLogoutHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
+		h.recordLogout(r, "method_not_allowed", http.StatusMethodNotAllowed, adminSession{}, "method not allowed")
 		writeAdminSessionJSON(w, http.StatusMethodNotAllowed, adminSessionResponse{Code: "method_not_allowed", GatewayNode: h.config.gatewayNode})
 		return
 	}
 	cookie, err := r.Cookie(h.config.sessionConfig.CookieName)
 	if err != nil || strings.TrimSpace(cookie.Value) == "" || h.config.sessions == nil {
 		clearAdminSessionCookie(w, h.config.sessionConfig)
+		h.recordLogout(r, "unauthorized", http.StatusUnauthorized, adminSession{}, "admin session cookie is missing")
 		writeAdminSessionJSON(w, http.StatusUnauthorized, adminSessionResponse{Code: "unauthorized", GatewayNode: h.config.gatewayNode})
 		return
 	}
-	if !h.config.sessions.Delete(cookie.Value) {
+	session, ok := h.config.sessions.Lookup(cookie.Value)
+	if !ok || !h.config.sessions.Delete(cookie.Value) {
 		clearAdminSessionCookie(w, h.config.sessionConfig)
+		h.recordLogout(r, "unauthorized", http.StatusUnauthorized, adminSession{}, "admin session is missing or expired")
 		writeAdminSessionJSON(w, http.StatusUnauthorized, adminSessionResponse{Code: "unauthorized", GatewayNode: h.config.gatewayNode})
 		return
 	}
 	clearAdminSessionCookie(w, h.config.sessionConfig)
+	h.recordLogout(r, "success", http.StatusOK, session, "")
 	writeAdminSessionJSON(w, http.StatusOK, adminSessionResponse{Code: "ok", GatewayNode: h.config.gatewayNode})
+}
+
+func (h *adminSessionLoginHandler) recordLogin(r *http.Request, result string, statusCode int, principal string, session adminSession, reason string) {
+	authMode := h.config.internalAuthMode
+	authKeyID := ""
+	if identity, ok := httpauth.IdentityFromContext(r.Context()); ok {
+		authMode = identity.Mode
+		authKeyID = identity.KeyID
+		if principal == "" {
+			principal = identity.Principal
+		}
+	}
+	if authMode == "" {
+		authMode = httpauth.ModeToken
+	}
+	h.recordSessionAudit(r, "admin_session_login", result, statusCode, authMode, authKeyID, principal, session, reason)
+}
+
+func (h *adminSessionLoginHandler) recordSessionAudit(
+	r *http.Request,
+	action string,
+	result string,
+	statusCode int,
+	authMode string,
+	authKeyID string,
+	principal string,
+	session adminSession,
+	reason string,
+) {
+	adminaudit.Record(h.config.audit, adminaudit.Entry{
+		Action:         action,
+		Result:         result,
+		HTTPStatus:     statusCode,
+		GatewayNode:    h.config.gatewayNode,
+		AuthMode:       authMode,
+		Principal:      principal,
+		Role:           session.Role,
+		AdminSessionID: session.SessionID,
+		AuthKeyID:      authKeyID,
+		Method:         r.Method,
+		Path:           r.URL.Path,
+		RemoteAddr:     r.RemoteAddr,
+		Reason:         reason,
+	})
+}
+
+func (h *adminSessionLogoutHandler) recordLogout(r *http.Request, result string, statusCode int, session adminSession, reason string) {
+	adminaudit.Record(h.config.audit, adminaudit.Entry{
+		Action:         "admin_session_logout",
+		Result:         result,
+		HTTPStatus:     statusCode,
+		GatewayNode:    h.config.gatewayNode,
+		AuthMode:       httpauth.ModeAdminSession,
+		Principal:      session.Principal,
+		Role:           session.Role,
+		AdminSessionID: session.SessionID,
+		Method:         r.Method,
+		Path:           r.URL.Path,
+		RemoteAddr:     r.RemoteAddr,
+		Reason:         reason,
+	})
 }
 
 func withAdminSessionAuth(next http.Handler, sessions *adminSessionManager, config AdminConsoleSessionConfig, internalToken string) http.Handler {
@@ -252,6 +328,7 @@ func adminSessionProtectedPath(path string) bool {
 		adminSessionLogoutPath,
 		"/internal/admin/overview",
 		"/internal/admin/routes",
+		adminAuditPath,
 		"/internal/admin/diagnostics",
 		"/internal/admin/check",
 		"/internal/admin/diagnose",
@@ -263,6 +340,8 @@ func adminSessionProtectedPath(path string) bool {
 		"/internal/messages",
 		"/internal/message/requeue",
 		"/internal/message/discard":
+		return true
+	case "/internal/messages/retry/scan":
 		return true
 	default:
 		return false

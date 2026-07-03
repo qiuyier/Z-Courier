@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/aceld/zinx/ziface"
+	"github.com/qiuyier/Z-Courier/internal/adminaudit"
 	"github.com/qiuyier/Z-Courier/internal/capacity"
 	"github.com/qiuyier/Z-Courier/internal/cluster"
 	"github.com/qiuyier/Z-Courier/internal/downlink"
@@ -28,13 +29,14 @@ func newInternalHTTPServer(config Config, logger *zap.Logger, service *downlink.
 	if config.InternalHTTPAuth.Mode == InternalHTTPAuthModeHMAC {
 		handlerConfig.InternalToken = ""
 	}
+	adminAudit := adminaudit.NewStore(adminaudit.StoreConfig{})
 	adminSessions := newAdminSessionManager(config.AdminConsole.Session)
-	adminSessionConfig := newAdminSessionHTTPConfig(handlerConfig, adminSessions)
+	adminSessionConfig := newAdminSessionHTTPConfig(handlerConfig, adminSessions, adminAudit)
 	withConsoleSession := func(handler http.Handler) http.Handler {
 		return withAdminSessionAuth(handler, adminSessions, adminSessionConfig.sessionConfig, handlerConfig.InternalToken)
 	}
 	withConsolePermission := func(handler http.Handler, permission string) http.Handler {
-		return withConsoleSession(withAdminPermission(handler, permission, logger))
+		return withConsoleSession(withAdminPermission(handler, permission, logger, adminAudit, config.GatewayNode))
 	}
 	pushLimiter := capacity.NewLimiter(config.InternalPushMaxInFlight)
 	mux.Handle("/healthz", newHealthHandler())
@@ -46,6 +48,7 @@ func newInternalHTTPServer(config Config, logger *zap.Logger, service *downlink.
 		GatewayNode:        config.GatewayNode,
 		PushLimiter:        pushLimiter,
 		Logger:             logger,
+		Audit:              adminAudit,
 	}))
 	mux.Handle("/internal/push/batch", downlink.NewBatchHandler(downlink.HandlerConfig{
 		Service:            service,
@@ -54,6 +57,7 @@ func newInternalHTTPServer(config Config, logger *zap.Logger, service *downlink.
 		GatewayNode:        config.GatewayNode,
 		PushLimiter:        pushLimiter,
 		Logger:             logger,
+		Audit:              adminAudit,
 	}))
 	mux.Handle("/internal/message/status", withConsolePermission(downlink.NewStatusHandler(downlink.HandlerConfig{
 		Service:            service,
@@ -61,6 +65,7 @@ func newInternalHTTPServer(config Config, logger *zap.Logger, service *downlink.
 		MaxRequestBodySize: config.InternalMaxRequestBodySize,
 		GatewayNode:        config.GatewayNode,
 		Logger:             logger,
+		Audit:              adminAudit,
 	}), adminPermissionRead))
 	mux.Handle("/internal/messages", withConsolePermission(downlink.NewMessageListHandler(downlink.HandlerConfig{
 		Service:            service,
@@ -68,6 +73,7 @@ func newInternalHTTPServer(config Config, logger *zap.Logger, service *downlink.
 		MaxRequestBodySize: config.InternalMaxRequestBodySize,
 		GatewayNode:        config.GatewayNode,
 		Logger:             logger,
+		Audit:              adminAudit,
 	}), adminPermissionRead))
 	mux.Handle("/internal/message/requeue", withConsolePermission(downlink.NewRequeueHandler(downlink.HandlerConfig{
 		Service:            service,
@@ -75,6 +81,7 @@ func newInternalHTTPServer(config Config, logger *zap.Logger, service *downlink.
 		MaxRequestBodySize: config.InternalMaxRequestBodySize,
 		GatewayNode:        config.GatewayNode,
 		Logger:             logger,
+		Audit:              adminAudit,
 	}), adminPermissionMessageRepair))
 	mux.Handle("/internal/message/discard", withConsolePermission(downlink.NewDiscardHandler(downlink.HandlerConfig{
 		Service:            service,
@@ -82,6 +89,7 @@ func newInternalHTTPServer(config Config, logger *zap.Logger, service *downlink.
 		MaxRequestBodySize: config.InternalMaxRequestBodySize,
 		GatewayNode:        config.GatewayNode,
 		Logger:             logger,
+		Audit:              adminAudit,
 	}), adminPermissionMessageRepair))
 	mux.Handle("/internal/messages/retry/scan", withConsolePermission(downlink.NewRetryScanHandler(downlink.HandlerConfig{
 		Service:            service,
@@ -90,6 +98,7 @@ func newInternalHTTPServer(config Config, logger *zap.Logger, service *downlink.
 		RetryScanLimit:     config.DownlinkDelivery.ScanLimit,
 		GatewayNode:        config.GatewayNode,
 		Logger:             logger,
+		Audit:              adminAudit,
 	}), adminPermissionRetryScan))
 	if adminSessions != nil {
 		mux.Handle(adminSessionLoginPath, newAdminSessionLoginHandler(adminSessionConfig))
@@ -98,14 +107,16 @@ func newInternalHTTPServer(config Config, logger *zap.Logger, service *downlink.
 	}
 	mux.Handle("/internal/admin/overview", withConsolePermission(newAdminOverviewHandler(handlerConfig, health, registry), adminPermissionRead))
 	mux.Handle("/internal/admin/routes", withConsolePermission(newAdminRoutesHandler(handlerConfig), adminPermissionRead))
+	mux.Handle("/internal/admin/audit", withConsolePermission(newAdminAuditHandler(handlerConfig, adminAudit), adminPermissionRead))
 	mux.Handle("/internal/admin/diagnostics", withConsolePermission(newAdminDiagnosticsHandler(handlerConfig, health, registry, runtime, service.HasStore()), adminPermissionRead))
 	mux.Handle("/internal/admin/check", withConsolePermission(newAdminCheckHandler(handlerConfig, service, registry), adminPermissionRead))
 	mux.Handle("/internal/admin/diagnose", withConsolePermission(newAdminDiagnoseHandler(handlerConfig, health, registry, runtime, service), adminPermissionRead))
 	mux.Handle("/internal/debug/route", withConsolePermission(newDebugRouteHandler(handlerConfig, registry), adminPermissionRead))
 	mux.Handle("/internal/debug/sessions", withConsolePermission(newDebugSessionsHandler(handlerConfig), adminPermissionRead))
-	mux.Handle("/internal/debug/session/disconnect", withConsolePermission(newDebugSessionDisconnectHandler(handlerConfig, service.ConnectionFinder(), logger), adminPermissionSessionDisconnect))
+	mux.Handle("/internal/debug/session/disconnect", withConsolePermission(newDebugSessionDisconnectHandler(handlerConfig, service.ConnectionFinder(), logger, adminAudit), adminPermissionSessionDisconnect))
 	debugPushConfig := debugConfig(handlerConfig, nil)
 	debugPushConfig.logger = logger
+	debugPushConfig.audit = adminAudit
 	mux.Handle("/internal/debug/push", withConsolePermission(newDebugPushAuditHandler(downlink.NewHandler(downlink.HandlerConfig{
 		Service:            service,
 		InternalToken:      handlerConfig.InternalToken,
@@ -113,6 +124,7 @@ func newInternalHTTPServer(config Config, logger *zap.Logger, service *downlink.
 		GatewayNode:        config.GatewayNode,
 		PushLimiter:        pushLimiter,
 		Logger:             logger,
+		Audit:              adminAudit,
 	}), debugPushConfig), adminPermissionDownlinkTestPush))
 	if config.AdminConsole.Enabled {
 		mux.Handle(config.AdminConsole.Path, newAdminConsoleHandler(config.AdminConsole))

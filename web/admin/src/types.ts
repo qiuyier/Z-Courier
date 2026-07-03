@@ -135,6 +135,41 @@ export type AdminRoutes = {
   routes: AdminRoute[];
 };
 
+export type AdminAuditEvent = {
+  id: number;
+  recorded_at: string;
+  action: string;
+  result: string;
+  http_status?: number;
+  gateway_node?: string;
+  auth_mode?: string;
+  principal?: string;
+  role?: string;
+  admin_session_id?: string;
+  auth_key_id?: string;
+  method?: string;
+  path?: string;
+  remote_addr?: string;
+  permission?: string;
+  target_client_id?: string;
+  target_device_id?: string;
+  target_session_id?: string;
+  target_conn_id?: number;
+  message_id?: string;
+  trace_id?: string;
+  reason?: string;
+  details?: Record<string, string>;
+};
+
+export type AdminAudit = {
+  code: string;
+  reason?: string;
+  gateway_node: string;
+  limit: number;
+  total: number;
+  events: AdminAuditEvent[];
+};
+
 export type AdminSession = {
   session_id: string;
   conn_id: number;

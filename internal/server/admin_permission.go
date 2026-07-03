@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/bytedance/sonic"
+	"github.com/qiuyier/Z-Courier/internal/adminaudit"
 	"github.com/qiuyier/Z-Courier/internal/httpauth"
 	"github.com/qiuyier/Z-Courier/internal/metrics"
 	"go.uber.org/zap"
@@ -29,7 +30,7 @@ type adminPermissionDeniedResponse struct {
 	Permission string `json:"permission,omitempty"`
 }
 
-func withAdminPermission(next http.Handler, permission string, logger *zap.Logger) http.Handler {
+func withAdminPermission(next http.Handler, permission string, logger *zap.Logger, audit adminaudit.Recorder, gatewayNode string) http.Handler {
 	permission = strings.TrimSpace(permission)
 	if permission == "" {
 		return next
@@ -49,6 +50,22 @@ func withAdminPermission(next http.Handler, permission string, logger *zap.Logge
 		}
 
 		metrics.RecordAdminPermissionRejected(role, permission)
+		adminaudit.Record(audit, adminaudit.Entry{
+			Action:         "admin_permission_denied",
+			Result:         "permission_denied",
+			HTTPStatus:     http.StatusForbidden,
+			GatewayNode:    gatewayNode,
+			AuthMode:       identity.Mode,
+			Principal:      identity.Principal,
+			Role:           role,
+			AdminSessionID: identity.SessionID,
+			AuthKeyID:      identity.KeyID,
+			Method:         r.Method,
+			Path:           r.URL.Path,
+			RemoteAddr:     r.RemoteAddr,
+			Permission:     permission,
+			Reason:         "admin session role does not allow this operation",
+		})
 		if logger != nil {
 			logger.Warn(
 				"admin permission denied",

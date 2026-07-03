@@ -24,6 +24,7 @@ import {
   APIError,
   disconnectSession,
   discardMessage,
+  fetchAudit,
   fetchAdminCheck,
   fetchAdminSession,
   fetchClientRoute,
@@ -41,6 +42,8 @@ import {
   sendDownlinkTestPush,
 } from "./api";
 import type {
+  AdminAudit,
+  AdminAuditEvent,
   AdminCheck,
   AdminCheckResult,
   AdminClientRouteLookup,
@@ -158,7 +161,7 @@ type RemoteState<T> =
   | { status: "ready"; data: T; error?: undefined }
   | { status: "error"; data?: T; error: string };
 
-type PageID = "overview" | "routes" | "sessions" | "messages" | "checks" | "diagnostics";
+type PageID = "overview" | "routes" | "sessions" | "messages" | "audit" | "checks" | "diagnostics";
 type MessageAction = "requeue" | "discard";
 type ClientRouteStatus = "idle" | "local" | "remote" | "offline" | "stale";
 type DownlinkTestPushForm = {
@@ -190,6 +193,7 @@ const navItems = [
   { id: "routes" as const, label: "Routes", icon: GitBranch, disabled: false },
   { id: "sessions" as const, label: "Sessions", icon: RadioButton, disabled: false },
   { id: "messages" as const, label: "Messages", icon: Database, disabled: false },
+  { id: "audit" as const, label: "Audit", icon: FileText, disabled: false },
   { id: "checks" as const, label: "Checks", icon: ShieldCheck, disabled: false },
   { id: "diagnostics" as const, label: "Diagnostics", icon: Gauge, disabled: false },
 ];
@@ -206,6 +210,7 @@ export default function App() {
   const [diagnosisBundleState, setDiagnosisBundleState] = useState<RemoteState<AdminDiagnosisBundle>>({ status: "idle" });
   const [checkState, setCheckState] = useState<RemoteState<AdminCheck>>({ status: "idle" });
   const [messagesState, setMessagesState] = useState<RemoteState<AdminMessages>>({ status: "idle" });
+  const [auditState, setAuditState] = useState<RemoteState<AdminAudit>>({ status: "idle" });
   const [messageLookupState, setMessageLookupState] = useState<RemoteState<MessageStatusResponse>>({ status: "idle" });
   const [retryScanState, setRetryScanState] = useState<RemoteState<RetryScanResponse>>({ status: "idle" });
   const [downlinkTestPushState, setDownlinkTestPushState] = useState<RemoteState<DownlinkTestPushResponse>>({ status: "idle" });
@@ -224,6 +229,13 @@ export default function App() {
   const [messageStatus, setMessageStatus] = useState<MessageStatus>("failed");
   const [messageLimit, setMessageLimit] = useState(100);
   const [messageLookupID, setMessageLookupID] = useState("");
+  const [auditAction, setAuditAction] = useState("");
+  const [auditResult, setAuditResult] = useState("");
+  const [auditPrincipal, setAuditPrincipal] = useState("");
+  const [auditClientID, setAuditClientID] = useState("");
+  const [auditSessionID, setAuditSessionID] = useState("");
+  const [auditMessageID, setAuditMessageID] = useState("");
+  const [auditLimit, setAuditLimit] = useState(100);
   const [downlinkTestPushForm, setDownlinkTestPushForm] = useState<DownlinkTestPushForm>(() => defaultDownlinkTestPushForm());
   const [messageActionDialog, setMessageActionDialog] = useState<MessageActionDialogState>(null);
   const [messageActionPending, setMessageActionPending] = useState(false);
@@ -247,6 +259,7 @@ export default function App() {
     setDiagnosisBundleState({ status: "idle" });
     setCheckState({ status: "idle" });
     setMessagesState({ status: "idle" });
+    setAuditState({ status: "idle" });
     setMessageLookupState({ status: "idle" });
     setRetryScanState({ status: "idle" });
     setDownlinkTestPushState({ status: "idle" });
@@ -560,6 +573,52 @@ export default function App() {
     [authenticated, expireSession, messageLimit, messageStatus],
   );
 
+  const refreshAudit = useCallback(
+    async (signal?: AbortSignal) => {
+      if (!authenticated) {
+        setAuditState({ status: "idle" });
+        return;
+      }
+      setAuditState((current) => ({ status: "loading", data: current.data }));
+      try {
+        const data = await fetchAudit(
+          {
+            action: auditAction,
+            result: auditResult,
+            principal: auditPrincipal,
+            clientID: auditClientID,
+            sessionID: auditSessionID,
+            messageID: auditMessageID,
+            limit: auditLimit,
+          },
+          signal,
+        );
+        setAuditState({ status: "ready", data });
+      } catch (error) {
+        if (signal?.aborted) {
+          return;
+        }
+        if (isUnauthorized(error)) {
+          expireSession();
+          return;
+        }
+        const message = requestErrorMessage(error);
+        setAuditState((current) => ({ status: "error", data: current.data, error: message }));
+      }
+    },
+    [
+      authenticated,
+      auditAction,
+      auditClientID,
+      auditLimit,
+      auditMessageID,
+      auditPrincipal,
+      auditResult,
+      auditSessionID,
+      expireSession,
+    ],
+  );
+
   const lookupMessage = useCallback(
     async (signal?: AbortSignal) => {
       const messageID = messageLookupID.trim();
@@ -866,6 +925,22 @@ export default function App() {
     };
   }, [activePage, authenticated, refreshMessages]);
 
+  useEffect(() => {
+    if (activePage !== "audit") {
+      return;
+    }
+    if (!authenticated) {
+      setAuditState({ status: "idle" });
+      return;
+    }
+
+    const controller = new AbortController();
+    void refreshAudit(controller.signal);
+    return () => {
+      controller.abort();
+    };
+  }, [activePage, authenticated, refreshAudit]);
+
   const login = useCallback(
     async (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
@@ -926,6 +1001,10 @@ export default function App() {
       void refreshMessages();
       return;
     }
+    if (activePage === "audit") {
+      void refreshAudit();
+      return;
+    }
     if (activePage === "checks") {
       void runCheck();
       return;
@@ -935,6 +1014,7 @@ export default function App() {
     activePage,
     lookupClientRoute,
     refresh,
+    refreshAudit,
     refreshDiagnostics,
     refreshMessages,
     refreshRoutes,
@@ -954,8 +1034,10 @@ export default function App() {
       ? "Routes"
       : activePage === "sessions"
         ? "Sessions"
-        : activePage === "messages"
-          ? "Messages"
+      : activePage === "messages"
+        ? "Messages"
+        : activePage === "audit"
+          ? "Audit Trail"
           : activePage === "checks"
             ? "Checks"
             : activePage === "diagnostics"
@@ -1087,6 +1169,7 @@ export default function App() {
           {activePage === "sessions" && sessionsState.status === "error" && <ErrorBanner message={sessionsState.error} />}
           {activePage === "sessions" && clientRouteState.status === "error" && <ErrorBanner message={clientRouteState.error} />}
           {activePage === "messages" && messagesState.status === "error" && <ErrorBanner message={messagesState.error} />}
+          {activePage === "audit" && auditState.status === "error" && <ErrorBanner message={auditState.error} />}
           {activePage === "checks" && checkState.status === "error" && <ErrorBanner message={checkState.error} />}
           {activePage === "diagnostics" && diagnosticsState.status === "error" && <ErrorBanner message={diagnosticsState.error} />}
 
@@ -1138,6 +1221,25 @@ export default function App() {
               retryScanState={retryScanState}
               selectedStatus={messageStatus}
               state={messagesState}
+            />
+          ) : activePage === "audit" && authenticated && (auditState.status !== "error" || auditState.data) ? (
+            <AuditPage
+              action={auditAction}
+              clientID={auditClientID}
+              limit={auditLimit}
+              messageID={auditMessageID}
+              onActionChange={setAuditAction}
+              onClientIDChange={setAuditClientID}
+              onLimitChange={setAuditLimit}
+              onMessageIDChange={setAuditMessageID}
+              onPrincipalChange={setAuditPrincipal}
+              onRefresh={refreshAudit}
+              onResultChange={setAuditResult}
+              onSessionIDChange={setAuditSessionID}
+              principal={auditPrincipal}
+              result={auditResult}
+              sessionID={auditSessionID}
+              state={auditState}
             />
           ) : activePage === "checks" && authenticated && (checkState.status !== "error" || checkState.data) ? (
             <ChecksPage
@@ -2225,6 +2327,267 @@ function MessagesPage({
         </section>
       )}
     </div>
+  );
+}
+
+const auditActionOptions = [
+  "",
+  "admin_session_login",
+  "admin_session_logout",
+  "admin_permission_denied",
+  "admin_session_disconnect",
+  "admin_downlink_test_push",
+  "downlink_message_action",
+  "admin_retry_scan",
+];
+
+function AuditPage({
+  action,
+  clientID,
+  limit,
+  messageID,
+  onActionChange,
+  onClientIDChange,
+  onLimitChange,
+  onMessageIDChange,
+  onPrincipalChange,
+  onRefresh,
+  onResultChange,
+  onSessionIDChange,
+  principal,
+  result,
+  sessionID,
+  state,
+}: {
+  action: string;
+  clientID: string;
+  limit: number;
+  messageID: string;
+  onActionChange: (action: string) => void;
+  onClientIDChange: (clientID: string) => void;
+  onLimitChange: (limit: number) => void;
+  onMessageIDChange: (messageID: string) => void;
+  onPrincipalChange: (principal: string) => void;
+  onRefresh: () => void | Promise<void>;
+  onResultChange: (result: string) => void;
+  onSessionIDChange: (sessionID: string) => void;
+  principal: string;
+  result: string;
+  sessionID: string;
+  state: RemoteState<AdminAudit>;
+}) {
+  const events = state.data?.events ?? [];
+  const total = state.data?.total ?? events.length;
+  const success = events.filter((event) => auditTone(event.result) === "ok").length;
+  const failed = events.filter((event) => auditTone(event.result) === "warn").length;
+  const permissionDenied = events.filter((event) => event.result === "permission_denied").length;
+  const loading = state.status === "loading";
+  const filtered = [action, result, principal, clientID, sessionID, messageID].some((value) => value.trim() !== "");
+
+  if (state.status === "loading" && !state.data) {
+    return <AuditSkeleton />;
+  }
+
+  return (
+    <div className="grid gap-5">
+      <section className="rounded-lg border border-line bg-white p-5 shadow-diffusion">
+        <div className="grid gap-5 xl:grid-cols-[0.92fr_1.08fr]">
+          <div>
+            <p className="text-sm font-medium text-zinc-500">Recent Admin Actions</p>
+            <div className="mt-2 flex flex-wrap items-end gap-3">
+              <h2 className="font-mono text-5xl tracking-tight text-ink">{total.toLocaleString()}</h2>
+              <StatusBadge label={loading ? "refreshing" : "bounded"} tone={loading ? "info" : "ok"} />
+            </div>
+            <p className="mt-2 text-sm text-zinc-500">gateway node: {state.data?.gateway_node ?? "--"}</p>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <MetricRow label="Loaded" value={events.length.toLocaleString()} />
+            <MetricRow label="Limit" value={(state.data?.limit ?? limit).toLocaleString()} />
+            <MetricRow label="Successful" value={success.toLocaleString()} />
+            <MetricRow label="Warnings" value={failed.toLocaleString()} />
+            <MetricRow label="Permission Denied" value={permissionDenied.toLocaleString()} />
+            <MetricRow label="Refresh State" value={state.status} />
+          </div>
+        </div>
+      </section>
+
+      <section className="rounded-lg border border-line bg-white p-5 shadow-diffusion">
+        <form
+          className="grid gap-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void onRefresh();
+          }}
+        >
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium text-zinc-500">Audit Filter</p>
+              <h2 className="mt-1 text-2xl font-semibold tracking-tight text-ink">Trace Console Mutations</h2>
+            </div>
+            <button
+              className="inline-flex min-w-0 items-center justify-center gap-2 rounded-lg bg-zinc-950 px-4 py-2 text-sm font-medium text-white transition duration-300 hover:bg-zinc-800 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={loading}
+              type="submit"
+            >
+              <ArrowClockwise size={16} weight="bold" />
+              {loading ? "Loading..." : "Apply Filters"}
+            </button>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <div className="grid gap-2">
+              <label className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500" htmlFor="audit-action">
+                Action
+              </label>
+              <select
+                className="min-w-0 rounded-lg border border-line bg-white px-3 py-2 font-mono text-sm outline-none transition duration-300 focus:border-accent"
+                id="audit-action"
+                onChange={(event) => onActionChange(event.target.value)}
+                value={action}
+              >
+                {auditActionOptions.map((value) => (
+                  <option key={value || "all"} value={value}>
+                    {value || "all actions"}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <AuditFilterInput id="audit-result" label="Result" onChange={onResultChange} placeholder="success" value={result} />
+            <AuditFilterInput id="audit-principal" label="Principal" onChange={onPrincipalChange} placeholder="internal-token" value={principal} />
+            <div className="grid gap-2">
+              <label className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500" htmlFor="audit-limit">
+                Limit
+              </label>
+              <input
+                className="min-w-0 rounded-lg border border-line bg-white px-3 py-2 font-mono text-sm outline-none transition duration-300 focus:border-accent"
+                id="audit-limit"
+                max={1000}
+                min={1}
+                onChange={(event) => onLimitChange(clampAuditLimit(event.target.value))}
+                type="number"
+                value={limit}
+              />
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-3">
+            <AuditFilterInput id="audit-client" label="ClientID" onChange={onClientIDChange} placeholder="load-client-0" value={clientID} />
+            <AuditFilterInput id="audit-session" label="SessionID" onChange={onSessionIDChange} placeholder="zs_..." value={sessionID} />
+            <AuditFilterInput id="audit-message" label="MessageID" onChange={onMessageIDChange} placeholder="message-1" value={messageID} />
+          </div>
+        </form>
+      </section>
+
+      {state.status !== "loading" && events.length === 0 ? (
+        <AuditEmptyState filtered={filtered} />
+      ) : (
+        <section className="grid gap-3">
+          {events.map((event, index) => (
+            <AuditEventCard event={event} index={index} key={event.id} />
+          ))}
+        </section>
+      )}
+    </div>
+  );
+}
+
+function AuditFilterInput({
+  id,
+  label,
+  onChange,
+  placeholder,
+  value,
+}: {
+  id: string;
+  label: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+  value: string;
+}) {
+  return (
+    <div className="grid gap-2">
+      <label className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500" htmlFor={id}>
+        {label}
+      </label>
+      <input
+        className="min-w-0 rounded-lg border border-line bg-white px-3 py-2 font-mono text-sm outline-none transition duration-300 placeholder:text-zinc-400 focus:border-accent"
+        id={id}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        value={value}
+      />
+    </div>
+  );
+}
+
+function AuditEventCard({ event, index }: { event: AdminAuditEvent; index: number }) {
+  const details = Object.entries(event.details ?? {}).filter(([, value]) => value !== "");
+
+  return (
+    <article
+      className="animate-rise overflow-hidden rounded-lg border border-line bg-white shadow-diffusion"
+      style={{ animationDelay: `${index * 45}ms` }}
+    >
+      <div className="grid gap-4 p-4 lg:grid-cols-[0.72fr_1.28fr] lg:p-5">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <AuditResultBadge result={event.result} />
+            <span className="rounded-md border border-line bg-zinc-50 px-2.5 py-1 font-mono text-xs text-zinc-600">
+              #{event.id.toLocaleString()}
+            </span>
+          </div>
+          <h3 className="mt-4 break-words font-mono text-lg font-semibold tracking-tight">{event.action || "--"}</h3>
+          <p className="mt-2 break-words text-sm text-zinc-500">
+            {event.principal || "--"} / {event.role || "--"}
+          </p>
+          <p className="mt-4 break-words font-mono text-xs text-zinc-500">{formatOptionalDate(event.recorded_at)}</p>
+        </div>
+
+        <div className="grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-3">
+          <MessageField label="HTTP" value={event.http_status?.toLocaleString() ?? "--"} />
+          <MessageField label="Auth" value={event.auth_mode || "--"} />
+          <MessageField label="Gateway" value={event.gateway_node || "--"} />
+          <MessageField label="Path" value={`${event.method || "--"} ${event.path || "--"}`} wide />
+          <MessageField label="Admin Session" value={event.admin_session_id || "--"} />
+          <MessageField label="Permission" value={event.permission || "--"} />
+          <MessageField label="ClientID" value={event.target_client_id || "--"} />
+          <MessageField label="DeviceID" value={event.target_device_id || "--"} />
+          <MessageField label="Target Session" value={event.target_session_id || "--"} />
+          <MessageField label="MessageID" value={event.message_id || "--"} />
+          <MessageField label="TraceID" value={event.trace_id || "--"} />
+          <MessageField label="Reason" value={event.reason || "--"} wide />
+        </div>
+      </div>
+
+      {details.length > 0 && (
+        <div className="border-t border-line bg-zinc-50 px-4 py-4 lg:px-5">
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">Details</p>
+          <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+            {details.map(([key, value]) => (
+              <div className="min-w-0 rounded-lg border border-line bg-white px-3 py-2" key={key}>
+                <p className="truncate text-xs uppercase tracking-[0.14em] text-zinc-500">{key}</p>
+                <p className="mt-1 break-words font-mono text-sm text-ink">{value || "--"}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </article>
+  );
+}
+
+function AuditResultBadge({ result }: { result?: string }) {
+  const normalized = result || "--";
+  const tone = auditTone(normalized);
+  const styles = statusBadgeStyles(tone);
+
+  return (
+    <span className={["inline-flex items-center gap-2 rounded-md px-2.5 py-1 font-mono text-xs font-medium uppercase", styles.badge].join(" ")}>
+      <span className={["size-1.5 rounded-full", styles.dot].join(" ")} />
+      {normalized}
+    </span>
   );
 }
 
@@ -3613,6 +3976,22 @@ function MessagesEmptyState({ status }: { status: MessageStatus }) {
   );
 }
 
+function AuditEmptyState({ filtered }: { filtered: boolean }) {
+  return (
+    <div className="rounded-lg border border-line bg-white px-5 py-8 shadow-diffusion">
+      <div className="max-w-xl">
+        <div className="grid size-12 place-items-center rounded-lg border border-line bg-zinc-50 text-accent">
+          <FileText size={22} weight="duotone" />
+        </div>
+        <h2 className="mt-5 text-2xl font-semibold tracking-tight">No Audit Events</h2>
+        <p className="mt-2 text-sm leading-relaxed text-zinc-500">
+          {filtered ? "No recent admin action matched these filters." : "This gateway has not recorded recent admin actions yet."}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function ChecksEmptyState({ onRun, running }: { onRun: () => void | Promise<void>; running: boolean }) {
   return (
     <div className="rounded-lg border border-line bg-white px-5 py-8 shadow-diffusion">
@@ -3672,6 +4051,17 @@ function MessagesSkeleton() {
         <SkeletonPanel className="h-48" />
         <SkeletonPanel className="h-48" />
       </div>
+      <SkeletonPanel className="h-40" />
+      <SkeletonPanel className="h-40" />
+    </div>
+  );
+}
+
+function AuditSkeleton() {
+  return (
+    <div className="grid gap-5">
+      <SkeletonPanel className="h-48" />
+      <SkeletonPanel className="h-64" />
       <SkeletonPanel className="h-40" />
       <SkeletonPanel className="h-40" />
     </div>
@@ -3808,6 +4198,29 @@ function canDiscard(status?: MessageStatus | string): boolean {
   return Boolean(status) && status !== "delivered" && status !== "discarded";
 }
 
+function auditTone(result?: string): StatusBadgeTone {
+  const normalized = (result ?? "").toLowerCase();
+  if (normalized === "success" || normalized === "ok" || normalized === "sent" || normalized === "queued" || normalized === "delivered") {
+    return "ok";
+  }
+  if (
+    normalized.includes("denied") ||
+    normalized.includes("unauthorized") ||
+    normalized.includes("failed") ||
+    normalized.includes("failure") ||
+    normalized.includes("error") ||
+    normalized.includes("bad_request") ||
+    normalized.includes("not_found") ||
+    normalized.includes("unavailable") ||
+    normalized.includes("mismatch") ||
+    normalized.includes("too_large") ||
+    normalized.includes("overloaded")
+  ) {
+    return "warn";
+  }
+  return "info";
+}
+
 function isUnauthorized(error: unknown): boolean {
   return error instanceof APIError && error.status === 401;
 }
@@ -3885,6 +4298,14 @@ function clampMessageLimit(value: string): number {
 }
 
 function clampSessionLimit(value: string): number {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed)) {
+    return 1;
+  }
+  return Math.min(1000, Math.max(1, parsed));
+}
+
+function clampAuditLimit(value: string): number {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isFinite(parsed)) {
     return 1;

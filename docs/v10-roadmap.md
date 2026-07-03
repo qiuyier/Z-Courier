@@ -213,6 +213,10 @@ Acceptance criteria:
 
 Purpose: make console operations reviewable after an incident.
 
+Status: first implementation landed as a node-local bounded in-memory audit
+store, `GET /internal/admin/audit`, console Audit page, and
+`z_courier_admin_action_total`.
+
 Candidate work:
 
 - Extend audit entries for admin session login/logout, permission rejection,

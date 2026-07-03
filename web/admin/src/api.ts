@@ -1,4 +1,5 @@
 import type {
+  AdminAudit,
   AdminCheck,
   AdminClientRouteLookup,
   AdminDiagnosisBundle,
@@ -28,6 +29,16 @@ export type SessionListParams = {
   clientID: string;
   deviceID: string;
   sessionID: string;
+  limit: number;
+};
+
+export type AuditListParams = {
+  action: string;
+  result: string;
+  principal: string;
+  clientID: string;
+  sessionID: string;
+  messageID: string;
   limit: number;
 };
 
@@ -122,6 +133,29 @@ export async function fetchOverview(signal?: AbortSignal): Promise<AdminOverview
 
 export async function fetchRoutes(signal?: AbortSignal): Promise<AdminRoutes> {
   return fetchAdminJSON<AdminRoutes>("/internal/admin/routes", signal);
+}
+
+export async function fetchAudit(params: AuditListParams, signal?: AbortSignal): Promise<AdminAudit> {
+  const query = new URLSearchParams({ limit: String(params.limit) });
+  if (params.action.trim() !== "") {
+    query.set("action", params.action.trim());
+  }
+  if (params.result.trim() !== "") {
+    query.set("result", params.result.trim());
+  }
+  if (params.principal.trim() !== "") {
+    query.set("principal", params.principal.trim());
+  }
+  if (params.clientID.trim() !== "") {
+    query.set("client_id", params.clientID.trim());
+  }
+  if (params.sessionID.trim() !== "") {
+    query.set("session_id", params.sessionID.trim());
+  }
+  if (params.messageID.trim() !== "") {
+    query.set("message_id", params.messageID.trim());
+  }
+  return fetchAdminJSON<AdminAudit>(`/internal/admin/audit?${query.toString()}`, signal);
 }
 
 export async function fetchSessions(params: SessionListParams, signal?: AbortSignal): Promise<AdminSessions> {

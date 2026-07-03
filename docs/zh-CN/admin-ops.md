@@ -195,6 +195,45 @@ go run ./cmd/admin retry-scan \
 它会记录 `z_courier_admin_retry_scan_total` 指标，并输出
 `admin_retry_scan` 审计日志。
 
+## 审计列表
+
+控制台提供一个有界内存审计列表，用来查看当前 gateway 节点最近发生的
+admin 操作：
+
+```text
+GET /internal/admin/audit?limit=100
+```
+
+可以按这些字段过滤：
+
+```text
+action=admin_retry_scan
+result=success
+principal=internal-token
+client_id=client-1
+session_id=zs_...
+message_id=message-1
+```
+
+响应按最新事件优先返回，最多 1000 条。事件里会包含 action、result、HTTP
+状态码、principal、role、admin session id、目标 client/session、message id、
+trace id、reason 和少量结构化 details。
+
+它不会返回 internal token、HMAC secret、message body、请求 body、route token
+等敏感或大体积内容。
+
+这一版审计列表是节点本地、内存型的，适合在 console 里快速回看最近操作。
+如果你需要生产事故留存，仍然应该把 gateway 日志和 Prometheus 指标接到你的
+日志系统或 SIEM 里。
+
+当前会进入审计列表的动作包括：admin session 登录/退出、权限拒绝、本机
+session 断开、下行测试推送、retry scan、requeue 和 discard。所有审计事件
+也会记录统一指标：
+
+```text
+z_courier_admin_action_total{action=...,result=...}
+```
+
 ## 会话和路由查询
 
 查询本机 sessions：

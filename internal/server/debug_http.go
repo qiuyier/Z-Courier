@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/bytedance/sonic"
+	"github.com/qiuyier/Z-Courier/internal/adminaudit"
 	"github.com/qiuyier/Z-Courier/internal/cluster"
 	"github.com/qiuyier/Z-Courier/internal/downlink"
 	"github.com/qiuyier/Z-Courier/internal/httpauth"
@@ -32,6 +33,7 @@ type debugHandlerConfig struct {
 	registry           cluster.OnlineRegistry
 	clusterEnabled     bool
 	logger             *zap.Logger
+	audit              adminaudit.Recorder
 }
 
 type debugRouteResponse struct {
@@ -110,10 +112,11 @@ func newDebugSessionsHandler(config Config) http.Handler {
 	return &debugSessionsHandler{config: debugConfig(config, nil)}
 }
 
-func newDebugSessionDisconnectHandler(config Config, connections downlink.ConnectionFinder, logger *zap.Logger) http.Handler {
+func newDebugSessionDisconnectHandler(config Config, connections downlink.ConnectionFinder, logger *zap.Logger, audit adminaudit.Recorder) http.Handler {
 	debugConfig := debugConfig(config, nil)
 	debugConfig.connections = connections
 	debugConfig.logger = logger
+	debugConfig.audit = audit
 	return &debugSessionDisconnectHandler{config: debugConfig}
 }
 
@@ -444,10 +447,6 @@ func (h *debugSessionDisconnectHandler) authorized(r *http.Request) bool {
 
 func (h *debugSessionDisconnectHandler) recordAndAudit(r *http.Request, result string, statusCode int, resp debugSessionDisconnectResponse, err error) {
 	metrics.RecordAdminSessionDisconnect(result)
-	if h.config.logger == nil {
-		return
-	}
-
 	identity := debugAuthIdentity(r, h.config.internalToken)
 	role := strings.TrimSpace(identity.Role)
 	if role == "" {
@@ -455,6 +454,32 @@ func (h *debugSessionDisconnectHandler) recordAndAudit(r *http.Request, result s
 	} else {
 		role = normalizeAdminRole(role)
 	}
+	adminaudit.Record(h.config.audit, adminaudit.Entry{
+		Action:          "admin_session_disconnect",
+		Result:          result,
+		HTTPStatus:      statusCode,
+		GatewayNode:     h.config.gatewayNode,
+		AuthMode:        identity.Mode,
+		Principal:       identity.Principal,
+		Role:            role,
+		AdminSessionID:  identity.SessionID,
+		AuthKeyID:       identity.KeyID,
+		Method:          r.Method,
+		Path:            r.URL.Path,
+		RemoteAddr:      r.RemoteAddr,
+		TargetClientID:  resp.ClientID,
+		TargetDeviceID:  resp.DeviceID,
+		TargetSessionID: resp.SessionID,
+		TargetConnID:    resp.ConnID,
+		Reason:          nonEmptyString(resp.Reason, errorString(err)),
+		Details: map[string]string{
+			"disconnected": strconv.FormatBool(resp.Disconnected),
+		},
+	})
+	if h.config.logger == nil {
+		return
+	}
+
 	fields := []zap.Field{
 		zap.String("audit_event", "admin_session_disconnect"),
 		zap.String("result", result),
@@ -502,6 +527,20 @@ func debugAuthIdentity(r *http.Request, internalToken string) httpauth.Identity 
 		return httpauth.Identity{Mode: httpauth.ModeToken}
 	}
 	return httpauth.Identity{Mode: httpauth.ModeNone}
+}
+
+func errorString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
+
+func nonEmptyString(value string, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return value
 }
 
 func parseDebugSessionLimit(raw string) (int, error) {

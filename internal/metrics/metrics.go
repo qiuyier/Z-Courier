@@ -70,6 +70,14 @@ var (
 		[]string{"role", "permission"},
 	)
 
+	adminAction = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "z_courier_admin_action_total",
+			Help: "Total number of audited admin action attempts.",
+		},
+		[]string{"action", "result"},
+	)
+
 	adminSessionDisconnect = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "z_courier_admin_session_disconnect_total",
@@ -409,6 +417,10 @@ func RecordAuthJWKSRefresh(result string, duration time.Duration) {
 
 func RecordAdminPermissionRejected(role string, permission string) {
 	adminPermissionRejected.WithLabelValues(nonEmpty(role, "unknown"), nonEmpty(permission, "unknown")).Inc()
+}
+
+func RecordAdminAction(action string, result string) {
+	adminAction.WithLabelValues(nonEmpty(action, "unknown"), nonEmpty(result, "unknown")).Inc()
 }
 
 func RecordAdminSessionDisconnect(result string) {

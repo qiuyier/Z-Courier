@@ -933,6 +933,129 @@ func TestInternalHTTPAdminSessionReadonlyDeniesMessageRepair(t *testing.T) {
 	}
 }
 
+func TestInternalHTTPAdminAuditListsLoginAndPermissionDenied(t *testing.T) {
+	service := downlink.NewService(testSessionFinder{}, testConnectionFinder{}, downlink.WithStore(downlink.NewMemoryStore()))
+	config := normalizeConfig(Config{
+		GatewayNode:      "gateway-a",
+		InternalHTTPAddr: "127.0.0.1:18080",
+		InternalToken:    "secret",
+		AdminConsole: AdminConsoleConfig{
+			Session: AdminConsoleSessionConfig{
+				Enabled:        true,
+				TTL:            time.Hour,
+				CookieName:     "zcourier_admin_session",
+				CookieSameSite: "lax",
+				Role:           adminSessionRoleReadonly,
+			},
+		},
+	})
+
+	server := mustInternalHTTPServer(t, config, service, &gatewayHealth{}, nil)
+
+	unauthReq := httptest.NewRequest(http.MethodGet, adminAuditPath, nil)
+	unauthRec := httptest.NewRecorder()
+	server.Handler.ServeHTTP(unauthRec, unauthReq)
+	if unauthRec.Code != http.StatusUnauthorized {
+		t.Fatalf("unauth audit status = %d, want %d, body = %s", unauthRec.Code, http.StatusUnauthorized, unauthRec.Body.String())
+	}
+
+	cookie := loginAdminSessionCookie(t, server, config, "secret")
+
+	requeueReq := httptest.NewRequest(http.MethodPost, "/internal/message/requeue", strings.NewReader(`{"message_id":"missing"}`))
+	requeueReq.AddCookie(cookie)
+	requeueRec := httptest.NewRecorder()
+	server.Handler.ServeHTTP(requeueRec, requeueReq)
+	if requeueRec.Code != http.StatusForbidden {
+		t.Fatalf("requeue status = %d, want %d, body = %s", requeueRec.Code, http.StatusForbidden, requeueRec.Body.String())
+	}
+
+	auditReq := httptest.NewRequest(http.MethodGet, adminAuditPath+"?limit=10", nil)
+	auditReq.AddCookie(cookie)
+	auditRec := httptest.NewRecorder()
+	server.Handler.ServeHTTP(auditRec, auditReq)
+	if auditRec.Code != http.StatusOK {
+		t.Fatalf("audit status = %d, want %d, body = %s", auditRec.Code, http.StatusOK, auditRec.Body.String())
+	}
+	var auditResp adminAuditResponse
+	if err := sonic.Unmarshal(auditRec.Body.Bytes(), &auditResp); err != nil {
+		t.Fatalf("Unmarshal(audit) error = %v", err)
+	}
+	if auditResp.Code != "ok" || auditResp.GatewayNode != "gateway-a" || auditResp.Total < 2 || len(auditResp.Events) < 2 {
+		t.Fatalf("audit response = %+v, want at least login and permission denial", auditResp)
+	}
+	denied := auditResp.Events[0]
+	if denied.Action != "admin_permission_denied" || denied.Result != "permission_denied" || denied.Permission != adminPermissionMessageRepair {
+		t.Fatalf("latest audit event = %+v, want message repair permission denial", denied)
+	}
+	if denied.Principal != "internal-token" || denied.Role != adminSessionRoleReadonly || denied.AdminSessionID == "" {
+		t.Fatalf("denied identity = %+v, want readonly admin session identity", denied)
+	}
+
+	foundLogin := false
+	for _, event := range auditResp.Events {
+		if event.Action == "admin_session_login" && event.Result == "success" {
+			foundLogin = true
+			if event.Principal != "internal-token" || event.Role != adminSessionRoleReadonly {
+				t.Fatalf("login event = %+v, want readonly internal-token", event)
+			}
+		}
+	}
+	if !foundLogin {
+		t.Fatalf("audit events = %+v, want successful login event", auditResp.Events)
+	}
+}
+
+func TestInternalHTTPAdminAuditFiltersRetryScan(t *testing.T) {
+	service := downlink.NewService(testSessionFinder{}, testConnectionFinder{}, downlink.WithStore(downlink.NewMemoryStore()))
+	config := normalizeConfig(Config{
+		GatewayNode:      "gateway-a",
+		InternalHTTPAddr: "127.0.0.1:18080",
+		InternalToken:    "secret",
+		AdminConsole: AdminConsoleConfig{
+			Session: AdminConsoleSessionConfig{
+				Enabled:        true,
+				TTL:            time.Hour,
+				CookieName:     "zcourier_admin_session",
+				CookieSameSite: "lax",
+				Role:           adminSessionRoleOperator,
+			},
+		},
+	})
+
+	server := mustInternalHTTPServer(t, config, service, &gatewayHealth{}, nil)
+	cookie := loginAdminSessionCookie(t, server, config, "secret")
+
+	scanReq := httptest.NewRequest(http.MethodPost, "/internal/messages/retry/scan", strings.NewReader(`{"limit":7}`))
+	scanReq.AddCookie(cookie)
+	scanRec := httptest.NewRecorder()
+	server.Handler.ServeHTTP(scanRec, scanReq)
+	if scanRec.Code != http.StatusOK {
+		t.Fatalf("retry scan status = %d, want %d, body = %s", scanRec.Code, http.StatusOK, scanRec.Body.String())
+	}
+
+	auditReq := httptest.NewRequest(http.MethodGet, adminAuditPath+"?action=admin_retry_scan&result=success&limit=1", nil)
+	auditReq.AddCookie(cookie)
+	auditRec := httptest.NewRecorder()
+	server.Handler.ServeHTTP(auditRec, auditReq)
+	if auditRec.Code != http.StatusOK {
+		t.Fatalf("audit status = %d, want %d, body = %s", auditRec.Code, http.StatusOK, auditRec.Body.String())
+	}
+	var auditResp adminAuditResponse
+	if err := sonic.Unmarshal(auditRec.Body.Bytes(), &auditResp); err != nil {
+		t.Fatalf("Unmarshal(audit) error = %v", err)
+	}
+	if auditResp.Total != 1 || len(auditResp.Events) != 1 {
+		t.Fatalf("audit response = %+v, want one retry scan event", auditResp)
+	}
+	event := auditResp.Events[0]
+	if event.Action != "admin_retry_scan" || event.Result != "success" || event.Details["limit"] != "7" {
+		t.Fatalf("retry scan event = %+v, want success limit 7", event)
+	}
+	if event.Principal != "internal-token" || event.Role != adminSessionRoleOperator {
+		t.Fatalf("retry scan identity = %+v, want operator internal-token", event)
+	}
+}
+
 func TestInternalHTTPHealthAndReady(t *testing.T) {
 	service := downlink.NewService(testSessionFinder{}, testConnectionFinder{})
 	health := &gatewayHealth{}
