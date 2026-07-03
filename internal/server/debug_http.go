@@ -2,6 +2,7 @@ package server
 
 import (
 	"errors"
+	"io"
 	"net/http"
 	"sort"
 	"strconv"
@@ -11,7 +12,10 @@ import (
 	"github.com/bytedance/sonic"
 	"github.com/qiuyier/Z-Courier/internal/cluster"
 	"github.com/qiuyier/Z-Courier/internal/downlink"
+	"github.com/qiuyier/Z-Courier/internal/httpauth"
+	"github.com/qiuyier/Z-Courier/internal/metrics"
 	"github.com/qiuyier/Z-Courier/internal/session"
+	"go.uber.org/zap"
 )
 
 const (
@@ -20,11 +24,14 @@ const (
 )
 
 type debugHandlerConfig struct {
-	gatewayNode    string
-	internalToken  string
-	sessions       *session.Manager
-	registry       cluster.OnlineRegistry
-	clusterEnabled bool
+	gatewayNode        string
+	internalToken      string
+	maxRequestBodySize int64
+	sessions           *session.Manager
+	connections        downlink.ConnectionFinder
+	registry           cluster.OnlineRegistry
+	clusterEnabled     bool
+	logger             *zap.Logger
 }
 
 type debugRouteResponse struct {
@@ -49,6 +56,25 @@ type debugSessionsResponse struct {
 	Total         int            `json:"total"`
 	UniqueClients int            `json:"unique_clients"`
 	Sessions      []debugSession `json:"sessions"`
+}
+
+type debugSessionDisconnectRequest struct {
+	SessionID string `json:"session_id"`
+	ClientID  string `json:"client_id,omitempty"`
+	DeviceID  string `json:"device_id,omitempty"`
+}
+
+type debugSessionDisconnectResponse struct {
+	Code              string        `json:"code"`
+	Reason            string        `json:"reason,omitempty"`
+	GatewayNode       string        `json:"gateway_node"`
+	SessionID         string        `json:"session_id,omitempty"`
+	ConnID            uint64        `json:"conn_id,omitempty"`
+	ClientID          string        `json:"client_id,omitempty"`
+	DeviceID          string        `json:"device_id,omitempty"`
+	LocalSessionFound bool          `json:"local_session_found"`
+	Disconnected      bool          `json:"disconnected"`
+	LocalSession      *debugSession `json:"local_session,omitempty"`
 }
 
 type debugSession struct {
@@ -82,13 +108,21 @@ func newDebugSessionsHandler(config Config) http.Handler {
 	return &debugSessionsHandler{config: debugConfig(config, nil)}
 }
 
+func newDebugSessionDisconnectHandler(config Config, connections downlink.ConnectionFinder, logger *zap.Logger) http.Handler {
+	debugConfig := debugConfig(config, nil)
+	debugConfig.connections = connections
+	debugConfig.logger = logger
+	return &debugSessionDisconnectHandler{config: debugConfig}
+}
+
 func debugConfig(config Config, registry cluster.OnlineRegistry) debugHandlerConfig {
 	return debugHandlerConfig{
-		gatewayNode:    config.GatewayNode,
-		internalToken:  config.InternalToken,
-		sessions:       config.Sessions,
-		registry:       registry,
-		clusterEnabled: config.Cluster.Enabled && registry != nil,
+		gatewayNode:        config.GatewayNode,
+		internalToken:      config.InternalToken,
+		maxRequestBodySize: config.InternalMaxRequestBodySize,
+		sessions:           config.Sessions,
+		registry:           registry,
+		clusterEnabled:     config.Cluster.Enabled && registry != nil,
 	}
 }
 
@@ -218,6 +252,209 @@ func (h *debugSessionsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 
 func (h *debugSessionsHandler) authorized(r *http.Request) bool {
 	return h.config.internalToken == "" || r.Header.Get(downlink.InternalTokenHeader) == h.config.internalToken
+}
+
+type debugSessionDisconnectHandler struct {
+	config debugHandlerConfig
+}
+
+type connectionStopper interface {
+	Stop()
+}
+
+func (h *debugSessionDisconnectHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeDebugJSON(w, http.StatusMethodNotAllowed, debugSessionDisconnectResponse{Code: "method_not_allowed", GatewayNode: h.config.gatewayNode})
+		return
+	}
+	if !h.authorized(r) {
+		writeDebugJSON(w, http.StatusUnauthorized, debugSessionDisconnectResponse{Code: "unauthorized", GatewayNode: h.config.gatewayNode})
+		return
+	}
+
+	req, ok := h.readRequest(w, r)
+	if !ok {
+		return
+	}
+	resp := debugSessionDisconnectResponse{
+		GatewayNode: h.config.gatewayNode,
+		SessionID:   req.SessionID,
+		ClientID:    req.ClientID,
+		DeviceID:    req.DeviceID,
+	}
+	if req.SessionID == "" {
+		resp.Code = "bad_request"
+		resp.Reason = "session_id is required"
+		h.recordAndAudit(r, "bad_request", http.StatusBadRequest, resp, nil)
+		writeDebugJSON(w, http.StatusBadRequest, resp)
+		return
+	}
+	if h.config.sessions == nil {
+		resp.Code = "sessions_unavailable"
+		resp.Reason = "session manager is not configured"
+		h.recordAndAudit(r, "sessions_unavailable", http.StatusServiceUnavailable, resp, nil)
+		writeDebugJSON(w, http.StatusServiceUnavailable, resp)
+		return
+	}
+	if h.config.connections == nil {
+		resp.Code = "connections_unavailable"
+		resp.Reason = "connection finder is not configured"
+		h.recordAndAudit(r, "connections_unavailable", http.StatusServiceUnavailable, resp, nil)
+		writeDebugJSON(w, http.StatusServiceUnavailable, resp)
+		return
+	}
+
+	found, foundOK := h.config.sessions.GetBySessionID(req.SessionID)
+	if !foundOK || found == nil {
+		resp.Code = "session_not_found"
+		resp.Reason = "local session was not found on this gateway"
+		h.recordAndAudit(r, "session_not_found", http.StatusNotFound, resp, nil)
+		writeDebugJSON(w, http.StatusNotFound, resp)
+		return
+	}
+
+	resp.LocalSessionFound = true
+	resp.LocalSession = debugSessionFromSession(found)
+	resp.ConnID = found.ConnID
+	resp.ClientID = found.ClientID
+	resp.DeviceID = found.DeviceID
+	if req.ClientID != "" && req.ClientID != found.ClientID {
+		resp.Code = "session_mismatch"
+		resp.Reason = "client_id does not match local session"
+		h.recordAndAudit(r, "session_mismatch", http.StatusConflict, resp, nil)
+		writeDebugJSON(w, http.StatusConflict, resp)
+		return
+	}
+	if req.DeviceID != "" && req.DeviceID != found.DeviceID {
+		resp.Code = "session_mismatch"
+		resp.Reason = "device_id does not match local session"
+		h.recordAndAudit(r, "session_mismatch", http.StatusConflict, resp, nil)
+		writeDebugJSON(w, http.StatusConflict, resp)
+		return
+	}
+
+	conn, err := h.config.connections.Get(found.ConnID)
+	if err != nil || conn == nil {
+		h.config.sessions.UnbindByConnID(found.ConnID)
+		resp.Code = "connection_not_found"
+		resp.Reason = "local connection was not found; stale session binding was removed"
+		h.recordAndAudit(r, "connection_not_found", http.StatusConflict, resp, err)
+		writeDebugJSON(w, http.StatusConflict, resp)
+		return
+	}
+	stopper, ok := conn.(connectionStopper)
+	if !ok {
+		resp.Code = "connection_not_stoppable"
+		resp.Reason = "local connection does not support stop"
+		h.recordAndAudit(r, "connection_not_stoppable", http.StatusConflict, resp, nil)
+		writeDebugJSON(w, http.StatusConflict, resp)
+		return
+	}
+
+	stopper.Stop()
+	h.config.sessions.UnbindByConnID(found.ConnID)
+	resp.Code = "ok"
+	resp.Disconnected = true
+	h.recordAndAudit(r, "ok", http.StatusOK, resp, nil)
+	writeDebugJSON(w, http.StatusOK, resp)
+}
+
+func (h *debugSessionDisconnectHandler) readRequest(w http.ResponseWriter, r *http.Request) (debugSessionDisconnectRequest, bool) {
+	if r.Body == nil {
+		return debugSessionDisconnectRequest{}, true
+	}
+	defer r.Body.Close()
+
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, h.config.maxRequestBodySize))
+	if err != nil {
+		writeDebugJSON(w, http.StatusRequestEntityTooLarge, debugSessionDisconnectResponse{
+			Code:        "request_too_large",
+			Reason:      err.Error(),
+			GatewayNode: h.config.gatewayNode,
+		})
+		return debugSessionDisconnectRequest{}, false
+	}
+	var req debugSessionDisconnectRequest
+	if len(strings.TrimSpace(string(body))) > 0 {
+		if err := sonic.Unmarshal(body, &req); err != nil {
+			writeDebugJSON(w, http.StatusBadRequest, debugSessionDisconnectResponse{
+				Code:        "bad_request",
+				Reason:      err.Error(),
+				GatewayNode: h.config.gatewayNode,
+			})
+			return debugSessionDisconnectRequest{}, false
+		}
+	}
+	req.SessionID = strings.TrimSpace(req.SessionID)
+	req.ClientID = strings.TrimSpace(req.ClientID)
+	req.DeviceID = strings.TrimSpace(req.DeviceID)
+	return req, true
+}
+
+func (h *debugSessionDisconnectHandler) authorized(r *http.Request) bool {
+	return h.config.internalToken == "" || r.Header.Get(downlink.InternalTokenHeader) == h.config.internalToken
+}
+
+func (h *debugSessionDisconnectHandler) recordAndAudit(r *http.Request, result string, statusCode int, resp debugSessionDisconnectResponse, err error) {
+	metrics.RecordAdminSessionDisconnect(result)
+	if h.config.logger == nil {
+		return
+	}
+
+	identity := debugAuthIdentity(r, h.config.internalToken)
+	role := strings.TrimSpace(identity.Role)
+	if role == "" {
+		role = "unknown"
+	} else {
+		role = normalizeAdminRole(role)
+	}
+	fields := []zap.Field{
+		zap.String("audit_event", "admin_session_disconnect"),
+		zap.String("result", result),
+		zap.Int("http_status", statusCode),
+		zap.String("auth_mode", identity.Mode),
+		zap.String("principal", identity.Principal),
+		zap.String("role", role),
+		zap.String("method", r.Method),
+		zap.String("path", r.URL.Path),
+		zap.String("remote_addr", r.RemoteAddr),
+		zap.String("gateway_node", h.config.gatewayNode),
+		zap.String("target_session_id", resp.SessionID),
+		zap.Uint64("target_conn_id", resp.ConnID),
+		zap.String("target_client_id", resp.ClientID),
+		zap.String("target_device_id", resp.DeviceID),
+		zap.Bool("disconnected", resp.Disconnected),
+	}
+	if identity.KeyID != "" {
+		fields = append(fields, zap.String("auth_key_id", identity.KeyID))
+	}
+	if identity.SessionID != "" {
+		fields = append(fields, zap.String("admin_session_id", identity.SessionID))
+	}
+	if resp.Reason != "" {
+		fields = append(fields, zap.String("reason", resp.Reason))
+	}
+	if err != nil {
+		fields = append(fields, zap.Error(err))
+	}
+	if statusCode >= http.StatusBadRequest {
+		h.config.logger.Warn("admin session disconnect audit", fields...)
+		return
+	}
+	h.config.logger.Info("admin session disconnect audit", fields...)
+}
+
+func debugAuthIdentity(r *http.Request, internalToken string) httpauth.Identity {
+	if identity, ok := httpauth.IdentityFromContext(r.Context()); ok {
+		if identity.Mode == "" {
+			identity.Mode = httpauth.ModeNone
+		}
+		return identity
+	}
+	if internalToken != "" {
+		return httpauth.Identity{Mode: httpauth.ModeToken}
+	}
+	return httpauth.Identity{Mode: httpauth.ModeNone}
 }
 
 func parseDebugSessionLimit(raw string) (int, error) {

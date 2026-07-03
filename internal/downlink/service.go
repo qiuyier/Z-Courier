@@ -136,6 +136,13 @@ func (s *Service) Store() Store {
 	return s.store
 }
 
+func (s *Service) ConnectionFinder() ConnectionFinder {
+	if s == nil {
+		return nil
+	}
+	return s.connections
+}
+
 func (s *Service) MessageStatus(ctx context.Context, messageID string) (Message, bool, error) {
 	if messageID == "" {
 		return Message{}, false, ErrMissingMessageID

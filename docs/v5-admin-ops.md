@@ -274,6 +274,7 @@ The existing debug endpoints remain part of the operator workflow:
 ```text
 GET /internal/debug/route?client_id=...&device_id=...
 GET /internal/debug/sessions?client_id=...&limit=...
+POST /internal/debug/session/disconnect
 ```
 
 `route` answers where this gateway would push a client/device. It includes a
@@ -281,6 +282,24 @@ local session if one exists and a cluster route if cluster routing is enabled.
 
 `sessions` answers which sessions are local to the gateway node you queried.
 It does not claim to list all sessions across all nodes.
+
+`session/disconnect` is a guarded mutation for local sessions only. Browser
+admin sessions need the `session:disconnect` permission, which is granted to
+`operator` and `admin` roles. The request body requires `session_id` and may
+include `client_id` and `device_id` as mismatch guards:
+
+```json
+{
+  "session_id": "zs_...",
+  "client_id": "client-1",
+  "device_id": "device-1"
+}
+```
+
+The gateway closes the matching local connection and removes the local session
+binding. If the session is only visible through the cluster registry on another
+gateway, this endpoint returns a local-not-found response instead of performing
+a peer disconnect.
 
 ### Existing Message Inspection
 

@@ -70,6 +70,14 @@ var (
 		[]string{"role", "permission"},
 	)
 
+	adminSessionDisconnect = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "z_courier_admin_session_disconnect_total",
+			Help: "Total number of admin local session disconnect attempts.",
+		},
+		[]string{"result"},
+	)
+
 	gatewayReadiness = promauto.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "z_courier_gateway_readiness",
@@ -385,6 +393,10 @@ func RecordAuthJWKSRefresh(result string, duration time.Duration) {
 
 func RecordAdminPermissionRejected(role string, permission string) {
 	adminPermissionRejected.WithLabelValues(nonEmpty(role, "unknown"), nonEmpty(permission, "unknown")).Inc()
+}
+
+func RecordAdminSessionDisconnect(result string) {
+	adminSessionDisconnect.WithLabelValues(nonEmpty(result, "unknown")).Inc()
 }
 
 func SetGatewayReadiness(status string) {

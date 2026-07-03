@@ -1403,6 +1403,155 @@ func TestInternalHTTPDebugSessionsListsLocalSessions(t *testing.T) {
 	}
 }
 
+func TestInternalHTTPDebugSessionDisconnectOperatorStopsLocalConnection(t *testing.T) {
+	sessions := session.NewManager()
+	if _, err := sessions.Bind(session.BindInput{
+		SessionID:   "session-1",
+		ConnID:      7,
+		ClientID:    "client-1",
+		DeviceID:    "device-1",
+		GatewayNode: "gateway-a",
+	}); err != nil {
+		t.Fatalf("Bind() error = %v", err)
+	}
+
+	conn := &testStoppableConnection{}
+	finder := &testStaticConnectionFinder{conn: conn}
+	service := downlink.NewService(sessions, finder)
+	config := normalizeConfig(Config{
+		Sessions:         sessions,
+		GatewayNode:      "gateway-a",
+		InternalHTTPAddr: "127.0.0.1:18080",
+		InternalToken:    "secret",
+		AdminConsole: AdminConsoleConfig{
+			Session: AdminConsoleSessionConfig{
+				Enabled:        true,
+				TTL:            time.Hour,
+				CookieName:     "zcourier_admin_session",
+				CookieSameSite: "lax",
+				Role:           adminSessionRoleOperator,
+			},
+		},
+	})
+
+	server := mustInternalHTTPServer(t, config, service, &gatewayHealth{}, nil)
+	cookie := loginAdminSessionCookie(t, server, config, "secret")
+	req := httptest.NewRequest(http.MethodPost, "/internal/debug/session/disconnect", strings.NewReader(`{"session_id":"session-1","client_id":"client-1","device_id":"device-1"}`))
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	server.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var resp debugSessionDisconnectResponse
+	if err := sonic.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if resp.Code != "ok" || !resp.Disconnected || !resp.LocalSessionFound || resp.ConnID != 7 {
+		t.Fatalf("response = %+v, want disconnected local conn 7", resp)
+	}
+	if !conn.stopped {
+		t.Fatal("connection stopped = false, want true")
+	}
+	if finder.gotConnID != 7 {
+		t.Fatalf("connection finder connID = %d, want 7", finder.gotConnID)
+	}
+	if _, ok := sessions.GetBySessionID("session-1"); ok {
+		t.Fatal("session still exists after disconnect")
+	}
+}
+
+func TestInternalHTTPDebugSessionDisconnectReadonlyDenied(t *testing.T) {
+	sessions := session.NewManager()
+	if _, err := sessions.Bind(session.BindInput{SessionID: "session-1", ConnID: 7, ClientID: "client-1", DeviceID: "device-1"}); err != nil {
+		t.Fatalf("Bind() error = %v", err)
+	}
+
+	conn := &testStoppableConnection{}
+	service := downlink.NewService(sessions, &testStaticConnectionFinder{conn: conn})
+	config := normalizeConfig(Config{
+		Sessions:         sessions,
+		InternalHTTPAddr: "127.0.0.1:18080",
+		InternalToken:    "secret",
+		AdminConsole: AdminConsoleConfig{
+			Session: AdminConsoleSessionConfig{
+				Enabled:        true,
+				TTL:            time.Hour,
+				CookieName:     "zcourier_admin_session",
+				CookieSameSite: "lax",
+				Role:           adminSessionRoleReadonly,
+			},
+		},
+	})
+
+	server := mustInternalHTTPServer(t, config, service, &gatewayHealth{}, nil)
+	cookie := loginAdminSessionCookie(t, server, config, "secret")
+	req := httptest.NewRequest(http.MethodPost, "/internal/debug/session/disconnect", strings.NewReader(`{"session_id":"session-1"}`))
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	server.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusForbidden, rec.Body.String())
+	}
+	var denied adminPermissionDeniedResponse
+	if err := sonic.Unmarshal(rec.Body.Bytes(), &denied); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if denied.Code != "permission_denied" || denied.Permission != adminPermissionSessionDisconnect {
+		t.Fatalf("denied = %+v, want session disconnect permission denial", denied)
+	}
+	if conn.stopped {
+		t.Fatal("connection stopped = true, want false")
+	}
+	if _, ok := sessions.GetBySessionID("session-1"); !ok {
+		t.Fatal("session was removed despite readonly denial")
+	}
+}
+
+type testStoppableConnection struct {
+	stopped bool
+}
+
+func (c *testStoppableConnection) SendMsg(uint32, []byte) error {
+	return nil
+}
+
+func (c *testStoppableConnection) Stop() {
+	c.stopped = true
+}
+
+type testStaticConnectionFinder struct {
+	conn      downlink.Connection
+	err       error
+	gotConnID uint64
+}
+
+func (f *testStaticConnectionFinder) Get(connID uint64) (downlink.Connection, error) {
+	f.gotConnID = connID
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.conn, nil
+}
+
+func loginAdminSessionCookie(t *testing.T, server *http.Server, config Config, token string) *http.Cookie {
+	t.Helper()
+
+	loginReq := httptest.NewRequest(http.MethodPost, adminSessionLoginPath, strings.NewReader(`{"token":"`+token+`"}`))
+	loginRec := httptest.NewRecorder()
+	server.Handler.ServeHTTP(loginRec, loginReq)
+	if loginRec.Code != http.StatusOK {
+		t.Fatalf("login status = %d, want %d, body = %s", loginRec.Code, http.StatusOK, loginRec.Body.String())
+	}
+	cookie := firstCookie(loginRec.Result(), config.AdminConsole.Session.CookieName)
+	if cookie == nil || cookie.Value == "" {
+		t.Fatalf("login cookie = %+v, want session cookie", cookie)
+	}
+	return cookie
+}
+
 func mustInternalHTTPServer(t *testing.T, config Config, service *downlink.Service, health *gatewayHealth, registry cluster.OnlineRegistry) *http.Server {
 	t.Helper()
 	runtime := newGatewayRuntime()

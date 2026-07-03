@@ -15,8 +15,9 @@ const (
 	adminSessionRoleOperator = "operator"
 	adminSessionRoleAdmin    = "admin"
 
-	adminPermissionRead          = "admin:read"
-	adminPermissionMessageRepair = "message:repair"
+	adminPermissionRead              = "admin:read"
+	adminPermissionMessageRepair     = "message:repair"
+	adminPermissionSessionDisconnect = "session:disconnect"
 )
 
 type adminPermissionDeniedResponse struct {
@@ -101,7 +102,9 @@ func adminRoleAllows(role string, permission string) bool {
 	case adminSessionRoleAdmin:
 		return true
 	case adminSessionRoleOperator:
-		return permission == adminPermissionRead || permission == adminPermissionMessageRepair
+		return permission == adminPermissionRead ||
+			permission == adminPermissionMessageRepair ||
+			permission == adminPermissionSessionDisconnect
 	case adminSessionRoleReadonly:
 		return permission == adminPermissionRead
 	default:
@@ -112,9 +115,9 @@ func adminRoleAllows(role string, permission string) bool {
 func adminPermissionsForRole(role string) []string {
 	switch normalizeAdminRole(role) {
 	case adminSessionRoleAdmin:
-		return []string{adminPermissionRead, adminPermissionMessageRepair}
+		return []string{adminPermissionRead, adminPermissionMessageRepair, adminPermissionSessionDisconnect}
 	case adminSessionRoleOperator:
-		return []string{adminPermissionRead, adminPermissionMessageRepair}
+		return []string{adminPermissionRead, adminPermissionMessageRepair, adminPermissionSessionDisconnect}
 	default:
 		return []string{adminPermissionRead}
 	}

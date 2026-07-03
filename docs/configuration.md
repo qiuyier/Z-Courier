@@ -330,8 +330,9 @@ admin_console:
   requires `session.cookie_secure=true`.
 - `session.role`: role assigned to newly created browser sessions. Supported
   values are `readonly`, `operator`, and `admin`. `readonly` can inspect
-  console data; `operator` can also run guarded message repair actions such as
-  requeue and discard; `admin` currently includes all operator permissions.
+  console data; `operator` can also run guarded local session disconnect and
+  message repair actions such as requeue and discard; `admin` currently
+  includes all operator permissions.
 
 The console is an internal operations UI, not a public endpoint. Production
 deployments should keep it on private networking and expose it only through a
