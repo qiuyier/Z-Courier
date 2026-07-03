@@ -84,6 +84,15 @@ ZINX_CONFIG_FILE_PATH=conf/zinx.cluster-b.json \
   go run ./cmd/gateway -config configs/z-courier.cluster-b.yaml
 ```
 
+两节点本地配置也开启了内置 console：
+
+- `gateway-a`: `http://127.0.0.1:18182/console/`
+- `gateway-b`: `http://127.0.0.1:18183/console/`
+
+登录 token 是 `dev-internal-token`。两份配置使用了不同的
+`admin_console.session.cookie_name`，避免你在同一个 `127.0.0.1` 域名下登录
+A 节点后，又登录 B 节点把 A 节点的 console session cookie 覆盖掉。
+
 终端 3 运行集群验证：
 
 ```bash

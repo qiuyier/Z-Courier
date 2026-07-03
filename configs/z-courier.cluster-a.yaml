@@ -19,6 +19,22 @@ internal_http:
   max_request_body_size: 10485760
   max_in_flight: 1000
 
+admin_console:
+  enabled: true
+  path: /console/
+  assets_dir: web/admin/dist
+  monitoring:
+    prometheus_url: http://127.0.0.1:19090
+    grafana_url: http://127.0.0.1:13000
+    dashboard_url: http://127.0.0.1:13000/d/z-courier-overview/z-courier-overview
+  session:
+    enabled: true
+    ttl: 8h
+    cookie_name: zcourier_admin_session_a
+    cookie_secure: false
+    cookie_same_site: lax
+    role: admin
+
 cluster:
   enabled: true
   internal_addr: http://127.0.0.1:18182

@@ -33,6 +33,15 @@ It starts two gateway processes:
 - `gateway-a`: TCP `9901`, internal HTTP `18182`
 - `gateway-b`: TCP `9902`, internal HTTP `18183`
 
+The local cluster configs also enable the embedded admin console:
+
+- `gateway-a`: `http://127.0.0.1:18182/console/`
+- `gateway-b`: `http://127.0.0.1:18183/console/`
+
+Use `dev-internal-token` to sign in. The two configs intentionally use
+different admin session cookie names so signing in to one local node does not
+invalidate the other node's console session on `127.0.0.1`.
+
 The verifier connects the client to `gateway-b`, sends `/internal/push` to
 `gateway-a`, and checks that Redis route lookup plus peer push delivers the
 message to the client on `gateway-b`. The cluster config uses a short Redis
@@ -123,6 +132,9 @@ ZINX_CONFIG_FILE_PATH=conf/zinx.cluster-a.json \
 
 ZINX_CONFIG_FILE_PATH=conf/zinx.cluster-b.json \
   go run ./cmd/gateway -config configs/z-courier.cluster-b.yaml
+
+open http://127.0.0.1:18182/console/
+open http://127.0.0.1:18183/console/
 
 go run ./cmd/e2e \
   -gateway-port 9902 \
