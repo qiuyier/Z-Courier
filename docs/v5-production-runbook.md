@@ -177,7 +177,8 @@ List local sessions on the queried gateway:
 
 ```bash
 go run ./cmd/admin sessions \
-  -client-id client-1
+  -client-id client-1 \
+  -device-id device-1
 ```
 
 List failed reliable downlink messages:

@@ -273,7 +273,7 @@ The existing debug endpoints remain part of the operator workflow:
 
 ```text
 GET /internal/debug/route?client_id=...&device_id=...
-GET /internal/debug/sessions?client_id=...&limit=...
+GET /internal/debug/sessions?session_id=...&client_id=...&device_id=...&limit=...
 POST /internal/debug/session/disconnect
 ```
 
@@ -281,7 +281,10 @@ POST /internal/debug/session/disconnect
 local session if one exists and a cluster route if cluster routing is enabled.
 
 `sessions` answers which sessions are local to the gateway node you queried.
-It does not claim to list all sessions across all nodes.
+It does not claim to list all sessions across all nodes. Operators can filter
+by `session_id`, by `client_id`, or by `client_id` plus `device_id`. A
+`session_id` lookup is exact; optional `client_id` and `device_id` values act
+as mismatch guards.
 
 `session/disconnect` is a guarded mutation for local sessions only. Browser
 admin sessions need the `session:disconnect` permission, which is granted to
@@ -366,7 +369,8 @@ go run ./cmd/admin route \
 go run ./cmd/admin sessions \
   -internal-url http://127.0.0.1:18183 \
   -internal-token dev-internal-token \
-  -client-id e2e-client
+  -client-id e2e-client \
+  -device-id e2e-device
 
 go run ./cmd/admin message \
   -internal-url http://127.0.0.1:18182 \

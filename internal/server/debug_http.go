@@ -51,7 +51,9 @@ type debugSessionsResponse struct {
 	Code          string         `json:"code"`
 	Reason        string         `json:"reason,omitempty"`
 	GatewayNode   string         `json:"gateway_node"`
+	SessionID     string         `json:"session_id,omitempty"`
 	ClientID      string         `json:"client_id,omitempty"`
+	DeviceID      string         `json:"device_id,omitempty"`
 	Limit         int            `json:"limit"`
 	Total         int            `json:"total"`
 	UniqueClients int            `json:"unique_clients"`
@@ -213,13 +215,30 @@ func (h *debugSessionsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	sessionID := strings.TrimSpace(r.URL.Query().Get("session_id"))
 	clientID := strings.TrimSpace(r.URL.Query().Get("client_id"))
+	deviceID := strings.TrimSpace(r.URL.Query().Get("device_id"))
 	var found []*session.Session
 	if h.config.sessions != nil {
-		if clientID != "" {
+		switch {
+		case sessionID != "":
+			if item, ok := h.config.sessions.GetBySessionID(sessionID); ok && sessionMatchesFilters(item, clientID, deviceID) {
+				found = []*session.Session{item}
+			}
+		case clientID != "" && deviceID != "":
+			if item, ok := h.config.sessions.GetByClientDevice(clientID, deviceID); ok {
+				found = []*session.Session{item}
+			}
+		case clientID != "":
 			found = h.config.sessions.ListByClientID(clientID)
-		} else {
+			if deviceID != "" {
+				found = filterSessionsByDeviceID(found, deviceID)
+			}
+		default:
 			found = h.config.sessions.Snapshot()
+			if deviceID != "" {
+				found = filterSessionsByDeviceID(found, deviceID)
+			}
 		}
 	}
 	sortSessions(found)
@@ -232,13 +251,15 @@ func (h *debugSessionsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	resp := debugSessionsResponse{
 		Code:          "ok",
 		GatewayNode:   h.config.gatewayNode,
+		SessionID:     sessionID,
 		ClientID:      clientID,
+		DeviceID:      deviceID,
 		Limit:         limit,
 		Total:         total,
 		UniqueClients: uniqueClientCount(found),
 		Sessions:      make([]debugSession, 0, len(found)),
 	}
-	if h.config.sessions != nil && clientID == "" {
+	if h.config.sessions != nil && sessionID == "" && clientID == "" && deviceID == "" {
 		resp.UniqueClients = h.config.sessions.UniqueClientLen()
 	}
 	for _, item := range found {
@@ -252,6 +273,32 @@ func (h *debugSessionsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 
 func (h *debugSessionsHandler) authorized(r *http.Request) bool {
 	return h.config.internalToken == "" || r.Header.Get(downlink.InternalTokenHeader) == h.config.internalToken
+}
+
+func sessionMatchesFilters(found *session.Session, clientID string, deviceID string) bool {
+	if found == nil {
+		return false
+	}
+	if clientID != "" && found.ClientID != clientID {
+		return false
+	}
+	if deviceID != "" && found.DeviceID != deviceID {
+		return false
+	}
+	return true
+}
+
+func filterSessionsByDeviceID(items []*session.Session, deviceID string) []*session.Session {
+	if deviceID == "" {
+		return items
+	}
+	filtered := make([]*session.Session, 0, len(items))
+	for _, item := range items {
+		if item != nil && item.DeviceID == deviceID {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered
 }
 
 type debugSessionDisconnectHandler struct {

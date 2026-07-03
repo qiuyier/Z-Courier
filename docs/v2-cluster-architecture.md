@@ -391,7 +391,7 @@ internal token as the downlink API:
 
 ```text
 GET /internal/debug/route?client_id=...&device_id=...
-GET /internal/debug/sessions?client_id=...&limit=...
+GET /internal/debug/sessions?session_id=...&client_id=...&device_id=...&limit=...
 ```
 
 They answer different questions:
@@ -405,7 +405,8 @@ They answer different questions:
 /internal/debug/sessions
   "Which sessions are local to this gateway process?"
   Reads only the current node's in-memory session manager. It does not list
-  cluster-wide online routes.
+  cluster-wide online routes. It can filter by exact session_id, by client_id,
+  or by client_id plus device_id.
 ```
 
 Example: if the client is connected to `gateway-b` and the query is sent to

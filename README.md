@@ -171,7 +171,8 @@ go run ./cmd/admin route \
 go run ./cmd/admin sessions \
   -internal-url http://127.0.0.1:18183 \
   -internal-token dev-internal-token \
-  -client-id e2e-client
+  -client-id e2e-client \
+  -device-id e2e-device
 
 go run ./cmd/admin messages \
   -internal-url http://127.0.0.1:18182 \

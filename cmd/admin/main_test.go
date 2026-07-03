@@ -182,7 +182,7 @@ func TestDiagnoseCollectsBundle(t *testing.T) {
 	if !containsPath(gotPaths, "/internal/messages?limit=5&status=failed") {
 		t.Fatalf("paths = %v, want failed messages path", gotPaths)
 	}
-	if !containsPath(gotPaths, "/internal/debug/sessions?client_id=client-1&limit=10") {
+	if !containsPath(gotPaths, "/internal/debug/sessions?client_id=client-1&device_id=device-1&limit=10") {
 		t.Fatalf("paths = %v, want sessions path", gotPaths)
 	}
 	if !containsPath(gotPaths, "/internal/debug/route?client_id=client-1&device_id=device-1") {
@@ -272,8 +272,10 @@ func TestSessionsSendsDebugSessionsRequest(t *testing.T) {
 			InternalToken: "secret",
 			Timeout:       time.Second,
 		},
-		ClientID: "client-1",
-		Limit:    25,
+		SessionID: "session-1",
+		ClientID:  "client-1",
+		DeviceID:  "device-1",
+		Limit:     25,
 	})
 	if err != nil {
 		t.Fatalf("sessions() error = %v", err)
@@ -285,8 +287,9 @@ func TestSessionsSendsDebugSessionsRequest(t *testing.T) {
 	if gotReq.URL.Path != "/internal/debug/sessions" {
 		t.Fatalf("path = %s, want /internal/debug/sessions", gotReq.URL.Path)
 	}
-	if gotReq.URL.Query().Get("client_id") != "client-1" || gotReq.URL.Query().Get("limit") != "25" {
-		t.Fatalf("query = %s, want client_id and limit", gotReq.URL.RawQuery)
+	query := gotReq.URL.Query()
+	if query.Get("session_id") != "session-1" || query.Get("client_id") != "client-1" || query.Get("device_id") != "device-1" || query.Get("limit") != "25" {
+		t.Fatalf("query = %s, want session_id, client_id, device_id, and limit", gotReq.URL.RawQuery)
 	}
 }
 

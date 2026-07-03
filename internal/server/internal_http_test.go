@@ -1403,6 +1403,87 @@ func TestInternalHTTPDebugSessionsListsLocalSessions(t *testing.T) {
 	}
 }
 
+func TestInternalHTTPDebugSessionsFiltersBySessionAndDevice(t *testing.T) {
+	sessions := session.NewManager()
+	if _, err := sessions.Bind(session.BindInput{SessionID: "session-1", ConnID: 1, ClientID: "client-1", DeviceID: "device-1"}); err != nil {
+		t.Fatalf("Bind(session-1) error = %v", err)
+	}
+	if _, err := sessions.Bind(session.BindInput{SessionID: "session-2", ConnID: 2, ClientID: "client-1", DeviceID: "device-2"}); err != nil {
+		t.Fatalf("Bind(session-2) error = %v", err)
+	}
+
+	service := downlink.NewService(sessions, testConnectionFinder{})
+	config := normalizeConfig(Config{
+		Sessions:         sessions,
+		GatewayNode:      "gateway-a",
+		InternalHTTPAddr: "127.0.0.1:18080",
+		InternalToken:    "secret",
+	})
+	server := mustInternalHTTPServer(t, config, service, &gatewayHealth{}, nil)
+
+	tests := []struct {
+		name       string
+		path       string
+		wantTotal  int
+		wantFirst  string
+		wantClient string
+		wantDevice string
+		wantID     string
+	}{
+		{
+			name:       "session id",
+			path:       "/internal/debug/sessions?session_id=session-2",
+			wantTotal:  1,
+			wantFirst:  "session-2",
+			wantID:     "session-2",
+			wantClient: "",
+			wantDevice: "",
+		},
+		{
+			name:       "client device",
+			path:       "/internal/debug/sessions?client_id=client-1&device_id=device-1",
+			wantTotal:  1,
+			wantFirst:  "session-1",
+			wantClient: "client-1",
+			wantDevice: "device-1",
+		},
+		{
+			name:       "session id mismatch",
+			path:       "/internal/debug/sessions?session_id=session-2&device_id=device-1",
+			wantTotal:  0,
+			wantID:     "session-2",
+			wantDevice: "device-1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tt.path, nil)
+			req.Header.Set(downlink.InternalTokenHeader, "secret")
+			rec := httptest.NewRecorder()
+			server.Handler.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusOK, rec.Body.String())
+			}
+
+			var resp debugSessionsResponse
+			if err := sonic.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("Unmarshal() error = %v", err)
+			}
+			if resp.Total != tt.wantTotal || len(resp.Sessions) != tt.wantTotal {
+				t.Fatalf("response = %+v, want total=%d", resp, tt.wantTotal)
+			}
+			if resp.SessionID != tt.wantID || resp.ClientID != tt.wantClient || resp.DeviceID != tt.wantDevice {
+				t.Fatalf("filters = session:%q client:%q device:%q, want session:%q client:%q device:%q", resp.SessionID, resp.ClientID, resp.DeviceID, tt.wantID, tt.wantClient, tt.wantDevice)
+			}
+			if tt.wantFirst != "" && resp.Sessions[0].SessionID != tt.wantFirst {
+				t.Fatalf("first session = %+v, want %s", resp.Sessions[0], tt.wantFirst)
+			}
+		})
+	}
+}
+
 func TestInternalHTTPDebugSessionDisconnectOperatorStopsLocalConnection(t *testing.T) {
 	sessions := session.NewManager()
 	if _, err := sessions.Bind(session.BindInput{

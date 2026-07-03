@@ -182,9 +182,11 @@ export default function App() {
   const [messageLookupState, setMessageLookupState] = useState<RemoteState<MessageStatusResponse>>({ status: "idle" });
   const [checkTimeout, setCheckTimeout] = useState("2s");
   const [checkRanAt, setCheckRanAt] = useState<Date | null>(null);
+  const [sessionID, setSessionID] = useState("");
   const [sessionClientID, setSessionClientID] = useState("");
   const [sessionDeviceID, setSessionDeviceID] = useState("");
   const [sessionLimit, setSessionLimit] = useState(100);
+  const [selectedSessionID, setSelectedSessionID] = useState("");
   const [diagnosisClientID, setDiagnosisClientID] = useState("");
   const [diagnosisDeviceID, setDiagnosisDeviceID] = useState("");
   const [diagnosisProbeTimeout, setDiagnosisProbeTimeout] = useState("2s");
@@ -218,6 +220,7 @@ export default function App() {
     setMessageActionPending(false);
     setSessionDisconnectDialog(null);
     setSessionDisconnectPending(false);
+    setSelectedSessionID("");
     setCheckRanAt(null);
     setUpdatedAt(null);
   }, []);
@@ -286,7 +289,15 @@ export default function App() {
       }
       setSessionsState((current) => ({ status: "loading", data: current.data }));
       try {
-        const data = await fetchSessions(sessionClientID, sessionLimit, signal);
+        const data = await fetchSessions(
+          {
+            clientID: sessionClientID,
+            deviceID: sessionDeviceID,
+            sessionID,
+            limit: sessionLimit,
+          },
+          signal,
+        );
         setSessionsState({ status: "ready", data });
       } catch (error) {
         if (signal?.aborted) {
@@ -300,7 +311,7 @@ export default function App() {
         setSessionsState((current) => ({ status: "error", data: current.data, error: message }));
       }
     },
-    [authenticated, expireSession, sessionClientID, sessionLimit],
+    [authenticated, expireSession, sessionClientID, sessionDeviceID, sessionID, sessionLimit],
   );
 
   const lookupClientRoute = useCallback(
@@ -332,6 +343,7 @@ export default function App() {
 
   const lookupSessionRoute = useCallback(
     (session: AdminSession) => {
+      setSelectedSessionID(session.session_id);
       setSessionClientID(session.client_id);
       setSessionDeviceID(session.device_id);
       void lookupClientRoute(session.client_id, session.device_id);
@@ -359,8 +371,8 @@ export default function App() {
     }
 
     const target = sessionDisconnectDialog.session;
-    const sessionID = target.session_id?.trim() ?? "";
-    if (sessionID === "") {
+    const targetSessionID = target.session_id?.trim() ?? "";
+    if (targetSessionID === "") {
       setSessionDisconnectDialog((current) => current ? { ...current, error: "session_id is required" } : current);
       return;
     }
@@ -368,13 +380,14 @@ export default function App() {
     setSessionDisconnectPending(true);
     try {
       await disconnectSession({
-        session_id: sessionID,
+        session_id: targetSessionID,
         client_id: target.client_id,
         device_id: target.device_id,
       });
       setSessionDisconnectDialog(null);
+      setSelectedSessionID((current) => current === targetSessionID ? "" : current);
       await refreshSessions();
-      if (clientRouteState.data?.local_session?.session_id === sessionID) {
+      if (clientRouteState.data?.local_session?.session_id === targetSessionID) {
         await lookupClientRoute(target.client_id, target.device_id);
       }
     } catch (error) {
@@ -944,10 +957,14 @@ export default function App() {
               clientID={sessionClientID}
               deviceID={sessionDeviceID}
               limit={sessionLimit}
+              selectedSessionID={selectedSessionID}
+              sessionID={sessionID}
               onClientIDChange={setSessionClientID}
               onDeviceIDChange={setSessionDeviceID}
               onLimitChange={setSessionLimit}
               onLookupRoute={() => lookupClientRoute()}
+              onSessionIDChange={setSessionID}
+              onSessionSelect={setSelectedSessionID}
               onSessionDisconnect={openSessionDisconnect}
               onSessionRouteLookup={lookupSessionRoute}
               onSessionsRefresh={refreshSessions}
@@ -1176,10 +1193,14 @@ function SessionsPage({
   clientID,
   deviceID,
   limit,
+  selectedSessionID,
+  sessionID,
   onClientIDChange,
   onDeviceIDChange,
   onLimitChange,
   onLookupRoute,
+  onSessionIDChange,
+  onSessionSelect,
   onSessionDisconnect,
   onSessionRouteLookup,
   onSessionsRefresh,
@@ -1190,10 +1211,14 @@ function SessionsPage({
   clientID: string;
   deviceID: string;
   limit: number;
+  selectedSessionID: string;
+  sessionID: string;
   onClientIDChange: (clientID: string) => void;
   onDeviceIDChange: (deviceID: string) => void;
   onLimitChange: (limit: number) => void;
   onLookupRoute: () => void | Promise<void>;
+  onSessionIDChange: (sessionID: string) => void;
+  onSessionSelect: (sessionID: string) => void;
   onSessionDisconnect: (session: AdminSession) => void;
   onSessionRouteLookup: (session: AdminSession) => void;
   onSessionsRefresh: () => void | Promise<void>;
@@ -1206,6 +1231,8 @@ function SessionsPage({
   const routeStatus = clientRouteStatus(routeState.data);
   const loadingSessions = state.status === "loading";
   const loadingRoute = routeState.status === "loading";
+  const selectedSession = sessions.find((session) => session.session_id === selectedSessionID) ?? (sessions.length === 1 ? sessions[0] : null);
+  const filtered = [state.data?.session_id, state.data?.client_id, state.data?.device_id].some((value) => (value ?? "") !== "");
 
   if (state.status === "loading" && !state.data) {
     return <SessionsSkeleton />;
@@ -1243,29 +1270,63 @@ function SessionsPage({
             }}
           >
             <p className="text-sm font-medium text-zinc-500">Session Filter</p>
-            <label className="mt-2 text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500" htmlFor="session-client-filter">
-              ClientID
-            </label>
-            <input
-              className="min-w-0 rounded-lg border border-line bg-white px-3 py-2 font-mono text-sm outline-none transition duration-300 placeholder:text-zinc-400 focus:border-accent"
-              id="session-client-filter"
-              onChange={(event) => onClientIDChange(event.target.value)}
-              placeholder="load-client-0"
-              value={clientID}
-            />
+            <div className="grid gap-3">
+              <div className="grid gap-2">
+                <label className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500" htmlFor="session-id-filter">
+                  SessionID
+                </label>
+                <input
+                  className="min-w-0 rounded-lg border border-line bg-white px-3 py-2 font-mono text-sm outline-none transition duration-300 placeholder:text-zinc-400 focus:border-accent"
+                  id="session-id-filter"
+                  onChange={(event) => onSessionIDChange(event.target.value)}
+                  placeholder="zs_..."
+                  value={sessionID}
+                />
+              </div>
 
-            <label className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500" htmlFor="session-limit">
-              Limit
-            </label>
-            <input
-              className="min-w-0 rounded-lg border border-line bg-white px-3 py-2 font-mono text-sm outline-none transition duration-300 focus:border-accent"
-              id="session-limit"
-              max={1000}
-              min={1}
-              onChange={(event) => onLimitChange(clampSessionLimit(event.target.value))}
-              type="number"
-              value={limit}
-            />
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="grid gap-2">
+                  <label className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500" htmlFor="session-client-filter">
+                    ClientID
+                  </label>
+                  <input
+                    className="min-w-0 rounded-lg border border-line bg-white px-3 py-2 font-mono text-sm outline-none transition duration-300 placeholder:text-zinc-400 focus:border-accent"
+                    id="session-client-filter"
+                    onChange={(event) => onClientIDChange(event.target.value)}
+                    placeholder="load-client-0"
+                    value={clientID}
+                  />
+                </div>
+
+                <div className="grid gap-2">
+                  <label className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500" htmlFor="session-device-filter">
+                    DeviceID
+                  </label>
+                  <input
+                    className="min-w-0 rounded-lg border border-line bg-white px-3 py-2 font-mono text-sm outline-none transition duration-300 placeholder:text-zinc-400 focus:border-accent"
+                    id="session-device-filter"
+                    onChange={(event) => onDeviceIDChange(event.target.value)}
+                    placeholder="device-0"
+                    value={deviceID}
+                  />
+                </div>
+              </div>
+
+              <div className="grid gap-2">
+                <label className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500" htmlFor="session-limit">
+                  Limit
+                </label>
+                <input
+                  className="min-w-0 rounded-lg border border-line bg-white px-3 py-2 font-mono text-sm outline-none transition duration-300 focus:border-accent"
+                  id="session-limit"
+                  max={1000}
+                  min={1}
+                  onChange={(event) => onLimitChange(clampSessionLimit(event.target.value))}
+                  type="number"
+                  value={limit}
+                />
+              </div>
+            </div>
 
             <button
               className="mt-2 inline-flex items-center justify-center gap-2 rounded-lg bg-zinc-950 px-4 py-2 text-sm font-medium text-white transition duration-300 hover:bg-zinc-800 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50"
@@ -1289,8 +1350,16 @@ function SessionsPage({
         />
       </section>
 
+      <SessionDetailPanel
+        canDisconnectSessions={canDisconnectSessions}
+        onDisconnect={onSessionDisconnect}
+        onLookupRoute={onSessionRouteLookup}
+        routeState={routeState}
+        session={selectedSession}
+      />
+
       {state.status !== "loading" && sessions.length === 0 ? (
-        <SessionsEmptyState filtered={(state.data?.client_id ?? "") !== ""} />
+        <SessionsEmptyState filtered={filtered} />
       ) : (
         <section className="grid gap-3">
           {sessions.map((session, index) => (
@@ -1298,14 +1367,120 @@ function SessionsPage({
               canDisconnectSessions={canDisconnectSessions}
               index={index}
               key={`${session.session_id}-${session.conn_id}`}
+              onSelect={onSessionSelect}
               onDisconnect={onSessionDisconnect}
               onLookupRoute={onSessionRouteLookup}
+              selected={selectedSession?.session_id === session.session_id}
               session={session}
             />
           ))}
         </section>
       )}
     </div>
+  );
+}
+
+function SessionDetailPanel({
+  canDisconnectSessions,
+  onDisconnect,
+  onLookupRoute,
+  routeState,
+  session,
+}: {
+  canDisconnectSessions: boolean;
+  onDisconnect: (session: AdminSession) => void;
+  onLookupRoute: (session: AdminSession) => void;
+  routeState: RemoteState<AdminClientRouteLookup>;
+  session: AdminSession | null;
+}) {
+  const matchingRoute = routeMatchesSession(routeState.data, session) ? routeState.data : undefined;
+  const routeStatus = matchingRoute ? clientRouteStatus(matchingRoute) : "idle";
+  const canDisconnect = canDisconnectSessions && Boolean(session?.session_id);
+  const disconnectTitle = !canDisconnectSessions
+    ? "Requires operator role"
+    : canDisconnect
+      ? "Disconnect local session"
+      : "SessionID is required";
+
+  if (!session) {
+    return (
+      <section className="rounded-lg border border-dashed border-line bg-white px-5 py-8 shadow-diffusion">
+        <div className="max-w-xl">
+          <div className="grid size-12 place-items-center rounded-lg border border-line bg-zinc-50 text-accent">
+            <RadioButton size={22} weight="duotone" />
+          </div>
+          <h2 className="mt-5 text-2xl font-semibold tracking-tight">No Session Selected</h2>
+          <p className="mt-2 text-sm leading-relaxed text-zinc-500">
+            Select a local session or search by SessionID to inspect its local binding and route context.
+          </p>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="overflow-hidden rounded-lg border border-line bg-white shadow-diffusion">
+      <div className="grid gap-0 xl:grid-cols-[0.88fr_1.12fr]">
+        <div className="border-b border-line p-5 xl:border-b-0 xl:border-r">
+          <div className="flex flex-wrap items-center gap-2">
+            <StatusBadge label="selected" tone="ok" />
+            <RouteStatusBadge status={routeStatus} />
+          </div>
+          <h2 className="mt-4 break-words font-mono text-xl font-semibold tracking-tight text-ink">{session.session_id || "--"}</h2>
+          <p className="mt-2 break-words text-sm text-zinc-500">
+            {session.client_id || "--"} / {session.device_id || "--"}
+          </p>
+
+          <div className="mt-5 flex flex-wrap gap-2">
+            <button
+              className="inline-flex min-w-0 items-center justify-center gap-2 rounded-lg border border-line bg-white px-3 py-2 text-xs font-medium text-ink transition duration-300 hover:border-zinc-300 hover:bg-zinc-50 active:translate-y-px"
+              onClick={() => onLookupRoute(session)}
+              type="button"
+            >
+              <MagnifyingGlass size={14} weight="bold" />
+              Lookup Route
+            </button>
+            <button
+              className="inline-flex min-w-0 items-center justify-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-800 transition duration-300 hover:border-rose-300 hover:bg-rose-100 active:translate-y-px disabled:cursor-not-allowed disabled:border-line disabled:bg-zinc-50 disabled:text-zinc-400 disabled:opacity-60"
+              disabled={!canDisconnect}
+              onClick={() => onDisconnect(session)}
+              title={disconnectTitle}
+              type="button"
+            >
+              <XCircle size={14} weight="bold" />
+              Disconnect
+            </button>
+          </div>
+        </div>
+
+        <div className="grid gap-4 bg-zinc-50 p-5">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            <LineItem label="ConnID" value={session.conn_id?.toLocaleString() ?? "--"} />
+            <LineItem label="Gateway" value={session.gateway_node || "--"} />
+            <LineItem label="Token" value={session.token_id || "--"} />
+            <LineItem label="Connected" value={formatOptionalDate(session.connected_at)} />
+            <LineItem label="Last Seen" value={formatOptionalDate(session.last_seen_at)} />
+            <LineItem label="Route Context" value={routeState.status === "loading" ? "loading" : matchingRoute ? routeStatus : "not loaded"} />
+          </div>
+
+          {matchingRoute?.cluster_route && !matchingRoute.local_session_found && (
+            <div className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+              <p className="font-semibold">Remote session</p>
+              <p className="mt-1 leading-relaxed">
+                This route belongs to {matchingRoute.cluster_route.gateway_node || "another gateway"}. This node can inspect it but cannot
+                disconnect that TCP connection yet.
+              </p>
+            </div>
+          )}
+
+          {!matchingRoute && (
+            <div className="rounded-lg border border-dashed border-line bg-white px-4 py-3 text-sm text-zinc-500">
+              Route context is not loaded for this selected session.
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -1437,6 +1612,15 @@ function ClientRouteResult({ lookup }: { lookup: AdminClientRouteLookup }) {
             <DarkLineItem label="Updated" value={formatOptionalDate(clusterRoute.updated_at)} />
             <DarkLineItem label="Expires In" value={formatMillis(clusterRoute.expires_in_ms)} />
           </div>
+          {!lookup.local_session_found && (
+            <div className="mt-4 rounded-lg border border-sky-200/20 bg-white/10 px-4 py-3 text-sm text-sky-50">
+              <p className="font-semibold">Remote session</p>
+              <p className="mt-1 leading-relaxed text-sky-100">
+                This client is routed to {clusterRoute.gateway_node || "another gateway"}. This node can inspect the route but cannot
+                disconnect that remote TCP connection.
+              </p>
+            </div>
+          )}
         </div>
       )}
 
@@ -1457,12 +1641,16 @@ function SessionCard({
   index,
   onDisconnect,
   onLookupRoute,
+  onSelect,
+  selected,
   session,
 }: {
   canDisconnectSessions: boolean;
   index: number;
   onDisconnect: (session: AdminSession) => void;
   onLookupRoute: (session: AdminSession) => void;
+  onSelect: (sessionID: string) => void;
+  selected: boolean;
   session: AdminSession;
 }) {
   const canDisconnect = canDisconnectSessions && Boolean(session.session_id);
@@ -1474,7 +1662,10 @@ function SessionCard({
 
   return (
     <article
-      className="animate-rise overflow-hidden rounded-lg border border-line bg-white shadow-diffusion"
+      className={[
+        "animate-rise overflow-hidden rounded-lg border bg-white shadow-diffusion transition duration-300",
+        selected ? "border-emerald-300 shadow-[0_20px_50px_-28px_rgba(16,185,129,0.42)]" : "border-line",
+      ].join(" ")}
       style={{ animationDelay: `${index * 45}ms` }}
     >
       <div className="grid gap-4 p-4 lg:grid-cols-[0.75fr_1.25fr] lg:p-5">
@@ -1488,6 +1679,14 @@ function SessionCard({
           <h3 className="mt-4 break-words font-mono text-lg font-semibold tracking-tight">{session.client_id || "--"}</h3>
           <p className="mt-2 break-words text-sm text-zinc-500">{session.device_id || "--"}</p>
           <div className="mt-5 flex min-w-0 flex-wrap gap-2">
+            <button
+              className="inline-flex min-w-0 items-center justify-center gap-2 rounded-lg border border-line bg-zinc-950 px-3 py-2 text-xs font-medium text-white transition duration-300 hover:bg-zinc-800 active:translate-y-px"
+              onClick={() => onSelect(session.session_id)}
+              type="button"
+            >
+              <FileText size={14} weight="bold" />
+              Details
+            </button>
             <button
               className="inline-flex min-w-0 items-center justify-center gap-2 rounded-lg border border-line bg-white px-3 py-2 text-xs font-medium text-ink transition duration-300 hover:border-zinc-300 hover:bg-zinc-50 active:translate-y-px"
               onClick={() => onLookupRoute(session)}
@@ -2904,7 +3103,7 @@ function SessionsEmptyState({ filtered }: { filtered: boolean }) {
         </div>
         <h2 className="mt-5 text-2xl font-semibold tracking-tight">No Sessions</h2>
         <p className="mt-2 text-sm leading-relaxed text-zinc-500">
-          {filtered ? "No local session matched this client filter." : "This gateway did not return local online sessions."}
+          {filtered ? "No local session matched these filters." : "This gateway did not return local online sessions."}
         </p>
       </div>
     </div>
@@ -3089,6 +3288,13 @@ function clientRouteStatus(lookup?: AdminClientRouteLookup): ClientRouteStatus {
     return "remote";
   }
   return "offline";
+}
+
+function routeMatchesSession(lookup: AdminClientRouteLookup | undefined, session: AdminSession | null): boolean {
+  if (!lookup || !session) {
+    return false;
+  }
+  return lookup.client_id === session.client_id && lookup.device_id === session.device_id;
 }
 
 function successfulHTTPStatus(status?: number): boolean {

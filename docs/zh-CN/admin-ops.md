@@ -184,8 +184,12 @@ go run ./cmd/admin discard \
 go run ./cmd/admin sessions \
   -internal-url http://127.0.0.1:18080 \
   -internal-token dev-internal-token \
-  -client-id client-1
+  -client-id client-1 \
+  -device-id device-1
 ```
+
+`sessions` 只查询当前 gateway 节点的本机连接。可以按 `session_id` 精确查询，
+也可以按 `client_id` 或 `client_id + device_id` 缩小结果范围。
 
 查询 client/device 路由：
 

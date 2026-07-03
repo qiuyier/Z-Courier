@@ -22,6 +22,13 @@ export type DiagnosisBundleParams = {
   deviceID: string;
 };
 
+export type SessionListParams = {
+  clientID: string;
+  deviceID: string;
+  sessionID: string;
+  limit: number;
+};
+
 export class APIError extends Error {
   readonly status: number;
 
@@ -105,14 +112,16 @@ export async function fetchRoutes(signal?: AbortSignal): Promise<AdminRoutes> {
   return fetchAdminJSON<AdminRoutes>("/internal/admin/routes", signal);
 }
 
-export async function fetchSessions(
-  clientID: string,
-  limit: number,
-  signal?: AbortSignal,
-): Promise<AdminSessions> {
-  const query = new URLSearchParams({ limit: String(limit) });
-  if (clientID.trim() !== "") {
-    query.set("client_id", clientID.trim());
+export async function fetchSessions(params: SessionListParams, signal?: AbortSignal): Promise<AdminSessions> {
+  const query = new URLSearchParams({ limit: String(params.limit) });
+  if (params.sessionID.trim() !== "") {
+    query.set("session_id", params.sessionID.trim());
+  }
+  if (params.clientID.trim() !== "") {
+    query.set("client_id", params.clientID.trim());
+  }
+  if (params.deviceID.trim() !== "") {
+    query.set("device_id", params.deviceID.trim());
   }
   return fetchAdminJSON<AdminSessions>(`/internal/debug/sessions?${query.toString()}`, signal);
 }

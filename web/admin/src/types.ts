@@ -150,7 +150,9 @@ export type AdminSessions = {
   code: string;
   reason?: string;
   gateway_node: string;
+  session_id?: string;
   client_id?: string;
+  device_id?: string;
   limit: number;
   total: number;
   unique_clients: number;

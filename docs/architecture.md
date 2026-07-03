@@ -263,8 +263,10 @@ POST /internal/kick
 
 `GET /internal/debug/route?client_id=...&device_id=...` returns the local
 session, if present, and the cluster online route, if cluster routing is enabled.
-`GET /internal/debug/sessions?client_id=...&limit=...` lists local sessions on
-the current gateway node.
+`GET /internal/debug/sessions?session_id=...&client_id=...&device_id=...&limit=...`
+lists local sessions on the current gateway node. The filters are local-only:
+`session_id` is an exact lookup, while `client_id` and `device_id` narrow the
+local session list.
 
 Downlink request envelope:
 

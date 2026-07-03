@@ -151,7 +151,8 @@ go run ./cmd/admin route \
 ```bash
 go run ./cmd/admin sessions \
   -internal-url http://<target-gateway-internal>:18080 \
-  -client-id client-1
+  -client-id client-1 \
+  -device-id device-1
 ```
 
 ## 8. 处理 failed 消息

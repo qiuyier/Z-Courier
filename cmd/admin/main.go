@@ -43,8 +43,10 @@ type routeConfig struct {
 
 type sessionsConfig struct {
 	commonConfig
-	ClientID string
-	Limit    int
+	SessionID string
+	ClientID  string
+	DeviceID  string
+	Limit     int
 }
 
 type messageConfig struct {
@@ -126,7 +128,7 @@ func printUsage(out io.Writer) {
 	fmt.Fprintln(out, "  diagnose     Collect a safe diagnosis bundle from one gateway node")
 	fmt.Fprintln(out, "  routes       Show enabled upstream route ranges and sanitized target metadata")
 	fmt.Fprintln(out, "  route        Show where one client/device would be pushed")
-	fmt.Fprintln(out, "  sessions     Show local sessions, optionally filtered by client_id")
+	fmt.Fprintln(out, "  sessions     Show local sessions, optionally filtered by session_id, client_id, or device_id")
 	fmt.Fprintln(out, "  message      Show one stored downlink message by message_id")
 	fmt.Fprintln(out, "  messages     List stored downlink messages by delivery status")
 	fmt.Fprintln(out, "  requeue      Requeue one stored downlink message, requires -confirm")
@@ -265,7 +267,9 @@ func runSessions(args []string) int {
 	fs := flag.NewFlagSet("sessions", flag.ExitOnError)
 	config := sessionsConfig{commonConfig: defaultCommonConfig(), Limit: 100}
 	addCommonFlags(fs, &config.commonConfig)
+	fs.StringVar(&config.SessionID, "session-id", "", "optional session id filter")
 	fs.StringVar(&config.ClientID, "client-id", "", "optional client id filter")
+	fs.StringVar(&config.DeviceID, "device-id", "", "optional device id filter")
 	fs.IntVar(&config.Limit, "limit", 100, "maximum sessions to return")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: admin sessions [flags]\n")
@@ -501,6 +505,9 @@ func diagnose(config diagnoseConfig) error {
 		sessionsQuery := url.Values{}
 		sessionsQuery.Set("client_id", clientID)
 		sessionsQuery.Set("limit", strconv.Itoa(config.SessionLimit))
+		if deviceID != "" {
+			sessionsQuery.Set("device_id", deviceID)
+		}
 		collectDiagnoseSection(config.commonConfig, bundle.Sections, "sessions", "/internal/debug/sessions?"+sessionsQuery.Encode())
 	}
 	if clientID != "" && deviceID != "" {
@@ -633,6 +640,12 @@ func sessions(config sessionsConfig) error {
 	query.Set("limit", strconv.Itoa(config.Limit))
 	if strings.TrimSpace(config.ClientID) != "" {
 		query.Set("client_id", strings.TrimSpace(config.ClientID))
+	}
+	if strings.TrimSpace(config.DeviceID) != "" {
+		query.Set("device_id", strings.TrimSpace(config.DeviceID))
+	}
+	if strings.TrimSpace(config.SessionID) != "" {
+		query.Set("session_id", strings.TrimSpace(config.SessionID))
 	}
 	return requestAndPrint(config.commonConfig, "/internal/debug/sessions?"+query.Encode())
 }
