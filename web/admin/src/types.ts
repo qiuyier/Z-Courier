@@ -44,6 +44,8 @@ export type AdminConsoleSummary = {
     cookie_name?: string;
     cookie_secure: boolean;
     cookie_same_site?: string;
+    role?: string;
+    permissions?: string[];
   };
 };
 
@@ -51,6 +53,7 @@ export type AdminConsoleSession = {
   session_id: string;
   principal: string;
   role: string;
+  permissions?: string[];
   created_at: string;
   expires_at: string;
   last_seen_at: string;

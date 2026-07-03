@@ -33,6 +33,9 @@ func newInternalHTTPServer(config Config, logger *zap.Logger, service *downlink.
 	withConsoleSession := func(handler http.Handler) http.Handler {
 		return withAdminSessionAuth(handler, adminSessions, adminSessionConfig.sessionConfig, handlerConfig.InternalToken)
 	}
+	withConsolePermission := func(handler http.Handler, permission string) http.Handler {
+		return withConsoleSession(withAdminPermission(handler, permission, logger))
+	}
 	pushLimiter := capacity.NewLimiter(config.InternalPushMaxInFlight)
 	mux.Handle("/healthz", newHealthHandler())
 	mux.Handle("/readyz", newReadyHandler(health))
@@ -52,46 +55,46 @@ func newInternalHTTPServer(config Config, logger *zap.Logger, service *downlink.
 		PushLimiter:        pushLimiter,
 		Logger:             logger,
 	}))
-	mux.Handle("/internal/message/status", withConsoleSession(downlink.NewStatusHandler(downlink.HandlerConfig{
+	mux.Handle("/internal/message/status", withConsolePermission(downlink.NewStatusHandler(downlink.HandlerConfig{
 		Service:            service,
 		InternalToken:      handlerConfig.InternalToken,
 		MaxRequestBodySize: config.InternalMaxRequestBodySize,
 		GatewayNode:        config.GatewayNode,
 		Logger:             logger,
-	})))
-	mux.Handle("/internal/messages", withConsoleSession(downlink.NewMessageListHandler(downlink.HandlerConfig{
+	}), adminPermissionRead))
+	mux.Handle("/internal/messages", withConsolePermission(downlink.NewMessageListHandler(downlink.HandlerConfig{
 		Service:            service,
 		InternalToken:      handlerConfig.InternalToken,
 		MaxRequestBodySize: config.InternalMaxRequestBodySize,
 		GatewayNode:        config.GatewayNode,
 		Logger:             logger,
-	})))
-	mux.Handle("/internal/message/requeue", withConsoleSession(downlink.NewRequeueHandler(downlink.HandlerConfig{
+	}), adminPermissionRead))
+	mux.Handle("/internal/message/requeue", withConsolePermission(downlink.NewRequeueHandler(downlink.HandlerConfig{
 		Service:            service,
 		InternalToken:      handlerConfig.InternalToken,
 		MaxRequestBodySize: config.InternalMaxRequestBodySize,
 		GatewayNode:        config.GatewayNode,
 		Logger:             logger,
-	})))
-	mux.Handle("/internal/message/discard", withConsoleSession(downlink.NewDiscardHandler(downlink.HandlerConfig{
+	}), adminPermissionMessageRepair))
+	mux.Handle("/internal/message/discard", withConsolePermission(downlink.NewDiscardHandler(downlink.HandlerConfig{
 		Service:            service,
 		InternalToken:      handlerConfig.InternalToken,
 		MaxRequestBodySize: config.InternalMaxRequestBodySize,
 		GatewayNode:        config.GatewayNode,
 		Logger:             logger,
-	})))
+	}), adminPermissionMessageRepair))
 	if adminSessions != nil {
 		mux.Handle(adminSessionLoginPath, newAdminSessionLoginHandler(adminSessionConfig))
 		mux.Handle(adminSessionMePath, newAdminSessionMeHandler(adminSessionConfig))
 		mux.Handle(adminSessionLogoutPath, newAdminSessionLogoutHandler(adminSessionConfig))
 	}
-	mux.Handle("/internal/admin/overview", withConsoleSession(newAdminOverviewHandler(handlerConfig, health, registry)))
-	mux.Handle("/internal/admin/routes", withConsoleSession(newAdminRoutesHandler(handlerConfig)))
-	mux.Handle("/internal/admin/diagnostics", withConsoleSession(newAdminDiagnosticsHandler(handlerConfig, health, registry, runtime, service.HasStore())))
-	mux.Handle("/internal/admin/check", withConsoleSession(newAdminCheckHandler(handlerConfig, service, registry)))
-	mux.Handle("/internal/admin/diagnose", withConsoleSession(newAdminDiagnoseHandler(handlerConfig, health, registry, runtime, service)))
-	mux.Handle("/internal/debug/route", withConsoleSession(newDebugRouteHandler(handlerConfig, registry)))
-	mux.Handle("/internal/debug/sessions", withConsoleSession(newDebugSessionsHandler(handlerConfig)))
+	mux.Handle("/internal/admin/overview", withConsolePermission(newAdminOverviewHandler(handlerConfig, health, registry), adminPermissionRead))
+	mux.Handle("/internal/admin/routes", withConsolePermission(newAdminRoutesHandler(handlerConfig), adminPermissionRead))
+	mux.Handle("/internal/admin/diagnostics", withConsolePermission(newAdminDiagnosticsHandler(handlerConfig, health, registry, runtime, service.HasStore()), adminPermissionRead))
+	mux.Handle("/internal/admin/check", withConsolePermission(newAdminCheckHandler(handlerConfig, service, registry), adminPermissionRead))
+	mux.Handle("/internal/admin/diagnose", withConsolePermission(newAdminDiagnoseHandler(handlerConfig, health, registry, runtime, service), adminPermissionRead))
+	mux.Handle("/internal/debug/route", withConsolePermission(newDebugRouteHandler(handlerConfig, registry), adminPermissionRead))
+	mux.Handle("/internal/debug/sessions", withConsolePermission(newDebugSessionsHandler(handlerConfig), adminPermissionRead))
 	if config.AdminConsole.Enabled {
 		mux.Handle(config.AdminConsole.Path, newAdminConsoleHandler(config.AdminConsole))
 	}

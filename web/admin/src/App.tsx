@@ -57,6 +57,7 @@ import type {
 } from "./types";
 
 const messageStatuses: MessageStatus[] = ["failed", "pending", "sent", "delivered", "discarded"];
+const messageRepairPermission = "message:repair";
 
 type MetricContext = {
   label: string;
@@ -191,6 +192,7 @@ export default function App() {
   const [activePage, setActivePage] = useState<PageID>("overview");
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
   const authenticated = authState.status === "authenticated";
+  const canRepairMessages = authState.status === "authenticated" && adminSessionAllows(authState.session, messageRepairPermission);
 
   const clearConsoleState = useCallback(() => {
     setState({ status: "idle" });
@@ -466,8 +468,11 @@ export default function App() {
   );
 
   const openMessageAction = useCallback((action: MessageAction, message: MessageStatusResponse) => {
+    if (!canRepairMessages) {
+      return;
+    }
     setMessageActionDialog({ action, message, reason: "" });
-  }, []);
+  }, [canRepairMessages]);
 
   const closeMessageAction = useCallback(() => {
     if (messageActionPending) {
@@ -481,7 +486,7 @@ export default function App() {
   }, []);
 
   const confirmMessageAction = useCallback(async () => {
-    if (!messageActionDialog || !authenticated) {
+    if (!messageActionDialog || !authenticated || !canRepairMessages) {
       return;
     }
 
@@ -517,7 +522,7 @@ export default function App() {
     } finally {
       setMessageActionPending(false);
     }
-  }, [authenticated, expireSession, messageActionDialog, messageLookupID, refreshMessages]);
+  }, [authenticated, canRepairMessages, expireSession, messageActionDialog, messageLookupID, refreshMessages]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -878,6 +883,7 @@ export default function App() {
             />
           ) : activePage === "messages" && authenticated && (messagesState.status !== "error" || messagesState.data) ? (
             <MessagesPage
+              canRepairMessages={canRepairMessages}
               limit={messageLimit}
               lookupID={messageLookupID}
               lookupState={messageLookupState}
@@ -1584,6 +1590,7 @@ function RouteStatusBadge({ status }: { status: ClientRouteStatus }) {
 }
 
 function MessagesPage({
+  canRepairMessages,
   limit,
   lookupID,
   lookupState,
@@ -1595,6 +1602,7 @@ function MessagesPage({
   selectedStatus,
   state,
 }: {
+  canRepairMessages: boolean;
   limit: number;
   lookupID: string;
   lookupState: RemoteState<MessageStatusResponse>;
@@ -1676,6 +1684,7 @@ function MessagesPage({
         </article>
 
         <MessageLookupPanel
+          canRepairMessages={canRepairMessages}
           lookupID={lookupID}
           lookupState={lookupState}
           onMessageAction={onMessageAction}
@@ -1693,6 +1702,7 @@ function MessagesPage({
               key={message.message_id || `${message.status}-${index}`}
               message={message}
               index={index}
+              canRepairMessages={canRepairMessages}
               onAction={onMessageAction}
             />
           ))}
@@ -1703,12 +1713,14 @@ function MessagesPage({
 }
 
 function MessageLookupPanel({
+  canRepairMessages,
   lookupID,
   lookupState,
   onMessageAction,
   onLookupIDChange,
   onLookupSubmit,
 }: {
+  canRepairMessages: boolean;
   lookupID: string;
   lookupState: RemoteState<MessageStatusResponse>;
   onMessageAction: (action: MessageAction, message: MessageStatusResponse) => void;
@@ -1776,7 +1788,7 @@ function MessageLookupPanel({
             <DarkLineItem label="Attempts" value={lookupState.data.attempts?.toLocaleString() ?? "0"} />
           </div>
           <div className="mt-4 border-t border-white/10 pt-4">
-            <MessageActionButtons message={lookupState.data} onAction={onMessageAction} variant="dark" />
+            <MessageActionButtons canRepairMessages={canRepairMessages} message={lookupState.data} onAction={onMessageAction} variant="dark" />
           </div>
         </div>
       )}
@@ -1785,10 +1797,12 @@ function MessageLookupPanel({
 }
 
 function MessageCard({
+  canRepairMessages,
   message,
   index,
   onAction,
 }: {
+  canRepairMessages: boolean;
   message: MessageStatusResponse;
   index: number;
   onAction: (action: MessageAction, message: MessageStatusResponse) => void;
@@ -1811,7 +1825,7 @@ function MessageCard({
             {message.client_id || "--"} / {message.device_id || "--"}
           </p>
           <div className="mt-5">
-            <MessageActionButtons message={message} onAction={onAction} />
+            <MessageActionButtons canRepairMessages={canRepairMessages} message={message} onAction={onAction} />
           </div>
         </div>
 
@@ -1833,16 +1847,29 @@ function MessageCard({
 }
 
 function MessageActionButtons({
+  canRepairMessages,
   message,
   onAction,
   variant = "light",
 }: {
+  canRepairMessages: boolean;
   message: MessageStatusResponse;
   onAction: (action: MessageAction, message: MessageStatusResponse) => void;
   variant?: "light" | "dark";
 }) {
-  const canRequeueMessage = canRequeue(message.status) && Boolean(message.message_id);
-  const canDiscardMessage = canDiscard(message.status) && Boolean(message.message_id);
+  const hasMessageID = Boolean(message.message_id);
+  const canRequeueMessage = canRepairMessages && canRequeue(message.status) && hasMessageID;
+  const canDiscardMessage = canRepairMessages && canDiscard(message.status) && hasMessageID;
+  const requeueTitle = !canRepairMessages
+    ? "Requires operator role"
+    : canRequeueMessage
+      ? "Requeue message"
+      : "This message cannot be requeued";
+  const discardTitle = !canRepairMessages
+    ? "Requires operator role"
+    : canDiscardMessage
+      ? "Discard message"
+      : "This message cannot be discarded";
   const lightRequeue =
     "border-line bg-white text-ink hover:border-zinc-300 hover:bg-zinc-50 disabled:bg-zinc-50 disabled:text-zinc-400";
   const lightDiscard =
@@ -1861,7 +1888,7 @@ function MessageActionButtons({
         ].join(" ")}
         disabled={!canRequeueMessage}
         onClick={() => onAction("requeue", message)}
-        title={canRequeueMessage ? "Requeue message" : "This message cannot be requeued"}
+        title={requeueTitle}
         type="button"
       >
         <ArrowClockwise size={14} weight="bold" />
@@ -1874,7 +1901,7 @@ function MessageActionButtons({
         ].join(" ")}
         disabled={!canDiscardMessage}
         onClick={() => onAction("discard", message)}
-        title={canDiscardMessage ? "Discard message" : "This message cannot be discarded"}
+        title={discardTitle}
         type="button"
       >
         <XCircle size={14} weight="bold" />
@@ -2913,6 +2940,16 @@ function isUnauthorized(error: unknown): boolean {
 
 function requestErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "unknown_error";
+}
+
+function adminSessionAllows(session: AdminConsoleSession, permission: string): boolean {
+  if (session.permissions?.includes(permission)) {
+    return true;
+  }
+  if (session.role === "admin") {
+    return true;
+  }
+  return session.role === "operator" && permission === messageRepairPermission;
 }
 
 function shortID(value: string): string {

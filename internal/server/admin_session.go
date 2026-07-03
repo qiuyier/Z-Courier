@@ -10,10 +10,7 @@ import (
 	"time"
 )
 
-const (
-	adminSessionIDPrefix  = "zas_"
-	adminSessionRoleAdmin = "admin"
-)
+const adminSessionIDPrefix = "zas_"
 
 var errAdminSessionRandom = errors.New("admin session: random source failed")
 
@@ -67,7 +64,7 @@ func (m *adminSessionManager) Create(principal string) (string, adminSession, er
 	session := adminSession{
 		SessionID:  sessionID,
 		Principal:  principal,
-		Role:       adminSessionRoleAdmin,
+		Role:       normalizeAdminRole(m.config.Role),
 		CreatedAt:  now,
 		ExpiresAt:  now.Add(m.config.TTL),
 		LastSeenAt: now,

@@ -72,6 +72,7 @@ type AdminConsoleSessionConfig struct {
 	CookieName     string
 	CookieSecure   bool
 	CookieSameSite string
+	Role           string
 }
 
 type UpstreamRouteConfig struct {
@@ -215,6 +216,7 @@ func DefaultConfig() Config {
 				TTL:            8 * time.Hour,
 				CookieName:     "zcourier_admin_session",
 				CookieSameSite: "lax",
+				Role:           adminSessionRoleAdmin,
 			},
 		},
 		DownlinkStorage: DownlinkStorageConfig{
@@ -368,6 +370,7 @@ func normalizeConfig(config Config) Config {
 	if config.AdminConsole.Session.CookieSameSite == "" {
 		config.AdminConsole.Session.CookieSameSite = defaults.AdminConsole.Session.CookieSameSite
 	}
+	config.AdminConsole.Session.Role = normalizeAdminRole(config.AdminConsole.Session.Role)
 	if config.DownlinkStorage.Type == "" {
 		config.DownlinkStorage.Type = defaults.DownlinkStorage.Type
 	}

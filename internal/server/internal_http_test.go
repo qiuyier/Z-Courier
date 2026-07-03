@@ -866,6 +866,73 @@ func TestInternalHTTPAdminSessionRejectsInvalidToken(t *testing.T) {
 	}
 }
 
+func TestInternalHTTPAdminSessionReadonlyDeniesMessageRepair(t *testing.T) {
+	service := downlink.NewService(testSessionFinder{}, testConnectionFinder{}, downlink.WithStore(downlink.NewMemoryStore()))
+	config := normalizeConfig(Config{
+		InternalHTTPAddr: "127.0.0.1:18080",
+		InternalToken:    "secret",
+		AdminConsole: AdminConsoleConfig{
+			Session: AdminConsoleSessionConfig{
+				Enabled:        true,
+				TTL:            time.Hour,
+				CookieName:     "zcourier_admin_session",
+				CookieSameSite: "lax",
+				Role:           adminSessionRoleReadonly,
+			},
+		},
+	})
+
+	server := mustInternalHTTPServer(t, config, service, &gatewayHealth{}, nil)
+	loginReq := httptest.NewRequest(http.MethodPost, adminSessionLoginPath, strings.NewReader(`{"token":"secret"}`))
+	loginRec := httptest.NewRecorder()
+	server.Handler.ServeHTTP(loginRec, loginReq)
+	if loginRec.Code != http.StatusOK {
+		t.Fatalf("login status = %d, want %d, body = %s", loginRec.Code, http.StatusOK, loginRec.Body.String())
+	}
+	cookie := firstCookie(loginRec.Result(), config.AdminConsole.Session.CookieName)
+	if cookie == nil || cookie.Value == "" {
+		t.Fatalf("login cookie = %+v, want session cookie", cookie)
+	}
+	var loginResp adminSessionResponse
+	if err := sonic.Unmarshal(loginRec.Body.Bytes(), &loginResp); err != nil {
+		t.Fatalf("Unmarshal(login) error = %v", err)
+	}
+	if loginResp.Session == nil || loginResp.Session.Role != adminSessionRoleReadonly || len(loginResp.Session.Permissions) != 1 || loginResp.Session.Permissions[0] != adminPermissionRead {
+		t.Fatalf("login response = %+v, want readonly read-only permissions", loginResp)
+	}
+
+	messagesReq := httptest.NewRequest(http.MethodGet, "/internal/messages?status=failed", nil)
+	messagesReq.AddCookie(cookie)
+	messagesRec := httptest.NewRecorder()
+	server.Handler.ServeHTTP(messagesRec, messagesReq)
+	if messagesRec.Code != http.StatusOK {
+		t.Fatalf("messages status = %d, want %d, body = %s", messagesRec.Code, http.StatusOK, messagesRec.Body.String())
+	}
+
+	requeueReq := httptest.NewRequest(http.MethodPost, "/internal/message/requeue", strings.NewReader(`{"message_id":"missing"}`))
+	requeueReq.AddCookie(cookie)
+	requeueRec := httptest.NewRecorder()
+	server.Handler.ServeHTTP(requeueRec, requeueReq)
+	if requeueRec.Code != http.StatusForbidden {
+		t.Fatalf("readonly requeue status = %d, want %d, body = %s", requeueRec.Code, http.StatusForbidden, requeueRec.Body.String())
+	}
+	var denied adminPermissionDeniedResponse
+	if err := sonic.Unmarshal(requeueRec.Body.Bytes(), &denied); err != nil {
+		t.Fatalf("Unmarshal(denied) error = %v", err)
+	}
+	if denied.Code != "permission_denied" || denied.Role != adminSessionRoleReadonly || denied.Permission != adminPermissionMessageRepair {
+		t.Fatalf("denied response = %+v, want readonly message repair denial", denied)
+	}
+
+	directReq := httptest.NewRequest(http.MethodPost, "/internal/message/requeue", strings.NewReader(`{"message_id":"missing"}`))
+	directReq.Header.Set(downlink.InternalTokenHeader, "secret")
+	directRec := httptest.NewRecorder()
+	server.Handler.ServeHTTP(directRec, directReq)
+	if directRec.Code == http.StatusForbidden {
+		t.Fatalf("direct internal token status = %d, want non-permission response", directRec.Code)
+	}
+}
+
 func TestInternalHTTPHealthAndReady(t *testing.T) {
 	service := downlink.NewService(testSessionFinder{}, testConnectionFinder{})
 	health := &gatewayHealth{}

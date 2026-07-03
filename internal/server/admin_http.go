@@ -81,11 +81,13 @@ type adminMonitoringSummary struct {
 }
 
 type adminConsoleSessionSummary struct {
-	Enabled        bool   `json:"enabled"`
-	TTL            string `json:"ttl,omitempty"`
-	CookieName     string `json:"cookie_name,omitempty"`
-	CookieSecure   bool   `json:"cookie_secure"`
-	CookieSameSite string `json:"cookie_same_site,omitempty"`
+	Enabled        bool     `json:"enabled"`
+	TTL            string   `json:"ttl,omitempty"`
+	CookieName     string   `json:"cookie_name,omitempty"`
+	CookieSecure   bool     `json:"cookie_secure"`
+	CookieSameSite string   `json:"cookie_same_site,omitempty"`
+	Role           string   `json:"role,omitempty"`
+	Permissions    []string `json:"permissions,omitempty"`
 }
 
 type adminDownlinkSummary struct {
@@ -416,6 +418,8 @@ func adminConsoleFromConfig(config Config) adminConsoleSummary {
 			CookieName:     config.AdminConsole.Session.CookieName,
 			CookieSecure:   config.AdminConsole.Session.CookieSecure,
 			CookieSameSite: config.AdminConsole.Session.CookieSameSite,
+			Role:           normalizeAdminRole(config.AdminConsole.Session.Role),
+			Permissions:    adminPermissionsForRole(config.AdminConsole.Session.Role),
 		},
 	}
 }

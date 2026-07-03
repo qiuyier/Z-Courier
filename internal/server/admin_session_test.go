@@ -13,6 +13,7 @@ func TestAdminSessionManagerCreateLookupDeleteAndExpire(t *testing.T) {
 		TTL:            time.Second,
 		CookieName:     "zcourier_admin_session",
 		CookieSameSite: "lax",
+		Role:           adminSessionRoleOperator,
 	})
 	manager.now = func() time.Time { return now }
 
@@ -20,8 +21,8 @@ func TestAdminSessionManagerCreateLookupDeleteAndExpire(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
-	if token == "" || !strings.HasPrefix(created.SessionID, adminSessionIDPrefix) || created.Principal != "operator" || created.Role != adminSessionRoleAdmin {
-		t.Fatalf("created session = %+v token=%q, want token/admin session", created, token)
+	if token == "" || !strings.HasPrefix(created.SessionID, adminSessionIDPrefix) || created.Principal != "operator" || created.Role != adminSessionRoleOperator {
+		t.Fatalf("created session = %+v token=%q, want token/operator session", created, token)
 	}
 
 	found, ok := manager.Lookup(token)
@@ -46,5 +47,29 @@ func TestAdminSessionManagerCreateLookupDeleteAndExpire(t *testing.T) {
 	}
 	if _, ok := manager.Lookup(token); ok {
 		t.Fatal("Lookup(deleted) ok = true, want false")
+	}
+}
+
+func TestAdminRoleAllows(t *testing.T) {
+	tests := []struct {
+		name       string
+		role       string
+		permission string
+		want       bool
+	}{
+		{name: "readonly read", role: adminSessionRoleReadonly, permission: adminPermissionRead, want: true},
+		{name: "readonly repair", role: adminSessionRoleReadonly, permission: adminPermissionMessageRepair, want: false},
+		{name: "operator read", role: adminSessionRoleOperator, permission: adminPermissionRead, want: true},
+		{name: "operator repair", role: adminSessionRoleOperator, permission: adminPermissionMessageRepair, want: true},
+		{name: "admin repair", role: adminSessionRoleAdmin, permission: adminPermissionMessageRepair, want: true},
+		{name: "empty defaults admin", role: "", permission: adminPermissionMessageRepair, want: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := adminRoleAllows(test.role, test.permission); got != test.want {
+				t.Fatalf("adminRoleAllows(%q, %q) = %v, want %v", test.role, test.permission, got, test.want)
+			}
+		})
 	}
 }

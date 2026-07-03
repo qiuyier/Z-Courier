@@ -119,6 +119,7 @@ type AdminConsoleSessionConfig struct {
 	CookieName     string `yaml:"cookie_name"`
 	CookieSecure   bool   `yaml:"cookie_secure"`
 	CookieSameSite string `yaml:"cookie_same_site"`
+	Role           string `yaml:"role"`
 }
 
 type ClusterConfig struct {
@@ -760,12 +761,23 @@ func toAdminConsoleSessionConfig(config AdminConsoleSessionConfig) (server.Admin
 		return server.AdminConsoleSessionConfig{}, fmt.Errorf("config: admin_console.session.cookie_same_site must be one of lax, strict, none")
 	}
 
+	role := strings.ToLower(strings.TrimSpace(config.Role))
+	if role == "" {
+		role = defaults.Role
+	}
+	switch role {
+	case "readonly", "operator", "admin":
+	default:
+		return server.AdminConsoleSessionConfig{}, fmt.Errorf("config: admin_console.session.role must be one of readonly, operator, admin")
+	}
+
 	return server.AdminConsoleSessionConfig{
 		Enabled:        config.Enabled,
 		TTL:            ttl,
 		CookieName:     cookieName,
 		CookieSecure:   config.CookieSecure,
 		CookieSameSite: sameSite,
+		Role:           role,
 	}, nil
 }
 

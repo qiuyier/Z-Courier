@@ -151,6 +151,10 @@
             "cookieSameSite": {
               "type": "string",
               "enum": ["lax", "strict", "none"]
+            },
+            "role": {
+              "type": "string",
+              "enum": ["readonly", "operator", "admin"]
             }
           }
         }

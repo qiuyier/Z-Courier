@@ -18,6 +18,10 @@ semantic versioning after the first public MVP tag.
 - Admin console login flow that exchanges the internal token for a short-lived
   HTTP-only session cookie, restores existing sessions on refresh, and removes
   browser-side token persistence from normal console API calls.
+- Admin console session roles and permission checks for `readonly`,
+  `operator`, and `admin`, including server-side protection for guarded message
+  repair actions and frontend action disabling from returned permission
+  metadata.
 
 ## [v0.9.1] - 2026-07-02
 

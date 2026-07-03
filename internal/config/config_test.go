@@ -150,6 +150,7 @@ admin_console:
     cookie_name: zcourier_ops_session
     cookie_secure: true
     cookie_same_site: strict
+    role: operator
 cluster:
   enabled: true
   internal_addr: http://gateway-a:18082
@@ -282,7 +283,8 @@ upstream:
 		config.AdminConsole.Session.TTL != 2*time.Hour ||
 		config.AdminConsole.Session.CookieName != "zcourier_ops_session" ||
 		!config.AdminConsole.Session.CookieSecure ||
-		config.AdminConsole.Session.CookieSameSite != "strict" {
+		config.AdminConsole.Session.CookieSameSite != "strict" ||
+		config.AdminConsole.Session.Role != "operator" {
 		t.Fatalf("AdminConsole Session = %+v, want configured session", config.AdminConsole.Session)
 	}
 	if !config.Cluster.Enabled {
@@ -538,6 +540,22 @@ admin_console:
 	}
 	if !strings.Contains(err.Error(), "admin_console.monitoring.prometheus_url") {
 		t.Fatalf("LoadServerConfig() error = %q, want monitoring field", err)
+	}
+}
+
+func TestLoadServerConfigRejectsInvalidAdminConsoleSessionRole(t *testing.T) {
+	path := writeConfig(t, `
+admin_console:
+  session:
+    role: owner
+`)
+
+	_, err := LoadServerConfig(path)
+	if err == nil {
+		t.Fatal("LoadServerConfig() error = nil, want session role error")
+	}
+	if !strings.Contains(err.Error(), "admin_console.session.role") {
+		t.Fatalf("LoadServerConfig() error = %q, want session role field", err)
 	}
 }
 

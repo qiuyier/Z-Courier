@@ -310,6 +310,7 @@ admin_console:
     cookie_name: zcourier_admin_session
     cookie_secure: false
     cookie_same_site: lax
+    role: admin
 ```
 
 - `enabled`: serves the embedded browser console from internal HTTP when true.
@@ -327,6 +328,10 @@ admin_console:
 - `session.cookie_secure`: set true when the console is served over HTTPS.
 - `session.cookie_same_site`: one of `lax`, `strict`, or `none`. `none`
   requires `session.cookie_secure=true`.
+- `session.role`: role assigned to newly created browser sessions. Supported
+  values are `readonly`, `operator`, and `admin`. `readonly` can inspect
+  console data; `operator` can also run guarded message repair actions such as
+  requeue and discard; `admin` currently includes all operator permissions.
 
 The console is an internal operations UI, not a public endpoint. Production
 deployments should keep it on private networking and expose it only through a

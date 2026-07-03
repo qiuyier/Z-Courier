@@ -92,6 +92,7 @@ adminConsole:
     cookieName: zcourier_admin_session
     cookieSecure: true
     cookieSameSite: lax
+    role: admin
 
 cluster:
   enabled: true

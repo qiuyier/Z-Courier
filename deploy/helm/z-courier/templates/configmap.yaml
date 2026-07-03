@@ -56,6 +56,7 @@ data:
         cookie_name: {{ .Values.adminConsole.session.cookieName | quote }}
         cookie_secure: {{ .Values.adminConsole.session.cookieSecure }}
         cookie_same_site: {{ .Values.adminConsole.session.cookieSameSite | quote }}
+        role: {{ .Values.adminConsole.session.role | quote }}
 
     cluster:
       enabled: {{ .Values.cluster.enabled }}

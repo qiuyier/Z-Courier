@@ -62,6 +62,14 @@ var (
 		[]string{"result"},
 	)
 
+	adminPermissionRejected = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "z_courier_admin_permission_rejected_total",
+			Help: "Total number of admin session requests rejected by role permission checks.",
+		},
+		[]string{"role", "permission"},
+	)
+
 	gatewayReadiness = promauto.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "z_courier_gateway_readiness",
@@ -373,6 +381,10 @@ func RecordAuthJWKSRefresh(result string, duration time.Duration) {
 	if duration >= 0 {
 		authJWKSRefreshDuration.WithLabelValues(result).Observe(duration.Seconds())
 	}
+}
+
+func RecordAdminPermissionRejected(role string, permission string) {
+	adminPermissionRejected.WithLabelValues(nonEmpty(role, "unknown"), nonEmpty(permission, "unknown")).Inc()
 }
 
 func SetGatewayReadiness(status string) {

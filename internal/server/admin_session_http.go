@@ -41,6 +41,7 @@ type adminSessionInfo struct {
 	SessionID   string    `json:"session_id"`
 	Principal   string    `json:"principal"`
 	Role        string    `json:"role"`
+	Permissions []string  `json:"permissions,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 	ExpiresAt   time.Time `json:"expires_at"`
 	LastSeenAt  time.Time `json:"last_seen_at"`
@@ -341,7 +342,8 @@ func adminSessionInfoFromSession(session adminSession, now time.Time) *adminSess
 	return &adminSessionInfo{
 		SessionID:   session.SessionID,
 		Principal:   session.Principal,
-		Role:        session.Role,
+		Role:        normalizeAdminRole(session.Role),
+		Permissions: adminPermissionsForRole(session.Role),
 		CreatedAt:   session.CreatedAt.UTC(),
 		ExpiresAt:   session.ExpiresAt.UTC(),
 		LastSeenAt:  session.LastSeenAt.UTC(),

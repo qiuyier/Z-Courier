@@ -143,6 +143,7 @@ adminConsole:
     cookieName: zcourier_admin_session
     cookieSecure: true
     cookieSameSite: lax
+    role: admin
   monitoring:
     prometheusURL: https://prometheus.example.internal
     grafanaURL: https://grafana.example.internal

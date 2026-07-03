@@ -33,6 +33,7 @@ admin_console:
     cookie_name: zcourier_admin_session
     cookie_secure: false
     cookie_same_site: lax
+    role: readonly
 
 cluster:
   enabled: false

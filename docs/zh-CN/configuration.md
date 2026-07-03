@@ -224,6 +224,7 @@ admin_console:
     cookie_name: zcourier_admin_session
     cookie_secure: false
     cookie_same_site: lax
+    role: admin
 ```
 
 注意：
@@ -238,6 +239,9 @@ admin_console:
 - 当前 admin session 是单节点内存态，gateway 重启后会失效。
 - `cookie_same_site` 可选 `lax`、`strict`、`none`；`none` 必须配合
   `cookie_secure=true`。
+- `role` 是新建浏览器 session 的角色，可选 `readonly`、`operator`、`admin`。
+  `readonly` 只能查看，`operator` 可以执行受保护的消息修复操作，比如 requeue
+  和 discard，`admin` 目前包含 operator 的全部权限。
 - HMAC 模式下，浏览器直接持有 HMAC secret 并不理想，也无法自己完成安全签名链路。
   生产更适合由反向代理完成 operator 鉴权和内部签名，再转发到 gateway internal
   HTTP。
