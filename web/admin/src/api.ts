@@ -13,6 +13,7 @@ import type {
   DownlinkTestPushResponse,
   MessageStatus,
   MessageStatusResponse,
+  RetryScanResponse,
 } from "./types";
 
 export type DiagnosisBundleParams = {
@@ -235,6 +236,10 @@ export async function discardMessage(
   signal?: AbortSignal,
 ): Promise<MessageStatusResponse> {
   return postAdminJSON<MessageStatusResponse>("/internal/message/discard", { message_id: messageID, reason }, signal);
+}
+
+export async function runRetryScan(signal?: AbortSignal): Promise<RetryScanResponse> {
+  return postAdminJSON<RetryScanResponse>("/internal/messages/retry/scan", {}, signal);
 }
 
 function generatedTestPushID(): string {

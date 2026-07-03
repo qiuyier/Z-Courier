@@ -37,6 +37,7 @@ import {
   loginAdminSession,
   logoutAdminSession,
   requeueMessage,
+  runRetryScan,
   sendDownlinkTestPush,
 } from "./api";
 import type {
@@ -57,10 +58,12 @@ import type {
   DownlinkTestPushResponse,
   MessageStatus,
   MessageStatusResponse,
+  RetryScanResponse,
 } from "./types";
 
 const messageStatuses: MessageStatus[] = ["failed", "pending", "sent", "delivered", "discarded"];
 const messageRepairPermission = "message:repair";
+const retryScanPermission = "message:retry_scan";
 const sessionDisconnectPermission = "session:disconnect";
 const downlinkTestPushPermission = "downlink:test_push";
 
@@ -204,6 +207,7 @@ export default function App() {
   const [checkState, setCheckState] = useState<RemoteState<AdminCheck>>({ status: "idle" });
   const [messagesState, setMessagesState] = useState<RemoteState<AdminMessages>>({ status: "idle" });
   const [messageLookupState, setMessageLookupState] = useState<RemoteState<MessageStatusResponse>>({ status: "idle" });
+  const [retryScanState, setRetryScanState] = useState<RemoteState<RetryScanResponse>>({ status: "idle" });
   const [downlinkTestPushState, setDownlinkTestPushState] = useState<RemoteState<DownlinkTestPushResponse>>({ status: "idle" });
   const [checkTimeout, setCheckTimeout] = useState("2s");
   const [checkRanAt, setCheckRanAt] = useState<Date | null>(null);
@@ -229,6 +233,7 @@ export default function App() {
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
   const authenticated = authState.status === "authenticated";
   const canRepairMessages = authState.status === "authenticated" && adminSessionAllows(authState.session, messageRepairPermission);
+  const canRunRetryScan = authState.status === "authenticated" && adminSessionAllows(authState.session, retryScanPermission);
   const canTestDownlinkPush = authState.status === "authenticated" && adminSessionAllows(authState.session, downlinkTestPushPermission);
   const canDisconnectSessions =
     authState.status === "authenticated" && adminSessionAllows(authState.session, sessionDisconnectPermission);
@@ -243,6 +248,7 @@ export default function App() {
     setCheckState({ status: "idle" });
     setMessagesState({ status: "idle" });
     setMessageLookupState({ status: "idle" });
+    setRetryScanState({ status: "idle" });
     setDownlinkTestPushState({ status: "idle" });
     setDownlinkTestPushForm(defaultDownlinkTestPushForm());
     setMessageActionDialog(null);
@@ -578,6 +584,37 @@ export default function App() {
       }
     },
     [authenticated, expireSession, messageLookupID],
+  );
+
+  const submitRetryScan = useCallback(
+    async (signal?: AbortSignal) => {
+      if (!authenticated) {
+        setRetryScanState({ status: "idle" });
+        return;
+      }
+      if (!canRunRetryScan) {
+        setRetryScanState({ status: "error", error: "permission_denied: requires operator role" });
+        return;
+      }
+
+      setRetryScanState((current) => ({ status: "loading", data: current.data }));
+      try {
+        const data = await runRetryScan(signal);
+        setRetryScanState({ status: "ready", data });
+        await refreshMessages(signal);
+      } catch (error) {
+        if (signal?.aborted) {
+          return;
+        }
+        if (isUnauthorized(error)) {
+          expireSession();
+          return;
+        }
+        const message = requestErrorMessage(error);
+        setRetryScanState((current) => ({ status: "error", data: current.data, error: message }));
+      }
+    },
+    [authenticated, canRunRetryScan, expireSession, refreshMessages],
   );
 
   const updateDownlinkTestPushForm = useCallback((patch: Partial<DownlinkTestPushForm>) => {
@@ -1083,6 +1120,7 @@ export default function App() {
           ) : activePage === "messages" && authenticated && (messagesState.status !== "error" || messagesState.data) ? (
             <MessagesPage
               canRepairMessages={canRepairMessages}
+              canRunRetryScan={canRunRetryScan}
               canTestDownlinkPush={canTestDownlinkPush}
               downlinkTestPushForm={downlinkTestPushForm}
               downlinkTestPushState={downlinkTestPushState}
@@ -1095,7 +1133,9 @@ export default function App() {
               onMessageAction={openMessageAction}
               onLookupIDChange={setMessageLookupID}
               onLookupSubmit={lookupMessage}
+              onRetryScan={submitRetryScan}
               onStatusChange={setMessageStatus}
+              retryScanState={retryScanState}
               selectedStatus={messageStatus}
               state={messagesState}
             />
@@ -2041,6 +2081,7 @@ function RouteStatusBadge({ status }: { status: ClientRouteStatus }) {
 
 function MessagesPage({
   canRepairMessages,
+  canRunRetryScan,
   canTestDownlinkPush,
   downlinkTestPushForm,
   downlinkTestPushState,
@@ -2053,11 +2094,14 @@ function MessagesPage({
   onLookupIDChange,
   onLookupSubmit,
   onMessageAction,
+  onRetryScan,
   onStatusChange,
+  retryScanState,
   selectedStatus,
   state,
 }: {
   canRepairMessages: boolean;
+  canRunRetryScan: boolean;
   canTestDownlinkPush: boolean;
   downlinkTestPushForm: DownlinkTestPushForm;
   downlinkTestPushState: RemoteState<DownlinkTestPushResponse>;
@@ -2070,7 +2114,9 @@ function MessagesPage({
   onLookupIDChange: (messageID: string) => void;
   onLookupSubmit: () => void | Promise<void>;
   onMessageAction: (action: MessageAction, message: MessageStatusResponse) => void;
+  onRetryScan: () => void | Promise<void>;
   onStatusChange: (status: MessageStatus) => void;
+  retryScanState: RemoteState<RetryScanResponse>;
   selectedStatus: MessageStatus;
   state: RemoteState<AdminMessages>;
 }) {
@@ -2125,6 +2171,8 @@ function MessagesPage({
         </div>
       </section>
 
+      <RetryScanPanel canRunRetryScan={canRunRetryScan} onRun={onRetryScan} state={retryScanState} />
+
       <DownlinkTestPushPanel
         canTestDownlinkPush={canTestDownlinkPush}
         form={downlinkTestPushForm}
@@ -2177,6 +2225,72 @@ function MessagesPage({
         </section>
       )}
     </div>
+  );
+}
+
+function RetryScanPanel({
+  canRunRetryScan,
+  onRun,
+  state,
+}: {
+  canRunRetryScan: boolean;
+  onRun: () => void | Promise<void>;
+  state: RemoteState<RetryScanResponse>;
+}) {
+  const running = state.status === "loading";
+  const disabled = running || !canRunRetryScan;
+  const data = state.data;
+  const code = data?.code ?? (state.status === "error" ? "failed" : running ? "running" : "idle");
+
+  return (
+    <section className="rounded-lg border border-line bg-white p-5 shadow-diffusion">
+      <div className="grid gap-5 lg:grid-cols-[0.78fr_1.22fr]">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <StatusBadge label={canRunRetryScan ? "operator" : "read only"} tone={canRunRetryScan ? "ok" : "warn"} />
+            <StatusBadge label={code} tone={state.status === "error" ? "warn" : data ? "ok" : "info"} />
+          </div>
+          <h2 className="mt-4 text-2xl font-semibold tracking-tight text-ink">Retry Scan</h2>
+          <p className="mt-2 max-w-[58ch] text-sm leading-relaxed text-zinc-500">
+            Triggers one bounded scan using the gateway retry lease, max-attempt, and ACK-timeout rules.
+          </p>
+          <button
+            className="mt-5 inline-flex min-w-0 items-center justify-center gap-2 rounded-lg bg-zinc-950 px-4 py-2 text-sm font-medium text-white transition duration-300 hover:bg-zinc-800 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={disabled}
+            onClick={() => void onRun()}
+            title={canRunRetryScan ? "Run one retry scan" : "Requires operator role"}
+            type="button"
+          >
+            <ArrowClockwise size={16} weight="bold" />
+            {running ? "Scanning..." : "Run Retry Scan"}
+          </button>
+          {!canRunRetryScan && <p className="mt-3 break-words text-xs font-medium text-amber-700">Requires operator role.</p>}
+        </div>
+
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <MetricRow label="Scanned" value={(data?.scanned ?? 0).toLocaleString()} />
+          <MetricRow label="Sent" value={(data?.sent ?? 0).toLocaleString()} />
+          <MetricRow label="Queued" value={(data?.queued ?? 0).toLocaleString()} />
+          <MetricRow label="Failed" value={(data?.failed ?? 0).toLocaleString()} />
+        </div>
+      </div>
+
+      {state.status === "error" && (
+        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          <p className="font-semibold">Retry scan failed</p>
+          <p className="mt-1 break-words font-mono text-xs">{state.error}</p>
+        </div>
+      )}
+
+      {data && (
+        <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+          <p className="font-semibold">Scan completed</p>
+          <p className="mt-1 font-mono text-xs">
+            limit={data.limit ?? "--"} scanned={data.scanned} sent={data.sent} queued={data.queued} failed={data.failed}
+          </p>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -3711,7 +3825,10 @@ function adminSessionAllows(session: AdminConsoleSession, permission: string): b
   }
   return (
     session.role === "operator" &&
-    (permission === messageRepairPermission || permission === sessionDisconnectPermission || permission === downlinkTestPushPermission)
+    (permission === messageRepairPermission ||
+      permission === retryScanPermission ||
+      permission === sessionDisconnectPermission ||
+      permission === downlinkTestPushPermission)
   );
 }
 

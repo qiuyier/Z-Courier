@@ -1687,6 +1687,41 @@ func TestInternalHTTPDebugPushReadonlyDenied(t *testing.T) {
 	}
 }
 
+func TestInternalHTTPRetryScanReadonlyDenied(t *testing.T) {
+	service := downlink.NewService(testSessionFinder{}, testConnectionFinder{}, downlink.WithStore(downlink.NewMemoryStore()))
+	config := normalizeConfig(Config{
+		InternalHTTPAddr: "127.0.0.1:18080",
+		InternalToken:    "secret",
+		AdminConsole: AdminConsoleConfig{
+			Session: AdminConsoleSessionConfig{
+				Enabled:        true,
+				TTL:            time.Hour,
+				CookieName:     "zcourier_admin_session",
+				CookieSameSite: "lax",
+				Role:           adminSessionRoleReadonly,
+			},
+		},
+	})
+
+	server := mustInternalHTTPServer(t, config, service, &gatewayHealth{}, nil)
+	cookie := loginAdminSessionCookie(t, server, config, "secret")
+	req := httptest.NewRequest(http.MethodPost, "/internal/messages/retry/scan", strings.NewReader(`{}`))
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	server.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusForbidden, rec.Body.String())
+	}
+	var denied adminPermissionDeniedResponse
+	if err := sonic.Unmarshal(rec.Body.Bytes(), &denied); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if denied.Code != "permission_denied" || denied.Permission != adminPermissionRetryScan {
+		t.Fatalf("denied = %+v, want retry scan permission denial", denied)
+	}
+}
+
 type testStoppableConnection struct {
 	stopped bool
 }

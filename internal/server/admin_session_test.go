@@ -59,9 +59,11 @@ func TestAdminRoleAllows(t *testing.T) {
 	}{
 		{name: "readonly read", role: adminSessionRoleReadonly, permission: adminPermissionRead, want: true},
 		{name: "readonly repair", role: adminSessionRoleReadonly, permission: adminPermissionMessageRepair, want: false},
+		{name: "readonly retry scan", role: adminSessionRoleReadonly, permission: adminPermissionRetryScan, want: false},
 		{name: "readonly test push", role: adminSessionRoleReadonly, permission: adminPermissionDownlinkTestPush, want: false},
 		{name: "operator read", role: adminSessionRoleOperator, permission: adminPermissionRead, want: true},
 		{name: "operator repair", role: adminSessionRoleOperator, permission: adminPermissionMessageRepair, want: true},
+		{name: "operator retry scan", role: adminSessionRoleOperator, permission: adminPermissionRetryScan, want: true},
 		{name: "operator test push", role: adminSessionRoleOperator, permission: adminPermissionDownlinkTestPush, want: true},
 		{name: "admin repair", role: adminSessionRoleAdmin, permission: adminPermissionMessageRepair, want: true},
 		{name: "empty defaults admin", role: "", permission: adminPermissionMessageRepair, want: true},

@@ -88,6 +88,12 @@ type discardConfig struct {
 	Confirm   bool
 }
 
+type retryScanConfig struct {
+	commonConfig
+	Limit   int
+	Confirm bool
+}
+
 func main() {
 	switch {
 	case len(os.Args) > 1 && os.Args[1] == "overview":
@@ -112,6 +118,8 @@ func main() {
 		os.Exit(runRequeue(os.Args[2:]))
 	case len(os.Args) > 1 && os.Args[1] == "discard":
 		os.Exit(runDiscard(os.Args[2:]))
+	case len(os.Args) > 1 && os.Args[1] == "retry-scan":
+		os.Exit(runRetryScan(os.Args[2:]))
 	default:
 		printUsage(os.Stderr)
 		os.Exit(2)
@@ -119,7 +127,7 @@ func main() {
 }
 
 func printUsage(out io.Writer) {
-	fmt.Fprintln(out, "Usage: admin <overview|diagnostics|check|diagnose|routes|route|sessions|message|messages|requeue|discard> [flags]")
+	fmt.Fprintln(out, "Usage: admin <overview|diagnostics|check|diagnose|routes|route|sessions|message|messages|requeue|discard|retry-scan> [flags]")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Commands:")
 	fmt.Fprintln(out, "  overview     Show gateway identity, readiness, cluster, sessions, and dependency summary")
@@ -133,6 +141,7 @@ func printUsage(out io.Writer) {
 	fmt.Fprintln(out, "  messages     List stored downlink messages by delivery status")
 	fmt.Fprintln(out, "  requeue      Requeue one stored downlink message, requires -confirm")
 	fmt.Fprintln(out, "  discard      Discard one stored downlink message, requires -reason and -confirm")
+	fmt.Fprintln(out, "  retry-scan   Trigger one bounded downlink retry scan, requires -confirm")
 }
 
 func runOverview(args []string) int {
@@ -365,6 +374,27 @@ func runDiscard(args []string) int {
 
 	if err := discard(config); err != nil {
 		fmt.Fprintf(os.Stderr, "discard failed: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+func runRetryScan(args []string) int {
+	fs := flag.NewFlagSet("retry-scan", flag.ExitOnError)
+	config := retryScanConfig{commonConfig: defaultCommonConfig()}
+	addCommonFlags(fs, &config.commonConfig)
+	fs.IntVar(&config.Limit, "limit", 0, "maximum messages to scan; 0 uses gateway configured scan_limit")
+	fs.BoolVar(&config.Confirm, "confirm", false, "confirm the retry scan mutation")
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: admin retry-scan -confirm [flags]\n")
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+
+	if err := retryScan(config); err != nil {
+		fmt.Fprintf(os.Stderr, "retry scan failed: %v\n", err)
 		return 1
 	}
 	return 0
@@ -706,6 +736,18 @@ func discard(config discardConfig) error {
 
 	request := sdkbackend.MessageActionRequest{MessageID: messageID, Reason: reason}
 	return requestAndPrintJSON(config.commonConfig, http.MethodPost, "/internal/message/discard", request)
+}
+
+func retryScan(config retryScanConfig) error {
+	if config.Limit < 0 {
+		return fmt.Errorf("limit must be greater than or equal to 0")
+	}
+	if !config.Confirm {
+		return fmt.Errorf("refusing to trigger retry scan without -confirm; would POST /internal/messages/retry/scan")
+	}
+
+	request := sdkbackend.RetryScanRequest{Limit: config.Limit}
+	return requestAndPrintJSON(config.commonConfig, http.MethodPost, "/internal/messages/retry/scan", request)
 }
 
 func requestAndPrint(config commonConfig, path string) error {

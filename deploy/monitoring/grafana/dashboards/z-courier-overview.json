@@ -3070,6 +3070,17 @@
           "legendFormat": "test push {{result}}",
           "range": true,
           "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (result) (rate(z_courier_admin_retry_scan_total[1m]))",
+          "legendFormat": "retry scan {{result}}",
+          "range": true,
+          "refId": "D"
         }
       ],
       "title": "Admin Actions / sec",

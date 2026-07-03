@@ -326,6 +326,16 @@ export type AdminMessages = {
   messages?: MessageStatusResponse[];
 };
 
+export type RetryScanResponse = {
+  code: string;
+  reason?: string;
+  limit?: number;
+  scanned: number;
+  sent: number;
+  queued: number;
+  failed: number;
+};
+
 export type AdminCheckStatus = "ok" | "degraded" | "failed" | "skipped";
 
 export type AdminCheckResult = {

@@ -461,6 +461,60 @@ func TestDiscardSendsConfirmedRequest(t *testing.T) {
 	}
 }
 
+func TestRetryScanRequiresConfirm(t *testing.T) {
+	var called bool
+	stubFailingAdminHTTPClient(t, &called)
+
+	err := retryScan(retryScanConfig{
+		commonConfig: validCommonConfig(t),
+		Limit:        10,
+	})
+	if err == nil || !strings.Contains(err.Error(), "without -confirm") {
+		t.Fatalf("retryScan() error = %v, want confirm error", err)
+	}
+	if called {
+		t.Fatal("retryScan() sent an HTTP request without confirm")
+	}
+}
+
+func TestRetryScanSendsConfirmedRequest(t *testing.T) {
+	var gotReq *http.Request
+	var gotBody []byte
+	stubAdminHTTPClientWithBody(t, http.StatusOK, `{"code":"ok","scanned":0}`, &gotReq, &gotBody)
+
+	err := retryScan(retryScanConfig{
+		commonConfig: commonConfig{
+			InternalURL:   "http://gateway-a:18182/",
+			AuthMode:      authModeToken,
+			InternalToken: "secret",
+			Timeout:       time.Second,
+		},
+		Limit:   25,
+		Confirm: true,
+	})
+	if err != nil {
+		t.Fatalf("retryScan() error = %v", err)
+	}
+
+	if gotReq == nil {
+		t.Fatal("request was not sent")
+	}
+	if gotReq.Method != http.MethodPost || gotReq.URL.String() != "http://gateway-a:18182/internal/messages/retry/scan" {
+		t.Fatalf("request = %s %s, want POST /internal/messages/retry/scan", gotReq.Method, gotReq.URL.String())
+	}
+	if gotReq.Header.Get(sdkbackend.InternalTokenHeader) != "secret" {
+		t.Fatalf("internal token = %q, want secret", gotReq.Header.Get(sdkbackend.InternalTokenHeader))
+	}
+
+	var body sdkbackend.RetryScanRequest
+	if err := sonic.Unmarshal(gotBody, &body); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
+	if body.Limit != 25 {
+		t.Fatalf("body = %+v, want limit 25", body)
+	}
+}
+
 func TestRequeueSignsRequestWithHMAC(t *testing.T) {
 	var gotReq *http.Request
 	var gotBody []byte

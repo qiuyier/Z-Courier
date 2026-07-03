@@ -17,6 +17,7 @@ type HandlerConfig struct {
 	InternalToken      string
 	MaxRequestBodySize int64
 	MaxBatchMessages   int
+	RetryScanLimit     int
 	GatewayNode        string
 	PushLimiter        *capacity.Limiter
 	Logger             *zap.Logger
@@ -39,6 +40,9 @@ func normalizeHandlerConfig(config HandlerConfig) HandlerConfig {
 	}
 	if config.MaxBatchMessages <= 0 {
 		config.MaxBatchMessages = 100
+	}
+	if config.RetryScanLimit <= 0 {
+		config.RetryScanLimit = 100
 	}
 
 	return config

@@ -28,6 +28,8 @@ type MessageStatusRequest = sdkbackend.MessageStatusRequest
 type MessageStatusResponse = sdkbackend.MessageStatusResponse
 type ListMessagesResponse = sdkbackend.ListMessagesResponse
 type MessageActionRequest = sdkbackend.MessageActionRequest
+type RetryScanRequest = sdkbackend.RetryScanRequest
+type RetryScanResponse = sdkbackend.RetryScanResponse
 
 type PeerPushResponse struct {
 	Code          string `json:"code"`

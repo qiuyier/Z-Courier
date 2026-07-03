@@ -176,6 +176,25 @@ go run ./cmd/admin discard \
 
 `requeue` 和 `discard` 都需要显式 `-confirm`。`discard` 还需要原因。这样是为了避免误操作。
 
+手动触发一轮 retry scan：
+
+```bash
+go run ./cmd/admin retry-scan \
+  -internal-url http://127.0.0.1:18080 \
+  -internal-token dev-internal-token \
+  -confirm
+```
+
+对应接口是 `POST /internal/messages/retry/scan`。它复用后台 retry worker 的
+同一套规则：retry lease、ACK timeout、max attempts、cluster peer push 都不会被
+绕过。请求体可以带 `{"limit":100}`；不传或传 `0` 时使用配置里的
+`downlink.delivery.scan_limit`。响应会返回 `scanned`、`sent`、`queued`、
+`failed` 计数。
+
+这个接口需要 `message:retry_scan` 权限，readonly console session 无法调用。
+它会记录 `z_courier_admin_retry_scan_total` 指标，并输出
+`admin_retry_scan` 审计日志。
+
 ## 会话和路由查询
 
 查询本机 sessions：

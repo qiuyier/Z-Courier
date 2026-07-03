@@ -83,6 +83,14 @@ func newInternalHTTPServer(config Config, logger *zap.Logger, service *downlink.
 		GatewayNode:        config.GatewayNode,
 		Logger:             logger,
 	}), adminPermissionMessageRepair))
+	mux.Handle("/internal/messages/retry/scan", withConsolePermission(downlink.NewRetryScanHandler(downlink.HandlerConfig{
+		Service:            service,
+		InternalToken:      handlerConfig.InternalToken,
+		MaxRequestBodySize: config.InternalMaxRequestBodySize,
+		RetryScanLimit:     config.DownlinkDelivery.ScanLimit,
+		GatewayNode:        config.GatewayNode,
+		Logger:             logger,
+	}), adminPermissionRetryScan))
 	if adminSessions != nil {
 		mux.Handle(adminSessionLoginPath, newAdminSessionLoginHandler(adminSessionConfig))
 		mux.Handle(adminSessionMePath, newAdminSessionMeHandler(adminSessionConfig))

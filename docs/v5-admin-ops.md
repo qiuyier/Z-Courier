@@ -332,6 +332,7 @@ operator workflow:
 ```text
 GET /internal/message/status?message_id=...
 GET /internal/messages?status=failed&limit=100
+POST /internal/messages/retry/scan
 ```
 
 `message/status` answers the persisted delivery state, attempts, last error,
@@ -340,6 +341,20 @@ claim owner, retry timestamps, and body size for one reliable downlink message.
 `messages` lists stored messages by status. Supported statuses are `pending`,
 `sent`, `delivered`, `failed`, and `discarded`. When status is omitted, the
 gateway defaults to failed messages.
+
+`messages/retry/scan` triggers one bounded reliable-downlink retry scan. It
+uses the same retry lease, ACK-timeout, max-attempt, and cluster peer-push
+rules as the background retry worker. It accepts an optional JSON body:
+
+```json
+{"limit":100}
+```
+
+When `limit` is omitted or zero, the gateway uses the configured
+`downlink.delivery.scan_limit`. The response reports `scanned`, `sent`,
+`queued`, and `failed` counts. The endpoint is guarded by the
+`message:retry_scan` console permission, increments
+`z_courier_admin_retry_scan_total`, and emits an `admin_retry_scan` audit log.
 
 ## CLI
 
@@ -414,6 +429,11 @@ go run ./cmd/admin discard \
   -internal-token dev-internal-token \
   -message-id message-1 \
   -reason "handled manually" \
+  -confirm
+
+go run ./cmd/admin retry-scan \
+  -internal-url http://127.0.0.1:18182 \
+  -internal-token dev-internal-token \
   -confirm
 ```
 

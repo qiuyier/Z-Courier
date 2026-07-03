@@ -86,6 +86,14 @@ var (
 		[]string{"result"},
 	)
 
+	adminRetryScan = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "z_courier_admin_retry_scan_total",
+			Help: "Total number of admin-triggered downlink retry scan attempts.",
+		},
+		[]string{"result"},
+	)
+
 	gatewayReadiness = promauto.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "z_courier_gateway_readiness",
@@ -496,6 +504,10 @@ func RecordDownlinkRequeue(result string) {
 
 func RecordDownlinkDiscard(result string) {
 	downlinkDiscard.WithLabelValues(nonEmpty(result, "unknown")).Inc()
+}
+
+func RecordAdminRetryScan(result string) {
+	adminRetryScan.WithLabelValues(nonEmpty(result, "unknown")).Inc()
 }
 
 func RecordDownlinkCleanupStatus(status, result string, deleted int) {

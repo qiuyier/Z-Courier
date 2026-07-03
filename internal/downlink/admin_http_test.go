@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/bytedance/sonic"
 	"github.com/qiuyier/Z-Courier/internal/httpauth"
@@ -153,6 +154,81 @@ func TestDiscardHandlerOK(t *testing.T) {
 	}
 }
 
+func TestRetryScanHandlerOK(t *testing.T) {
+	now := time.Now().Add(-time.Minute)
+	store := NewMemoryStore()
+	if _, err := store.Save(context.Background(), Message{
+		MessageID:   "message-1",
+		ClientID:    "client-1",
+		DeviceID:    "device-1",
+		MsgID:       2001,
+		Status:      MessageStatusPending,
+		NextRetryAt: now,
+	}); err != nil {
+		t.Fatalf("Save error = %v", err)
+	}
+
+	core, logs := observer.New(zap.InfoLevel)
+	handler := NewRetryScanHandler(HandlerConfig{
+		Service:        NewService(fakeSessions{}, fakeConnections{}, WithStore(store)),
+		InternalToken:  "secret",
+		RetryScanLimit: 25,
+		GatewayNode:    "gateway-a",
+		Logger:         zap.New(core),
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/internal/messages/retry/scan", strings.NewReader(`{}`))
+	req.Header.Set(InternalTokenHeader, "secret")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var resp RetryScanResponse
+	if err := sonic.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if resp.Code != "ok" || resp.Limit != 25 || resp.Scanned != 1 || resp.Sent != 0 || resp.Queued != 1 || resp.Failed != 0 {
+		t.Fatalf("response = %+v, want one queued retry", resp)
+	}
+
+	entry := onlyRetryScanAuditLog(t, logs)
+	if entry.Level != zap.InfoLevel {
+		t.Fatalf("level = %s, want info", entry.Level)
+	}
+	fields := entry.ContextMap()
+	if fields["audit_event"] != "admin_retry_scan" ||
+		fields["result"] != "success" ||
+		fields["http_status"] != int64(http.StatusOK) ||
+		fields["auth_mode"] != httpauth.ModeToken ||
+		fields["gateway_node"] != "gateway-a" ||
+		fields["limit"] != int64(25) ||
+		fields["scanned"] != int64(1) ||
+		fields["queued"] != int64(1) {
+		t.Fatalf("audit fields = %#v", fields)
+	}
+}
+
+func TestRetryScanHandlerRejectsInvalidLimit(t *testing.T) {
+	handler := NewRetryScanHandler(HandlerConfig{
+		Service:       NewService(fakeSessions{}, fakeConnections{}, WithStore(NewMemoryStore())),
+		InternalToken: "secret",
+		Logger:        zap.NewNop(),
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/internal/messages/retry/scan", strings.NewReader(`{"limit":-1}`))
+	req.Header.Set(InternalTokenHeader, "secret")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+}
+
 func TestDiscardHandlerAuditsSuccessWithTokenIdentity(t *testing.T) {
 	store := NewMemoryStore()
 	if _, err := store.Save(context.Background(), Message{
@@ -284,6 +360,16 @@ func onlyAuditLog(t *testing.T, logs *observer.ObservedLogs) observer.LoggedEntr
 	t.Helper()
 
 	entries := logs.FilterMessage("admin message action audit").All()
+	if len(entries) != 1 {
+		t.Fatalf("audit log entries = %d, want 1: %+v", len(entries), entries)
+	}
+	return entries[0]
+}
+
+func onlyRetryScanAuditLog(t *testing.T, logs *observer.ObservedLogs) observer.LoggedEntry {
+	t.Helper()
+
+	entries := logs.FilterMessage("admin retry scan audit").All()
 	if len(entries) != 1 {
 		t.Fatalf("audit log entries = %d, want 1: %+v", len(entries), entries)
 	}

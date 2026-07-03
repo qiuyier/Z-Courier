@@ -16,6 +16,7 @@ import (
 const (
 	defaultMessageListLimit = 100
 	maxMessageListLimit     = 1000
+	maxRetryScanLimit       = 1000
 
 	messageActionRequeue = "requeue"
 	messageActionDiscard = "discard"
@@ -31,6 +32,10 @@ func NewRequeueHandler(config HandlerConfig) http.Handler {
 
 func NewDiscardHandler(config HandlerConfig) http.Handler {
 	return &messageActionHandler{config: normalizeHandlerConfig(config), action: messageActionDiscard}
+}
+
+func NewRetryScanHandler(config HandlerConfig) http.Handler {
+	return &retryScanHandler{config: normalizeHandlerConfig(config)}
 }
 
 type messageListHandler struct {
@@ -86,6 +91,131 @@ func (h *messageListHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 type messageActionHandler struct {
 	config HandlerConfig
 	action string
+}
+
+type retryScanHandler struct {
+	config HandlerConfig
+}
+
+func (h *retryScanHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		h.record("method_not_allowed")
+		h.audit(r, "method_not_allowed", http.StatusMethodNotAllowed, 0, RetryResult{}, nil)
+		writeJSON(w, http.StatusMethodNotAllowed, RetryScanResponse{Code: "method_not_allowed"})
+		return
+	}
+	if h.config.InternalToken != "" && r.Header.Get(InternalTokenHeader) != h.config.InternalToken {
+		h.record("unauthorized")
+		h.audit(r, "unauthorized", http.StatusUnauthorized, 0, RetryResult{}, nil)
+		writeJSON(w, http.StatusUnauthorized, RetryScanResponse{Code: "unauthorized"})
+		return
+	}
+
+	req, ok := h.request(w, r)
+	if !ok {
+		return
+	}
+	limit, err := parseRetryScanLimit(req.Limit, h.config.RetryScanLimit)
+	if err != nil {
+		h.record("bad_request")
+		h.audit(r, "bad_request", http.StatusBadRequest, req.Limit, RetryResult{}, err)
+		writeJSON(w, http.StatusBadRequest, RetryScanResponse{Code: "bad_request", Reason: err.Error()})
+		return
+	}
+
+	result, err := h.config.Service.RetryDue(r.Context(), limit)
+	if err != nil {
+		statusCode := statusFromAdminError(err)
+		code := retryScanCodeFromError(err, statusCode)
+		h.record(code)
+		h.audit(r, code, statusCode, limit, result, err)
+		writeJSON(w, statusCode, RetryScanResponse{
+			Code:    code,
+			Reason:  err.Error(),
+			Limit:   limit,
+			Scanned: result.Scanned,
+			Sent:    result.Sent,
+			Queued:  result.Queued,
+			Failed:  result.Failed,
+		})
+		return
+	}
+
+	h.record("success")
+	h.audit(r, "success", http.StatusOK, limit, result, nil)
+	writeJSON(w, http.StatusOK, RetryScanResponse{
+		Code:    "ok",
+		Limit:   limit,
+		Scanned: result.Scanned,
+		Sent:    result.Sent,
+		Queued:  result.Queued,
+		Failed:  result.Failed,
+	})
+}
+
+func (h *retryScanHandler) request(w http.ResponseWriter, r *http.Request) (RetryScanRequest, bool) {
+	defer r.Body.Close()
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, h.config.MaxRequestBodySize))
+	if err != nil {
+		h.record("request_too_large")
+		h.audit(r, "request_too_large", http.StatusRequestEntityTooLarge, 0, RetryResult{}, err)
+		writeJSON(w, http.StatusRequestEntityTooLarge, RetryScanResponse{Code: "request_too_large", Reason: err.Error()})
+		return RetryScanRequest{}, false
+	}
+	if strings.TrimSpace(string(body)) == "" {
+		return RetryScanRequest{}, true
+	}
+
+	var req RetryScanRequest
+	if err := sonic.Unmarshal(body, &req); err != nil {
+		h.record("bad_request")
+		h.audit(r, "bad_request", http.StatusBadRequest, 0, RetryResult{}, err)
+		writeJSON(w, http.StatusBadRequest, RetryScanResponse{Code: "bad_request", Reason: err.Error()})
+		return RetryScanRequest{}, false
+	}
+	return req, true
+}
+
+func (h *retryScanHandler) record(result string) {
+	metrics.RecordAdminRetryScan(result)
+}
+
+func (h *retryScanHandler) audit(r *http.Request, result string, statusCode int, limit int, scan RetryResult, err error) {
+	if h.config.Logger == nil {
+		return
+	}
+
+	identity := adminAuthIdentity(r, h.config.InternalToken)
+	fields := []zap.Field{
+		zap.String("audit_event", "admin_retry_scan"),
+		zap.String("result", result),
+		zap.Int("http_status", statusCode),
+		zap.String("auth_mode", identity.Mode),
+		zap.String("method", r.Method),
+		zap.String("path", r.URL.Path),
+		zap.String("remote_addr", r.RemoteAddr),
+		zap.Int("limit", limit),
+		zap.Int("scanned", scan.Scanned),
+		zap.Int("sent", scan.Sent),
+		zap.Int("queued", scan.Queued),
+		zap.Int("failed", scan.Failed),
+	}
+	if h.config.GatewayNode != "" {
+		fields = append(fields, zap.String("gateway_node", h.config.GatewayNode))
+	}
+	if identity.KeyID != "" {
+		fields = append(fields, zap.String("auth_key_id", identity.KeyID))
+	}
+	if err != nil {
+		fields = append(fields, zap.Error(err))
+		h.config.Logger.Warn("admin retry scan audit", fields...)
+		return
+	}
+	if statusCode >= http.StatusBadRequest {
+		h.config.Logger.Warn("admin retry scan audit", fields...)
+		return
+	}
+	h.config.Logger.Info("admin retry scan audit", fields...)
 }
 
 func (h *messageActionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -217,13 +347,17 @@ func (h *messageActionHandler) audit(r *http.Request, result string, statusCode 
 }
 
 func (h *messageActionHandler) authIdentity(r *http.Request) httpauth.Identity {
+	return adminAuthIdentity(r, h.config.InternalToken)
+}
+
+func adminAuthIdentity(r *http.Request, internalToken string) httpauth.Identity {
 	if identity, ok := httpauth.IdentityFromContext(r.Context()); ok {
 		if identity.Mode == "" {
 			identity.Mode = httpauth.ModeNone
 		}
 		return identity
 	}
-	if h.config.InternalToken != "" {
+	if internalToken != "" {
 		return httpauth.Identity{Mode: httpauth.ModeToken}
 	}
 	return httpauth.Identity{Mode: httpauth.ModeNone}
@@ -256,6 +390,22 @@ func parseMessageListLimit(raw string) (int, error) {
 	return limit, nil
 }
 
+func parseRetryScanLimit(rawLimit int, defaultLimit int) (int, error) {
+	if rawLimit < 0 {
+		return 0, ErrInvalidLimit
+	}
+	if rawLimit == 0 {
+		if defaultLimit <= 0 {
+			return 0, ErrInvalidLimit
+		}
+		return defaultLimit, nil
+	}
+	if rawLimit > maxRetryScanLimit {
+		return maxRetryScanLimit, nil
+	}
+	return rawLimit, nil
+}
+
 func statusFromAdminError(err error) int {
 	switch {
 	case errors.Is(err, ErrMissingMessageID), errors.Is(err, ErrInvalidStatus), errors.Is(err, ErrInvalidLimit):
@@ -268,6 +418,17 @@ func statusFromAdminError(err error) int {
 		return http.StatusServiceUnavailable
 	default:
 		return http.StatusBadGateway
+	}
+}
+
+func retryScanCodeFromError(err error, status int) string {
+	switch {
+	case errors.Is(err, ErrInvalidLimit), status == http.StatusBadRequest:
+		return "bad_request"
+	case errors.Is(err, ErrStoreNotConfigured), status == http.StatusServiceUnavailable:
+		return "store_not_configured"
+	default:
+		return "retry_scan_failed"
 	}
 }
 

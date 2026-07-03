@@ -127,3 +127,20 @@ type MessageActionRequest struct {
 	MessageID string `json:"message_id"`
 	Reason    string `json:"reason,omitempty"`
 }
+
+// RetryScanRequest triggers one bounded reliable-downlink retry scan.
+// A zero Limit asks the gateway to use its configured default.
+type RetryScanRequest struct {
+	Limit int `json:"limit,omitempty"`
+}
+
+// RetryScanResponse reports the result of one reliable-downlink retry scan.
+type RetryScanResponse struct {
+	Code    string `json:"code"`
+	Reason  string `json:"reason,omitempty"`
+	Limit   int    `json:"limit,omitempty"`
+	Scanned int    `json:"scanned"`
+	Sent    int    `json:"sent"`
+	Queued  int    `json:"queued"`
+	Failed  int    `json:"failed"`
+}
