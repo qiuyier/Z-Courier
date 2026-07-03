@@ -584,6 +584,21 @@ export default function App() {
     setDownlinkTestPushForm((current) => ({ ...current, ...patch }));
   }, []);
 
+  const useRouteForDownlinkTestPush = useCallback((lookup: AdminClientRouteLookup) => {
+    const clientID = lookup.client_id?.trim();
+    const deviceID = lookup.device_id?.trim();
+    if (!clientID || !deviceID) {
+      return;
+    }
+    setDownlinkTestPushForm((current) => ({
+      ...current,
+      clientID,
+      deviceID,
+    }));
+    setDownlinkTestPushState({ status: "idle" });
+    setActivePage("messages");
+  }, []);
+
   const submitDownlinkTestPush = useCallback(
     async (signal?: AbortSignal) => {
       if (!authenticated) {
@@ -1061,6 +1076,7 @@ export default function App() {
               onSessionDisconnect={openSessionDisconnect}
               onSessionRouteLookup={lookupSessionRoute}
               onSessionsRefresh={refreshSessions}
+              onUseRouteForTestPush={useRouteForDownlinkTestPush}
               routeState={clientRouteState}
               state={sessionsState}
             />
@@ -1264,7 +1280,7 @@ function RoutesPage({ state }: { state: RemoteState<AdminRoutes> }) {
       <section className="rounded-lg border border-line bg-white p-5 shadow-diffusion">
         <div className="grid gap-5 lg:grid-cols-[0.85fr_1.15fr]">
           <div>
-            <p className="text-sm font-medium text-zinc-500">Route Table</p>
+            <p className="text-sm font-medium text-zinc-500">Upstream MsgID Routes</p>
             <h2 className="mt-1 font-mono text-5xl tracking-tight text-ink">{state.data?.total ?? routes.length}</h2>
             <p className="mt-2 text-sm text-zinc-500">gateway node: {state.data?.gateway_node ?? "--"}</p>
           </div>
@@ -1272,7 +1288,7 @@ function RoutesPage({ state }: { state: RemoteState<AdminRoutes> }) {
             <MetricRow label="HTTP targets" value={httpRoutes.toLocaleString()} />
             <MetricRow label="NSQ targets" value={nsqRoutes.toLocaleString()} />
             <MetricRow label="Capacity limits" value={limitedRoutes.toLocaleString()} />
-            <MetricRow label="Refresh state" value={state.status} />
+            <MetricRow label="Client routes" value="Sessions lookup" />
           </div>
         </div>
       </section>
@@ -1302,6 +1318,7 @@ function SessionsPage({
   onSessionDisconnect,
   onSessionRouteLookup,
   onSessionsRefresh,
+  onUseRouteForTestPush,
   routeState,
   state,
 }: {
@@ -1320,6 +1337,7 @@ function SessionsPage({
   onSessionDisconnect: (session: AdminSession) => void;
   onSessionRouteLookup: (session: AdminSession) => void;
   onSessionsRefresh: () => void | Promise<void>;
+  onUseRouteForTestPush: (lookup: AdminClientRouteLookup) => void;
   routeState: RemoteState<AdminClientRouteLookup>;
   state: RemoteState<AdminSessions>;
 }) {
@@ -1443,6 +1461,7 @@ function SessionsPage({
           onClientIDChange={onClientIDChange}
           onDeviceIDChange={onDeviceIDChange}
           onLookupRoute={onLookupRoute}
+          onUseRouteForTestPush={onUseRouteForTestPush}
           routeState={routeState}
           running={loadingRoute}
         />
@@ -1588,6 +1607,7 @@ function SessionRouteLookupPanel({
   onClientIDChange,
   onDeviceIDChange,
   onLookupRoute,
+  onUseRouteForTestPush,
   routeState,
   running,
 }: {
@@ -1596,6 +1616,7 @@ function SessionRouteLookupPanel({
   onClientIDChange: (clientID: string) => void;
   onDeviceIDChange: (deviceID: string) => void;
   onLookupRoute: () => void | Promise<void>;
+  onUseRouteForTestPush: (lookup: AdminClientRouteLookup) => void;
   routeState: RemoteState<AdminClientRouteLookup>;
   running: boolean;
 }) {
@@ -1608,7 +1629,13 @@ function SessionRouteLookupPanel({
           void onLookupRoute();
         }}
       >
-        <p className="text-sm text-zinc-400">Client Route Lookup</p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-sm text-zinc-400">Cluster Route Lookup</p>
+            <h2 className="mt-1 text-2xl font-semibold tracking-tight">Client Online Route</h2>
+          </div>
+          <StatusBadge label="local + redis" tone="info" />
+        </div>
         <div className="grid gap-3 md:grid-cols-2">
           <div className="grid gap-2">
             <label className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-400" htmlFor="route-client-id">
@@ -1655,15 +1682,22 @@ function SessionRouteLookupPanel({
         </div>
       )}
 
-      {routeState.data && <ClientRouteResult lookup={routeState.data} />}
+      {routeState.data && <ClientRouteResult lookup={routeState.data} onUseRouteForTestPush={onUseRouteForTestPush} />}
     </article>
   );
 }
 
-function ClientRouteResult({ lookup }: { lookup: AdminClientRouteLookup }) {
+function ClientRouteResult({
+  lookup,
+  onUseRouteForTestPush,
+}: {
+  lookup: AdminClientRouteLookup;
+  onUseRouteForTestPush: (lookup: AdminClientRouteLookup) => void;
+}) {
   const status = clientRouteStatus(lookup);
   const local = lookup.local_session;
   const clusterRoute = lookup.cluster_route;
+  const canUseForTestPush = Boolean(lookup.client_id && lookup.device_id);
 
   return (
     <div className="mt-5 grid gap-4">
@@ -1683,6 +1717,16 @@ function ClientRouteResult({ lookup }: { lookup: AdminClientRouteLookup }) {
           <DarkLineItem label="Cluster Route" value={lookup.cluster_route_found ? "found" : "missing"} />
           <DarkLineItem label="Resolved As" value={status} />
         </div>
+        {canUseForTestPush && (
+          <button
+            className="mt-4 inline-flex min-w-0 items-center justify-center gap-2 rounded-lg border border-white/10 bg-white px-3 py-2 text-sm font-medium text-zinc-950 transition duration-300 hover:bg-zinc-100 active:translate-y-px"
+            onClick={() => onUseRouteForTestPush(lookup)}
+            type="button"
+          >
+            <PlugsConnected size={16} weight="bold" />
+            Use in Test Push
+          </button>
+        )}
       </div>
 
       {local && (
@@ -1714,8 +1758,7 @@ function ClientRouteResult({ lookup }: { lookup: AdminClientRouteLookup }) {
             <div className="mt-4 rounded-lg border border-sky-200/20 bg-white/10 px-4 py-3 text-sm text-sky-50">
               <p className="font-semibold">Remote session</p>
               <p className="mt-1 leading-relaxed text-sky-100">
-                This client is routed to {clusterRoute.gateway_node || "another gateway"}. This node can inspect the route but cannot
-                disconnect that remote TCP connection.
+                This client is connected to {clusterRoute.gateway_node || "another gateway"}. Test push from this node will use peer push.
               </p>
             </div>
           )}
@@ -3257,18 +3300,33 @@ function DarkLineItem({ label, value }: { label: string; value: string }) {
   );
 }
 
-function StatusBadge({ label, tone }: { label: string; tone: "ok" | "warn" }) {
+type StatusBadgeTone = "ok" | "warn" | "info";
+
+function StatusBadge({ label, tone }: { label: string; tone: StatusBadgeTone }) {
+  const styles = statusBadgeStyles(tone);
+
   return (
     <span
       className={[
         "inline-flex items-center gap-2 rounded-md px-2.5 py-1 text-xs font-medium",
-        tone === "ok" ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-800",
+        styles.badge,
       ].join(" ")}
     >
-      <span className={["size-1.5 rounded-full", tone === "ok" ? "bg-accent" : "bg-amber-500"].join(" ")} />
+      <span className={["size-1.5 rounded-full", styles.dot].join(" ")} />
       {label}
     </span>
   );
+}
+
+function statusBadgeStyles(tone: StatusBadgeTone): { badge: string; dot: string } {
+  switch (tone) {
+    case "ok":
+      return { badge: "bg-emerald-50 text-emerald-800", dot: "bg-accent" };
+    case "info":
+      return { badge: "bg-sky-50 text-sky-800", dot: "bg-sky-500" };
+    case "warn":
+      return { badge: "bg-amber-50 text-amber-800", dot: "bg-amber-500" };
+  }
 }
 
 function DiagnosticsConfigPanel({ title, rows }: { title: string; rows: Array<[string, string]> }) {
