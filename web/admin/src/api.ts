@@ -7,6 +7,8 @@ import type {
   AdminOverview,
   AdminRoutes,
   AdminSessionResponse,
+  AdminSessionDisconnectRequest,
+  AdminSessionDisconnectResponse,
   AdminSessions,
   MessageStatus,
   MessageStatusResponse,
@@ -125,6 +127,13 @@ export async function fetchClientRoute(
     device_id: deviceID.trim(),
   });
   return fetchAdminJSON<AdminClientRouteLookup>(`/internal/debug/route?${query.toString()}`, signal);
+}
+
+export async function disconnectSession(
+  request: AdminSessionDisconnectRequest,
+  signal?: AbortSignal,
+): Promise<AdminSessionDisconnectResponse> {
+  return postAdminJSON<AdminSessionDisconnectResponse>("/internal/debug/session/disconnect", request, signal);
 }
 
 export async function fetchDiagnostics(signal?: AbortSignal): Promise<AdminDiagnostics> {

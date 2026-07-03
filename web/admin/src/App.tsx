@@ -22,6 +22,7 @@ import {
 } from "@phosphor-icons/react";
 import {
   APIError,
+  disconnectSession,
   discardMessage,
   fetchAdminCheck,
   fetchAdminSession,
@@ -58,6 +59,7 @@ import type {
 
 const messageStatuses: MessageStatus[] = ["failed", "pending", "sent", "delivered", "discarded"];
 const messageRepairPermission = "message:repair";
+const sessionDisconnectPermission = "session:disconnect";
 
 type MetricContext = {
   label: string;
@@ -151,6 +153,10 @@ type MessageActionDialogState = {
   reason: string;
   error?: string;
 } | null;
+type SessionDisconnectDialogState = {
+  session: AdminSession;
+  error?: string;
+} | null;
 
 const navItems = [
   { id: "overview" as const, label: "Overview", icon: Pulse, disabled: false },
@@ -189,10 +195,14 @@ export default function App() {
   const [messageLookupID, setMessageLookupID] = useState("");
   const [messageActionDialog, setMessageActionDialog] = useState<MessageActionDialogState>(null);
   const [messageActionPending, setMessageActionPending] = useState(false);
+  const [sessionDisconnectDialog, setSessionDisconnectDialog] = useState<SessionDisconnectDialogState>(null);
+  const [sessionDisconnectPending, setSessionDisconnectPending] = useState(false);
   const [activePage, setActivePage] = useState<PageID>("overview");
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
   const authenticated = authState.status === "authenticated";
   const canRepairMessages = authState.status === "authenticated" && adminSessionAllows(authState.session, messageRepairPermission);
+  const canDisconnectSessions =
+    authState.status === "authenticated" && adminSessionAllows(authState.session, sessionDisconnectPermission);
 
   const clearConsoleState = useCallback(() => {
     setState({ status: "idle" });
@@ -205,6 +215,9 @@ export default function App() {
     setMessagesState({ status: "idle" });
     setMessageLookupState({ status: "idle" });
     setMessageActionDialog(null);
+    setMessageActionPending(false);
+    setSessionDisconnectDialog(null);
+    setSessionDisconnectPending(false);
     setCheckRanAt(null);
     setUpdatedAt(null);
   }, []);
@@ -325,6 +338,64 @@ export default function App() {
     },
     [lookupClientRoute],
   );
+
+  const openSessionDisconnect = useCallback((session: AdminSession) => {
+    if (!canDisconnectSessions) {
+      return;
+    }
+    setSessionDisconnectDialog({ session });
+  }, [canDisconnectSessions]);
+
+  const closeSessionDisconnect = useCallback(() => {
+    if (sessionDisconnectPending) {
+      return;
+    }
+    setSessionDisconnectDialog(null);
+  }, [sessionDisconnectPending]);
+
+  const confirmSessionDisconnect = useCallback(async () => {
+    if (!sessionDisconnectDialog || !authenticated || !canDisconnectSessions) {
+      return;
+    }
+
+    const target = sessionDisconnectDialog.session;
+    const sessionID = target.session_id?.trim() ?? "";
+    if (sessionID === "") {
+      setSessionDisconnectDialog((current) => current ? { ...current, error: "session_id is required" } : current);
+      return;
+    }
+
+    setSessionDisconnectPending(true);
+    try {
+      await disconnectSession({
+        session_id: sessionID,
+        client_id: target.client_id,
+        device_id: target.device_id,
+      });
+      setSessionDisconnectDialog(null);
+      await refreshSessions();
+      if (clientRouteState.data?.local_session?.session_id === sessionID) {
+        await lookupClientRoute(target.client_id, target.device_id);
+      }
+    } catch (error) {
+      if (isUnauthorized(error)) {
+        expireSession();
+        return;
+      }
+      const message = requestErrorMessage(error);
+      setSessionDisconnectDialog((current) => current ? { ...current, error: message } : current);
+    } finally {
+      setSessionDisconnectPending(false);
+    }
+  }, [
+    authenticated,
+    canDisconnectSessions,
+    clientRouteState.data?.local_session?.session_id,
+    expireSession,
+    lookupClientRoute,
+    refreshSessions,
+    sessionDisconnectDialog,
+  ]);
 
   const refreshDiagnostics = useCallback(
     async (signal?: AbortSignal) => {
@@ -869,6 +940,7 @@ export default function App() {
             <RoutesPage state={routeState} />
           ) : activePage === "sessions" && authenticated && (sessionsState.status !== "error" || sessionsState.data) ? (
             <SessionsPage
+              canDisconnectSessions={canDisconnectSessions}
               clientID={sessionClientID}
               deviceID={sessionDeviceID}
               limit={sessionLimit}
@@ -876,6 +948,7 @@ export default function App() {
               onDeviceIDChange={setSessionDeviceID}
               onLimitChange={setSessionLimit}
               onLookupRoute={() => lookupClientRoute()}
+              onSessionDisconnect={openSessionDisconnect}
               onSessionRouteLookup={lookupSessionRoute}
               onSessionsRefresh={refreshSessions}
               routeState={clientRouteState}
@@ -929,6 +1002,14 @@ export default function App() {
           onConfirm={confirmMessageAction}
           onReasonChange={updateMessageActionReason}
           pending={messageActionPending}
+        />
+      )}
+      {sessionDisconnectDialog && (
+        <SessionDisconnectDialog
+          dialog={sessionDisconnectDialog}
+          onClose={closeSessionDisconnect}
+          onConfirm={confirmSessionDisconnect}
+          pending={sessionDisconnectPending}
         />
       )}
     </main>
@@ -1091,6 +1172,7 @@ function RoutesPage({ state }: { state: RemoteState<AdminRoutes> }) {
 }
 
 function SessionsPage({
+  canDisconnectSessions,
   clientID,
   deviceID,
   limit,
@@ -1098,11 +1180,13 @@ function SessionsPage({
   onDeviceIDChange,
   onLimitChange,
   onLookupRoute,
+  onSessionDisconnect,
   onSessionRouteLookup,
   onSessionsRefresh,
   routeState,
   state,
 }: {
+  canDisconnectSessions: boolean;
   clientID: string;
   deviceID: string;
   limit: number;
@@ -1110,6 +1194,7 @@ function SessionsPage({
   onDeviceIDChange: (deviceID: string) => void;
   onLimitChange: (limit: number) => void;
   onLookupRoute: () => void | Promise<void>;
+  onSessionDisconnect: (session: AdminSession) => void;
   onSessionRouteLookup: (session: AdminSession) => void;
   onSessionsRefresh: () => void | Promise<void>;
   routeState: RemoteState<AdminClientRouteLookup>;
@@ -1210,8 +1295,10 @@ function SessionsPage({
         <section className="grid gap-3">
           {sessions.map((session, index) => (
             <SessionCard
+              canDisconnectSessions={canDisconnectSessions}
               index={index}
               key={`${session.session_id}-${session.conn_id}`}
+              onDisconnect={onSessionDisconnect}
               onLookupRoute={onSessionRouteLookup}
               session={session}
             />
@@ -1366,14 +1453,25 @@ function ClientRouteResult({ lookup }: { lookup: AdminClientRouteLookup }) {
 }
 
 function SessionCard({
+  canDisconnectSessions,
   index,
+  onDisconnect,
   onLookupRoute,
   session,
 }: {
+  canDisconnectSessions: boolean;
   index: number;
+  onDisconnect: (session: AdminSession) => void;
   onLookupRoute: (session: AdminSession) => void;
   session: AdminSession;
 }) {
+  const canDisconnect = canDisconnectSessions && Boolean(session.session_id);
+  const disconnectTitle = !canDisconnectSessions
+    ? "Requires operator role"
+    : canDisconnect
+      ? "Disconnect local session"
+      : "SessionID is required";
+
   return (
     <article
       className="animate-rise overflow-hidden rounded-lg border border-line bg-white shadow-diffusion"
@@ -1389,14 +1487,26 @@ function SessionCard({
           </div>
           <h3 className="mt-4 break-words font-mono text-lg font-semibold tracking-tight">{session.client_id || "--"}</h3>
           <p className="mt-2 break-words text-sm text-zinc-500">{session.device_id || "--"}</p>
-          <button
-            className="mt-5 inline-flex items-center justify-center gap-2 rounded-lg border border-line bg-white px-3 py-2 text-xs font-medium text-ink transition duration-300 hover:border-zinc-300 hover:bg-zinc-50 active:translate-y-px"
-            onClick={() => onLookupRoute(session)}
-            type="button"
-          >
-            <MagnifyingGlass size={14} weight="bold" />
-            Lookup Route
-          </button>
+          <div className="mt-5 flex min-w-0 flex-wrap gap-2">
+            <button
+              className="inline-flex min-w-0 items-center justify-center gap-2 rounded-lg border border-line bg-white px-3 py-2 text-xs font-medium text-ink transition duration-300 hover:border-zinc-300 hover:bg-zinc-50 active:translate-y-px"
+              onClick={() => onLookupRoute(session)}
+              type="button"
+            >
+              <MagnifyingGlass size={14} weight="bold" />
+              Lookup Route
+            </button>
+            <button
+              className="inline-flex min-w-0 items-center justify-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-800 transition duration-300 hover:border-rose-300 hover:bg-rose-100 active:translate-y-px disabled:cursor-not-allowed disabled:border-line disabled:bg-zinc-50 disabled:text-zinc-400 disabled:opacity-60"
+              disabled={!canDisconnect}
+              onClick={() => onDisconnect(session)}
+              title={disconnectTitle}
+              type="button"
+            >
+              <XCircle size={14} weight="bold" />
+              Disconnect
+            </button>
+          </div>
         </div>
 
         <div className="grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -1999,6 +2109,77 @@ function MessageActionDialog({
             type="submit"
           >
             {pending ? "Working..." : isDiscard ? "Discard" : "Requeue"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function SessionDisconnectDialog({
+  dialog,
+  onClose,
+  onConfirm,
+  pending,
+}: {
+  dialog: NonNullable<SessionDisconnectDialogState>;
+  onClose: () => void;
+  onConfirm: () => void | Promise<void>;
+  pending: boolean;
+}) {
+  const session = dialog.session;
+  const sessionID = session.session_id || "--";
+  const confirmDisabled = pending || sessionID === "--";
+
+  return (
+    <div className="fixed inset-0 z-30 grid place-items-center bg-zinc-950/45 px-4 py-6 backdrop-blur-sm" role="dialog" aria-modal="true">
+      <form
+        className="w-full max-w-lg animate-rise overflow-hidden rounded-lg border border-white/10 bg-white shadow-[0_24px_80px_-32px_rgba(0,0,0,0.45)]"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void onConfirm();
+        }}
+      >
+        <div className="border-b border-line bg-zinc-50 px-5 py-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">Disconnect Local Session</p>
+          <h2 className="mt-2 break-words font-mono text-lg font-semibold tracking-tight text-ink">{sessionID}</h2>
+        </div>
+
+        <div className="grid gap-4 p-5">
+          <div className="rounded-lg border border-line bg-white px-4 py-3">
+            <LineItem label="Client" value={session.client_id || "--"} />
+            <LineItem label="Device" value={session.device_id || "--"} />
+            <LineItem label="ConnID" value={session.conn_id?.toLocaleString() ?? "--"} />
+            <LineItem label="Gateway" value={session.gateway_node || "--"} />
+          </div>
+
+          <p className="text-sm leading-relaxed text-zinc-600">
+            This closes the selected local TCP connection and removes its local session binding. Other devices for the same client are not affected.
+          </p>
+
+          {dialog.error && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              <p className="font-semibold">Disconnect failed</p>
+              <p className="mt-1 break-words font-mono text-xs">{dialog.error}</p>
+            </div>
+          )}
+        </div>
+
+        <div className="flex flex-col-reverse gap-2 border-t border-line bg-zinc-50 px-5 py-4 sm:flex-row sm:justify-end">
+          <button
+            className="inline-flex items-center justify-center rounded-lg border border-line bg-white px-4 py-2 text-sm font-medium text-ink transition duration-300 hover:bg-zinc-50 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={pending}
+            onClick={onClose}
+            type="button"
+          >
+            Cancel
+          </button>
+          <button
+            className="inline-flex items-center justify-center rounded-lg bg-rose-700 px-4 py-2 text-sm font-medium text-white transition duration-300 hover:bg-rose-800 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={confirmDisabled}
+            type="submit"
+          >
+            {pending ? "Disconnecting..." : "Disconnect"}
           </button>
         </div>
       </form>
@@ -2949,7 +3130,7 @@ function adminSessionAllows(session: AdminConsoleSession, permission: string): b
   if (session.role === "admin") {
     return true;
   }
-  return session.role === "operator" && permission === messageRepairPermission;
+  return session.role === "operator" && (permission === messageRepairPermission || permission === sessionDisconnectPermission);
 }
 
 function shortID(value: string): string {

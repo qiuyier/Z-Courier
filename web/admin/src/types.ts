@@ -182,6 +182,25 @@ export type AdminClientRouteLookup = {
   cluster_route?: AdminClusterRoute;
 };
 
+export type AdminSessionDisconnectRequest = {
+  session_id: string;
+  client_id?: string;
+  device_id?: string;
+};
+
+export type AdminSessionDisconnectResponse = {
+  code: string;
+  reason?: string;
+  gateway_node: string;
+  session_id?: string;
+  conn_id?: number;
+  client_id?: string;
+  device_id?: string;
+  local_session_found: boolean;
+  disconnected: boolean;
+  local_session?: AdminSession;
+};
+
 export type RuntimeDiagnostics = {
   started: boolean;
   started_at?: string;
