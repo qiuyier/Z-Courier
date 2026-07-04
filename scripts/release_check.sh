@@ -95,6 +95,11 @@ run_fast_checks() {
   run go run ./cmd/gateway -config configs/z-courier.integration.yaml -check-config
   run go run ./cmd/gateway -config configs/z-courier.cluster-a.yaml -check-config
   run go run ./cmd/gateway -config configs/z-courier.cluster-b.yaml -check-config
+  run env \
+    ZCOURIER_CONSOLE_SMOKE_ROLE=admin \
+    ZCOURIER_CONSOLE_SMOKE_INTERNAL_ADDR=127.0.0.1:18084 \
+    ZCOURIER_CONSOLE_SMOKE_INTERNAL_TOKEN=dev-internal-token \
+    go run ./cmd/gateway -config configs/z-courier.console-smoke.yaml -check-config
 
   for shell_script in scripts/*.sh; do
     run bash -n "$shell_script"

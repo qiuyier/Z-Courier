@@ -1,0 +1,83 @@
+gateway_node: console-smoke-${ZCOURIER_CONSOLE_SMOKE_ROLE}
+route_msg_ids:
+  - 1000
+
+auth:
+  static_tokens:
+    console-smoke-token:
+      client_id: console-smoke-client
+      token_id: console-smoke-token
+      scopes:
+        - gateway:dev
+
+internal_http:
+  enabled: true
+  addr: ${ZCOURIER_CONSOLE_SMOKE_INTERNAL_ADDR}
+  token: ${ZCOURIER_CONSOLE_SMOKE_INTERNAL_TOKEN}
+  auth:
+    mode: token
+  max_request_body_size: 10485760
+  max_in_flight: 1000
+
+admin_console:
+  enabled: true
+  path: /console/
+  assets_dir: web/admin/dist
+  monitoring:
+    prometheus_url: ""
+    grafana_url: ""
+    dashboard_url: ""
+  session:
+    enabled: true
+    ttl: 30m
+    cookie_name: zcourier_console_smoke_${ZCOURIER_CONSOLE_SMOKE_ROLE}
+    cookie_secure: false
+    cookie_same_site: lax
+    role: ${ZCOURIER_CONSOLE_SMOKE_ROLE}
+
+cluster:
+  enabled: false
+  internal_addr: http://${ZCOURIER_CONSOLE_SMOKE_INTERNAL_ADDR}
+  route_refresh_interval: 10s
+  registry:
+    type: memory
+    ttl: 30s
+  peer:
+    token: console-smoke-cluster-token
+    timeout: 2s
+    auth:
+      mode: token
+
+downlink:
+  storage:
+    type: memory
+  delivery:
+    retry_interval: 1s
+    retry_delay: 1s
+    retry_jitter: 0s
+    ack_timeout: 1s
+    retry_lease: 5s
+    max_attempts: 5
+    scan_limit: 100
+    bind_flush_limit: 100
+  retention:
+    delivered_ttl: 24h
+    failed_ttl: 168h
+    discarded_ttl: 168h
+    cleanup_interval: 1h
+    cleanup_limit: 1000
+
+pipeline:
+  allowlist:
+    client_ids: []
+    msg_ids: []
+  blocklist:
+    client_ids: []
+    msg_ids: []
+  rate_limit:
+    enabled: false
+    max_requests: 100
+    window: 1s
+
+upstream:
+  routes: []

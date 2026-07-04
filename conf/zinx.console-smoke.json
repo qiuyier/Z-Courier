@@ -1,0 +1,17 @@
+{
+  "Name": "Z-Courier Console Smoke Gateway",
+  "Host": "127.0.0.1",
+  "TCPPort": 9921,
+  "Mode": "tcp",
+  "MaxConn": 1024,
+  "MaxPacketSize": 8388608,
+  "WorkerPoolSize": 4,
+  "MaxWorkerTaskLen": 256,
+  "MaxMsgChanLen": 256,
+  "IOReadBuffSize": 8192,
+  "HeartbeatMax": 30,
+  "LogDir": "./log",
+  "LogFile": "zinx-console-smoke.log",
+  "LogCons": true,
+  "LogIsolationLevel": 2
+}

@@ -13,6 +13,8 @@ reports/*
 /sdk/php/composer.lock
 /web/admin/node_modules/
 /web/admin/dist/
+/web/admin/playwright-report/
+/web/admin/test-results/
 /web/admin/tsconfig.tsbuildinfo
 /deploy/production/.env
 /deploy/production-cluster/.env
