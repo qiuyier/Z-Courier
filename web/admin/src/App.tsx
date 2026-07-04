@@ -189,6 +189,20 @@ type SessionDisconnectDialogState = {
   session: AdminSession;
   error?: string;
 } | null;
+type RetryScanDialogState = {
+  error?: string;
+} | null;
+type PreparedDownlinkTestPush = {
+  clientID: string;
+  deviceID: string;
+  msgID: number;
+  messageID: string;
+  traceID: string;
+  ackRequired: boolean;
+  body: string;
+  error?: string;
+};
+type DownlinkTestPushDialogState = PreparedDownlinkTestPush | null;
 
 const navItems = [
   { id: "overview" as const, label: "Overview", icon: Pulse, disabled: false },
@@ -243,6 +257,10 @@ export default function App() {
   const [messageActionPending, setMessageActionPending] = useState(false);
   const [sessionDisconnectDialog, setSessionDisconnectDialog] = useState<SessionDisconnectDialogState>(null);
   const [sessionDisconnectPending, setSessionDisconnectPending] = useState(false);
+  const [retryScanDialog, setRetryScanDialog] = useState<RetryScanDialogState>(null);
+  const [retryScanPending, setRetryScanPending] = useState(false);
+  const [downlinkTestPushDialog, setDownlinkTestPushDialog] = useState<DownlinkTestPushDialogState>(null);
+  const [downlinkTestPushPending, setDownlinkTestPushPending] = useState(false);
   const [activePage, setActivePage] = useState<PageID>("overview");
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
   const authenticated = authState.status === "authenticated";
@@ -270,6 +288,10 @@ export default function App() {
     setMessageActionPending(false);
     setSessionDisconnectDialog(null);
     setSessionDisconnectPending(false);
+    setRetryScanDialog(null);
+    setRetryScanPending(false);
+    setDownlinkTestPushDialog(null);
+    setDownlinkTestPushPending(false);
     setSelectedSessionID("");
     setCheckRanAt(null);
     setUpdatedAt(null);
@@ -647,8 +669,27 @@ export default function App() {
     [authenticated, expireSession, messageLookupID],
   );
 
-  const submitRetryScan = useCallback(
-    async (signal?: AbortSignal) => {
+  const openRetryScan = useCallback(() => {
+    if (!authenticated) {
+      setRetryScanState({ status: "idle" });
+      return;
+    }
+    if (!canRunRetryScan) {
+      setRetryScanState({ status: "error", error: "permission_denied: requires operator role" });
+      return;
+    }
+    setRetryScanDialog({});
+  }, [authenticated, canRunRetryScan]);
+
+  const closeRetryScan = useCallback(() => {
+    if (retryScanPending) {
+      return;
+    }
+    setRetryScanDialog(null);
+  }, [retryScanPending]);
+
+  const confirmRetryScan = useCallback(
+    async () => {
       if (!authenticated) {
         setRetryScanState({ status: "idle" });
         return;
@@ -658,21 +699,23 @@ export default function App() {
         return;
       }
 
+      setRetryScanPending(true);
       setRetryScanState((current) => ({ status: "loading", data: current.data }));
       try {
-        const data = await runRetryScan(signal);
+        const data = await runRetryScan();
         setRetryScanState({ status: "ready", data });
-        await refreshMessages(signal);
+        setRetryScanDialog(null);
+        await refreshMessages();
       } catch (error) {
-        if (signal?.aborted) {
-          return;
-        }
         if (isUnauthorized(error)) {
           expireSession();
           return;
         }
         const message = requestErrorMessage(error);
+        setRetryScanDialog((current) => current ? { ...current, error: message } : current);
         setRetryScanState((current) => ({ status: "error", data: current.data, error: message }));
+      } finally {
+        setRetryScanPending(false);
       }
     },
     [authenticated, canRunRetryScan, expireSession, refreshMessages],
@@ -697,8 +740,55 @@ export default function App() {
     setActivePage("messages");
   }, []);
 
-  const submitDownlinkTestPush = useCallback(
-    async (signal?: AbortSignal) => {
+  const openDownlinkTestPush = useCallback(() => {
+    if (!authenticated) {
+      setDownlinkTestPushState({ status: "idle" });
+      return;
+    }
+    if (!canTestDownlinkPush) {
+      setDownlinkTestPushState({ status: "error", error: "permission_denied: requires operator role" });
+      return;
+    }
+
+    const clientID = downlinkTestPushForm.clientID.trim();
+    const deviceID = downlinkTestPushForm.deviceID.trim();
+    const msgID = Number.parseInt(downlinkTestPushForm.msgID.trim(), 10);
+    if (clientID === "") {
+      setDownlinkTestPushState({ status: "error", error: "client_id is required" });
+      return;
+    }
+    if (deviceID === "") {
+      setDownlinkTestPushState({ status: "error", error: "device_id is required" });
+      return;
+    }
+    if (!Number.isFinite(msgID) || msgID <= 0) {
+      setDownlinkTestPushState({ status: "error", error: "msg_id must be a positive integer" });
+      return;
+    }
+
+    setDownlinkTestPushDialog({
+      clientID,
+      deviceID,
+      msgID,
+      messageID: downlinkTestPushForm.messageID.trim(),
+      traceID: downlinkTestPushForm.traceID.trim(),
+      ackRequired: downlinkTestPushForm.ackRequired,
+      body: downlinkTestPushForm.body,
+    });
+  }, [authenticated, canTestDownlinkPush, downlinkTestPushForm]);
+
+  const closeDownlinkTestPush = useCallback(() => {
+    if (downlinkTestPushPending) {
+      return;
+    }
+    setDownlinkTestPushDialog(null);
+  }, [downlinkTestPushPending]);
+
+  const confirmDownlinkTestPush = useCallback(
+    async () => {
+      if (!downlinkTestPushDialog) {
+        return;
+      }
       if (!authenticated) {
         setDownlinkTestPushState({ status: "idle" });
         return;
@@ -708,53 +798,38 @@ export default function App() {
         return;
       }
 
-      const clientID = downlinkTestPushForm.clientID.trim();
-      const deviceID = downlinkTestPushForm.deviceID.trim();
-      const msgID = Number.parseInt(downlinkTestPushForm.msgID.trim(), 10);
-      if (clientID === "") {
-        setDownlinkTestPushState({ status: "error", error: "client_id is required" });
-        return;
-      }
-      if (deviceID === "") {
-        setDownlinkTestPushState({ status: "error", error: "device_id is required" });
-        return;
-      }
-      if (!Number.isFinite(msgID) || msgID <= 0) {
-        setDownlinkTestPushState({ status: "error", error: "msg_id must be a positive integer" });
-        return;
-      }
-
+      setDownlinkTestPushPending(true);
       setDownlinkTestPushState((current) => ({ status: "loading", data: current.data }));
       try {
         const data = await sendDownlinkTestPush(
           {
-            clientID,
-            deviceID,
-            msgID,
-            messageID: downlinkTestPushForm.messageID,
-            traceID: downlinkTestPushForm.traceID,
-            ackRequired: downlinkTestPushForm.ackRequired,
-            body: downlinkTestPushForm.body,
+            clientID: downlinkTestPushDialog.clientID,
+            deviceID: downlinkTestPushDialog.deviceID,
+            msgID: downlinkTestPushDialog.msgID,
+            messageID: downlinkTestPushDialog.messageID,
+            traceID: downlinkTestPushDialog.traceID,
+            ackRequired: downlinkTestPushDialog.ackRequired,
+            body: downlinkTestPushDialog.body,
           },
-          signal,
         );
         setDownlinkTestPushState({ status: "ready", data });
+        setDownlinkTestPushDialog(null);
         if (data.message_id) {
           setMessageLookupID(data.message_id);
         }
       } catch (error) {
-        if (signal?.aborted) {
-          return;
-        }
         if (isUnauthorized(error)) {
           expireSession();
           return;
         }
         const message = requestErrorMessage(error);
+        setDownlinkTestPushDialog((current) => current ? { ...current, error: message } : current);
         setDownlinkTestPushState((current) => ({ status: "error", data: current.data, error: message }));
+      } finally {
+        setDownlinkTestPushPending(false);
       }
     },
-    [authenticated, canTestDownlinkPush, downlinkTestPushForm, expireSession],
+    [authenticated, canTestDownlinkPush, downlinkTestPushDialog, expireSession],
   );
 
   const openMessageAction = useCallback((action: MessageAction, message: MessageStatusResponse) => {
@@ -1213,12 +1288,12 @@ export default function App() {
               lookupID={messageLookupID}
               lookupState={messageLookupState}
               onDownlinkTestPushFormChange={updateDownlinkTestPushForm}
-              onDownlinkTestPushSubmit={submitDownlinkTestPush}
+              onDownlinkTestPushSubmit={openDownlinkTestPush}
               onLimitChange={setMessageLimit}
               onMessageAction={openMessageAction}
               onLookupIDChange={setMessageLookupID}
               onLookupSubmit={lookupMessage}
-              onRetryScan={submitRetryScan}
+              onRetryScan={openRetryScan}
               onStatusChange={setMessageStatus}
               retryScanState={retryScanState}
               selectedStatus={messageStatus}
@@ -1285,6 +1360,22 @@ export default function App() {
           onClose={closeSessionDisconnect}
           onConfirm={confirmSessionDisconnect}
           pending={sessionDisconnectPending}
+        />
+      )}
+      {retryScanDialog && (
+        <RetryScanDialog
+          dialog={retryScanDialog}
+          onClose={closeRetryScan}
+          onConfirm={confirmRetryScan}
+          pending={retryScanPending}
+        />
+      )}
+      {downlinkTestPushDialog && (
+        <DownlinkTestPushDialog
+          dialog={downlinkTestPushDialog}
+          onClose={closeDownlinkTestPush}
+          onConfirm={confirmDownlinkTestPush}
+          pending={downlinkTestPushPending}
         />
       )}
     </main>
@@ -3076,72 +3167,76 @@ function MessageActionButtons({
   );
 }
 
-function MessageActionDialog({
-  dialog,
+function ConfirmActionDialog({
+  children,
+  confirmDisabled = false,
+  confirmLabel,
+  description,
+  error,
+  errorTitle = "Action failed",
+  eyebrow,
   onClose,
   onConfirm,
-  onReasonChange,
   pending,
+  pendingLabel,
+  size = "md",
+  title,
+  tone = "default",
 }: {
-  dialog: NonNullable<MessageActionDialogState>;
+  children: ReactNode;
+  confirmDisabled?: boolean;
+  confirmLabel: string;
+  description?: string;
+  error?: string;
+  errorTitle?: string;
+  eyebrow: string;
   onClose: () => void;
   onConfirm: () => void | Promise<void>;
-  onReasonChange: (reason: string) => void;
   pending: boolean;
+  pendingLabel: string;
+  size?: "md" | "lg";
+  title: string;
+  tone?: "default" | "danger";
 }) {
-  const messageID = dialog.message.message_id || "--";
-  const isDiscard = dialog.action === "discard";
-  const confirmDisabled = pending || messageID === "--" || (isDiscard && dialog.reason.trim() === "");
+  const titleID = `confirm-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-") || "action"}`;
+  const widthClass = size === "lg" ? "max-w-2xl" : "max-w-lg";
+  const confirmClass =
+    tone === "danger"
+      ? "bg-rose-700 hover:bg-rose-800"
+      : "bg-zinc-950 hover:bg-zinc-800";
 
   return (
-    <div className="fixed inset-0 z-30 grid place-items-center bg-zinc-950/45 px-4 py-6 backdrop-blur-sm" role="dialog" aria-modal="true">
+    <div
+      aria-labelledby={titleID}
+      aria-modal="true"
+      className="fixed inset-0 z-30 grid place-items-center bg-zinc-950/45 px-4 py-6 backdrop-blur-sm"
+      role="dialog"
+    >
       <form
-        className="w-full max-w-lg animate-rise overflow-hidden rounded-lg border border-white/10 bg-white shadow-[0_24px_80px_-32px_rgba(0,0,0,0.45)]"
+        className={[
+          "w-full animate-rise overflow-hidden rounded-lg border border-white/10 bg-white shadow-[0_24px_80px_-32px_rgba(0,0,0,0.45)]",
+          widthClass,
+        ].join(" ")}
         onSubmit={(event) => {
           event.preventDefault();
           void onConfirm();
         }}
       >
         <div className="border-b border-line bg-zinc-50 px-5 py-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">
-            {isDiscard ? "Discard Message" : "Requeue Message"}
-          </p>
-          <h2 className="mt-2 break-words font-mono text-lg font-semibold tracking-tight text-ink">{messageID}</h2>
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">{eyebrow}</p>
+          <h2 id={titleID} className="mt-2 break-words font-mono text-lg font-semibold tracking-tight text-ink">
+            {title}
+          </h2>
+          {description && <p className="mt-2 text-sm leading-relaxed text-zinc-600">{description}</p>}
         </div>
 
         <div className="grid gap-4 p-5">
-          <div className="rounded-lg border border-line bg-white px-4 py-3">
-            <LineItem label="Current Status" value={dialog.message.status || "--"} />
-            <LineItem label="Attempts" value={dialog.message.attempts?.toLocaleString() ?? "0"} />
-            <LineItem label="Client" value={dialog.message.client_id || "--"} />
-          </div>
+          {children}
 
-          <p className="text-sm leading-relaxed text-zinc-600">
-            {isDiscard
-              ? "Discard stops retry delivery for this message and stores the reason as the latest error."
-              : "Requeue moves this message back to pending and clears attempts, retry time, claim, sent state, and last error."}
-          </p>
-
-          {isDiscard && (
-            <div className="grid gap-2">
-              <label className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500" htmlFor="discard-reason">
-                Reason
-              </label>
-              <textarea
-                className="min-h-24 resize-y rounded-lg border border-line bg-white px-3 py-2 text-sm outline-none transition duration-300 placeholder:text-zinc-400 focus:border-accent"
-                id="discard-reason"
-                onChange={(event) => onReasonChange(event.target.value)}
-                placeholder="manual discard after backend confirmation"
-                value={dialog.reason}
-              />
-              <p className="text-xs text-zinc-500">Required. This will be visible in the message last_error field.</p>
-            </div>
-          )}
-
-          {dialog.error && (
+          {error && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-              <p className="font-semibold">Action failed</p>
-              <p className="mt-1 break-words font-mono text-xs">{dialog.error}</p>
+              <p className="font-semibold">{errorTitle}</p>
+              <p className="mt-1 break-words font-mono text-xs">{error}</p>
             </div>
           )}
         </div>
@@ -3158,16 +3253,78 @@ function MessageActionDialog({
           <button
             className={[
               "inline-flex items-center justify-center rounded-lg px-4 py-2 text-sm font-medium text-white transition duration-300 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50",
-              isDiscard ? "bg-rose-700 hover:bg-rose-800" : "bg-zinc-950 hover:bg-zinc-800",
+              confirmClass,
             ].join(" ")}
-            disabled={confirmDisabled}
+            disabled={pending || confirmDisabled}
             type="submit"
           >
-            {pending ? "Working..." : isDiscard ? "Discard" : "Requeue"}
+            {pending ? pendingLabel : confirmLabel}
           </button>
         </div>
       </form>
     </div>
+  );
+}
+
+function MessageActionDialog({
+  dialog,
+  onClose,
+  onConfirm,
+  onReasonChange,
+  pending,
+}: {
+  dialog: NonNullable<MessageActionDialogState>;
+  onClose: () => void;
+  onConfirm: () => void | Promise<void>;
+  onReasonChange: (reason: string) => void;
+  pending: boolean;
+}) {
+  const messageID = dialog.message.message_id || "--";
+  const isDiscard = dialog.action === "discard";
+  const confirmDisabled = messageID === "--" || (isDiscard && dialog.reason.trim() === "");
+
+  return (
+    <ConfirmActionDialog
+      confirmDisabled={confirmDisabled}
+      confirmLabel={isDiscard ? "Discard" : "Requeue"}
+      error={dialog.error}
+      errorTitle="Action failed"
+      eyebrow={isDiscard ? "Discard Message" : "Requeue Message"}
+      onClose={onClose}
+      onConfirm={onConfirm}
+      pending={pending}
+      pendingLabel="Working..."
+      title={messageID}
+      tone={isDiscard ? "danger" : "default"}
+    >
+      <div className="rounded-lg border border-line bg-white px-4 py-3">
+        <LineItem label="Current Status" value={dialog.message.status || "--"} />
+        <LineItem label="Attempts" value={dialog.message.attempts?.toLocaleString() ?? "0"} />
+        <LineItem label="Client" value={dialog.message.client_id || "--"} />
+      </div>
+
+      <p className="text-sm leading-relaxed text-zinc-600">
+        {isDiscard
+          ? "Discard stops retry delivery for this message and stores the reason as the latest error."
+          : "Requeue moves this message back to pending and clears attempts, retry time, claim, sent state, and last error."}
+      </p>
+
+      {isDiscard && (
+        <div className="grid gap-2">
+          <label className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500" htmlFor="discard-reason">
+            Reason
+          </label>
+          <textarea
+            className="min-h-24 resize-y rounded-lg border border-line bg-white px-3 py-2 text-sm outline-none transition duration-300 placeholder:text-zinc-400 focus:border-accent"
+            id="discard-reason"
+            onChange={(event) => onReasonChange(event.target.value)}
+            placeholder="manual discard after backend confirmation"
+            value={dialog.reason}
+          />
+          <p className="text-xs text-zinc-500">Required. This will be visible in the message last_error field.</p>
+        </div>
+      )}
+    </ConfirmActionDialog>
   );
 }
 
@@ -3184,61 +3341,108 @@ function SessionDisconnectDialog({
 }) {
   const session = dialog.session;
   const sessionID = session.session_id || "--";
-  const confirmDisabled = pending || sessionID === "--";
 
   return (
-    <div className="fixed inset-0 z-30 grid place-items-center bg-zinc-950/45 px-4 py-6 backdrop-blur-sm" role="dialog" aria-modal="true">
-      <form
-        className="w-full max-w-lg animate-rise overflow-hidden rounded-lg border border-white/10 bg-white shadow-[0_24px_80px_-32px_rgba(0,0,0,0.45)]"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void onConfirm();
-        }}
-      >
-        <div className="border-b border-line bg-zinc-50 px-5 py-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">Disconnect Local Session</p>
-          <h2 className="mt-2 break-words font-mono text-lg font-semibold tracking-tight text-ink">{sessionID}</h2>
-        </div>
+    <ConfirmActionDialog
+      confirmDisabled={sessionID === "--"}
+      confirmLabel="Disconnect"
+      description="This closes the selected local TCP connection and removes its local session binding. Other devices for the same client are not affected."
+      error={dialog.error}
+      errorTitle="Disconnect failed"
+      eyebrow="Disconnect Local Session"
+      onClose={onClose}
+      onConfirm={onConfirm}
+      pending={pending}
+      pendingLabel="Disconnecting..."
+      title={sessionID}
+      tone="danger"
+    >
+      <div className="rounded-lg border border-line bg-white px-4 py-3">
+        <LineItem label="Client" value={session.client_id || "--"} />
+        <LineItem label="Device" value={session.device_id || "--"} />
+        <LineItem label="ConnID" value={session.conn_id?.toLocaleString() ?? "--"} />
+        <LineItem label="Gateway" value={session.gateway_node || "--"} />
+      </div>
+    </ConfirmActionDialog>
+  );
+}
 
-        <div className="grid gap-4 p-5">
-          <div className="rounded-lg border border-line bg-white px-4 py-3">
-            <LineItem label="Client" value={session.client_id || "--"} />
-            <LineItem label="Device" value={session.device_id || "--"} />
-            <LineItem label="ConnID" value={session.conn_id?.toLocaleString() ?? "--"} />
-            <LineItem label="Gateway" value={session.gateway_node || "--"} />
-          </div>
+function RetryScanDialog({
+  dialog,
+  onClose,
+  onConfirm,
+  pending,
+}: {
+  dialog: NonNullable<RetryScanDialogState>;
+  onClose: () => void;
+  onConfirm: () => void | Promise<void>;
+  pending: boolean;
+}) {
+  return (
+    <ConfirmActionDialog
+      confirmLabel="Run Retry Scan"
+      description="This triggers one bounded retry worker scan on the current gateway using the configured lease, max-attempt, and ACK-timeout rules."
+      error={dialog.error}
+      errorTitle="Retry scan failed"
+      eyebrow="Retry Scan"
+      onClose={onClose}
+      onConfirm={onConfirm}
+      pending={pending}
+      pendingLabel="Scanning..."
+      title="Run Retry Scan"
+    >
+      <div className="rounded-lg border border-line bg-white px-4 py-3">
+        <LineItem label="Scope" value="current gateway node" />
+        <LineItem label="Mutation" value="claim and resend eligible stored messages" />
+        <LineItem label="Result" value="message status list refreshes after completion" />
+      </div>
+    </ConfirmActionDialog>
+  );
+}
 
-          <p className="text-sm leading-relaxed text-zinc-600">
-            This closes the selected local TCP connection and removes its local session binding. Other devices for the same client are not affected.
-          </p>
+function DownlinkTestPushDialog({
+  dialog,
+  onClose,
+  onConfirm,
+  pending,
+}: {
+  dialog: NonNullable<DownlinkTestPushDialogState>;
+  onClose: () => void;
+  onConfirm: () => void | Promise<void>;
+  pending: boolean;
+}) {
+  const bodyBytes = new TextEncoder().encode(dialog.body).length;
+  const messageID = dialog.messageID || "auto on send";
+  const traceID = dialog.traceID || "same as message_id";
 
-          {dialog.error && (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-              <p className="font-semibold">Disconnect failed</p>
-              <p className="mt-1 break-words font-mono text-xs">{dialog.error}</p>
-            </div>
-          )}
-        </div>
-
-        <div className="flex flex-col-reverse gap-2 border-t border-line bg-zinc-50 px-5 py-4 sm:flex-row sm:justify-end">
-          <button
-            className="inline-flex items-center justify-center rounded-lg border border-line bg-white px-4 py-2 text-sm font-medium text-ink transition duration-300 hover:bg-zinc-50 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={pending}
-            onClick={onClose}
-            type="button"
-          >
-            Cancel
-          </button>
-          <button
-            className="inline-flex items-center justify-center rounded-lg bg-rose-700 px-4 py-2 text-sm font-medium text-white transition duration-300 hover:bg-rose-800 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={confirmDisabled}
-            type="submit"
-          >
-            {pending ? "Disconnecting..." : "Disconnect"}
-          </button>
-        </div>
-      </form>
-    </div>
+  return (
+    <ConfirmActionDialog
+      confirmLabel="Send Test Push"
+      description="This sends one downlink message through the gateway internal debug push endpoint."
+      error={dialog.error}
+      errorTitle="Test push failed"
+      eyebrow="Test Downlink"
+      onClose={onClose}
+      onConfirm={onConfirm}
+      pending={pending}
+      pendingLabel="Sending..."
+      size="lg"
+      title={`${dialog.clientID} / ${dialog.deviceID}`}
+    >
+      <div className="grid gap-3 rounded-lg border border-line bg-white px-4 py-3 md:grid-cols-2">
+        <LineItem label="ClientID" value={dialog.clientID} />
+        <LineItem label="DeviceID" value={dialog.deviceID} />
+        <LineItem label="MsgID" value={dialog.msgID.toLocaleString()} />
+        <LineItem label="ACK" value={dialog.ackRequired ? "required" : "not required"} />
+        <LineItem label="MessageID" value={messageID} />
+        <LineItem label="TraceID" value={traceID} />
+      </div>
+      <div className="rounded-lg border border-line bg-zinc-50 px-4 py-3">
+        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">Body Preview</p>
+        <p className="mt-2 max-h-32 overflow-auto break-words font-mono text-sm text-ink">{dialog.body || "--"}</p>
+        <p className="mt-2 text-xs text-zinc-500">{bodyBytes.toLocaleString()} bytes after UTF-8 encoding</p>
+      </div>
+    </ConfirmActionDialog>
   );
 }
 
