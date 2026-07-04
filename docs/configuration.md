@@ -353,6 +353,21 @@ session or call `/internal/*` APIs directly unless a deployment-side proxy
 signs the login request. For production, prefer a private authenticated reverse
 proxy or continue using the `cmd/admin` CLI for direct HMAC-signed operations.
 
+For browser-level release verification, run:
+
+```bash
+bash scripts/console_smoke.sh
+```
+
+The smoke script builds the console assets, starts a lightweight gateway twice,
+once as `admin` and once as `readonly`, then verifies login, navigation,
+guarded operation confirmations, and read-only disabled states with Playwright.
+Install the local Playwright browser once if needed:
+
+```bash
+npm --prefix web/admin exec -- playwright install chromium
+```
+
 ## Cluster
 
 ```yaml

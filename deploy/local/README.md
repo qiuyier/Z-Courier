@@ -42,6 +42,21 @@ Use `dev-internal-token` to sign in. The two configs intentionally use
 different admin session cookie names so signing in to one local node does not
 invalidate the other node's console session on `127.0.0.1`.
 
+Run the browser-level admin console smoke verifier:
+
+```bash
+bash scripts/console_smoke.sh
+```
+
+It builds the console assets, starts a lightweight gateway with an `admin`
+session role, runs Playwright checks against `/console/`, then repeats the
+same path with a `readonly` role to confirm guarded mutation controls are
+disabled. If the local Playwright browser is missing, install it once:
+
+```bash
+npm --prefix web/admin exec -- playwright install chromium
+```
+
 The verifier connects the client to `gateway-b`, sends `/internal/push` to
 `gateway-a`, and checks that Redis route lookup plus peer push delivers the
 message to the client on `gateway-b`. The cluster config uses a short Redis

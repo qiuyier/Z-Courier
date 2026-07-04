@@ -93,6 +93,20 @@ ZINX_CONFIG_FILE_PATH=conf/zinx.cluster-b.json \
 `admin_console.session.cookie_name`，避免你在同一个 `127.0.0.1` 域名下登录
 A 节点后，又登录 B 节点把 A 节点的 console session cookie 覆盖掉。
 
+浏览器级别的 admin console smoke：
+
+```bash
+bash scripts/console_smoke.sh
+```
+
+脚本会构建 console 资产，先用 `admin` 角色启动轻量 gateway 并跑 Playwright 检查，
+再用 `readonly` 角色重复一次，确认受保护的变更操作在只读模式下不可用。如果本机还没
+装 Playwright 浏览器，先执行一次：
+
+```bash
+npm --prefix web/admin exec -- playwright install chromium
+```
+
 终端 3 运行集群验证：
 
 ```bash

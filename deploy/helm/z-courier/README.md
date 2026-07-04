@@ -163,7 +163,11 @@ signs those requests; direct HMAC operations remain available through
 short-lived HTTP-only session cookie after a valid internal token or
 HMAC-authenticated login request. Sessions are node-local and in-memory in this
 first implementation, so a gateway restart or pod move requires logging in
-again.
+again. If an ingress or proxy load-balances console traffic across replicas,
+use sticky routing, direct per-pod access, or expect a fresh login when requests
+land on a different pod. Choose the lowest role that fits the operator workflow:
+`readonly` for inspection, `operator` for guarded repair actions, and `admin`
+for the current full console permission set.
 
 ## Required Secrets
 

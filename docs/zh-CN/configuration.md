@@ -246,6 +246,20 @@ admin_console:
   生产更适合由反向代理完成 operator 鉴权和内部签名，再转发到 gateway internal
   HTTP。
 
+浏览器级别的 console 发布前验证可以执行：
+
+```bash
+bash scripts/console_smoke.sh
+```
+
+这个脚本会构建 console 资产，分别用 `admin` 和 `readonly` 两种角色启动轻量 gateway，
+再通过 Playwright 验证登录、页面导航、受保护操作确认框，以及 readonly 下的禁用状态。
+如果本机还没有安装 Playwright 浏览器，先执行一次：
+
+```bash
+npm --prefix web/admin exec -- playwright install chromium
+```
+
 ## Cluster
 
 ```yaml
