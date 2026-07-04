@@ -88,6 +88,10 @@ V9 Web admin console work is tracked in
 [docs/v9-roadmap.md](docs/v9-roadmap.md), and the `v0.9.0` release-prep
 checklist is in [docs/v9-release.md](docs/v9-release.md).
 
+V10 admin console operations work is tracked in
+[docs/v10-roadmap.md](docs/v10-roadmap.md), and the `v0.10.0` release guide is
+in [docs/v10-release.md](docs/v10-release.md).
+
 ## Quick Start
 
 Run the single-node integration verifier from the repository root:
@@ -282,11 +286,12 @@ context, and guarded downlink repair. See
 [docs/v9-roadmap.md](docs/v9-roadmap.md) and
 [docs/v9-release.md](docs/v9-release.md).
 
-V10 is being planned for `v0.10.0`. It focuses on turning the admin console
-from an inspection surface into a controlled operations surface: short-lived
-admin sessions, read-only/operator permissions, session operations, downlink
-debug pushes, retry/offline queue views, audit trail, and console UX hardening.
-See [docs/v10-roadmap.md](docs/v10-roadmap.md).
+V10 is the `v0.10.0` release-prep track. It turns the admin console from an
+inspection surface into a controlled operations surface: short-lived admin
+sessions, read-only/operator permissions, session operations, downlink debug
+pushes, retry/offline queue views, audit trail, console UX hardening, and
+browser smoke coverage. See [docs/v10-roadmap.md](docs/v10-roadmap.md) and
+[docs/v10-release.md](docs/v10-release.md).
 
 ## Development
 

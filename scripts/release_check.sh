@@ -133,6 +133,8 @@ run_docker_checks() {
 run_slow_checks() {
   run bash scripts/e2e.sh
   run bash scripts/e2e_cluster.sh
+  run npm --prefix web/admin exec -- playwright install chromium
+  run bash scripts/console_smoke.sh
   run bash scripts/loadtest_smoke.sh
   run bash scripts/production_smoke.sh
   run bash scripts/production_cluster_smoke.sh
