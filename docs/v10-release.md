@@ -265,6 +265,15 @@ Fast local release checks:
 bash scripts/release_check.sh
 ```
 
+If Composer is provided by a Docker-based local PHP toolchain instead of a
+real `composer` executable on `PATH`, point the release script at an image that
+contains Composer:
+
+```bash
+ZCOURIER_RELEASE_COMPOSER_DOCKER_IMAGE=dnmp8-php82 \
+bash scripts/release_check.sh
+```
+
 Full local release checks, including Docker-backed validation and long-running
 smoke/E2E paths:
 

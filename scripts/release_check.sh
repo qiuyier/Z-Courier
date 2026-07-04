@@ -8,6 +8,8 @@ RUN_SLOW="${ZCOURIER_RELEASE_RUN_SLOW:-0}"
 RUN_K8S="${ZCOURIER_RELEASE_RUN_K8S:-0}"
 RUN_RACE="${ZCOURIER_RELEASE_RUN_RACE:-1}"
 SKIP_PHP="${ZCOURIER_RELEASE_SKIP_PHP:-0}"
+COMPOSER_DOCKER_IMAGE="${ZCOURIER_RELEASE_COMPOSER_DOCKER_IMAGE:-}"
+COMPOSER_DOCKER_CACHE_DIR="${ZCOURIER_RELEASE_COMPOSER_CACHE_DIR:-$HOME/.composer}"
 
 cd "$ROOT_DIR"
 
@@ -42,7 +44,6 @@ run_php_checks() {
   fi
 
   require_cmd php
-  require_cmd composer
 
   run php -d error_reporting=E_ALL sdk/php/tests/run.php
 
@@ -50,8 +51,32 @@ run_php_checks() {
     run php -l "$file"
   done < <(find sdk/php -name '*.php' -print0)
 
-  run composer --working-dir=sdk/php install --no-interaction --prefer-dist
-  run composer --working-dir=sdk/php analyse
+  run_composer --working-dir=sdk/php install --no-interaction --prefer-dist
+  run_composer --working-dir=sdk/php analyse
+}
+
+run_composer() {
+  if command -v composer >/dev/null 2>&1; then
+    run composer "$@"
+    return
+  fi
+
+  if [[ -n "$COMPOSER_DOCKER_IMAGE" ]]; then
+    require_cmd docker
+    mkdir -p "$COMPOSER_DOCKER_CACHE_DIR"
+    run docker run --rm --interactive \
+      --user "$(id -u):$(id -g)" \
+      --env COMPOSER_HOME=/tmp/composer \
+      --volume "$COMPOSER_DOCKER_CACHE_DIR:/tmp/composer" \
+      --volume "$ROOT_DIR:/app" \
+      --workdir /app \
+      "$COMPOSER_DOCKER_IMAGE" composer "$@"
+    return
+  fi
+
+  echo "missing required command: composer" >&2
+  echo "or set ZCOURIER_RELEASE_COMPOSER_DOCKER_IMAGE to a local image with composer" >&2
+  exit 1
 }
 
 run_helm() {
