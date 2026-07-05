@@ -274,6 +274,16 @@ ZCOURIER_RELEASE_COMPOSER_DOCKER_IMAGE=dnmp8-php82 \
 bash scripts/release_check.sh
 ```
 
+On an arm64 development machine with locally cached arm64 base images, set the
+Docker build platform explicitly for local release checks:
+
+```bash
+ZCOURIER_RELEASE_COMPOSER_DOCKER_IMAGE=dnmp8-php82 \
+ZCOURIER_RELEASE_RUN_DOCKER=1 \
+ZCOURIER_RELEASE_DOCKER_BUILD_PLATFORM=linux/arm64 \
+bash scripts/release_check.sh
+```
+
 Full local release checks, including Docker-backed validation and long-running
 smoke/E2E paths:
 

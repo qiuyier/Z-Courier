@@ -10,6 +10,7 @@ RUN_RACE="${ZCOURIER_RELEASE_RUN_RACE:-1}"
 SKIP_PHP="${ZCOURIER_RELEASE_SKIP_PHP:-0}"
 COMPOSER_DOCKER_IMAGE="${ZCOURIER_RELEASE_COMPOSER_DOCKER_IMAGE:-}"
 COMPOSER_DOCKER_CACHE_DIR="${ZCOURIER_RELEASE_COMPOSER_CACHE_DIR:-$HOME/.composer}"
+DOCKER_BUILD_PLATFORM="${ZCOURIER_RELEASE_DOCKER_BUILD_PLATFORM:-}"
 
 cd "$ROOT_DIR"
 
@@ -93,6 +94,17 @@ run_helm() {
   docker run --rm -v "$ROOT_DIR:/work" -w /work alpine/helm:3.17.3 "$@"
 }
 
+run_release_docker_build() {
+  if [[ -n "$DOCKER_BUILD_PLATFORM" ]]; then
+    run docker build \
+      --build-arg "BUILDPLATFORM=$DOCKER_BUILD_PLATFORM" \
+      --tag z-courier-gateway:release-check .
+    return
+  fi
+
+  run docker build --tag z-courier-gateway:release-check .
+}
+
 run_fast_checks() {
   require_cmd go
   require_cmd npm
@@ -150,7 +162,7 @@ run_docker_checks() {
   run_helm template z-courier deploy/helm/z-courier
   run_helm package deploy/helm/z-courier --destination /tmp
 
-  run docker build --tag z-courier-gateway:release-check .
+  run_release_docker_build
   run docker run --rm --entrypoint /bin/sh z-courier-gateway:release-check -c \
     'test -x /usr/local/bin/z-courier-gateway && test -f /app/configs/z-courier.yaml && test -f /app/conf/zinx.json && test -f /app/web/admin/dist/index.html'
 }
