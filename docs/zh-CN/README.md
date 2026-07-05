@@ -36,8 +36,9 @@ roadmap、历史版本文档仍保留在 `docs/` 根目录；这里主要放“�
 | [Kubernetes / Helm 部署](kubernetes-helm.md) | K8s 用户 | Helm values、Service、StatefulSet、Secret、ServiceMonitor |
 | [管理和运维](admin-ops.md) | 运维、后端 | admin CLI、Web 控制台、消息修复、诊断 bundle |
 | [生产排障手册](production-runbook.md) | 运维、值班同学 | 健康检查、路由排查、下行失败、依赖异常、监控指标 |
+| [v0.10.0 发布复盘和使用说明](v10-release-retrospective.md) | 开发、运维、发布负责人 | 发布结果、产物、升级、控制台启用、验证、回滚 |
 
 ## 版本说明
 
-当前中文版以 `v0.9.x` 的代码和英文文档为基础整理。若中文文档和代码行为冲突，
+当前中文版以 `v0.10.0` 的代码和英文文档为基础整理。若中文文档和代码行为冲突，
 以代码、配置示例和英文主文档为准；欢迎继续把发现的差异补回中文文档。

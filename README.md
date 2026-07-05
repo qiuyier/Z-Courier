@@ -90,7 +90,9 @@ checklist is in [docs/v9-release.md](docs/v9-release.md).
 
 V10 admin console operations work is tracked in
 [docs/v10-roadmap.md](docs/v10-roadmap.md), and the `v0.10.0` release guide is
-in [docs/v10-release.md](docs/v10-release.md).
+in [docs/v10-release.md](docs/v10-release.md). The Chinese release
+retrospective and usage guide is in
+[docs/zh-CN/v10-release-retrospective.md](docs/zh-CN/v10-release-retrospective.md).
 
 ## Quick Start
 
@@ -286,12 +288,14 @@ context, and guarded downlink repair. See
 [docs/v9-roadmap.md](docs/v9-roadmap.md) and
 [docs/v9-release.md](docs/v9-release.md).
 
-V10 is the `v0.10.0` release-prep track. It turns the admin console from an
+V10 was published as `v0.10.0`. It turns the admin console from an
 inspection surface into a controlled operations surface: short-lived admin
 sessions, read-only/operator permissions, session operations, downlink debug
 pushes, retry/offline queue views, audit trail, console UX hardening, and
 browser smoke coverage. See [docs/v10-roadmap.md](docs/v10-roadmap.md) and
-[docs/v10-release.md](docs/v10-release.md).
+[docs/v10-release.md](docs/v10-release.md). Chinese release notes and usage
+guidance are available in
+[docs/zh-CN/v10-release-retrospective.md](docs/zh-CN/v10-release-retrospective.md).
 
 ## Development
 

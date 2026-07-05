@@ -80,6 +80,7 @@ Readiness:       http://127.0.0.1:18080/readyz
 - [Kubernetes / Helm 部署](docs/zh-CN/kubernetes-helm.md)
 - [管理和运维](docs/zh-CN/admin-ops.md)
 - [生产排障手册](docs/zh-CN/production-runbook.md)
+- [v0.10.0 发布复盘和使用说明](docs/zh-CN/v10-release-retrospective.md)
 
 ## 生产部署
 
@@ -94,17 +95,17 @@ ghcr.io/qiuyier/z-courier-gateway:<release-tag>
 ```yaml
 image:
   repository: ghcr.io/qiuyier/z-courier-gateway
-  tag: v0.9.0
+  tag: v0.10.0
 ```
 
 Helm chart 发布到 GHCR OCI：
 
 ```bash
 helm upgrade --install z-courier oci://ghcr.io/qiuyier/charts/z-courier \
-  --version 0.4.0 \
+  --version 0.5.0 \
   --namespace z-courier \
   -f values-production.yaml \
-  --set image.tag=v0.9.0
+  --set image.tag=v0.10.0
 ```
 
 生产环境不要把 `/console/` 或 `/internal/*` 直接暴露到公网。Web 管理控制台
