@@ -6,9 +6,12 @@ COMPOSE_FILE="$ROOT_DIR/deploy/production/docker-compose.yml"
 ENV_FILE="${PRODUCTION_SMOKE_ENV_FILE:-$ROOT_DIR/deploy/production/.env.example}"
 PROMETHEUS_URL="${PRODUCTION_SMOKE_PROMETHEUS_URL:-http://127.0.0.1:9090}"
 TIMEOUT_SECONDS="${PRODUCTION_SMOKE_TIMEOUT_SECONDS:-120}"
+DOCKER_BUILD_PLATFORM="${ZCOURIER_RELEASE_DOCKER_BUILD_PLATFORM:-}"
+GATEWAY_HOST_PORT="${PRODUCTION_SMOKE_GATEWAY_PORT:-18999}"
 
 compose() {
-  docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "$@"
+  ZCOURIER_PRODUCTION_GATEWAY_PORT="$GATEWAY_HOST_PORT" \
+    docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "$@"
 }
 
 cleanup() {
@@ -61,13 +64,23 @@ prometheus_target_up() {
     [[ "$body" == *'"health":"up"'* ]]
 }
 
+start_stack() {
+  if [[ -n "$DOCKER_BUILD_PLATFORM" ]]; then
+    compose build --build-arg "BUILDPLATFORM=$DOCKER_BUILD_PLATFORM"
+    compose up -d
+    return
+  fi
+
+  compose up -d --build
+}
+
 cd "$ROOT_DIR"
 
 echo "rendering production compose config..."
 compose config >/dev/null
 
 echo "starting production reference stack..."
-compose up -d --build
+start_stack
 
 wait_until "gateway readiness" gateway_ready
 wait_until "gateway metrics" gateway_metrics_ready

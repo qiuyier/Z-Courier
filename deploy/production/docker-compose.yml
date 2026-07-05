@@ -13,7 +13,7 @@ services:
       nsqd:
         condition: service_started
     ports:
-      - "8999:8999"
+      - "${ZCOURIER_PRODUCTION_GATEWAY_PORT:-8999}:8999"
     expose:
       - "18080"
     environment:
