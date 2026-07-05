@@ -7,6 +7,8 @@ semantic versioning after the first public MVP tag.
 
 ## [Unreleased]
 
+## [v0.10.0] - 2026-07-05
+
 ### Added
 
 - V10 roadmap covering the `v0.10.0` admin console operations planning track,
