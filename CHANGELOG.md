@@ -7,6 +7,13 @@ semantic versioning after the first public MVP tag.
 
 ## [Unreleased]
 
+### Added
+
+- V11 roadmap covering production-grade admin control-plane work, including
+  persistent audit storage, Redis-backed admin sessions, cluster-wide console
+  views, remote operation safety, CSRF hardening, and bounded admin data
+  pagination.
+
 ## [v0.10.0] - 2026-07-05
 
 ### Added

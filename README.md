@@ -94,6 +94,11 @@ in [docs/v10-release.md](docs/v10-release.md). The Chinese release
 retrospective and usage guide is in
 [docs/zh-CN/v10-release-retrospective.md](docs/zh-CN/v10-release-retrospective.md).
 
+V11 production control-plane planning is tracked in
+[docs/v11-roadmap.md](docs/v11-roadmap.md). It focuses on persistent audit,
+Redis-backed admin sessions, cluster-wide console views, remote operation
+safety, browser-session hardening, and bounded admin data APIs.
+
 ## Quick Start
 
 Run the single-node integration verifier from the repository root:
@@ -296,6 +301,12 @@ browser smoke coverage. See [docs/v10-roadmap.md](docs/v10-roadmap.md) and
 [docs/v10-release.md](docs/v10-release.md). Chinese release notes and usage
 guidance are available in
 [docs/zh-CN/v10-release-retrospective.md](docs/zh-CN/v10-release-retrospective.md).
+
+V11 is the `v0.11.0` planning track. It focuses on making the admin control
+plane more production-ready for clustered deployments: persistent audit,
+Redis-backed admin sessions, cluster-wide views, safe remote operations, CSRF
+hardening, and bounded admin data pagination. See
+[docs/v11-roadmap.md](docs/v11-roadmap.md).
 
 ## Development
 
