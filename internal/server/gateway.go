@@ -37,6 +37,7 @@ type Gateway struct {
 
 	clusterRegistry          cluster.OnlineRegistry
 	clusterRegistryCloser    io.Closer
+	adminSessionCloser       io.Closer
 	adminAuditCloser         io.Closer
 	authVerifierCloser       io.Closer
 	internalHTTP             *http.Server
@@ -109,10 +110,29 @@ func New(config Config, logger *zap.Logger) (*Gateway, error) {
 		return nil, err
 	}
 	config.AdminAudit = adminAudit
+	var adminSessions *adminSessionManager
+	var adminSessionCloser io.Closer
+	if !config.DisableInternalHTTP && config.InternalHTTPAddr != "" {
+		adminSessions, adminSessionCloser, err = newConfiguredAdminSessionManager(config.AdminConsole.Session)
+		if err != nil {
+			closeWithLog(adminAuditCloser, logger, "admin audit store")
+			closeWithLog(downlinkCloser, logger, "downlink store")
+			if upstream != nil {
+				_ = upstream.Close()
+			}
+			if clusterRegistryCloser != nil {
+				_ = clusterRegistryCloser.Close()
+			}
+			closeWithLog(authVerifierCloser, logger, "authentication verifier")
+			return nil, err
+		}
+	}
+	config.AdminSessions = adminSessions
 	health := &gatewayHealth{}
 	runtime := newGatewayRuntime()
 	internalHTTP, err := newInternalHTTPServer(config, logger, downlinkService, health, clusterRegistry, runtime)
 	if err != nil {
+		closeWithLog(adminSessionCloser, logger, "admin session store")
 		closeWithLog(adminAuditCloser, logger, "admin audit store")
 		closeWithLog(downlinkCloser, logger, "downlink store")
 		if upstream != nil {
@@ -133,6 +153,7 @@ func New(config Config, logger *zap.Logger) (*Gateway, error) {
 		runtime:                runtime,
 		clusterRegistry:        clusterRegistry,
 		clusterRegistryCloser:  clusterRegistryCloser,
+		adminSessionCloser:     adminSessionCloser,
 		adminAuditCloser:       adminAuditCloser,
 		authVerifierCloser:     authVerifierCloser,
 		internalHTTP:           internalHTTP,
@@ -230,6 +251,7 @@ func (g *Gateway) Shutdown(ctx context.Context) error {
 		g.shutdownAuthVerifier()
 		unbound := g.unbindAllClusterRoutes(ctx)
 		g.shutdownInternalHTTPWithContext(ctx)
+		g.shutdownAdminSessions()
 		g.shutdownAdminAudit()
 		g.shutdownDownlinkCleanupWorker()
 		g.shutdownDownlinkRetryWorker()
@@ -357,6 +379,16 @@ func (g *Gateway) shutdownAdminAudit() {
 	if err := g.adminAuditCloser.Close(); err != nil {
 		g.shutdownErr = errors.Join(g.shutdownErr, err)
 		g.logger.Warn("failed to shutdown admin audit store cleanly", zap.Error(err))
+	}
+}
+
+func (g *Gateway) shutdownAdminSessions() {
+	if g.adminSessionCloser == nil {
+		return
+	}
+	if err := g.adminSessionCloser.Close(); err != nil {
+		g.shutdownErr = errors.Join(g.shutdownErr, err)
+		g.logger.Warn("failed to shutdown admin session store cleanly", zap.Error(err))
 	}
 }
 

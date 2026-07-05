@@ -290,6 +290,15 @@ func (c *File) validateOperationalWarnings(collector *validationCollector) {
 		if strings.TrimSpace(c.Cluster.InternalAddr) == "" {
 			collector.addWarning("cluster is enabled but cluster.internal_addr is empty; startup defaults may not be reachable by peer gateways")
 		}
+		if c.AdminConsole.Session.Enabled {
+			sessionStoreType := strings.ToLower(strings.TrimSpace(c.AdminConsole.Session.Store.Type))
+			if sessionStoreType == "" {
+				sessionStoreType = server.DefaultConfig().AdminConsole.Session.Store.Type
+			}
+			if sessionStoreType == "memory" {
+				collector.addWarning("cluster is enabled with memory admin console session store; use redis session store when console traffic may reach multiple gateway nodes")
+			}
+		}
 	}
 
 	internalHTTPEnabled := c.InternalHTTP.Enabled == nil || *c.InternalHTTP.Enabled

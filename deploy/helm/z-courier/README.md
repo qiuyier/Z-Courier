@@ -144,6 +144,11 @@ adminConsole:
     cookieSecure: true
     cookieSameSite: lax
     role: admin
+    store:
+      type: redis
+      redis:
+        addr: redis-master.z-courier.svc.cluster.local:6379
+        keyPrefix: zcourier:production-k8s:admin-session
   monitoring:
     prometheusURL: https://prometheus.example.internal
     grafanaURL: https://grafana.example.internal
@@ -162,6 +167,11 @@ the console.
 audit events inside each gateway process. Use `postgres` when production
 operators need admin audit history to survive pod restarts.
 
+`adminConsole.session.store.type` can be `memory` or `redis`. Use `memory` for
+single-node development. Use `redis` when console requests can land on
+different gateway pods; logout deletes the shared session and the Redis key TTL
+tracks the configured session TTL.
+
 The chart defaults `adminConsole.enabled=false`. When enabling it, keep the
 internal service on private networking and prefer VPN, bastion, private ingress,
 or an authenticating reverse proxy for operator access. In production HMAC mode,
@@ -169,11 +179,7 @@ browser JavaScript cannot call `/internal/*` APIs unless a deployment-side proxy
 signs those requests; direct HMAC operations remain available through
 `cmd/admin`. When `adminConsole.session.enabled=true`, the browser receives a
 short-lived HTTP-only session cookie after a valid internal token or
-HMAC-authenticated login request. Sessions are node-local and in-memory in this
-first implementation, so a gateway restart or pod move requires logging in
-again. If an ingress or proxy load-balances console traffic across replicas,
-use sticky routing, direct per-pod access, or expect a fresh login when requests
-land on a different pod. Choose the lowest role that fits the operator workflow:
+HMAC-authenticated login request. Choose the lowest role that fits the operator workflow:
 `readonly` for inspection, `operator` for guarded repair actions, and `admin`
 for the current full console permission set.
 

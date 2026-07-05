@@ -33,7 +33,14 @@ func newInternalHTTPServer(config Config, logger *zap.Logger, service *downlink.
 	if adminAudit == nil {
 		adminAudit = adminaudit.NewStore(adminaudit.StoreConfig{})
 	}
-	adminSessions := newAdminSessionManager(config.AdminConsole.Session)
+	adminSessions := config.AdminSessions
+	if adminSessions == nil {
+		var err error
+		adminSessions, _, err = newConfiguredAdminSessionManager(config.AdminConsole.Session)
+		if err != nil {
+			return nil, err
+		}
+	}
 	adminSessionConfig := newAdminSessionHTTPConfig(handlerConfig, adminSessions, adminAudit)
 	withConsoleSession := func(handler http.Handler) http.Handler {
 		return withAdminSessionAuth(handler, adminSessions, adminSessionConfig.sessionConfig, handlerConfig.InternalToken)

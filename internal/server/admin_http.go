@@ -82,13 +82,15 @@ type adminMonitoringSummary struct {
 }
 
 type adminConsoleSessionSummary struct {
-	Enabled        bool     `json:"enabled"`
-	TTL            string   `json:"ttl,omitempty"`
-	CookieName     string   `json:"cookie_name,omitempty"`
-	CookieSecure   bool     `json:"cookie_secure"`
-	CookieSameSite string   `json:"cookie_same_site,omitempty"`
-	Role           string   `json:"role,omitempty"`
-	Permissions    []string `json:"permissions,omitempty"`
+	Enabled         bool     `json:"enabled"`
+	TTL             string   `json:"ttl,omitempty"`
+	CookieName      string   `json:"cookie_name,omitempty"`
+	CookieSecure    bool     `json:"cookie_secure"`
+	CookieSameSite  string   `json:"cookie_same_site,omitempty"`
+	Role            string   `json:"role,omitempty"`
+	Permissions     []string `json:"permissions,omitempty"`
+	StorageType     string   `json:"storage_type,omitempty"`
+	RedisConfigured bool     `json:"redis_configured"`
 }
 
 type adminConsoleAuditSummary struct {
@@ -421,13 +423,15 @@ func adminConsoleFromConfig(config Config) adminConsoleSummary {
 			DashboardURL:  config.AdminConsole.Monitoring.DashboardURL,
 		},
 		Session: adminConsoleSessionSummary{
-			Enabled:        config.AdminConsole.Session.Enabled,
-			TTL:            durationString(config.AdminConsole.Session.TTL),
-			CookieName:     config.AdminConsole.Session.CookieName,
-			CookieSecure:   config.AdminConsole.Session.CookieSecure,
-			CookieSameSite: config.AdminConsole.Session.CookieSameSite,
-			Role:           normalizeAdminRole(config.AdminConsole.Session.Role),
-			Permissions:    adminPermissionsForRole(config.AdminConsole.Session.Role),
+			Enabled:         config.AdminConsole.Session.Enabled,
+			TTL:             durationString(config.AdminConsole.Session.TTL),
+			CookieName:      config.AdminConsole.Session.CookieName,
+			CookieSecure:    config.AdminConsole.Session.CookieSecure,
+			CookieSameSite:  config.AdminConsole.Session.CookieSameSite,
+			Role:            normalizeAdminRole(config.AdminConsole.Session.Role),
+			Permissions:     adminPermissionsForRole(config.AdminConsole.Session.Role),
+			StorageType:     config.AdminConsole.Session.Store.Type,
+			RedisConfigured: config.AdminConsole.Session.Store.Redis.Addr != "",
 		},
 		Audit: adminConsoleAuditSummary{
 			StorageType:        config.AdminAuditStorage.Type,

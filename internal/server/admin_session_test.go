@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/alicebob/miniredis/v2"
 )
 
 func TestAdminSessionManagerCreateLookupDeleteAndExpire(t *testing.T) {
@@ -25,7 +27,10 @@ func TestAdminSessionManagerCreateLookupDeleteAndExpire(t *testing.T) {
 		t.Fatalf("created session = %+v token=%q, want token/operator session", created, token)
 	}
 
-	found, ok := manager.Lookup(token)
+	found, ok, err := manager.Lookup(token)
+	if err != nil {
+		t.Fatalf("Lookup() error = %v", err)
+	}
 	if !ok {
 		t.Fatal("Lookup() ok = false, want true")
 	}
@@ -34,7 +39,10 @@ func TestAdminSessionManagerCreateLookupDeleteAndExpire(t *testing.T) {
 	}
 
 	manager.now = func() time.Time { return now.Add(2 * time.Second) }
-	if _, ok := manager.Lookup(token); ok {
+	if _, ok, err := manager.Lookup(token); err != nil || ok {
+		if err != nil {
+			t.Fatalf("Lookup(expired) error = %v", err)
+		}
 		t.Fatal("Lookup(expired) ok = true, want false")
 	}
 
@@ -42,11 +50,77 @@ func TestAdminSessionManagerCreateLookupDeleteAndExpire(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create(second) error = %v", err)
 	}
-	if !manager.Delete(token) {
+	deleted, err := manager.Delete(token)
+	if err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+	if !deleted {
 		t.Fatal("Delete() = false, want true")
 	}
-	if _, ok := manager.Lookup(token); ok {
+	if _, ok, err := manager.Lookup(token); err != nil || ok {
+		if err != nil {
+			t.Fatalf("Lookup(deleted) error = %v", err)
+		}
 		t.Fatal("Lookup(deleted) ok = true, want false")
+	}
+}
+
+func TestRedisAdminSessionManagerSharesSessions(t *testing.T) {
+	redisServer := miniredis.RunT(t)
+	config := AdminConsoleSessionConfig{
+		Enabled:        true,
+		TTL:            time.Minute,
+		CookieName:     "zcourier_admin_session",
+		CookieSameSite: "lax",
+		Role:           adminSessionRoleOperator,
+		Store: AdminSessionStoreConfig{
+			Type: "redis",
+			Redis: AdminSessionRedisConfig{
+				Addr:             redisServer.Addr(),
+				KeyPrefix:        "zcourier:test:admin-session",
+				DialTimeout:      time.Second,
+				ReadTimeout:      time.Second,
+				WriteTimeout:     time.Second,
+				OperationTimeout: time.Second,
+			},
+		},
+	}
+
+	managerA, closerA, err := newConfiguredAdminSessionManager(config)
+	if err != nil {
+		t.Fatalf("newConfiguredAdminSessionManager(a) error = %v", err)
+	}
+	t.Cleanup(func() { _ = closerA.Close() })
+	managerB, closerB, err := newConfiguredAdminSessionManager(config)
+	if err != nil {
+		t.Fatalf("newConfiguredAdminSessionManager(b) error = %v", err)
+	}
+	t.Cleanup(func() { _ = closerB.Close() })
+
+	token, created, err := managerA.Create("operator")
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	found, ok, err := managerB.Lookup(token)
+	if err != nil {
+		t.Fatalf("Lookup(shared) error = %v", err)
+	}
+	if !ok || found.SessionID != created.SessionID || found.Principal != "operator" {
+		t.Fatalf("shared session = %+v ok=%v, want session %s", found, ok, created.SessionID)
+	}
+
+	deleted, err := managerB.Delete(token)
+	if err != nil {
+		t.Fatalf("Delete(shared) error = %v", err)
+	}
+	if !deleted {
+		t.Fatal("Delete(shared) = false, want true")
+	}
+	if _, ok, err := managerA.Lookup(token); err != nil || ok {
+		if err != nil {
+			t.Fatalf("Lookup(after shared delete) error = %v", err)
+		}
+		t.Fatal("Lookup(after shared delete) ok = true, want false")
 	}
 }
 

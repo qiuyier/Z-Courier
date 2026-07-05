@@ -225,6 +225,18 @@ admin_console:
     cookie_secure: false
     cookie_same_site: lax
     role: admin
+    store:
+      type: memory
+      redis:
+        addr: 127.0.0.1:16379
+        username: ""
+        password: ""
+        db: 0
+        key_prefix: zcourier:admin-session
+        dial_timeout: 1s
+        read_timeout: 1s
+        write_timeout: 1s
+        operation_timeout: 2s
   audit:
     type: memory
     capacity: 1000
@@ -246,12 +258,17 @@ admin_console:
   `POST /internal/admin/session/login`、`GET /internal/admin/session/me` 和
   `POST /internal/admin/session/logout`。login 会把有效 internal token，或已经通过
   HMAC 验签的请求，换成一个短期 HTTP-only cookie。
-- 当前 admin session 是单节点内存态，gateway 重启后会失效。
 - `cookie_same_site` 可选 `lax`、`strict`、`none`；`none` 必须配合
   `cookie_secure=true`。
 - `role` 是新建浏览器 session 的角色，可选 `readonly`、`operator`、`admin`。
   `readonly` 只能查看，`operator` 可以执行受保护的本机 session 断开、下行测试推送
   和消息修复操作，比如 requeue 和 discard，`admin` 目前包含 operator 的全部权限。
+- `session.store.type` 是浏览器 admin session 的存储类型。`memory` 只存当前
+  gateway 进程；`redis` 会把 session 共享到 Redis，适合集群和负载均衡场景。
+- `session.store.redis.addr`、`username`、`password`、`db`、`key_prefix` 是
+  Redis 连接和 key 命名空间配置。
+- `session.store.redis.dial_timeout`、`read_timeout`、`write_timeout`、
+  `operation_timeout` 是 Redis 连接和操作超时。
 - `audit.type` 是管理员操作审计存储类型。`memory` 只保留当前 gateway 进程内最近
   的审计事件；`postgres` 会把事件持久化到 PostgreSQL，重启后仍然可以查询。
 - `audit.capacity` 是 `audit.type=memory` 时最多保留的内存审计事件数。
@@ -263,6 +280,9 @@ admin_console:
 - 管理员审计会记录 login、权限拒绝、session 断开、下行测试推送、消息
   requeue/discard、retry scan、诊断操作等 console/internal admin API 行为。生产环境
   如果需要重启后仍能追踪这些事件，建议使用 `audit.type=postgres`。
+- 单节点开发可以使用 `session.store.type=memory`；如果 console 请求可能在
+  gateway-a/gateway-b 之间切换，建议使用 `session.store.type=redis`。logout 会删除
+  Redis 中的共享 session，Redis key TTL 和 session 过期时间保持一致。
 - HMAC 模式下，浏览器直接持有 HMAC secret 并不理想，也无法自己完成安全签名链路。
   生产更适合由反向代理完成 operator 鉴权和内部签名，再转发到 gateway internal
   HTTP。

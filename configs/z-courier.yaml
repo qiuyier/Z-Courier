@@ -34,6 +34,18 @@ admin_console:
     cookie_secure: false
     cookie_same_site: lax
     role: admin
+    store:
+      type: memory
+      redis:
+        addr: 127.0.0.1:16379
+        username: ""
+        password: ""
+        db: 0
+        key_prefix: zcourier:admin-session
+        dial_timeout: 1s
+        read_timeout: 1s
+        write_timeout: 1s
+        operation_timeout: 2s
   audit:
     type: memory
     capacity: 1000

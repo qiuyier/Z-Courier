@@ -115,12 +115,30 @@ type AdminConsoleMonitoringConfig struct {
 }
 
 type AdminConsoleSessionConfig struct {
-	Enabled        bool   `yaml:"enabled"`
-	TTL            string `yaml:"ttl"`
-	CookieName     string `yaml:"cookie_name"`
-	CookieSecure   bool   `yaml:"cookie_secure"`
-	CookieSameSite string `yaml:"cookie_same_site"`
-	Role           string `yaml:"role"`
+	Enabled        bool                           `yaml:"enabled"`
+	TTL            string                         `yaml:"ttl"`
+	CookieName     string                         `yaml:"cookie_name"`
+	CookieSecure   bool                           `yaml:"cookie_secure"`
+	CookieSameSite string                         `yaml:"cookie_same_site"`
+	Role           string                         `yaml:"role"`
+	Store          AdminConsoleSessionStoreConfig `yaml:"store"`
+}
+
+type AdminConsoleSessionStoreConfig struct {
+	Type  string                         `yaml:"type"`
+	Redis AdminConsoleSessionRedisConfig `yaml:"redis"`
+}
+
+type AdminConsoleSessionRedisConfig struct {
+	Addr             string `yaml:"addr"`
+	Username         string `yaml:"username"`
+	Password         string `yaml:"password"`
+	DB               int    `yaml:"db"`
+	KeyPrefix        string `yaml:"key_prefix"`
+	DialTimeout      string `yaml:"dial_timeout"`
+	ReadTimeout      string `yaml:"read_timeout"`
+	WriteTimeout     string `yaml:"write_timeout"`
+	OperationTimeout string `yaml:"operation_timeout"`
 }
 
 type AdminConsoleAuditConfig struct {
@@ -850,6 +868,10 @@ func toAdminConsoleSessionConfig(config AdminConsoleSessionConfig) (server.Admin
 		return server.AdminConsoleSessionConfig{}, fmt.Errorf("config: admin_console.session.role must be one of readonly, operator, admin")
 	}
 
+	store, err := toAdminSessionStoreConfig(config.Store)
+	if err != nil {
+		return server.AdminConsoleSessionConfig{}, err
+	}
 	return server.AdminConsoleSessionConfig{
 		Enabled:        config.Enabled,
 		TTL:            ttl,
@@ -857,7 +879,75 @@ func toAdminConsoleSessionConfig(config AdminConsoleSessionConfig) (server.Admin
 		CookieSecure:   config.CookieSecure,
 		CookieSameSite: sameSite,
 		Role:           role,
+		Store:          store,
 	}, nil
+}
+
+func toAdminSessionStoreConfig(config AdminConsoleSessionStoreConfig) (server.AdminSessionStoreConfig, error) {
+	defaults := server.DefaultConfig().AdminConsole.Session.Store
+	out := defaults
+
+	if config.Type != "" {
+		storeType := strings.ToLower(strings.TrimSpace(config.Type))
+		switch storeType {
+		case "memory", "redis":
+			out.Type = storeType
+		default:
+			return server.AdminSessionStoreConfig{}, fmt.Errorf("config: unsupported admin_console.session.store.type %q", config.Type)
+		}
+	}
+
+	redis := config.Redis
+	if redis.Addr != "" {
+		out.Redis.Addr = strings.TrimSpace(redis.Addr)
+	}
+	if redis.Username != "" {
+		out.Redis.Username = strings.TrimSpace(redis.Username)
+	}
+	if redis.Password != "" {
+		out.Redis.Password = redis.Password
+	}
+	if redis.DB < 0 {
+		return server.AdminSessionStoreConfig{}, fmt.Errorf("config: admin_console.session.store.redis.db must be greater than or equal to 0")
+	}
+	out.Redis.DB = redis.DB
+	if redis.KeyPrefix != "" {
+		out.Redis.KeyPrefix = strings.TrimSpace(redis.KeyPrefix)
+	}
+
+	dialTimeout, err := parseOptionalPositiveDuration(redis.DialTimeout)
+	if err != nil {
+		return server.AdminSessionStoreConfig{}, fmt.Errorf("config: admin_console.session.store.redis.dial_timeout: %w", err)
+	}
+	if dialTimeout > 0 {
+		out.Redis.DialTimeout = dialTimeout
+	}
+	readTimeout, err := parseOptionalPositiveDuration(redis.ReadTimeout)
+	if err != nil {
+		return server.AdminSessionStoreConfig{}, fmt.Errorf("config: admin_console.session.store.redis.read_timeout: %w", err)
+	}
+	if readTimeout > 0 {
+		out.Redis.ReadTimeout = readTimeout
+	}
+	writeTimeout, err := parseOptionalPositiveDuration(redis.WriteTimeout)
+	if err != nil {
+		return server.AdminSessionStoreConfig{}, fmt.Errorf("config: admin_console.session.store.redis.write_timeout: %w", err)
+	}
+	if writeTimeout > 0 {
+		out.Redis.WriteTimeout = writeTimeout
+	}
+	operationTimeout, err := parseOptionalPositiveDuration(redis.OperationTimeout)
+	if err != nil {
+		return server.AdminSessionStoreConfig{}, fmt.Errorf("config: admin_console.session.store.redis.operation_timeout: %w", err)
+	}
+	if operationTimeout > 0 {
+		out.Redis.OperationTimeout = operationTimeout
+	}
+
+	if out.Type == "redis" && out.Redis.Addr == "" {
+		return server.AdminSessionStoreConfig{}, fmt.Errorf("config: admin_console.session.store.redis.addr is required")
+	}
+	return out, nil
 }
 
 func validCookieName(name string) bool {

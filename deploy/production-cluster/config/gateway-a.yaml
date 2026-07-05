@@ -44,6 +44,18 @@ admin_console:
     cookie_secure: true
     cookie_same_site: lax
     role: admin
+    store:
+      type: redis
+      redis:
+        addr: redis:6379
+        username: ""
+        password: "${ZCOURIER_REDIS_PASSWORD}"
+        db: 0
+        key_prefix: zcourier:production-cluster:admin-session
+        dial_timeout: 1s
+        read_timeout: 1s
+        write_timeout: 1s
+        operation_timeout: 2s
   audit:
     type: postgres
     capacity: 1000

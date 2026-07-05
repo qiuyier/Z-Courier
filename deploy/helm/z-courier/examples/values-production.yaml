@@ -23,6 +23,12 @@ internalService:
 adminConsole:
   enabled: false
   path: /console/
+  session:
+    store:
+      type: redis
+      redis:
+        addr: redis-master.z-courier.svc.cluster.local:6379
+        keyPrefix: zcourier:production-k8s:admin-session
   monitoring:
     prometheusURL: https://prometheus.example.internal
     grafanaURL: https://grafana.example.internal

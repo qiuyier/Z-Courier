@@ -181,7 +181,11 @@ func (h *adminSessionMeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		writeAdminSessionJSON(w, http.StatusMethodNotAllowed, adminSessionResponse{Code: "method_not_allowed", GatewayNode: h.config.gatewayNode})
 		return
 	}
-	session, ok := adminSessionFromCookie(r, h.config.sessionConfig, h.config.sessions)
+	session, ok, err := adminSessionFromCookie(r, h.config.sessionConfig, h.config.sessions)
+	if err != nil {
+		writeAdminSessionJSON(w, http.StatusServiceUnavailable, adminSessionResponse{Code: "session_store_error", Reason: err.Error(), GatewayNode: h.config.gatewayNode})
+		return
+	}
 	if !ok {
 		writeAdminSessionJSON(w, http.StatusUnauthorized, adminSessionResponse{Code: "unauthorized", GatewayNode: h.config.gatewayNode})
 		return
@@ -206,8 +210,22 @@ func (h *adminSessionLogoutHandler) ServeHTTP(w http.ResponseWriter, r *http.Req
 		writeAdminSessionJSON(w, http.StatusUnauthorized, adminSessionResponse{Code: "unauthorized", GatewayNode: h.config.gatewayNode})
 		return
 	}
-	session, ok := h.config.sessions.Lookup(cookie.Value)
-	if !ok || !h.config.sessions.Delete(cookie.Value) {
+	session, ok, err := h.config.sessions.Lookup(cookie.Value)
+	if err != nil {
+		h.recordLogout(r, "session_store_error", http.StatusServiceUnavailable, adminSession{}, err.Error())
+		writeAdminSessionJSON(w, http.StatusServiceUnavailable, adminSessionResponse{Code: "session_store_error", Reason: err.Error(), GatewayNode: h.config.gatewayNode})
+		return
+	}
+	deleted := false
+	if ok {
+		deleted, err = h.config.sessions.Delete(cookie.Value)
+		if err != nil {
+			h.recordLogout(r, "session_store_error", http.StatusServiceUnavailable, session, err.Error())
+			writeAdminSessionJSON(w, http.StatusServiceUnavailable, adminSessionResponse{Code: "session_store_error", Reason: err.Error(), GatewayNode: h.config.gatewayNode})
+			return
+		}
+	}
+	if !ok || !deleted {
 		clearAdminSessionCookie(w, h.config.sessionConfig)
 		h.recordLogout(r, "unauthorized", http.StatusUnauthorized, adminSession{}, "admin session is missing or expired")
 		writeAdminSessionJSON(w, http.StatusUnauthorized, adminSessionResponse{Code: "unauthorized", GatewayNode: h.config.gatewayNode})
@@ -284,7 +302,11 @@ func withAdminSessionAuth(next http.Handler, sessions *adminSessionManager, conf
 		return next
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		session, ok := adminSessionFromCookie(r, config, sessions)
+		session, ok, err := adminSessionFromCookie(r, config, sessions)
+		if err != nil {
+			next.ServeHTTP(w, r)
+			return
+		}
 		if !ok {
 			next.ServeHTTP(w, r)
 			return
@@ -314,7 +336,7 @@ func newAdminSessionHMACBypassHandler(direct http.Handler, fallback http.Handler
 
 func (h *adminSessionHMACBypassHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if adminSessionProtectedPath(r.URL.Path) {
-		if session, ok := adminSessionFromCookie(r, h.config, h.sessions); ok {
+		if session, ok, err := adminSessionFromCookie(r, h.config, h.sessions); err == nil && ok {
 			h.direct.ServeHTTP(w, requestWithAdminSession(r, session, ""))
 			return
 		}
@@ -348,13 +370,13 @@ func adminSessionProtectedPath(path string) bool {
 	}
 }
 
-func adminSessionFromCookie(r *http.Request, config AdminConsoleSessionConfig, sessions *adminSessionManager) (adminSession, bool) {
+func adminSessionFromCookie(r *http.Request, config AdminConsoleSessionConfig, sessions *adminSessionManager) (adminSession, bool, error) {
 	if sessions == nil {
-		return adminSession{}, false
+		return adminSession{}, false, nil
 	}
 	cookie, err := r.Cookie(config.CookieName)
 	if err != nil {
-		return adminSession{}, false
+		return adminSession{}, false, nil
 	}
 	return sessions.Lookup(cookie.Value)
 }

@@ -34,6 +34,18 @@ admin_console:
     cookie_secure: false
     cookie_same_site: lax
     role: ${ZCOURIER_CONSOLE_SMOKE_ROLE}
+    store:
+      type: memory
+      redis:
+        addr: ""
+        username: ""
+        password: ""
+        db: 0
+        key_prefix: zcourier:console-smoke:admin-session
+        dial_timeout: 1s
+        read_timeout: 1s
+        write_timeout: 1s
+        operation_timeout: 2s
   audit:
     type: memory
     capacity: 1000

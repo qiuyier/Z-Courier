@@ -155,6 +155,31 @@
             "role": {
               "type": "string",
               "enum": ["readonly", "operator", "admin"]
+            },
+            "store": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": ["memory", "redis"]
+                },
+                "redis": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "addr": { "type": "string" },
+                    "username": { "type": "string" },
+                    "passwordEnv": { "$ref": "#/definitions/envName" },
+                    "db": { "$ref": "#/definitions/nonNegativeInteger" },
+                    "keyPrefix": { "type": "string", "minLength": 1 },
+                    "dialTimeout": { "$ref": "#/definitions/duration" },
+                    "readTimeout": { "$ref": "#/definitions/duration" },
+                    "writeTimeout": { "$ref": "#/definitions/duration" },
+                    "operationTimeout": { "$ref": "#/definitions/duration" }
+                  }
+                }
+              }
             }
           }
         },

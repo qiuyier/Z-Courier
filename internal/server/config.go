@@ -32,6 +32,7 @@ type Config struct {
 	InternalMaxRequestBodySize int64
 	InternalPushMaxInFlight    int
 	AdminConsole               AdminConsoleConfig
+	AdminSessions              *adminSessionManager
 	AdminAudit                 adminaudit.Trail
 	AdminAuditStorage          AdminAuditStorageConfig
 	UpstreamRoutes             []UpstreamRouteConfig
@@ -76,6 +77,24 @@ type AdminConsoleSessionConfig struct {
 	CookieSecure   bool
 	CookieSameSite string
 	Role           string
+	Store          AdminSessionStoreConfig
+}
+
+type AdminSessionStoreConfig struct {
+	Type  string
+	Redis AdminSessionRedisConfig
+}
+
+type AdminSessionRedisConfig struct {
+	Addr             string
+	Username         string
+	Password         string
+	DB               int
+	KeyPrefix        string
+	DialTimeout      time.Duration
+	ReadTimeout      time.Duration
+	WriteTimeout     time.Duration
+	OperationTimeout time.Duration
 }
 
 type AdminAuditStorageConfig struct {
@@ -236,6 +255,16 @@ func DefaultConfig() Config {
 				CookieName:     "zcourier_admin_session",
 				CookieSameSite: "lax",
 				Role:           adminSessionRoleAdmin,
+				Store: AdminSessionStoreConfig{
+					Type: "memory",
+					Redis: AdminSessionRedisConfig{
+						KeyPrefix:        defaultAdminSessionRedisKeyPrefix,
+						DialTimeout:      time.Second,
+						ReadTimeout:      time.Second,
+						WriteTimeout:     time.Second,
+						OperationTimeout: 2 * time.Second,
+					},
+				},
 			},
 		},
 		AdminAuditStorage: AdminAuditStorageConfig{
@@ -399,6 +428,24 @@ func normalizeConfig(config Config) Config {
 		config.AdminConsole.Session.CookieSameSite = defaults.AdminConsole.Session.CookieSameSite
 	}
 	config.AdminConsole.Session.Role = normalizeAdminRole(config.AdminConsole.Session.Role)
+	if config.AdminConsole.Session.Store.Type == "" {
+		config.AdminConsole.Session.Store.Type = defaults.AdminConsole.Session.Store.Type
+	}
+	if config.AdminConsole.Session.Store.Redis.KeyPrefix == "" {
+		config.AdminConsole.Session.Store.Redis.KeyPrefix = defaults.AdminConsole.Session.Store.Redis.KeyPrefix
+	}
+	if config.AdminConsole.Session.Store.Redis.DialTimeout <= 0 {
+		config.AdminConsole.Session.Store.Redis.DialTimeout = defaults.AdminConsole.Session.Store.Redis.DialTimeout
+	}
+	if config.AdminConsole.Session.Store.Redis.ReadTimeout <= 0 {
+		config.AdminConsole.Session.Store.Redis.ReadTimeout = defaults.AdminConsole.Session.Store.Redis.ReadTimeout
+	}
+	if config.AdminConsole.Session.Store.Redis.WriteTimeout <= 0 {
+		config.AdminConsole.Session.Store.Redis.WriteTimeout = defaults.AdminConsole.Session.Store.Redis.WriteTimeout
+	}
+	if config.AdminConsole.Session.Store.Redis.OperationTimeout <= 0 {
+		config.AdminConsole.Session.Store.Redis.OperationTimeout = defaults.AdminConsole.Session.Store.Redis.OperationTimeout
+	}
 	if config.AdminAuditStorage.Type == "" {
 		config.AdminAuditStorage.Type = defaults.AdminAuditStorage.Type
 	}

@@ -46,6 +46,8 @@ export type AdminConsoleSummary = {
     cookie_same_site?: string;
     role?: string;
     permissions?: string[];
+    storage_type?: string;
+    redis_configured: boolean;
   };
   audit?: {
     storage_type: string;

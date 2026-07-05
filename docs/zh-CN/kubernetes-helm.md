@@ -108,6 +108,11 @@ adminConsole:
     cookieSecure: true
     cookieSameSite: lax
     role: admin
+    store:
+      type: redis
+      redis:
+        addr: redis-master.z-courier.svc.cluster.local:6379
+        keyPrefix: zcourier:production-k8s:admin-session
   monitoring:
     prometheusURL: https://prometheus.example.internal
     grafanaURL: https://grafana.example.internal
@@ -117,9 +122,9 @@ adminConsole:
 console 只应该通过私有网络、VPN、堡垒机、私有 ingress 或带认证的反向代理访问。
 生产 HMAC 模式下，浏览器 JavaScript 不适合直接持有 HMAC secret；可以让反向代理
 完成 operator 鉴权和内部签名。`adminConsole.session.enabled=true` 时，登录成功后
-浏览器拿到短期 HTTP-only cookie；当前 session 是单 Pod 内存态，Pod 重启后需要重新
-登录。如果 ingress 或代理会把 console 请求负载均衡到多个副本，需要使用粘性路由、
-按 Pod 直连，或者接受请求落到另一个 Pod 时重新登录。角色建议按最小权限选择：
+浏览器拿到短期 HTTP-only cookie。`adminConsole.session.store.type=redis` 可以让
+console session 在多个 gateway Pod 之间共享；单节点开发也可以使用 `memory`。
+角色建议按最小权限选择：
 `readonly` 用于查看，`operator` 用于受保护的修复操作，`admin` 表示当前完整
 console 权限集。
 

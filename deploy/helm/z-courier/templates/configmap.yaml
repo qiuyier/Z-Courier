@@ -57,6 +57,18 @@ data:
         cookie_secure: {{ .Values.adminConsole.session.cookieSecure }}
         cookie_same_site: {{ .Values.adminConsole.session.cookieSameSite | quote }}
         role: {{ .Values.adminConsole.session.role | quote }}
+        store:
+          type: {{ .Values.adminConsole.session.store.type | quote }}
+          redis:
+            addr: {{ .Values.adminConsole.session.store.redis.addr | quote }}
+            username: {{ .Values.adminConsole.session.store.redis.username | quote }}
+            password: {{ printf "${%s}" .Values.adminConsole.session.store.redis.passwordEnv | quote }}
+            db: {{ .Values.adminConsole.session.store.redis.db }}
+            key_prefix: {{ .Values.adminConsole.session.store.redis.keyPrefix | quote }}
+            dial_timeout: {{ .Values.adminConsole.session.store.redis.dialTimeout | quote }}
+            read_timeout: {{ .Values.adminConsole.session.store.redis.readTimeout | quote }}
+            write_timeout: {{ .Values.adminConsole.session.store.redis.writeTimeout | quote }}
+            operation_timeout: {{ .Values.adminConsole.session.store.redis.operationTimeout | quote }}
       audit:
         type: {{ .Values.adminConsole.audit.type | quote }}
         capacity: {{ .Values.adminConsole.audit.capacity }}

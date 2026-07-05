@@ -311,6 +311,18 @@ admin_console:
     cookie_secure: false
     cookie_same_site: lax
     role: admin
+    store:
+      type: memory
+      redis:
+        addr: 127.0.0.1:16379
+        username: ""
+        password: ""
+        db: 0
+        key_prefix: zcourier:admin-session
+        dial_timeout: 1s
+        read_timeout: 1s
+        write_timeout: 1s
+        operation_timeout: 2s
   audit:
     type: memory
     capacity: 1000
@@ -343,6 +355,12 @@ admin_console:
   console data; `operator` can also run guarded local session disconnect and
   downlink test push actions plus message repair actions such as requeue and
   discard; `admin` currently includes all operator permissions.
+- `session.store.type`: admin browser session storage. `memory` stores sessions
+  in the current gateway process; `redis` shares sessions across gateway nodes.
+- `session.store.redis.addr`, `username`, `password`, `db`, and `key_prefix`:
+  Redis connection and key namespace used when `session.store.type=redis`.
+- `session.store.redis.dial_timeout`, `read_timeout`, `write_timeout`, and
+  `operation_timeout`: Redis connection and operation timeouts.
 - `audit.type`: admin operation audit storage. `memory` keeps the latest events
   in the current gateway process; `postgres` persists events in PostgreSQL so
   they survive restarts and can be queried across a longer retention window.
@@ -369,7 +387,10 @@ When `admin_console.session.enabled=true`, the gateway exposes
 `POST /internal/admin/session/login`, `GET /internal/admin/session/me`, and
 `POST /internal/admin/session/logout`. The login endpoint exchanges a valid
 internal token, or a successfully HMAC-authenticated request, for a short-lived
-HTTP-only cookie. Current sessions are node-local and in-memory.
+HTTP-only cookie. Use `session.store.type=memory` for single-node development.
+Use `session.store.type=redis` when console traffic can move across gateway
+nodes; logout deletes the shared Redis session, and Redis key TTL follows the
+session expiry.
 
 Admin audit events are produced by console and internal admin APIs such as
 login, permission denial, session disconnect, downlink test push, message

@@ -151,6 +151,18 @@ admin_console:
     cookie_secure: true
     cookie_same_site: strict
     role: operator
+    store:
+      type: redis
+      redis:
+        addr: 127.0.0.1:16379
+        username: admin-session-user
+        password: admin-session-pass
+        db: 3
+        key_prefix: zcourier:test:admin-session
+        dial_timeout: 600ms
+        read_timeout: 800ms
+        write_timeout: 950ms
+        operation_timeout: 1200ms
 cluster:
   enabled: true
   internal_addr: http://gateway-a:18082
@@ -284,7 +296,17 @@ upstream:
 		config.AdminConsole.Session.CookieName != "zcourier_ops_session" ||
 		!config.AdminConsole.Session.CookieSecure ||
 		config.AdminConsole.Session.CookieSameSite != "strict" ||
-		config.AdminConsole.Session.Role != "operator" {
+		config.AdminConsole.Session.Role != "operator" ||
+		config.AdminConsole.Session.Store.Type != "redis" ||
+		config.AdminConsole.Session.Store.Redis.Addr != "127.0.0.1:16379" ||
+		config.AdminConsole.Session.Store.Redis.Username != "admin-session-user" ||
+		config.AdminConsole.Session.Store.Redis.Password != "admin-session-pass" ||
+		config.AdminConsole.Session.Store.Redis.DB != 3 ||
+		config.AdminConsole.Session.Store.Redis.KeyPrefix != "zcourier:test:admin-session" ||
+		config.AdminConsole.Session.Store.Redis.DialTimeout != 600*time.Millisecond ||
+		config.AdminConsole.Session.Store.Redis.ReadTimeout != 800*time.Millisecond ||
+		config.AdminConsole.Session.Store.Redis.WriteTimeout != 950*time.Millisecond ||
+		config.AdminConsole.Session.Store.Redis.OperationTimeout != 1200*time.Millisecond {
 		t.Fatalf("AdminConsole Session = %+v, want configured session", config.AdminConsole.Session)
 	}
 	if !config.Cluster.Enabled {
@@ -604,6 +626,70 @@ admin_console:
 	}
 	if !strings.Contains(err.Error(), "admin_console.session.role") {
 		t.Fatalf("LoadServerConfig() error = %q, want session role field", err)
+	}
+}
+
+func TestLoadServerConfigRejectsInvalidAdminSessionStore(t *testing.T) {
+	tests := []struct {
+		name    string
+		yaml    string
+		wantErr string
+	}{
+		{
+			name: "unsupported type",
+			yaml: `
+admin_console:
+  session:
+    store:
+      type: postgres
+`,
+			wantErr: "unsupported admin_console.session.store.type",
+		},
+		{
+			name: "missing redis addr",
+			yaml: `
+admin_console:
+  session:
+    store:
+      type: redis
+`,
+			wantErr: "admin_console.session.store.redis.addr is required",
+		},
+		{
+			name: "negative redis db",
+			yaml: `
+admin_console:
+  session:
+    store:
+      redis:
+        db: -1
+`,
+			wantErr: "admin_console.session.store.redis.db",
+		},
+		{
+			name: "invalid operation timeout",
+			yaml: `
+admin_console:
+  session:
+    store:
+      redis:
+        operation_timeout: -1s
+`,
+			wantErr: "admin_console.session.store.redis.operation_timeout",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeConfig(t, tt.yaml)
+			_, err := LoadServerConfig(path)
+			if err == nil {
+				t.Fatal("LoadServerConfig() error = nil, want admin session store error")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("LoadServerConfig() error = %q, want %q", err, tt.wantErr)
+			}
+		})
 	}
 }
 
@@ -1206,6 +1292,39 @@ downlink:
 	}
 	if !strings.Contains(strings.Join(report.Warnings, "\n"), "memory") {
 		t.Fatalf("warnings = %v, want memory warnings", report.Warnings)
+	}
+}
+
+func TestValidateFileWarnsForMemoryAdminSessionStoreInCluster(t *testing.T) {
+	path := writeConfig(t, `
+cluster:
+  enabled: true
+  internal_addr: http://127.0.0.1:18080
+  registry:
+    type: redis
+    redis:
+      addr: 127.0.0.1:6379
+admin_console:
+  session:
+    enabled: true
+    store:
+      type: memory
+downlink:
+  storage:
+    type: postgres
+    postgres:
+      dsn: postgres://zcourier:zcourier@127.0.0.1:5432/zcourier?sslmode=disable
+`)
+
+	report, err := ValidateFile(path)
+	if err != nil {
+		t.Fatalf("ValidateFile() error = %v", err)
+	}
+	if len(report.Warnings) != 1 {
+		t.Fatalf("warnings = %v, want 1 warning", report.Warnings)
+	}
+	if !strings.Contains(report.Warnings[0], "memory admin console session store") {
+		t.Fatalf("warnings = %v, want admin session store warning", report.Warnings)
 	}
 }
 
