@@ -22,6 +22,8 @@ semantic versioning after the first public MVP tag.
   `operator`, and `admin`, including server-side protection for guarded message
   repair actions and frontend action disabling from returned permission
   metadata.
+- Helm chart metadata and production values for `0.5.0`, aligned with the
+  `v0.10.0` gateway image and V10 admin console operations release.
 
 ## [v0.9.1] - 2026-07-02
 

@@ -89,6 +89,7 @@ Maintain this matrix when releasing or changing the chart:
 | `0.3.0` | `v0.8.1` | `v0.8.1` | Same protocol and config contract as `0.2.0`; chart defaults to the v0.8 production diagnostics gateway image. | Hotfix chart release aligning default image metadata after `v0.8.0`. |
 | `0.4.0` | `v0.9.0` | `v0.9.0` | Same protocol and config contract as `0.3.0`; chart exposes optional admin console values while keeping the console disabled by default. | Chart release aligned with the embedded Web admin console gateway image. |
 | `0.4.1` | `v0.9.1` | `v0.9.1` | Same protocol, config contract, and chart behavior as `0.4.0`. | Patch chart release aligned with the Chinese documentation refresh. |
+| `0.5.0` | `v0.10.0` | `v0.10.0` | Same packet protocol and dependency contract as `0.4.1`; chart metadata and production examples align with the V10 admin console operations release. | Chart release aligned with guarded console operations, browser sessions, and role-aware admin workflows. |
 
 If the chart is used with a gateway image that differs from `appVersion`, the
 operator owns compatibility validation. The safest check is:
@@ -137,7 +138,7 @@ Production operators should pin both the chart version and gateway image tag:
 ```yaml
 image:
   repository: ghcr.io/qiuyier/z-courier-gateway
-  tag: v0.9.1
+  tag: v0.10.0
 ```
 
 This makes rollbacks explicit:
