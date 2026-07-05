@@ -3,6 +3,7 @@ package server
 import (
 	"time"
 
+	"github.com/qiuyier/Z-Courier/internal/adminaudit"
 	"github.com/qiuyier/Z-Courier/internal/auth"
 	"github.com/qiuyier/Z-Courier/internal/cluster"
 	"github.com/qiuyier/Z-Courier/internal/downlink"
@@ -31,6 +32,8 @@ type Config struct {
 	InternalMaxRequestBodySize int64
 	InternalPushMaxInFlight    int
 	AdminConsole               AdminConsoleConfig
+	AdminAudit                 adminaudit.Trail
+	AdminAuditStorage          AdminAuditStorageConfig
 	UpstreamRoutes             []UpstreamRouteConfig
 	UpstreamRuntime            *UpstreamRuntime
 	Pipeline                   pipeline.Config
@@ -73,6 +76,22 @@ type AdminConsoleSessionConfig struct {
 	CookieSecure   bool
 	CookieSameSite string
 	Role           string
+}
+
+type AdminAuditStorageConfig struct {
+	Type     string
+	Capacity int
+	Postgres AdminAuditPostgresConfig
+}
+
+type AdminAuditPostgresConfig struct {
+	DSN              string
+	AutoMigrate      bool
+	AutoMigrateSet   bool
+	MaxOpenConns     int
+	MaxIdleConns     int
+	ConnMaxLifetime  time.Duration
+	OperationTimeout time.Duration
 }
 
 type UpstreamRouteConfig struct {
@@ -217,6 +236,15 @@ func DefaultConfig() Config {
 				CookieName:     "zcourier_admin_session",
 				CookieSameSite: "lax",
 				Role:           adminSessionRoleAdmin,
+			},
+		},
+		AdminAuditStorage: AdminAuditStorageConfig{
+			Type:     "memory",
+			Capacity: adminaudit.DefaultCapacity,
+			Postgres: AdminAuditPostgresConfig{
+				AutoMigrate:      true,
+				AutoMigrateSet:   true,
+				OperationTimeout: 2 * time.Second,
 			},
 		},
 		DownlinkStorage: DownlinkStorageConfig{
@@ -371,6 +399,19 @@ func normalizeConfig(config Config) Config {
 		config.AdminConsole.Session.CookieSameSite = defaults.AdminConsole.Session.CookieSameSite
 	}
 	config.AdminConsole.Session.Role = normalizeAdminRole(config.AdminConsole.Session.Role)
+	if config.AdminAuditStorage.Type == "" {
+		config.AdminAuditStorage.Type = defaults.AdminAuditStorage.Type
+	}
+	if config.AdminAuditStorage.Capacity <= 0 {
+		config.AdminAuditStorage.Capacity = defaults.AdminAuditStorage.Capacity
+	}
+	if !config.AdminAuditStorage.Postgres.AutoMigrateSet {
+		config.AdminAuditStorage.Postgres.AutoMigrate = defaults.AdminAuditStorage.Postgres.AutoMigrate
+		config.AdminAuditStorage.Postgres.AutoMigrateSet = defaults.AdminAuditStorage.Postgres.AutoMigrateSet
+	}
+	if config.AdminAuditStorage.Postgres.OperationTimeout <= 0 {
+		config.AdminAuditStorage.Postgres.OperationTimeout = defaults.AdminAuditStorage.Postgres.OperationTimeout
+	}
 	if config.DownlinkStorage.Type == "" {
 		config.DownlinkStorage.Type = defaults.DownlinkStorage.Type
 	}

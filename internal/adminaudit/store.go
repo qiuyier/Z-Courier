@@ -19,6 +19,15 @@ type Recorder interface {
 	RecordAdminAudit(Entry) Entry
 }
 
+type Lister interface {
+	List(Query) Result
+}
+
+type Trail interface {
+	Recorder
+	Lister
+}
+
 type StoreConfig struct {
 	Capacity int
 }

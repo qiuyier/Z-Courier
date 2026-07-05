@@ -57,6 +57,16 @@ data:
         cookie_secure: {{ .Values.adminConsole.session.cookieSecure }}
         cookie_same_site: {{ .Values.adminConsole.session.cookieSameSite | quote }}
         role: {{ .Values.adminConsole.session.role | quote }}
+      audit:
+        type: {{ .Values.adminConsole.audit.type | quote }}
+        capacity: {{ .Values.adminConsole.audit.capacity }}
+        postgres:
+          dsn: {{ .Values.adminConsole.audit.postgres.dsn | quote }}
+          auto_migrate: {{ .Values.adminConsole.audit.postgres.autoMigrate }}
+          max_open_conns: {{ .Values.adminConsole.audit.postgres.maxOpenConns }}
+          max_idle_conns: {{ .Values.adminConsole.audit.postgres.maxIdleConns }}
+          conn_max_lifetime: {{ .Values.adminConsole.audit.postgres.connMaxLifetime | quote }}
+          operation_timeout: {{ .Values.adminConsole.audit.postgres.operationTimeout | quote }}
 
     cluster:
       enabled: {{ .Values.cluster.enabled }}

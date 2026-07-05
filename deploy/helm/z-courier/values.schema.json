@@ -157,6 +157,29 @@
               "enum": ["readonly", "operator", "admin"]
             }
           }
+        },
+        "audit": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["memory", "postgres"]
+            },
+            "capacity": { "$ref": "#/definitions/nonNegativeInteger" },
+            "postgres": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "dsn": { "type": "string" },
+                "autoMigrate": { "type": "boolean" },
+                "maxOpenConns": { "$ref": "#/definitions/nonNegativeInteger" },
+                "maxIdleConns": { "$ref": "#/definitions/nonNegativeInteger" },
+                "connMaxLifetime": { "$ref": "#/definitions/duration" },
+                "operationTimeout": { "$ref": "#/definitions/duration" }
+              }
+            }
+          }
         }
       }
     },

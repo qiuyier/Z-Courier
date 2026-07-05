@@ -29,7 +29,10 @@ func newInternalHTTPServer(config Config, logger *zap.Logger, service *downlink.
 	if config.InternalHTTPAuth.Mode == InternalHTTPAuthModeHMAC {
 		handlerConfig.InternalToken = ""
 	}
-	adminAudit := adminaudit.NewStore(adminaudit.StoreConfig{})
+	adminAudit := config.AdminAudit
+	if adminAudit == nil {
+		adminAudit = adminaudit.NewStore(adminaudit.StoreConfig{})
+	}
 	adminSessions := newAdminSessionManager(config.AdminConsole.Session)
 	adminSessionConfig := newAdminSessionHTTPConfig(handlerConfig, adminSessions, adminAudit)
 	withConsoleSession := func(handler http.Handler) http.Handler {

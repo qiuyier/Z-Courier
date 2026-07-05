@@ -72,6 +72,7 @@ type adminConsoleSummary struct {
 	AssetsDir  string                     `json:"assets_dir,omitempty"`
 	Monitoring adminMonitoringSummary     `json:"monitoring"`
 	Session    adminConsoleSessionSummary `json:"session"`
+	Audit      adminConsoleAuditSummary   `json:"audit"`
 }
 
 type adminMonitoringSummary struct {
@@ -88,6 +89,13 @@ type adminConsoleSessionSummary struct {
 	CookieSameSite string   `json:"cookie_same_site,omitempty"`
 	Role           string   `json:"role,omitempty"`
 	Permissions    []string `json:"permissions,omitempty"`
+}
+
+type adminConsoleAuditSummary struct {
+	StorageType        string `json:"storage_type"`
+	Capacity           int    `json:"capacity,omitempty"`
+	StoreConfigured    bool   `json:"store_configured"`
+	PostgresConfigured bool   `json:"postgres_configured"`
 }
 
 type adminDownlinkSummary struct {
@@ -420,6 +428,12 @@ func adminConsoleFromConfig(config Config) adminConsoleSummary {
 			CookieSameSite: config.AdminConsole.Session.CookieSameSite,
 			Role:           normalizeAdminRole(config.AdminConsole.Session.Role),
 			Permissions:    adminPermissionsForRole(config.AdminConsole.Session.Role),
+		},
+		Audit: adminConsoleAuditSummary{
+			StorageType:        config.AdminAuditStorage.Type,
+			Capacity:           config.AdminAuditStorage.Capacity,
+			StoreConfigured:    config.AdminAudit != nil,
+			PostgresConfigured: config.AdminAuditStorage.Postgres.DSN != "",
 		},
 	}
 }

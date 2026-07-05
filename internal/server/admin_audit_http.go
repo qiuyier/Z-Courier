@@ -22,10 +22,10 @@ type adminAuditResponse struct {
 type adminAuditHandler struct {
 	gatewayNode   string
 	internalToken string
-	store         *adminaudit.Store
+	store         adminaudit.Lister
 }
 
-func newAdminAuditHandler(config Config, store *adminaudit.Store) http.Handler {
+func newAdminAuditHandler(config Config, store adminaudit.Lister) http.Handler {
 	return &adminAuditHandler{
 		gatewayNode:   config.GatewayNode,
 		internalToken: config.InternalToken,

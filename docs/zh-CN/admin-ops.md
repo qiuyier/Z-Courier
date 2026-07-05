@@ -197,8 +197,9 @@ go run ./cmd/admin retry-scan \
 
 ## 审计列表
 
-控制台提供一个有界内存审计列表，用来查看当前 gateway 节点最近发生的
-admin 操作：
+控制台提供管理员审计列表，用来查看当前 gateway 节点最近发生的 admin 操作。
+默认使用有界内存存储；如果配置了 `admin_console.audit.type: postgres`，审计事件会
+写入 PostgreSQL，gateway 重启后仍然可以查询：
 
 ```text
 GET /internal/admin/audit?limit=100
@@ -222,9 +223,10 @@ trace id、reason 和少量结构化 details。
 它不会返回 internal token、HMAC secret、message body、请求 body、route token
 等敏感或大体积内容。
 
-这一版审计列表是节点本地、内存型的，适合在 console 里快速回看最近操作。
-如果你需要生产事故留存，仍然应该把 gateway 日志和 Prometheus 指标接到你的
-日志系统或 SIEM 里。
+内存模式适合在 console 里快速回看最近操作；PostgreSQL 模式适合生产环境留存
+管理员操作轨迹。它仍然不是完整 SIEM 替代品，如果你需要长期归档、跨系统关联和
+告警闭环，仍然应该把 gateway 日志、Prometheus 指标和审计表接到你的日志系统或
+SIEM 里。
 
 当前会进入审计列表的动作包括：admin session 登录/退出、权限拒绝、本机
 session 断开、下行测试推送、retry scan、requeue 和 discard。所有审计事件

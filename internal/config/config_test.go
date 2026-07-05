@@ -510,6 +510,54 @@ admin_console:
 	}
 }
 
+func TestLoadServerConfigAdminAuditStorage(t *testing.T) {
+	path := writeConfig(t, `
+admin_console:
+  audit:
+    type: postgres
+    capacity: 123
+    postgres:
+      dsn: postgres://zcourier:secret@postgres:5432/zcourier?sslmode=disable
+      auto_migrate: false
+      max_open_conns: 7
+      max_idle_conns: 3
+      conn_max_lifetime: 11m
+      operation_timeout: 1500ms
+`)
+
+	config, err := LoadServerConfig(path)
+	if err != nil {
+		t.Fatalf("LoadServerConfig() error = %v", err)
+	}
+	if config.AdminAuditStorage.Type != "postgres" {
+		t.Fatalf("AdminAuditStorage.Type = %q, want postgres", config.AdminAuditStorage.Type)
+	}
+	if config.AdminAuditStorage.Capacity != 123 {
+		t.Fatalf("AdminAuditStorage.Capacity = %d, want 123", config.AdminAuditStorage.Capacity)
+	}
+	if config.AdminAuditStorage.Postgres.DSN != "postgres://zcourier:secret@postgres:5432/zcourier?sslmode=disable" {
+		t.Fatalf("AdminAuditStorage.Postgres.DSN = %q", config.AdminAuditStorage.Postgres.DSN)
+	}
+	if config.AdminAuditStorage.Postgres.AutoMigrate {
+		t.Fatal("AdminAuditStorage.Postgres.AutoMigrate = true, want false")
+	}
+	if !config.AdminAuditStorage.Postgres.AutoMigrateSet {
+		t.Fatal("AdminAuditStorage.Postgres.AutoMigrateSet = false, want true")
+	}
+	if config.AdminAuditStorage.Postgres.MaxOpenConns != 7 {
+		t.Fatalf("AdminAuditStorage.Postgres.MaxOpenConns = %d, want 7", config.AdminAuditStorage.Postgres.MaxOpenConns)
+	}
+	if config.AdminAuditStorage.Postgres.MaxIdleConns != 3 {
+		t.Fatalf("AdminAuditStorage.Postgres.MaxIdleConns = %d, want 3", config.AdminAuditStorage.Postgres.MaxIdleConns)
+	}
+	if config.AdminAuditStorage.Postgres.ConnMaxLifetime != 11*time.Minute {
+		t.Fatalf("AdminAuditStorage.Postgres.ConnMaxLifetime = %v, want 11m", config.AdminAuditStorage.Postgres.ConnMaxLifetime)
+	}
+	if config.AdminAuditStorage.Postgres.OperationTimeout != 1500*time.Millisecond {
+		t.Fatalf("AdminAuditStorage.Postgres.OperationTimeout = %v, want 1500ms", config.AdminAuditStorage.Postgres.OperationTimeout)
+	}
+}
+
 func TestLoadServerConfigRejectsInvalidAdminConsolePath(t *testing.T) {
 	path := writeConfig(t, `
 admin_console:
@@ -556,6 +604,56 @@ admin_console:
 	}
 	if !strings.Contains(err.Error(), "admin_console.session.role") {
 		t.Fatalf("LoadServerConfig() error = %q, want session role field", err)
+	}
+}
+
+func TestLoadServerConfigRejectsInvalidAdminAuditStorage(t *testing.T) {
+	tests := []struct {
+		name    string
+		yaml    string
+		wantErr string
+	}{
+		{
+			name: "unsupported type",
+			yaml: `
+admin_console:
+  audit:
+    type: sqlite
+`,
+			wantErr: "unsupported admin_console.audit type",
+		},
+		{
+			name: "missing postgres dsn",
+			yaml: `
+admin_console:
+  audit:
+    type: postgres
+`,
+			wantErr: "admin_console.audit.postgres dsn is required",
+		},
+		{
+			name: "invalid operation timeout",
+			yaml: `
+admin_console:
+  audit:
+    postgres:
+      operation_timeout: -1s
+`,
+			wantErr: "admin_console.audit.postgres.operation_timeout",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeConfig(t, tt.yaml)
+			_, err := LoadServerConfig(path)
+			if err == nil {
+				t.Fatal("LoadServerConfig() error = nil, want admin audit error")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("LoadServerConfig() error = %q, want %q", err, tt.wantErr)
+			}
+		})
 	}
 }
 

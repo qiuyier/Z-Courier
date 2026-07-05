@@ -47,6 +47,12 @@ export type AdminConsoleSummary = {
     role?: string;
     permissions?: string[];
   };
+  audit?: {
+    storage_type: string;
+    capacity?: number;
+    store_configured: boolean;
+    postgres_configured: boolean;
+  };
 };
 
 export type AdminConsoleSession = {

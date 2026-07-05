@@ -105,6 +105,7 @@ type AdminConsoleConfig struct {
 	AssetsDir  string                       `yaml:"assets_dir"`
 	Monitoring AdminConsoleMonitoringConfig `yaml:"monitoring"`
 	Session    AdminConsoleSessionConfig    `yaml:"session"`
+	Audit      AdminConsoleAuditConfig      `yaml:"audit"`
 }
 
 type AdminConsoleMonitoringConfig struct {
@@ -120,6 +121,21 @@ type AdminConsoleSessionConfig struct {
 	CookieSecure   bool   `yaml:"cookie_secure"`
 	CookieSameSite string `yaml:"cookie_same_site"`
 	Role           string `yaml:"role"`
+}
+
+type AdminConsoleAuditConfig struct {
+	Type     string                          `yaml:"type"`
+	Capacity int                             `yaml:"capacity"`
+	Postgres AdminConsoleAuditPostgresConfig `yaml:"postgres"`
+}
+
+type AdminConsoleAuditPostgresConfig struct {
+	DSN              string `yaml:"dsn"`
+	AutoMigrate      *bool  `yaml:"auto_migrate"`
+	MaxOpenConns     int    `yaml:"max_open_conns"`
+	MaxIdleConns     int    `yaml:"max_idle_conns"`
+	ConnMaxLifetime  string `yaml:"conn_max_lifetime"`
+	OperationTimeout string `yaml:"operation_timeout"`
 }
 
 type ClusterConfig struct {
@@ -726,7 +742,70 @@ func applyAdminConsoleConfig(out *server.Config, config AdminConsoleConfig) erro
 		return err
 	}
 	out.AdminConsole.Session = sessionConfig
+
+	auditConfig, err := toAdminAuditStorageConfig(config.Audit)
+	if err != nil {
+		return err
+	}
+	out.AdminAuditStorage = auditConfig
 	return nil
+}
+
+func toAdminAuditStorageConfig(config AdminConsoleAuditConfig) (server.AdminAuditStorageConfig, error) {
+	defaults := server.DefaultConfig().AdminAuditStorage
+	out := defaults
+
+	if config.Type != "" {
+		storageType := strings.ToLower(strings.TrimSpace(config.Type))
+		switch storageType {
+		case "memory", "postgres":
+			out.Type = storageType
+		default:
+			return server.AdminAuditStorageConfig{}, fmt.Errorf("config: unsupported admin_console.audit type %q", config.Type)
+		}
+	}
+	if config.Capacity < 0 {
+		return server.AdminAuditStorageConfig{}, fmt.Errorf("config: admin_console.audit.capacity must be greater than or equal to 0")
+	}
+	if config.Capacity > 0 {
+		out.Capacity = config.Capacity
+	}
+
+	postgres := config.Postgres
+	if postgres.DSN != "" {
+		out.Postgres.DSN = postgres.DSN
+	}
+	if postgres.AutoMigrate != nil {
+		out.Postgres.AutoMigrate = *postgres.AutoMigrate
+		out.Postgres.AutoMigrateSet = true
+	}
+	if postgres.MaxOpenConns < 0 {
+		return server.AdminAuditStorageConfig{}, fmt.Errorf("config: admin_console.audit.postgres.max_open_conns must be greater than or equal to 0")
+	}
+	if postgres.MaxIdleConns < 0 {
+		return server.AdminAuditStorageConfig{}, fmt.Errorf("config: admin_console.audit.postgres.max_idle_conns must be greater than or equal to 0")
+	}
+	out.Postgres.MaxOpenConns = postgres.MaxOpenConns
+	out.Postgres.MaxIdleConns = postgres.MaxIdleConns
+
+	connMaxLifetime, err := parseOptionalDuration(postgres.ConnMaxLifetime)
+	if err != nil {
+		return server.AdminAuditStorageConfig{}, fmt.Errorf("config: admin_console.audit.postgres.conn_max_lifetime: %w", err)
+	}
+	out.Postgres.ConnMaxLifetime = connMaxLifetime
+
+	operationTimeout, err := parseOptionalPositiveDuration(postgres.OperationTimeout)
+	if err != nil {
+		return server.AdminAuditStorageConfig{}, fmt.Errorf("config: admin_console.audit.postgres.operation_timeout: %w", err)
+	}
+	if operationTimeout > 0 {
+		out.Postgres.OperationTimeout = operationTimeout
+	}
+
+	if out.Type == "postgres" && out.Postgres.DSN == "" {
+		return server.AdminAuditStorageConfig{}, fmt.Errorf("config: admin_console.audit.postgres dsn is required")
+	}
+	return out, nil
 }
 
 func toAdminConsoleSessionConfig(config AdminConsoleSessionConfig) (server.AdminConsoleSessionConfig, error) {

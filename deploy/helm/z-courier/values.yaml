@@ -93,6 +93,16 @@ adminConsole:
     cookieSecure: true
     cookieSameSite: lax
     role: admin
+  audit:
+    type: memory
+    capacity: 1000
+    postgres:
+      dsn: "postgres://zcourier:${ZCOURIER_POSTGRES_PASSWORD}@postgres:5432/zcourier?sslmode=disable"
+      autoMigrate: true
+      maxOpenConns: 10
+      maxIdleConns: 5
+      connMaxLifetime: 30m
+      operationTimeout: 2s
 
 cluster:
   enabled: true

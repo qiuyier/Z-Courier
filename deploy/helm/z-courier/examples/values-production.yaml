@@ -27,6 +27,10 @@ adminConsole:
     prometheusURL: https://prometheus.example.internal
     grafanaURL: https://grafana.example.internal
     dashboardURL: https://grafana.example.internal/d/z-courier-overview/z-courier-overview
+  audit:
+    type: postgres
+    postgres:
+      dsn: "postgres://zcourier:${ZCOURIER_POSTGRES_PASSWORD}@postgresql.z-courier.svc.cluster.local:5432/zcourier?sslmode=disable"
 
 auth:
   http:

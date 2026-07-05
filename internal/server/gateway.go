@@ -37,6 +37,7 @@ type Gateway struct {
 
 	clusterRegistry          cluster.OnlineRegistry
 	clusterRegistryCloser    io.Closer
+	adminAuditCloser         io.Closer
 	authVerifierCloser       io.Closer
 	internalHTTP             *http.Server
 	upstream                 *router.Engine
@@ -95,10 +96,24 @@ func New(config Config, logger *zap.Logger) (*Gateway, error) {
 		closeWithLog(authVerifierCloser, logger, "authentication verifier")
 		return nil, err
 	}
+	adminAudit, adminAuditCloser, err := newAdminAuditStore(config)
+	if err != nil {
+		closeWithLog(downlinkCloser, logger, "downlink store")
+		if upstream != nil {
+			_ = upstream.Close()
+		}
+		if clusterRegistryCloser != nil {
+			_ = clusterRegistryCloser.Close()
+		}
+		closeWithLog(authVerifierCloser, logger, "authentication verifier")
+		return nil, err
+	}
+	config.AdminAudit = adminAudit
 	health := &gatewayHealth{}
 	runtime := newGatewayRuntime()
 	internalHTTP, err := newInternalHTTPServer(config, logger, downlinkService, health, clusterRegistry, runtime)
 	if err != nil {
+		closeWithLog(adminAuditCloser, logger, "admin audit store")
 		closeWithLog(downlinkCloser, logger, "downlink store")
 		if upstream != nil {
 			_ = upstream.Close()
@@ -118,6 +133,7 @@ func New(config Config, logger *zap.Logger) (*Gateway, error) {
 		runtime:                runtime,
 		clusterRegistry:        clusterRegistry,
 		clusterRegistryCloser:  clusterRegistryCloser,
+		adminAuditCloser:       adminAuditCloser,
 		authVerifierCloser:     authVerifierCloser,
 		internalHTTP:           internalHTTP,
 		upstream:               upstream,
@@ -214,6 +230,7 @@ func (g *Gateway) Shutdown(ctx context.Context) error {
 		g.shutdownAuthVerifier()
 		unbound := g.unbindAllClusterRoutes(ctx)
 		g.shutdownInternalHTTPWithContext(ctx)
+		g.shutdownAdminAudit()
 		g.shutdownDownlinkCleanupWorker()
 		g.shutdownDownlinkRetryWorker()
 		g.shutdownUpstream()
@@ -330,6 +347,16 @@ func (g *Gateway) shutdownAuthVerifier() {
 	if err := g.authVerifierCloser.Close(); err != nil {
 		g.shutdownErr = errors.Join(g.shutdownErr, err)
 		g.logger.Warn("failed to shutdown authentication verifier cleanly", zap.Error(err))
+	}
+}
+
+func (g *Gateway) shutdownAdminAudit() {
+	if g.adminAuditCloser == nil {
+		return
+	}
+	if err := g.adminAuditCloser.Close(); err != nil {
+		g.shutdownErr = errors.Join(g.shutdownErr, err)
+		g.logger.Warn("failed to shutdown admin audit store cleanly", zap.Error(err))
 	}
 }
 

@@ -148,11 +148,19 @@ adminConsole:
     prometheusURL: https://prometheus.example.internal
     grafanaURL: https://grafana.example.internal
     dashboardURL: https://grafana.example.internal/d/z-courier-overview/z-courier-overview
+  audit:
+    type: postgres
+    postgres:
+      dsn: "postgres://zcourier:${ZCOURIER_POSTGRES_PASSWORD}@postgresql.z-courier.svc.cluster.local:5432/zcourier?sslmode=disable"
 ```
 
 Keep the internal service private. These links do not install monitoring
 components; they only make existing monitoring surfaces easier to reach from
 the console.
+
+`adminConsole.audit.type` defaults to `memory`, which keeps only the latest
+audit events inside each gateway process. Use `postgres` when production
+operators need admin audit history to survive pod restarts.
 
 The chart defaults `adminConsole.enabled=false`. When enabling it, keep the
 internal service on private networking and prefer VPN, bastion, private ingress,

@@ -311,6 +311,16 @@ admin_console:
     cookie_secure: false
     cookie_same_site: lax
     role: admin
+  audit:
+    type: memory
+    capacity: 1000
+    postgres:
+      dsn: "postgres://zcourier:${ZCOURIER_POSTGRES_PASSWORD}@postgres:5432/zcourier?sslmode=disable"
+      auto_migrate: true
+      max_open_conns: 10
+      max_idle_conns: 5
+      conn_max_lifetime: 30m
+      operation_timeout: 2s
 ```
 
 - `enabled`: serves the embedded browser console from internal HTTP when true.
@@ -333,6 +343,19 @@ admin_console:
   console data; `operator` can also run guarded local session disconnect and
   downlink test push actions plus message repair actions such as requeue and
   discard; `admin` currently includes all operator permissions.
+- `audit.type`: admin operation audit storage. `memory` keeps the latest events
+  in the current gateway process; `postgres` persists events in PostgreSQL so
+  they survive restarts and can be queried across a longer retention window.
+- `audit.capacity`: maximum in-memory audit entries retained when
+  `audit.type=memory`.
+- `audit.postgres.dsn`: PostgreSQL DSN used when `audit.type=postgres`.
+- `audit.postgres.auto_migrate`: creates the audit table and indexes on
+  startup when true.
+- `audit.postgres.max_open_conns`, `audit.postgres.max_idle_conns`, and
+  `audit.postgres.conn_max_lifetime`: optional PostgreSQL connection pool
+  settings.
+- `audit.postgres.operation_timeout`: timeout for inserting and listing audit
+  events.
 
 The console is an internal operations UI, not a public endpoint. Production
 deployments should keep it on private networking and expose it only through a
@@ -347,6 +370,11 @@ When `admin_console.session.enabled=true`, the gateway exposes
 `POST /internal/admin/session/logout`. The login endpoint exchanges a valid
 internal token, or a successfully HMAC-authenticated request, for a short-lived
 HTTP-only cookie. Current sessions are node-local and in-memory.
+
+Admin audit events are produced by console and internal admin APIs such as
+login, permission denial, session disconnect, downlink test push, message
+requeue/discard, retry scans, and diagnostics actions. Use `audit.type=postgres`
+in production if those events need to remain available after gateway restarts.
 
 When `internal_http.auth.mode` is `hmac`, browser JavaScript cannot create a
 session or call `/internal/*` APIs directly unless a deployment-side proxy

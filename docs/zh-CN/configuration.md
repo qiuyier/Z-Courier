@@ -225,6 +225,16 @@ admin_console:
     cookie_secure: false
     cookie_same_site: lax
     role: admin
+  audit:
+    type: memory
+    capacity: 1000
+    postgres:
+      dsn: "postgres://zcourier:${ZCOURIER_POSTGRES_PASSWORD}@postgres:5432/zcourier?sslmode=disable"
+      auto_migrate: true
+      max_open_conns: 10
+      max_idle_conns: 5
+      conn_max_lifetime: 30m
+      operation_timeout: 2s
 ```
 
 注意：
@@ -242,6 +252,17 @@ admin_console:
 - `role` 是新建浏览器 session 的角色，可选 `readonly`、`operator`、`admin`。
   `readonly` 只能查看，`operator` 可以执行受保护的本机 session 断开、下行测试推送
   和消息修复操作，比如 requeue 和 discard，`admin` 目前包含 operator 的全部权限。
+- `audit.type` 是管理员操作审计存储类型。`memory` 只保留当前 gateway 进程内最近
+  的审计事件；`postgres` 会把事件持久化到 PostgreSQL，重启后仍然可以查询。
+- `audit.capacity` 是 `audit.type=memory` 时最多保留的内存审计事件数。
+- `audit.postgres.dsn` 是 `audit.type=postgres` 时使用的 PostgreSQL DSN。
+- `audit.postgres.auto_migrate=true` 时，gateway 启动会自动创建审计表和索引。
+- `audit.postgres.max_open_conns`、`audit.postgres.max_idle_conns`、
+  `audit.postgres.conn_max_lifetime` 是可选连接池配置。
+- `audit.postgres.operation_timeout` 是写入和查询审计事件的超时时间。
+- 管理员审计会记录 login、权限拒绝、session 断开、下行测试推送、消息
+  requeue/discard、retry scan、诊断操作等 console/internal admin API 行为。生产环境
+  如果需要重启后仍能追踪这些事件，建议使用 `audit.type=postgres`。
 - HMAC 模式下，浏览器直接持有 HMAC secret 并不理想，也无法自己完成安全签名链路。
   生产更适合由反向代理完成 operator 鉴权和内部签名，再转发到 gateway internal
   HTTP。
