@@ -377,7 +377,10 @@ claim owner, retry timestamps, and body size for one reliable downlink message.
 
 `messages` lists stored messages by status. Supported statuses are `pending`,
 `sent`, `delivered`, `failed`, and `discarded`. When status is omitted, the
-gateway defaults to failed messages.
+gateway defaults to failed messages. Responses include `cursor`, `next_cursor`,
+`has_more`, `limit`, `total`, and `messages`; pass `next_cursor` back as the
+`cursor` query parameter or `cmd/admin messages -cursor ...` to read the next
+page. Ordering is stable by `updated_at DESC, message_id ASC`.
 
 `messages/retry/scan` triggers one bounded reliable-downlink retry scan. It
 uses the same retry lease, ACK-timeout, max-attempt, and cluster peer-push
@@ -505,6 +508,13 @@ go run ./cmd/admin messages \
   -internal-token dev-internal-token \
   -status failed \
   -limit 100
+
+go run ./cmd/admin messages \
+  -internal-url http://127.0.0.1:18182 \
+  -internal-token dev-internal-token \
+  -status failed \
+  -limit 100 \
+  -cursor '<next_cursor from the previous response>'
 
 go run ./cmd/admin requeue \
   -internal-url http://127.0.0.1:18182 \

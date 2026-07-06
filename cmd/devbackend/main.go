@@ -145,6 +145,7 @@ type listConfig struct {
 	InternalToken string
 	Status        string
 	Limit         int
+	Cursor        string
 	Timeout       time.Duration
 }
 
@@ -264,6 +265,7 @@ func runList(args []string) int {
 	fs.StringVar(&config.InternalToken, "internal-token", "dev-internal-token", "gateway internal HTTP token")
 	fs.StringVar(&config.Status, "status", string(downlink.MessageStatusFailed), "downlink message status")
 	fs.IntVar(&config.Limit, "limit", 100, "maximum messages to return")
+	fs.StringVar(&config.Cursor, "cursor", "", "opaque cursor returned by a previous list response")
 	fs.DurationVar(&config.Timeout, "timeout", 10*time.Second, "list request timeout")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: devbackend list [flags]\n")
@@ -505,7 +507,13 @@ func listMessages(config listConfig) error {
 		return fmt.Errorf("limit must be greater than 0")
 	}
 
-	path := "/internal/messages?status=" + url.QueryEscape(strings.TrimSpace(config.Status)) + "&limit=" + strconv.Itoa(config.Limit)
+	query := url.Values{}
+	query.Set("status", strings.TrimSpace(config.Status))
+	query.Set("limit", strconv.Itoa(config.Limit))
+	if cursor := strings.TrimSpace(config.Cursor); cursor != "" {
+		query.Set("cursor", cursor)
+	}
+	path := "/internal/messages?" + query.Encode()
 	statusCode, respBody, err := getJSON(config.InternalURL, path, config.InternalToken, config.Timeout)
 	if err != nil {
 		return err

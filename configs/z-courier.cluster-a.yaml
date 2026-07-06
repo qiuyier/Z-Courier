@@ -47,7 +47,7 @@ admin_console:
         write_timeout: 1s
         operation_timeout: 2s
   audit:
-    type: memory
+    type: postgres
     capacity: 1000
     postgres:
       dsn: postgres://zcourier:zcourier@127.0.0.1:15432/zcourier?sslmode=disable

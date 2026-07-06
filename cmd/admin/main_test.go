@@ -337,6 +337,7 @@ func TestMessagesSendsListRequest(t *testing.T) {
 		},
 		Status: "failed",
 		Limit:  25,
+		Cursor: "cursor-1",
 	})
 	if err != nil {
 		t.Fatalf("messages() error = %v", err)
@@ -348,8 +349,8 @@ func TestMessagesSendsListRequest(t *testing.T) {
 	if gotReq.URL.Path != "/internal/messages" {
 		t.Fatalf("path = %s, want /internal/messages", gotReq.URL.Path)
 	}
-	if gotReq.URL.Query().Get("status") != "failed" || gotReq.URL.Query().Get("limit") != "25" {
-		t.Fatalf("query = %s, want failed limit 25", gotReq.URL.RawQuery)
+	if gotReq.URL.Query().Get("status") != "failed" || gotReq.URL.Query().Get("limit") != "25" || gotReq.URL.Query().Get("cursor") != "cursor-1" {
+		t.Fatalf("query = %s, want failed limit 25 cursor-1", gotReq.URL.RawQuery)
 	}
 }
 

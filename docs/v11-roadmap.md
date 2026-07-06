@@ -245,6 +245,12 @@ Current implementation:
   and `events`; `total` counts active filters before cursor paging.
 - Memory and PostgreSQL audit stores share the same `limit` cap and cursor
   behavior.
+- The Web console Audit page shows page state and can move forward/back through
+  audit cursors.
+- `GET /internal/messages` supports stable cursor pagination using descending
+  message `updated_at` plus `message_id` as the tie-breaker.
+- The Web console Messages page shows page state and can move forward/back
+  through message cursors.
 
 ### V11.7 Observability And Release Readiness
 

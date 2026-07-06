@@ -1210,6 +1210,28 @@ func TestServiceListMessages(t *testing.T) {
 	}
 }
 
+func TestServiceListMessagesPage(t *testing.T) {
+	store := NewMemoryStore()
+	now := time.UnixMilli(1760000000000)
+	for _, message := range []Message{
+		{MessageID: "failed-1", ClientID: "client-1", DeviceID: "device-1", MsgID: 2001, Status: MessageStatusFailed, UpdatedAt: now.Add(2 * time.Second)},
+		{MessageID: "failed-2", ClientID: "client-1", DeviceID: "device-1", MsgID: 2001, Status: MessageStatusFailed, UpdatedAt: now.Add(time.Second)},
+	} {
+		if _, err := store.Save(context.Background(), message); err != nil {
+			t.Fatalf("Save(%s) error = %v", message.MessageID, err)
+		}
+	}
+	service := NewService(fakeSessions{}, fakeConnections{}, WithStore(store))
+
+	result, err := service.ListMessagesPage(context.Background(), MessageListQuery{Status: MessageStatusFailed, Limit: 1})
+	if err != nil {
+		t.Fatalf("ListMessagesPage() error = %v", err)
+	}
+	if result.Total != 2 || !result.HasMore || len(result.Messages) != 1 || result.Messages[0].MessageID != "failed-1" {
+		t.Fatalf("ListMessagesPage() = %+v, want first paged failed message", result)
+	}
+}
+
 func TestServiceListMessagesRejectsInvalidStatus(t *testing.T) {
 	service := NewService(fakeSessions{}, fakeConnections{}, WithStore(NewMemoryStore()))
 

@@ -203,6 +203,49 @@ func TestMemoryStoreListByStatus(t *testing.T) {
 	}
 }
 
+func TestMemoryStoreListByStatusPage(t *testing.T) {
+	store := NewMemoryStore()
+	now := time.UnixMilli(1760000000000)
+	store.now = func() time.Time { return now }
+
+	for _, message := range []Message{
+		{MessageID: "failed-a", ClientID: "c1", DeviceID: "d1", MsgID: 2001, Status: MessageStatusFailed, UpdatedAt: now.Add(3 * time.Second)},
+		{MessageID: "failed-b", ClientID: "c1", DeviceID: "d1", MsgID: 2001, Status: MessageStatusFailed, UpdatedAt: now.Add(2 * time.Second)},
+		{MessageID: "failed-c", ClientID: "c1", DeviceID: "d1", MsgID: 2001, Status: MessageStatusFailed, UpdatedAt: now.Add(time.Second)},
+		{MessageID: "pending", ClientID: "c1", DeviceID: "d1", MsgID: 2001, Status: MessageStatusPending, UpdatedAt: now.Add(4 * time.Second)},
+	} {
+		if _, err := store.Save(context.Background(), message); err != nil {
+			t.Fatalf("Save(%s) error = %v", message.MessageID, err)
+		}
+	}
+
+	first, err := store.ListByStatusPage(context.Background(), MessageListQuery{Status: MessageStatusFailed, Limit: 2})
+	if err != nil {
+		t.Fatalf("ListByStatusPage(first) error = %v", err)
+	}
+	if first.Total != 3 || !first.HasMore || len(first.Messages) != 2 {
+		t.Fatalf("first result = %+v, want total=3 has_more and two messages", first)
+	}
+	if first.Messages[0].MessageID != "failed-a" || first.Messages[1].MessageID != "failed-b" {
+		t.Fatalf("first messages = %+v, want failed-a then failed-b", first.Messages)
+	}
+	if messageListCursorIsZero(first.NextCursor) {
+		t.Fatalf("first.NextCursor = zero, want cursor")
+	}
+
+	second, err := store.ListByStatusPage(context.Background(), MessageListQuery{
+		Status: MessageStatusFailed,
+		Limit:  2,
+		Cursor: first.NextCursor,
+	})
+	if err != nil {
+		t.Fatalf("ListByStatusPage(second) error = %v", err)
+	}
+	if second.Total != 3 || second.HasMore || len(second.Messages) != 1 || second.Messages[0].MessageID != "failed-c" {
+		t.Fatalf("second result = %+v, want final failed-c page", second)
+	}
+}
+
 func TestMemoryStoreListPendingByClientDeviceIgnoresRetryTime(t *testing.T) {
 	store := NewMemoryStore()
 	now := time.UnixMilli(1760000000000)

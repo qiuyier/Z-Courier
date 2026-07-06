@@ -175,6 +175,9 @@ func (c *Client) ListMessages(ctx context.Context, request ListMessagesRequest) 
 	if request.Limit > 0 {
 		query.Set("limit", strconv.Itoa(request.Limit))
 	}
+	if cursor := strings.TrimSpace(request.Cursor); cursor != "" {
+		query.Set("cursor", cursor)
+	}
 
 	var response ListMessagesResponse
 	if err := c.doJSON(ctx, http.MethodGet, listPath, query, nil, &response); err != nil {

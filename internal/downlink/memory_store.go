@@ -68,22 +68,53 @@ func (s *MemoryStore) Get(ctx context.Context, messageID string) (Message, bool,
 }
 
 func (s *MemoryStore) ListByStatus(ctx context.Context, status MessageStatus, limit int) ([]Message, error) {
-	if err := ctx.Err(); err != nil {
+	result, err := s.ListByStatusPage(ctx, MessageListQuery{
+		Status: status,
+		Limit:  limit,
+	})
+	if err != nil {
 		return nil, err
 	}
+	return result.Messages, nil
+}
+
+func (s *MemoryStore) ListByStatusPage(ctx context.Context, query MessageListQuery) (MessageListResult, error) {
+	if err := ctx.Err(); err != nil {
+		return MessageListResult{}, err
+	}
+	query = normalizeMessageListQuery(query)
 
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	messages := make([]Message, 0)
+	result := MessageListResult{
+		Status:   query.Status,
+		Limit:    query.Limit,
+		Cursor:   query.Cursor,
+		Messages: make([]Message, 0, query.Limit),
+	}
+	messages := make([]Message, 0, query.Limit+1)
 	for _, message := range s.messages {
-		if message.Status != status {
+		if message.Status != query.Status {
+			continue
+		}
+		result.Total++
+		if !messageAfterListCursor(message, query.Cursor) {
 			continue
 		}
 		messages = append(messages, message.Clone())
 	}
 
-	return limitMessagesByUpdatedDesc(messages, limit), nil
+	messages = limitMessagesByUpdatedDesc(messages, query.Limit+1)
+	if len(messages) > query.Limit {
+		result.HasMore = true
+		messages = messages[:query.Limit]
+	}
+	result.Messages = messages
+	if result.HasMore && len(result.Messages) > 0 {
+		result.NextCursor = messageListCursorFromMessage(result.Messages[len(result.Messages)-1])
+	}
+	return result, nil
 }
 
 func (s *MemoryStore) ListDuePending(ctx context.Context, now time.Time, limit int) ([]Message, error) {

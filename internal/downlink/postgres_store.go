@@ -99,7 +99,9 @@ CREATE INDEX IF NOT EXISTS z_courier_downlink_messages_claim_until_idx
   WHERE claim_until IS NOT NULL;
 CREATE INDEX IF NOT EXISTS z_courier_downlink_messages_status_updated_at_idx
   ON z_courier_downlink_messages (status, updated_at);
-`)
+CREATE INDEX IF NOT EXISTS z_courier_downlink_messages_status_updated_message_idx
+  ON z_courier_downlink_messages (status, updated_at DESC, message_id ASC);
+	`)
 	return err
 }
 
@@ -190,23 +192,70 @@ WHERE message_id = $1
 }
 
 func (s *PostgresStore) ListByStatus(ctx context.Context, status MessageStatus, limit int) ([]Message, error) {
-	if limit <= 0 {
-		limit = 100
-	}
-
-	rows, err := s.db.QueryContext(ctx, `
-SELECT `+postgresMessageColumns+`
-FROM z_courier_downlink_messages
-WHERE status = $1
-ORDER BY updated_at DESC, message_id ASC
-LIMIT $2
-`, string(status), limit)
+	result, err := s.ListByStatusPage(ctx, MessageListQuery{
+		Status: status,
+		Limit:  limit,
+	})
 	if err != nil {
 		return nil, err
 	}
+	return result.Messages, nil
+}
+
+func (s *PostgresStore) ListByStatusPage(ctx context.Context, query MessageListQuery) (MessageListResult, error) {
+	query = normalizeMessageListQuery(query)
+	result := MessageListResult{
+		Status:   query.Status,
+		Limit:    query.Limit,
+		Cursor:   query.Cursor,
+		Messages: make([]Message, 0, query.Limit),
+	}
+	if err := s.db.QueryRowContext(ctx, `
+	SELECT COUNT(*)
+	FROM z_courier_downlink_messages
+	WHERE status = $1
+	`, string(query.Status)).Scan(&result.Total); err != nil {
+		return MessageListResult{}, err
+	}
+
+	where := "WHERE status = $1"
+	args := []any{string(query.Status)}
+	if !messageListCursorIsZero(query.Cursor) {
+		args = append(args, query.Cursor.UpdatedAt, query.Cursor.MessageID)
+		where += fmt.Sprintf(" AND (updated_at < $%d OR (updated_at = $%d AND message_id > $%d))", len(args)-1, len(args)-1, len(args))
+	}
+	args = append(args, query.Limit+1)
+
+	rows, err := s.db.QueryContext(ctx, `
+	SELECT `+postgresMessageColumns+`
+	FROM z_courier_downlink_messages
+	`+where+`
+	ORDER BY updated_at DESC, message_id ASC
+	LIMIT $`+fmt.Sprint(len(args))+`
+	`, args...)
+	if err != nil {
+		return MessageListResult{}, err
+	}
 	defer rows.Close()
 
-	return scanMessages(rows)
+	for rows.Next() {
+		message, err := scanMessage(rows)
+		if err != nil {
+			return MessageListResult{}, err
+		}
+		if len(result.Messages) >= query.Limit {
+			result.HasMore = true
+			break
+		}
+		result.Messages = append(result.Messages, message)
+	}
+	if err := rows.Err(); err != nil {
+		return MessageListResult{}, err
+	}
+	if result.HasMore && len(result.Messages) > 0 {
+		result.NextCursor = messageListCursorFromMessage(result.Messages[len(result.Messages)-1])
+	}
+	return result, nil
 }
 
 func (s *PostgresStore) ListDuePending(ctx context.Context, now time.Time, limit int) ([]Message, error) {

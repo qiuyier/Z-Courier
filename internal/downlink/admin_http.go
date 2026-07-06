@@ -63,8 +63,17 @@ func (h *messageListHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, ListMessagesResponse{Code: "bad_request", Reason: err.Error()})
 		return
 	}
+	cursor, err := parseMessageListCursor(r.URL.Query().Get("cursor"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, ListMessagesResponse{Code: "bad_request", Reason: err.Error()})
+		return
+	}
 
-	messages, err := h.config.Service.ListMessages(r.Context(), status, limit)
+	result, err := h.config.Service.ListMessagesPage(r.Context(), MessageListQuery{
+		Status: status,
+		Limit:  limit,
+		Cursor: cursor,
+	})
 	if err != nil {
 		statusCode := statusFromAdminError(err)
 		writeJSON(w, statusCode, ListMessagesResponse{
@@ -72,18 +81,22 @@ func (h *messageListHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Reason: err.Error(),
 			Status: status,
 			Limit:  limit,
+			Cursor: formatMessageListCursor(cursor),
 		})
 		return
 	}
 
 	resp := ListMessagesResponse{
-		Code:     "ok",
-		Status:   status,
-		Limit:    limit,
-		Total:    len(messages),
-		Messages: make([]MessageStatusResponse, 0, len(messages)),
+		Code:       "ok",
+		Status:     result.Status,
+		Limit:      result.Limit,
+		Cursor:     formatMessageListCursor(result.Cursor),
+		NextCursor: formatMessageListCursor(result.NextCursor),
+		HasMore:    result.HasMore,
+		Total:      result.Total,
+		Messages:   make([]MessageStatusResponse, 0, len(result.Messages)),
 	}
-	for _, message := range messages {
+	for _, message := range result.Messages {
 		resp.Messages = append(resp.Messages, responseFromMessage(message))
 	}
 	writeJSON(w, http.StatusOK, resp)

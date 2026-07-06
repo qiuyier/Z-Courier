@@ -58,6 +58,7 @@ type messagesConfig struct {
 	commonConfig
 	Status string
 	Limit  int
+	Cursor string
 }
 
 type checkConfig struct {
@@ -321,6 +322,7 @@ func runMessages(args []string) int {
 	addCommonFlags(fs, &config.commonConfig)
 	fs.StringVar(&config.Status, "status", config.Status, "message status: pending, sent, delivered, failed, or discarded")
 	fs.IntVar(&config.Limit, "limit", 100, "maximum messages to return")
+	fs.StringVar(&config.Cursor, "cursor", "", "opaque cursor returned by a previous messages response")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: admin messages [flags]\n")
 		fs.PrintDefaults()
@@ -704,6 +706,9 @@ func messages(config messagesConfig) error {
 	query.Set("limit", strconv.Itoa(config.Limit))
 	if status != "" {
 		query.Set("status", string(status))
+	}
+	if cursor := strings.TrimSpace(config.Cursor); cursor != "" {
+		query.Set("cursor", cursor)
 	}
 	return requestAndPrint(config.commonConfig, "/internal/messages?"+query.Encode())
 }

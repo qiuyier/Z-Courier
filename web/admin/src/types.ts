@@ -391,6 +391,9 @@ export type AdminMessages = {
   reason?: string;
   status?: MessageStatus;
   limit?: number;
+  cursor?: string;
+  next_cursor?: string;
+  has_more?: boolean;
   total: number;
   messages?: MessageStatusResponse[];
 };

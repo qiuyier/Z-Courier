@@ -11,6 +11,7 @@ var (
 	ErrInvalidAckCode     = errors.New("downlink: invalid ack code")
 	ErrInvalidStatus      = errors.New("downlink: invalid message status")
 	ErrInvalidLimit       = errors.New("downlink: invalid limit")
+	ErrInvalidCursor      = errors.New("downlink: invalid cursor")
 	ErrInvalidTransition  = errors.New("downlink: invalid message status transition")
 	ErrSessionNotFound    = errors.New("downlink: session not found")
 	ErrSessionMismatch    = errors.New("downlink: session mismatch")

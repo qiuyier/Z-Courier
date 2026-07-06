@@ -161,6 +161,21 @@ go run ./cmd/admin messages \
   -limit 20
 ```
 
+消息列表响应会返回 `cursor`、`next_cursor`、`has_more`、`limit`、`total` 和
+`messages`。如果 `has_more=true`，下一页可以把响应里的 `next_cursor` 作为
+`-cursor` 继续传入：
+
+```bash
+go run ./cmd/admin messages \
+  -internal-url http://127.0.0.1:18080 \
+  -internal-token dev-internal-token \
+  -status failed \
+  -limit 20 \
+  -cursor '<上一页响应里的 next_cursor>'
+```
+
+消息列表按 `updated_at DESC, message_id ASC` 稳定排序。
+
 重新入队：
 
 ```bash

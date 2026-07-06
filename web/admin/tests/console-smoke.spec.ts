@@ -41,7 +41,13 @@ test("logs in and navigates core console pages", async ({ page }) => {
   await gotoNav(page, "Routes");
   await gotoNav(page, "Sessions");
   await gotoNav(page, "Messages");
+  await expect(page.getByText("Message Cursor")).toBeVisible();
+  await expect(page.getByText("page 1")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Back" })).toBeDisabled();
   await gotoNav(page, "Audit", "Audit Trail");
+  await expect(page.getByText("Audit Cursor")).toBeVisible();
+  await expect(page.getByText("page 1")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Back" })).toBeDisabled();
   await gotoNav(page, "Checks");
   await gotoNav(page, "Diagnostics");
   await gotoNav(page, "Overview", "Operations Overview");

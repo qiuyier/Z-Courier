@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import {
   ArrowClockwise,
+  CaretLeft,
+  CaretRight,
   ArrowSquareOut,
   ChartLineUp,
   Check,
@@ -253,6 +255,8 @@ export default function App() {
   const [diagnosisSessionLimit, setDiagnosisSessionLimit] = useState(100);
   const [messageStatus, setMessageStatus] = useState<MessageStatus>("failed");
   const [messageLimit, setMessageLimit] = useState(100);
+  const [messageCursor, setMessageCursor] = useState("");
+  const [messageCursorStack, setMessageCursorStack] = useState<string[]>([]);
   const [messageLookupID, setMessageLookupID] = useState("");
   const [auditAction, setAuditAction] = useState("");
   const [auditResult, setAuditResult] = useState("");
@@ -261,6 +265,8 @@ export default function App() {
   const [auditSessionID, setAuditSessionID] = useState("");
   const [auditMessageID, setAuditMessageID] = useState("");
   const [auditLimit, setAuditLimit] = useState(100);
+  const [auditCursor, setAuditCursor] = useState("");
+  const [auditCursorStack, setAuditCursorStack] = useState<string[]>([]);
   const [downlinkTestPushForm, setDownlinkTestPushForm] = useState<DownlinkTestPushForm>(() => defaultDownlinkTestPushForm());
   const [messageActionDialog, setMessageActionDialog] = useState<MessageActionDialogState>(null);
   const [messageActionPending, setMessageActionPending] = useState(false);
@@ -292,6 +298,8 @@ export default function App() {
     setCheckState({ status: "idle" });
     setMessagesState({ status: "idle" });
     setAuditState({ status: "idle" });
+    setAuditCursor("");
+    setAuditCursorStack([]);
     setMessageLookupState({ status: "idle" });
     setRetryScanState({ status: "idle" });
     setDownlinkTestPushState({ status: "idle" });
@@ -606,36 +614,81 @@ export default function App() {
   );
 
   const refreshMessages = useCallback(
-    async (signal?: AbortSignal) => {
+    async (signal?: AbortSignal, cursorOverride?: string) => {
       if (!authenticated) {
         setMessagesState({ status: "idle" });
-        return;
+        return false;
       }
+      const cursor = cursorOverride ?? messageCursor;
       setMessagesState((current) => ({ status: "loading", data: current.data }));
       try {
-        const data = await fetchMessages(messageStatus, messageLimit, signal);
+        const data = await fetchMessages({ status: messageStatus, limit: messageLimit, cursor }, signal);
         setMessagesState({ status: "ready", data });
+        return true;
       } catch (error) {
         if (signal?.aborted) {
-          return;
+          return false;
         }
         if (isUnauthorized(error)) {
           expireSession();
-          return;
+          return false;
         }
         const message = requestErrorMessage(error);
         setMessagesState((current) => ({ status: "error", data: current.data, error: message }));
+        return false;
       }
     },
-    [authenticated, expireSession, messageLimit, messageStatus],
+    [authenticated, expireSession, messageCursor, messageLimit, messageStatus],
   );
 
+  const resetMessagePagination = useCallback(() => {
+    setMessageCursor("");
+    setMessageCursorStack([]);
+  }, []);
+
+  const updateMessageStatus = useCallback((status: MessageStatus) => {
+    resetMessagePagination();
+    setMessageStatus(status);
+  }, [resetMessagePagination]);
+
+  const updateMessageLimit = useCallback((limit: number) => {
+    resetMessagePagination();
+    setMessageLimit(limit);
+  }, [resetMessagePagination]);
+
+  const nextMessagePage = useCallback(async () => {
+    const nextCursor = messagesState.data?.next_cursor?.trim() ?? "";
+    if (nextCursor === "" || messagesState.status === "loading") {
+      return;
+    }
+    const loaded = await refreshMessages(undefined, nextCursor);
+    if (!loaded) {
+      return;
+    }
+    setMessageCursorStack((current) => [...current, messageCursor]);
+    setMessageCursor(nextCursor);
+  }, [messageCursor, messagesState.data?.next_cursor, messagesState.status, refreshMessages]);
+
+  const previousMessagePage = useCallback(async () => {
+    if (messageCursorStack.length === 0 || messagesState.status === "loading") {
+      return;
+    }
+    const previousCursor = messageCursorStack[messageCursorStack.length - 1] ?? "";
+    const loaded = await refreshMessages(undefined, previousCursor);
+    if (!loaded) {
+      return;
+    }
+    setMessageCursorStack((current) => current.slice(0, -1));
+    setMessageCursor(previousCursor);
+  }, [messageCursorStack, messagesState.status, refreshMessages]);
+
   const refreshAudit = useCallback(
-    async (signal?: AbortSignal) => {
+    async (signal?: AbortSignal, cursorOverride?: string) => {
       if (!authenticated) {
         setAuditState({ status: "idle" });
-        return;
+        return false;
       }
+      const cursor = cursorOverride ?? auditCursor;
       setAuditState((current) => ({ status: "loading", data: current.data }));
       try {
         const data = await fetchAudit(
@@ -646,27 +699,31 @@ export default function App() {
             clientID: auditClientID,
             sessionID: auditSessionID,
             messageID: auditMessageID,
+            cursor,
             limit: auditLimit,
           },
           signal,
         );
         setAuditState({ status: "ready", data });
+        return true;
       } catch (error) {
         if (signal?.aborted) {
-          return;
+          return false;
         }
         if (isUnauthorized(error)) {
           expireSession();
-          return;
+          return false;
         }
         const message = requestErrorMessage(error);
         setAuditState((current) => ({ status: "error", data: current.data, error: message }));
+        return false;
       }
     },
     [
       authenticated,
       auditAction,
       auditClientID,
+      auditCursor,
       auditLimit,
       auditMessageID,
       auditPrincipal,
@@ -675,6 +732,77 @@ export default function App() {
       expireSession,
     ],
   );
+
+  const resetAuditPagination = useCallback(() => {
+    setAuditCursor("");
+    setAuditCursorStack([]);
+  }, []);
+
+  const applyAuditFilters = useCallback(() => {
+    resetAuditPagination();
+    void refreshAudit(undefined, "");
+  }, [refreshAudit, resetAuditPagination]);
+
+  const updateAuditAction = useCallback((action: string) => {
+    resetAuditPagination();
+    setAuditAction(action);
+  }, [resetAuditPagination]);
+
+  const updateAuditResult = useCallback((result: string) => {
+    resetAuditPagination();
+    setAuditResult(result);
+  }, [resetAuditPagination]);
+
+  const updateAuditPrincipal = useCallback((principal: string) => {
+    resetAuditPagination();
+    setAuditPrincipal(principal);
+  }, [resetAuditPagination]);
+
+  const updateAuditClientID = useCallback((clientID: string) => {
+    resetAuditPagination();
+    setAuditClientID(clientID);
+  }, [resetAuditPagination]);
+
+  const updateAuditSessionID = useCallback((sessionID: string) => {
+    resetAuditPagination();
+    setAuditSessionID(sessionID);
+  }, [resetAuditPagination]);
+
+  const updateAuditMessageID = useCallback((messageID: string) => {
+    resetAuditPagination();
+    setAuditMessageID(messageID);
+  }, [resetAuditPagination]);
+
+  const updateAuditLimit = useCallback((limit: number) => {
+    resetAuditPagination();
+    setAuditLimit(limit);
+  }, [resetAuditPagination]);
+
+  const nextAuditPage = useCallback(async () => {
+    const nextCursor = auditState.data?.next_cursor?.trim() ?? "";
+    if (nextCursor === "" || auditState.status === "loading") {
+      return;
+    }
+    const loaded = await refreshAudit(undefined, nextCursor);
+    if (!loaded) {
+      return;
+    }
+    setAuditCursorStack((current) => [...current, auditCursor]);
+    setAuditCursor(nextCursor);
+  }, [auditCursor, auditState.data?.next_cursor, auditState.status, refreshAudit]);
+
+  const previousAuditPage = useCallback(async () => {
+    if (auditCursorStack.length === 0 || auditState.status === "loading") {
+      return;
+    }
+    const previousCursor = auditCursorStack[auditCursorStack.length - 1] ?? "";
+    const loaded = await refreshAudit(undefined, previousCursor);
+    if (!loaded) {
+      return;
+    }
+    setAuditCursorStack((current) => current.slice(0, -1));
+    setAuditCursor(previousCursor);
+  }, [auditCursorStack, auditState.status, refreshAudit]);
 
   const lookupMessage = useCallback(
     async (signal?: AbortSignal) => {
@@ -1357,8 +1485,10 @@ export default function App() {
           ) : activePage === "messages" && authenticated && (messagesState.status !== "error" || messagesState.data) ? (
             <MessagesPage
               canRepairMessages={canRepairMessages}
+              canPreviousPage={messageCursorStack.length > 0}
               canRunRetryScan={canRunRetryScan}
               canTestDownlinkPush={canTestDownlinkPush}
+              currentPage={messageCursorStack.length + 1}
               downlinkTestPushForm={downlinkTestPushForm}
               downlinkTestPushPreflightPending={downlinkTestPushPreflightPending}
               downlinkTestPushState={downlinkTestPushState}
@@ -1367,12 +1497,14 @@ export default function App() {
               lookupState={messageLookupState}
               onDownlinkTestPushFormChange={updateDownlinkTestPushForm}
               onDownlinkTestPushSubmit={openDownlinkTestPush}
-              onLimitChange={setMessageLimit}
+              onLimitChange={updateMessageLimit}
               onMessageAction={openMessageAction}
               onLookupIDChange={setMessageLookupID}
               onLookupSubmit={lookupMessage}
+              onNextPage={nextMessagePage}
+              onPreviousPage={previousMessagePage}
               onRetryScan={openRetryScan}
-              onStatusChange={setMessageStatus}
+              onStatusChange={updateMessageStatus}
               retryScanState={retryScanState}
               selectedStatus={messageStatus}
               state={messagesState}
@@ -1380,17 +1512,21 @@ export default function App() {
           ) : activePage === "audit" && authenticated && (auditState.status !== "error" || auditState.data) ? (
             <AuditPage
               action={auditAction}
+              canPreviousPage={auditCursorStack.length > 0}
               clientID={auditClientID}
+              currentPage={auditCursorStack.length + 1}
               limit={auditLimit}
               messageID={auditMessageID}
-              onActionChange={setAuditAction}
-              onClientIDChange={setAuditClientID}
-              onLimitChange={setAuditLimit}
-              onMessageIDChange={setAuditMessageID}
-              onPrincipalChange={setAuditPrincipal}
-              onRefresh={refreshAudit}
-              onResultChange={setAuditResult}
-              onSessionIDChange={setAuditSessionID}
+              onActionChange={updateAuditAction}
+              onApplyFilters={applyAuditFilters}
+              onClientIDChange={updateAuditClientID}
+              onLimitChange={updateAuditLimit}
+              onMessageIDChange={updateAuditMessageID}
+              onNextPage={nextAuditPage}
+              onPreviousPage={previousAuditPage}
+              onPrincipalChange={updateAuditPrincipal}
+              onResultChange={updateAuditResult}
+              onSessionIDChange={updateAuditSessionID}
               principal={auditPrincipal}
               result={auditResult}
               sessionID={auditSessionID}
@@ -2506,8 +2642,10 @@ function RouteStatusBadge({ status }: { status: ClientRouteStatus }) {
 
 function MessagesPage({
   canRepairMessages,
+  canPreviousPage,
   canRunRetryScan,
   canTestDownlinkPush,
+  currentPage,
   downlinkTestPushForm,
   downlinkTestPushPreflightPending,
   downlinkTestPushState,
@@ -2520,6 +2658,8 @@ function MessagesPage({
   onLookupIDChange,
   onLookupSubmit,
   onMessageAction,
+  onNextPage,
+  onPreviousPage,
   onRetryScan,
   onStatusChange,
   retryScanState,
@@ -2527,8 +2667,10 @@ function MessagesPage({
   state,
 }: {
   canRepairMessages: boolean;
+  canPreviousPage: boolean;
   canRunRetryScan: boolean;
   canTestDownlinkPush: boolean;
+  currentPage: number;
   downlinkTestPushForm: DownlinkTestPushForm;
   downlinkTestPushPreflightPending: boolean;
   downlinkTestPushState: RemoteState<DownlinkTestPushResponse>;
@@ -2541,6 +2683,8 @@ function MessagesPage({
   onLookupIDChange: (messageID: string) => void;
   onLookupSubmit: () => void | Promise<void>;
   onMessageAction: (action: MessageAction, message: MessageStatusResponse) => void;
+  onNextPage: () => void | Promise<void>;
+  onPreviousPage: () => void | Promise<void>;
   onRetryScan: () => void | Promise<void>;
   onStatusChange: (status: MessageStatus) => void;
   retryScanState: RemoteState<RetryScanResponse>;
@@ -2551,6 +2695,9 @@ function MessagesPage({
   const total = state.data?.total ?? messages.length;
   const ackRequired = messages.filter((message) => message.ack_required).length;
   const retryScheduled = messages.filter((message) => Boolean(message.next_retry_at)).length;
+  const loading = state.status === "loading";
+  const hasMore = state.data?.has_more ?? false;
+  const nextCursor = state.data?.next_cursor ?? "";
 
   if (state.status === "loading" && !state.data) {
     return <MessagesSkeleton />;
@@ -2589,12 +2736,14 @@ function MessagesPage({
             </div>
           </div>
 
-          <div className="grid gap-3 md:grid-cols-2">
-            <MetricRow label="Loaded" value={messages.length.toLocaleString()} />
-            <MetricRow label="Limit" value={limit.toLocaleString()} />
-            <MetricRow label="ACK Required" value={ackRequired.toLocaleString()} />
-            <MetricRow label="Retry Scheduled" value={retryScheduled.toLocaleString()} />
-          </div>
+	          <div className="grid gap-3 md:grid-cols-2">
+	            <MetricRow label="Loaded" value={messages.length.toLocaleString()} />
+	            <MetricRow label="Limit" value={limit.toLocaleString()} />
+	            <MetricRow label="ACK Required" value={ackRequired.toLocaleString()} />
+	            <MetricRow label="Retry Scheduled" value={retryScheduled.toLocaleString()} />
+	            <MetricRow label="Page" value={currentPage.toLocaleString()} />
+	            <MetricRow label="More" value={hasMore ? "yes" : "no"} />
+	          </div>
         </div>
       </section>
 
@@ -2616,7 +2765,7 @@ function MessagesPage({
         state={downlinkTestPushState}
       />
 
-      <section className="grid gap-5 xl:grid-cols-[0.8fr_1.2fr]">
+	      <section className="grid gap-5 xl:grid-cols-[0.8fr_1.2fr]">
         <article className="rounded-lg border border-line bg-white p-5 shadow-diffusion">
           <p className="text-sm font-medium text-zinc-500">List Filter</p>
           <label className="mt-5 block text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500" htmlFor="message-limit">
@@ -2642,9 +2791,47 @@ function MessagesPage({
           onLookupIDChange={onLookupIDChange}
           onLookupSubmit={onLookupSubmit}
         />
-      </section>
+	      </section>
 
-      {state.status !== "loading" && messages.length === 0 ? (
+	      <section className="rounded-lg border border-line bg-white p-4 shadow-diffusion">
+	        <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-center">
+	          <div className="min-w-0">
+	            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">Message Cursor</p>
+	            <div className="mt-2 flex flex-wrap items-center gap-2">
+	              <span className="rounded-md border border-line bg-zinc-50 px-2.5 py-1 font-mono text-xs text-zinc-600">
+	                page {currentPage.toLocaleString()}
+	              </span>
+	              <span className="max-w-full truncate rounded-md border border-line bg-zinc-50 px-2.5 py-1 font-mono text-xs text-zinc-600">
+	                next {nextCursor || "--"}
+	              </span>
+	              <StatusBadge label={hasMore ? "more" : "end"} tone={hasMore ? "info" : "ok"} />
+	            </div>
+	          </div>
+
+	          <div className="grid grid-cols-2 gap-2 sm:flex sm:justify-end">
+	            <button
+	              className="inline-flex min-w-0 items-center justify-center gap-2 rounded-lg border border-line bg-white px-3 py-2 text-sm font-medium text-ink transition duration-300 hover:bg-zinc-50 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50"
+	              disabled={loading || !canPreviousPage}
+	              onClick={() => void onPreviousPage()}
+	              type="button"
+	            >
+	              <CaretLeft size={16} weight="bold" />
+	              Back
+	            </button>
+	            <button
+	              className="inline-flex min-w-0 items-center justify-center gap-2 rounded-lg bg-zinc-950 px-3 py-2 text-sm font-medium text-white transition duration-300 hover:bg-zinc-800 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50"
+	              disabled={loading || !hasMore}
+	              onClick={() => void onNextPage()}
+	              type="button"
+	            >
+	              Next
+	              <CaretRight size={16} weight="bold" />
+	            </button>
+	          </div>
+	        </div>
+	      </section>
+
+	      {state.status !== "loading" && messages.length === 0 ? (
         <MessagesEmptyState status={selectedStatus} />
       ) : (
         <section className="grid gap-3">
@@ -2676,15 +2863,19 @@ const auditActionOptions = [
 
 function AuditPage({
   action,
+  canPreviousPage,
   clientID,
+  currentPage,
   limit,
   messageID,
   onActionChange,
+  onApplyFilters,
   onClientIDChange,
   onLimitChange,
   onMessageIDChange,
+  onNextPage,
+  onPreviousPage,
   onPrincipalChange,
-  onRefresh,
   onResultChange,
   onSessionIDChange,
   principal,
@@ -2693,15 +2884,19 @@ function AuditPage({
   state,
 }: {
   action: string;
+  canPreviousPage: boolean;
   clientID: string;
+  currentPage: number;
   limit: number;
   messageID: string;
   onActionChange: (action: string) => void;
+  onApplyFilters: () => void | Promise<void>;
   onClientIDChange: (clientID: string) => void;
   onLimitChange: (limit: number) => void;
   onMessageIDChange: (messageID: string) => void;
+  onNextPage: () => void | Promise<void>;
+  onPreviousPage: () => void | Promise<void>;
   onPrincipalChange: (principal: string) => void;
-  onRefresh: () => void | Promise<void>;
   onResultChange: (result: string) => void;
   onSessionIDChange: (sessionID: string) => void;
   principal: string;
@@ -2715,6 +2910,8 @@ function AuditPage({
   const failed = events.filter((event) => auditTone(event.result) === "warn").length;
   const permissionDenied = events.filter((event) => event.result === "permission_denied").length;
   const loading = state.status === "loading";
+  const hasMore = state.data?.has_more ?? false;
+  const nextCursor = state.data?.next_cursor ?? "";
   const filtered = [action, result, principal, clientID, sessionID, messageID].some((value) => value.trim() !== "");
 
   if (state.status === "loading" && !state.data) {
@@ -2740,7 +2937,9 @@ function AuditPage({
             <MetricRow label="Successful" value={success.toLocaleString()} />
             <MetricRow label="Warnings" value={failed.toLocaleString()} />
             <MetricRow label="Permission Denied" value={permissionDenied.toLocaleString()} />
-            <MetricRow label="Refresh State" value={state.status} />
+            <MetricRow label="Page" value={currentPage.toLocaleString()} />
+            <MetricRow label="More" value={hasMore ? "yes" : "no"} />
+            <MetricRow label="State" value={state.status} />
           </div>
         </div>
       </section>
@@ -2750,7 +2949,7 @@ function AuditPage({
           className="grid gap-4"
           onSubmit={(event) => {
             event.preventDefault();
-            void onRefresh();
+            void onApplyFilters();
           }}
         >
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -2811,6 +3010,44 @@ function AuditPage({
             <AuditFilterInput id="audit-message" label="MessageID" onChange={onMessageIDChange} placeholder="message-1" value={messageID} />
           </div>
         </form>
+      </section>
+
+      <section className="rounded-lg border border-line bg-white p-4 shadow-diffusion">
+        <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-center">
+          <div className="min-w-0">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">Audit Cursor</p>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <span className="rounded-md border border-line bg-zinc-50 px-2.5 py-1 font-mono text-xs text-zinc-600">
+                page {currentPage.toLocaleString()}
+              </span>
+              <span className="rounded-md border border-line bg-zinc-50 px-2.5 py-1 font-mono text-xs text-zinc-600">
+                next {nextCursor || "--"}
+              </span>
+              <StatusBadge label={hasMore ? "more" : "end"} tone={hasMore ? "info" : "ok"} />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:justify-end">
+            <button
+              className="inline-flex min-w-0 items-center justify-center gap-2 rounded-lg border border-line bg-white px-3 py-2 text-sm font-medium text-ink transition duration-300 hover:bg-zinc-50 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={loading || !canPreviousPage}
+              onClick={() => void onPreviousPage()}
+              type="button"
+            >
+              <CaretLeft size={16} weight="bold" />
+              Back
+            </button>
+            <button
+              className="inline-flex min-w-0 items-center justify-center gap-2 rounded-lg bg-zinc-950 px-3 py-2 text-sm font-medium text-white transition duration-300 hover:bg-zinc-800 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={loading || !hasMore}
+              onClick={() => void onNextPage()}
+              type="button"
+            >
+              Next
+              <CaretRight size={16} weight="bold" />
+            </button>
+          </div>
+        </div>
       </section>
 
       {state.status !== "loading" && events.length === 0 ? (

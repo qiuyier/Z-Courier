@@ -160,18 +160,29 @@ func (s *Service) MessageStatus(ctx context.Context, messageID string) (Message,
 }
 
 func (s *Service) ListMessages(ctx context.Context, status MessageStatus, limit int) ([]Message, error) {
-	if s.store == nil {
-		return nil, ErrStoreNotConfigured
+	result, err := s.ListMessagesPage(ctx, MessageListQuery{
+		Status: status,
+		Limit:  limit,
+	})
+	if err != nil {
+		return nil, err
 	}
-	if !validMessageStatus(status) {
-		return nil, ErrInvalidStatus
+	return result.Messages, nil
+}
+
+func (s *Service) ListMessagesPage(ctx context.Context, query MessageListQuery) (MessageListResult, error) {
+	if s.store == nil {
+		return MessageListResult{}, ErrStoreNotConfigured
+	}
+	if !validMessageStatus(query.Status) {
+		return MessageListResult{}, ErrInvalidStatus
 	}
 
-	messages, err := s.store.ListByStatus(ctx, status, limit)
+	result, err := s.store.ListByStatusPage(ctx, query)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrStore, err)
+		return MessageListResult{}, fmt.Errorf("%w: %v", ErrStore, err)
 	}
-	return messages, nil
+	return result, nil
 }
 
 func (s *Service) Requeue(ctx context.Context, messageID string) (Message, error) {

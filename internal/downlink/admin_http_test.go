@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -60,6 +61,62 @@ func TestMessageListHandlerOK(t *testing.T) {
 	}
 	if len(resp.Messages) != 1 || resp.Messages[0].MessageID != "failed-1" {
 		t.Fatalf("messages = %+v, want failed-1", resp.Messages)
+	}
+}
+
+func TestMessageListHandlerPaginatesWithCursor(t *testing.T) {
+	store := NewMemoryStore()
+	now := time.UnixMilli(1760000000000)
+	for _, message := range []Message{
+		{MessageID: "failed-1", ClientID: "client-1", DeviceID: "device-1", MsgID: 2001, Status: MessageStatusFailed, UpdatedAt: now.Add(3 * time.Second)},
+		{MessageID: "failed-2", ClientID: "client-1", DeviceID: "device-1", MsgID: 2001, Status: MessageStatusFailed, UpdatedAt: now.Add(2 * time.Second)},
+		{MessageID: "failed-3", ClientID: "client-1", DeviceID: "device-1", MsgID: 2001, Status: MessageStatusFailed, UpdatedAt: now.Add(time.Second)},
+	} {
+		if _, err := store.Save(context.Background(), message); err != nil {
+			t.Fatalf("Save(%s) error = %v", message.MessageID, err)
+		}
+	}
+
+	handler := NewMessageListHandler(HandlerConfig{
+		Service:       NewService(fakeSessions{}, fakeConnections{}, WithStore(store)),
+		InternalToken: "secret",
+		Logger:        zap.NewNop(),
+	})
+
+	firstReq := httptest.NewRequest(http.MethodGet, "/internal/messages?status=failed&limit=2", nil)
+	firstReq.Header.Set(InternalTokenHeader, "secret")
+	firstRec := httptest.NewRecorder()
+	handler.ServeHTTP(firstRec, firstReq)
+	if firstRec.Code != http.StatusOK {
+		t.Fatalf("first status = %d, want %d, body = %s", firstRec.Code, http.StatusOK, firstRec.Body.String())
+	}
+	var first ListMessagesResponse
+	if err := sonic.Unmarshal(firstRec.Body.Bytes(), &first); err != nil {
+		t.Fatalf("Unmarshal(first) error = %v", err)
+	}
+	if first.Total != 3 || !first.HasMore || first.NextCursor == "" || len(first.Messages) != 2 {
+		t.Fatalf("first response = %+v, want total=3 has_more with two messages", first)
+	}
+	if first.Messages[0].MessageID != "failed-1" || first.Messages[1].MessageID != "failed-2" {
+		t.Fatalf("first messages = %+v, want failed-1 then failed-2", first.Messages)
+	}
+
+	secondReq := httptest.NewRequest(http.MethodGet, "/internal/messages?status=failed&limit=2&cursor="+url.QueryEscape(first.NextCursor), nil)
+	secondReq.Header.Set(InternalTokenHeader, "secret")
+	secondRec := httptest.NewRecorder()
+	handler.ServeHTTP(secondRec, secondReq)
+	if secondRec.Code != http.StatusOK {
+		t.Fatalf("second status = %d, want %d, body = %s", secondRec.Code, http.StatusOK, secondRec.Body.String())
+	}
+	var second ListMessagesResponse
+	if err := sonic.Unmarshal(secondRec.Body.Bytes(), &second); err != nil {
+		t.Fatalf("Unmarshal(second) error = %v", err)
+	}
+	if second.Total != 3 || second.Cursor != first.NextCursor || second.HasMore || second.NextCursor != "" || len(second.Messages) != 1 {
+		t.Fatalf("second response = %+v, want final page", second)
+	}
+	if second.Messages[0].MessageID != "failed-3" {
+		t.Fatalf("second messages = %+v, want failed-3", second.Messages)
 	}
 }
 

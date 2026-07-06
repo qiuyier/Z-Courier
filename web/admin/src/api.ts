@@ -44,6 +44,12 @@ export type AuditListParams = {
   limit: number;
 };
 
+export type MessageListParams = {
+  status: MessageStatus;
+  limit: number;
+  cursor?: string;
+};
+
 export type DownlinkTestPushParams = {
   clientID: string;
   deviceID: string;
@@ -272,14 +278,16 @@ export async function fetchDiagnosisBundle(
 }
 
 export async function fetchMessages(
-  status: MessageStatus,
-  limit: number,
+  params: MessageListParams,
   signal?: AbortSignal,
 ): Promise<AdminMessages> {
   const query = new URLSearchParams({
-    status,
-    limit: String(limit),
+    status: params.status,
+    limit: String(params.limit),
   });
+  if (params.cursor?.trim()) {
+    query.set("cursor", params.cursor.trim());
+  }
   return fetchAdminJSON<AdminMessages>(`/internal/messages?${query.toString()}`, signal);
 }
 

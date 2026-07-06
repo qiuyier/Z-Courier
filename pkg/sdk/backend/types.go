@@ -124,20 +124,25 @@ type MessageStatusResponse struct {
 
 // ListMessagesRequest filters persisted messages. An empty Status asks the
 // gateway to use its default failed-message filter. A zero Limit asks the
-// gateway to use its default limit.
+// gateway to use its default limit. Cursor is an opaque value returned by a
+// previous list response.
 type ListMessagesRequest struct {
 	Status MessageStatus
 	Limit  int
+	Cursor string
 }
 
 // ListMessagesResponse contains persisted messages matching a status.
 type ListMessagesResponse struct {
-	Code     string                  `json:"code"`
-	Reason   string                  `json:"reason,omitempty"`
-	Status   MessageStatus           `json:"status,omitempty"`
-	Limit    int                     `json:"limit,omitempty"`
-	Total    int                     `json:"total"`
-	Messages []MessageStatusResponse `json:"messages,omitempty"`
+	Code       string                  `json:"code"`
+	Reason     string                  `json:"reason,omitempty"`
+	Status     MessageStatus           `json:"status,omitempty"`
+	Limit      int                     `json:"limit,omitempty"`
+	Cursor     string                  `json:"cursor,omitempty"`
+	NextCursor string                  `json:"next_cursor,omitempty"`
+	HasMore    bool                    `json:"has_more"`
+	Total      int                     `json:"total"`
+	Messages   []MessageStatusResponse `json:"messages,omitempty"`
 }
 
 // MessageActionRequest is used by requeue and discard operations.

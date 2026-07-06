@@ -73,6 +73,27 @@ type Message struct {
 	DeliveredAt time.Time
 }
 
+type MessageListCursor struct {
+	UpdatedAt time.Time
+	MessageID string
+}
+
+type MessageListQuery struct {
+	Status MessageStatus
+	Limit  int
+	Cursor MessageListCursor
+}
+
+type MessageListResult struct {
+	Status     MessageStatus
+	Limit      int
+	Cursor     MessageListCursor
+	NextCursor MessageListCursor
+	HasMore    bool
+	Total      int
+	Messages   []Message
+}
+
 func (m Message) Clone() Message {
 	m.Body = bytes.Clone(m.Body)
 	return m
@@ -82,6 +103,7 @@ type Store interface {
 	Save(context.Context, Message) (Message, error)
 	Get(context.Context, string) (Message, bool, error)
 	ListByStatus(context.Context, MessageStatus, int) ([]Message, error)
+	ListByStatusPage(context.Context, MessageListQuery) (MessageListResult, error)
 	ListDueRetry(context.Context, time.Time, time.Duration, int) ([]Message, error)
 	ListPendingByClientDevice(context.Context, string, string, int) ([]Message, error)
 	MarkSent(context.Context, string, string, time.Time) error

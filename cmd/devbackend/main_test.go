@@ -161,6 +161,7 @@ func TestListSendsInternalMessagesRequest(t *testing.T) {
 		InternalToken: "secret",
 		Status:        "failed",
 		Limit:         25,
+		Cursor:        "cursor-1",
 		Timeout:       time.Second,
 	})
 	if err != nil {
@@ -181,6 +182,9 @@ func TestListSendsInternalMessagesRequest(t *testing.T) {
 	}
 	if gotReq.URL.Query().Get("limit") != "25" {
 		t.Fatalf("limit query = %q, want 25", gotReq.URL.Query().Get("limit"))
+	}
+	if gotReq.URL.Query().Get("cursor") != "cursor-1" {
+		t.Fatalf("cursor query = %q, want cursor-1", gotReq.URL.Query().Get("cursor"))
 	}
 	if gotReq.Header.Get(downlink.InternalTokenHeader) != "secret" {
 		t.Fatalf("internal token header = %q, want secret", gotReq.Header.Get(downlink.InternalTokenHeader))

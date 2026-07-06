@@ -188,11 +188,17 @@ func TestMessageQueriesEncodeParameters(t *testing.T) {
 			if got := r.URL.Query().Get("limit"); got != "25" {
 				t.Errorf("limit = %q, want 25", got)
 			}
+			if got := r.URL.Query().Get("cursor"); got != "cursor-1" {
+				t.Errorf("cursor = %q, want cursor-1", got)
+			}
 			writeTestJSON(t, w, http.StatusOK, ListMessagesResponse{
-				Code:   "ok",
-				Status: MessageStatusFailed,
-				Limit:  25,
-				Total:  1,
+				Code:       "ok",
+				Status:     MessageStatusFailed,
+				Limit:      25,
+				Cursor:     "cursor-1",
+				NextCursor: "cursor-2",
+				HasMore:    true,
+				Total:      1,
 				Messages: []MessageStatusResponse{{
 					Code: "ok", MessageID: "message-2", Status: MessageStatusFailed,
 				}},
@@ -212,11 +218,11 @@ func TestMessageQueriesEncodeParameters(t *testing.T) {
 		t.Fatalf("status response = %+v", status)
 	}
 
-	list, err := client.ListMessages(context.Background(), ListMessagesRequest{Status: MessageStatusFailed, Limit: 25})
+	list, err := client.ListMessages(context.Background(), ListMessagesRequest{Status: MessageStatusFailed, Limit: 25, Cursor: " cursor-1 "})
 	if err != nil {
 		t.Fatalf("ListMessages() error = %v", err)
 	}
-	if list.Total != 1 || len(list.Messages) != 1 || list.Messages[0].MessageID != "message-2" {
+	if list.Total != 1 || !list.HasMore || list.NextCursor != "cursor-2" || len(list.Messages) != 1 || list.Messages[0].MessageID != "message-2" {
 		t.Fatalf("list response = %+v", list)
 	}
 }
