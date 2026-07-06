@@ -70,6 +70,14 @@ var (
 		[]string{"role", "permission"},
 	)
 
+	adminCSRFRejected = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "z_courier_admin_csrf_rejected_total",
+			Help: "Total number of admin session mutation requests rejected by CSRF checks.",
+		},
+		[]string{"reason"},
+	)
+
 	adminAction = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "z_courier_admin_action_total",
@@ -417,6 +425,10 @@ func RecordAuthJWKSRefresh(result string, duration time.Duration) {
 
 func RecordAdminPermissionRejected(role string, permission string) {
 	adminPermissionRejected.WithLabelValues(nonEmpty(role, "unknown"), nonEmpty(permission, "unknown")).Inc()
+}
+
+func RecordAdminCSRFRejected(reason string) {
+	adminCSRFRejected.WithLabelValues(nonEmpty(reason, "unknown")).Inc()
 }
 
 func RecordAdminAction(action string, result string) {

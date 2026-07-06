@@ -786,6 +786,13 @@ func TestInternalHTTPAdminSessionTokenMode(t *testing.T) {
 	if cookie == nil || cookie.Value == "" || !cookie.HttpOnly || cookie.SameSite != http.SameSiteLaxMode {
 		t.Fatalf("login cookie = %+v, want http-only lax cookie", cookie)
 	}
+	var loginResp adminSessionResponse
+	if err := sonic.Unmarshal(loginRec.Body.Bytes(), &loginResp); err != nil {
+		t.Fatalf("Unmarshal(login) error = %v", err)
+	}
+	if loginResp.Session == nil || loginResp.Session.CSRFToken == "" {
+		t.Fatalf("login response = %+v, want csrf token", loginResp)
+	}
 
 	meReq := httptest.NewRequest(http.MethodGet, adminSessionMePath, nil)
 	meReq.AddCookie(cookie)
@@ -800,6 +807,9 @@ func TestInternalHTTPAdminSessionTokenMode(t *testing.T) {
 	}
 	if sessionResp.Session == nil || sessionResp.Session.Role != adminSessionRoleAdmin || sessionResp.Session.Principal != "internal-token" {
 		t.Fatalf("me response = %+v, want admin internal-token session", sessionResp)
+	}
+	if sessionResp.Session.CSRFToken == "" || sessionResp.Session.CSRFToken != loginResp.Session.CSRFToken {
+		t.Fatalf("me csrf token = %q, want login csrf token %q", sessionResp.Session.CSRFToken, loginResp.Session.CSRFToken)
 	}
 
 	overviewReq := httptest.NewRequest(http.MethodGet, "/internal/admin/overview", nil)
@@ -819,7 +829,7 @@ func TestInternalHTTPAdminSessionTokenMode(t *testing.T) {
 	}
 
 	logoutReq := httptest.NewRequest(http.MethodPost, adminSessionLogoutPath, nil)
-	logoutReq.AddCookie(cookie)
+	addAdminSessionMutationHeaders(logoutReq, cookie, loginResp.Session.CSRFToken)
 	logoutRec := httptest.NewRecorder()
 	server.Handler.ServeHTTP(logoutRec, logoutReq)
 	if logoutRec.Code != http.StatusOK {
@@ -836,6 +846,132 @@ func TestInternalHTTPAdminSessionTokenMode(t *testing.T) {
 	server.Handler.ServeHTTP(afterLogoutRec, afterLogoutReq)
 	if afterLogoutRec.Code != http.StatusUnauthorized {
 		t.Fatalf("after logout status = %d, want %d", afterLogoutRec.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestInternalHTTPAdminSessionMutationRequiresCSRF(t *testing.T) {
+	service := downlink.NewService(testSessionFinder{}, testConnectionFinder{}, downlink.WithStore(downlink.NewMemoryStore()))
+	config := normalizeConfig(Config{
+		GatewayNode:      "gateway-a",
+		InternalHTTPAddr: "127.0.0.1:18080",
+		InternalToken:    "secret",
+		AdminConsole: AdminConsoleConfig{
+			Session: AdminConsoleSessionConfig{
+				Enabled:        true,
+				TTL:            time.Hour,
+				CookieName:     "zcourier_admin_session",
+				CookieSameSite: "lax",
+			},
+		},
+	})
+
+	server := mustInternalHTTPServer(t, config, service, &gatewayHealth{}, nil)
+	cookie, _ := loginAdminSessionCredentials(t, server, config, "secret")
+
+	req := httptest.NewRequest(http.MethodPost, "/internal/message/requeue", strings.NewReader(`{"message_id":"missing"}`))
+	req.AddCookie(cookie)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	server.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusForbidden, rec.Body.String())
+	}
+	var denied adminSessionCSRFResponse
+	if err := sonic.Unmarshal(rec.Body.Bytes(), &denied); err != nil {
+		t.Fatalf("Unmarshal(denied) error = %v", err)
+	}
+	if denied.Code != "csrf_failed" || denied.GatewayNode != "gateway-a" {
+		t.Fatalf("denied response = %+v, want csrf_failed gateway-a", denied)
+	}
+
+	auditReq := httptest.NewRequest(http.MethodGet, adminAuditPath+"?limit=1", nil)
+	auditReq.AddCookie(cookie)
+	auditRec := httptest.NewRecorder()
+	server.Handler.ServeHTTP(auditRec, auditReq)
+	if auditRec.Code != http.StatusOK {
+		t.Fatalf("audit status = %d, want %d, body = %s", auditRec.Code, http.StatusOK, auditRec.Body.String())
+	}
+	var auditResp adminAuditResponse
+	if err := sonic.Unmarshal(auditRec.Body.Bytes(), &auditResp); err != nil {
+		t.Fatalf("Unmarshal(audit) error = %v", err)
+	}
+	if auditResp.Total < 1 || len(auditResp.Events) != 1 {
+		t.Fatalf("audit response = %+v, want latest mutation rejection", auditResp)
+	}
+	event := auditResp.Events[0]
+	if event.Action != "admin_session_mutation_rejected" || event.Result != "csrf_failed" || event.HTTPStatus != http.StatusForbidden {
+		t.Fatalf("audit event = %+v, want csrf rejection", event)
+	}
+}
+
+func TestInternalHTTPAdminSessionMutationRejectsCrossOrigin(t *testing.T) {
+	service := downlink.NewService(testSessionFinder{}, testConnectionFinder{}, downlink.WithStore(downlink.NewMemoryStore()))
+	config := normalizeConfig(Config{
+		InternalHTTPAddr: "127.0.0.1:18080",
+		InternalToken:    "secret",
+		AdminConsole: AdminConsoleConfig{
+			Session: AdminConsoleSessionConfig{
+				Enabled:        true,
+				TTL:            time.Hour,
+				CookieName:     "zcourier_admin_session",
+				CookieSameSite: "lax",
+			},
+		},
+	})
+
+	server := mustInternalHTTPServer(t, config, service, &gatewayHealth{}, nil)
+	cookie, csrfToken := loginAdminSessionCredentials(t, server, config, "secret")
+
+	req := httptest.NewRequest(http.MethodPost, "/internal/message/requeue", strings.NewReader(`{"message_id":"missing"}`))
+	addAdminSessionMutationHeaders(req, cookie, csrfToken)
+	req.Header.Set("Origin", "http://evil.example")
+	rec := httptest.NewRecorder()
+	server.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusForbidden, rec.Body.String())
+	}
+	var denied adminSessionCSRFResponse
+	if err := sonic.Unmarshal(rec.Body.Bytes(), &denied); err != nil {
+		t.Fatalf("Unmarshal(denied) error = %v", err)
+	}
+	if denied.Code != "same_origin_failed" {
+		t.Fatalf("denied response = %+v, want same_origin_failed", denied)
+	}
+}
+
+func TestInternalHTTPAdminSessionMutationRequiresJSONContentType(t *testing.T) {
+	service := downlink.NewService(testSessionFinder{}, testConnectionFinder{}, downlink.WithStore(downlink.NewMemoryStore()))
+	config := normalizeConfig(Config{
+		InternalHTTPAddr: "127.0.0.1:18080",
+		InternalToken:    "secret",
+		AdminConsole: AdminConsoleConfig{
+			Session: AdminConsoleSessionConfig{
+				Enabled:        true,
+				TTL:            time.Hour,
+				CookieName:     "zcourier_admin_session",
+				CookieSameSite: "lax",
+			},
+		},
+	})
+
+	server := mustInternalHTTPServer(t, config, service, &gatewayHealth{}, nil)
+	cookie, csrfToken := loginAdminSessionCredentials(t, server, config, "secret")
+
+	req := httptest.NewRequest(http.MethodPost, "/internal/message/requeue", strings.NewReader(`{"message_id":"missing"}`))
+	req.AddCookie(cookie)
+	req.Header.Set(adminCSRFHeader, csrfToken)
+	req.Header.Set("Content-Type", "text/plain")
+	rec := httptest.NewRecorder()
+	server.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusUnsupportedMediaType, rec.Body.String())
+	}
+	var denied adminSessionCSRFResponse
+	if err := sonic.Unmarshal(rec.Body.Bytes(), &denied); err != nil {
+		t.Fatalf("Unmarshal(denied) error = %v", err)
+	}
+	if denied.Code != "unsupported_media_type" {
+		t.Fatalf("denied response = %+v, want unsupported_media_type", denied)
 	}
 }
 
@@ -910,7 +1046,7 @@ func TestInternalHTTPAdminSessionReadonlyDeniesMessageRepair(t *testing.T) {
 	}
 
 	requeueReq := httptest.NewRequest(http.MethodPost, "/internal/message/requeue", strings.NewReader(`{"message_id":"missing"}`))
-	requeueReq.AddCookie(cookie)
+	addAdminSessionMutationHeaders(requeueReq, cookie, loginResp.Session.CSRFToken)
 	requeueRec := httptest.NewRecorder()
 	server.Handler.ServeHTTP(requeueRec, requeueReq)
 	if requeueRec.Code != http.StatusForbidden {
@@ -959,10 +1095,10 @@ func TestInternalHTTPAdminAuditListsLoginAndPermissionDenied(t *testing.T) {
 		t.Fatalf("unauth audit status = %d, want %d, body = %s", unauthRec.Code, http.StatusUnauthorized, unauthRec.Body.String())
 	}
 
-	cookie := loginAdminSessionCookie(t, server, config, "secret")
+	cookie, csrfToken := loginAdminSessionCredentials(t, server, config, "secret")
 
 	requeueReq := httptest.NewRequest(http.MethodPost, "/internal/message/requeue", strings.NewReader(`{"message_id":"missing"}`))
-	requeueReq.AddCookie(cookie)
+	addAdminSessionMutationHeaders(requeueReq, cookie, csrfToken)
 	requeueRec := httptest.NewRecorder()
 	server.Handler.ServeHTTP(requeueRec, requeueReq)
 	if requeueRec.Code != http.StatusForbidden {
@@ -1023,10 +1159,10 @@ func TestInternalHTTPAdminAuditFiltersRetryScan(t *testing.T) {
 	})
 
 	server := mustInternalHTTPServer(t, config, service, &gatewayHealth{}, nil)
-	cookie := loginAdminSessionCookie(t, server, config, "secret")
+	cookie, csrfToken := loginAdminSessionCredentials(t, server, config, "secret")
 
 	scanReq := httptest.NewRequest(http.MethodPost, "/internal/messages/retry/scan", strings.NewReader(`{"limit":7}`))
-	scanReq.AddCookie(cookie)
+	addAdminSessionMutationHeaders(scanReq, cookie, csrfToken)
 	scanRec := httptest.NewRecorder()
 	server.Handler.ServeHTTP(scanRec, scanReq)
 	if scanRec.Code != http.StatusOK {
@@ -1741,9 +1877,9 @@ func TestInternalHTTPDebugSessionDisconnectOperatorStopsLocalConnection(t *testi
 	})
 
 	server := mustInternalHTTPServer(t, config, service, &gatewayHealth{}, nil)
-	cookie := loginAdminSessionCookie(t, server, config, "secret")
+	cookie, csrfToken := loginAdminSessionCredentials(t, server, config, "secret")
 	req := httptest.NewRequest(http.MethodPost, "/internal/debug/session/disconnect", strings.NewReader(`{"session_id":"session-1","client_id":"client-1","device_id":"device-1"}`))
-	req.AddCookie(cookie)
+	addAdminSessionMutationHeaders(req, cookie, csrfToken)
 	rec := httptest.NewRecorder()
 	server.Handler.ServeHTTP(rec, req)
 
@@ -1792,9 +1928,9 @@ func TestInternalHTTPDebugSessionDisconnectReadonlyDenied(t *testing.T) {
 	})
 
 	server := mustInternalHTTPServer(t, config, service, &gatewayHealth{}, nil)
-	cookie := loginAdminSessionCookie(t, server, config, "secret")
+	cookie, csrfToken := loginAdminSessionCredentials(t, server, config, "secret")
 	req := httptest.NewRequest(http.MethodPost, "/internal/debug/session/disconnect", strings.NewReader(`{"session_id":"session-1"}`))
-	req.AddCookie(cookie)
+	addAdminSessionMutationHeaders(req, cookie, csrfToken)
 	rec := httptest.NewRecorder()
 	server.Handler.ServeHTTP(rec, req)
 
@@ -1848,7 +1984,7 @@ func TestInternalHTTPDebugPushOperatorSendsDownlink(t *testing.T) {
 	})
 
 	server := mustInternalHTTPServer(t, config, service, &gatewayHealth{}, nil)
-	cookie := loginAdminSessionCookie(t, server, config, "secret")
+	cookie, csrfToken := loginAdminSessionCredentials(t, server, config, "secret")
 	req := httptest.NewRequest(http.MethodPost, "/internal/debug/push", strings.NewReader(`{
 		"client_id":"client-1",
 		"device_id":"device-1",
@@ -1858,7 +1994,7 @@ func TestInternalHTTPDebugPushOperatorSendsDownlink(t *testing.T) {
 		"ack_required":true,
 		"body":"aGVsbG8="
 	}`))
-	req.AddCookie(cookie)
+	addAdminSessionMutationHeaders(req, cookie, csrfToken)
 	rec := httptest.NewRecorder()
 	server.Handler.ServeHTTP(rec, req)
 
@@ -1897,9 +2033,9 @@ func TestInternalHTTPDebugPushReadonlyDenied(t *testing.T) {
 	})
 
 	server := mustInternalHTTPServer(t, config, service, &gatewayHealth{}, nil)
-	cookie := loginAdminSessionCookie(t, server, config, "secret")
+	cookie, csrfToken := loginAdminSessionCredentials(t, server, config, "secret")
 	req := httptest.NewRequest(http.MethodPost, "/internal/debug/push", strings.NewReader(`{"client_id":"client-1","device_id":"device-1","msg_id":2001}`))
-	req.AddCookie(cookie)
+	addAdminSessionMutationHeaders(req, cookie, csrfToken)
 	rec := httptest.NewRecorder()
 	server.Handler.ServeHTTP(rec, req)
 
@@ -1932,9 +2068,9 @@ func TestInternalHTTPRetryScanReadonlyDenied(t *testing.T) {
 	})
 
 	server := mustInternalHTTPServer(t, config, service, &gatewayHealth{}, nil)
-	cookie := loginAdminSessionCookie(t, server, config, "secret")
+	cookie, csrfToken := loginAdminSessionCredentials(t, server, config, "secret")
 	req := httptest.NewRequest(http.MethodPost, "/internal/messages/retry/scan", strings.NewReader(`{}`))
-	req.AddCookie(cookie)
+	addAdminSessionMutationHeaders(req, cookie, csrfToken)
 	rec := httptest.NewRecorder()
 	server.Handler.ServeHTTP(rec, req)
 
@@ -1979,7 +2115,15 @@ func (f *testStaticConnectionFinder) Get(connID uint64) (downlink.Connection, er
 func loginAdminSessionCookie(t *testing.T, server *http.Server, config Config, token string) *http.Cookie {
 	t.Helper()
 
+	cookie, _ := loginAdminSessionCredentials(t, server, config, token)
+	return cookie
+}
+
+func loginAdminSessionCredentials(t *testing.T, server *http.Server, config Config, token string) (*http.Cookie, string) {
+	t.Helper()
+
 	loginReq := httptest.NewRequest(http.MethodPost, adminSessionLoginPath, strings.NewReader(`{"token":"`+token+`"}`))
+	loginReq.Header.Set("Content-Type", "application/json")
 	loginRec := httptest.NewRecorder()
 	server.Handler.ServeHTTP(loginRec, loginReq)
 	if loginRec.Code != http.StatusOK {
@@ -1989,7 +2133,20 @@ func loginAdminSessionCookie(t *testing.T, server *http.Server, config Config, t
 	if cookie == nil || cookie.Value == "" {
 		t.Fatalf("login cookie = %+v, want session cookie", cookie)
 	}
-	return cookie
+	var resp adminSessionResponse
+	if err := sonic.Unmarshal(loginRec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("Unmarshal(login) error = %v", err)
+	}
+	if resp.Session == nil || resp.Session.CSRFToken == "" {
+		t.Fatalf("login response = %+v, want csrf token", resp)
+	}
+	return cookie, resp.Session.CSRFToken
+}
+
+func addAdminSessionMutationHeaders(req *http.Request, cookie *http.Cookie, csrfToken string) {
+	req.AddCookie(cookie)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(adminCSRFHeader, csrfToken)
 }
 
 func mustInternalHTTPServer(t *testing.T, config Config, service *downlink.Service, health *gatewayHealth, registry cluster.OnlineRegistry) *http.Server {

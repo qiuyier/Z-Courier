@@ -45,8 +45,11 @@ func newInternalHTTPServer(config Config, logger *zap.Logger, service *downlink.
 	withConsoleSession := func(handler http.Handler) http.Handler {
 		return withAdminSessionAuth(handler, adminSessions, adminSessionConfig.sessionConfig, handlerConfig.InternalToken)
 	}
+	withConsoleMutationGuard := func(handler http.Handler) http.Handler {
+		return withAdminSessionMutationGuard(handler, adminSessionConfig.sessionConfig, logger, adminAudit, config.GatewayNode)
+	}
 	withConsolePermission := func(handler http.Handler, permission string) http.Handler {
-		return withConsoleSession(withAdminPermission(handler, permission, logger, adminAudit, config.GatewayNode))
+		return withConsoleSession(withConsoleMutationGuard(withAdminPermission(handler, permission, logger, adminAudit, config.GatewayNode)))
 	}
 	pushLimiter := capacity.NewLimiter(config.InternalPushMaxInFlight)
 	mux.Handle("/healthz", newHealthHandler())
@@ -113,7 +116,7 @@ func newInternalHTTPServer(config Config, logger *zap.Logger, service *downlink.
 	if adminSessions != nil {
 		mux.Handle(adminSessionLoginPath, newAdminSessionLoginHandler(adminSessionConfig))
 		mux.Handle(adminSessionMePath, newAdminSessionMeHandler(adminSessionConfig))
-		mux.Handle(adminSessionLogoutPath, newAdminSessionLogoutHandler(adminSessionConfig))
+		mux.Handle(adminSessionLogoutPath, withConsoleSession(withConsoleMutationGuard(newAdminSessionLogoutHandler(adminSessionConfig))))
 	}
 	mux.Handle("/internal/admin/overview", withConsolePermission(newAdminOverviewHandler(handlerConfig, health, registry), adminPermissionRead))
 	mux.Handle("/internal/admin/routes", withConsolePermission(newAdminRoutesHandler(handlerConfig), adminPermissionRead))

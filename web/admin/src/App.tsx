@@ -43,6 +43,7 @@ import {
   requeueMessage,
   runRetryScan,
   sendDownlinkTestPush,
+  setAdminCSRFToken,
 } from "./api";
 import type {
   AdminAudit,
@@ -280,6 +281,7 @@ export default function App() {
     authState.status === "authenticated" && adminSessionAllows(authState.session, sessionDisconnectPermission);
 
   const clearConsoleState = useCallback(() => {
+    setAdminCSRFToken();
     setState({ status: "idle" });
     setRouteState({ status: "idle" });
     setSessionsState({ status: "idle" });
@@ -961,9 +963,11 @@ export default function App() {
           return;
         }
         if (response.session) {
+          setAdminCSRFToken(response.session.csrf_token);
           setAuthState({ status: "authenticated", session: response.session });
           return;
         }
+        setAdminCSRFToken();
         setAuthState({ status: "anonymous" });
       })
       .catch((error) => {
@@ -971,9 +975,11 @@ export default function App() {
           return;
         }
         if (isUnauthorized(error)) {
+          setAdminCSRFToken();
           setAuthState({ status: "anonymous" });
           return;
         }
+        setAdminCSRFToken();
         setAuthState({ status: "anonymous", error: requestErrorMessage(error) });
       });
 
@@ -1097,6 +1103,7 @@ export default function App() {
         if (!response.session) {
           throw new Error("login response did not include a session");
         }
+        setAdminCSRFToken(response.session.csrf_token);
         setAuthState({ status: "authenticated", session: response.session });
         setLoginToken("");
       } catch (error) {

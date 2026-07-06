@@ -283,6 +283,14 @@ admin_console:
 - 单节点开发可以使用 `session.store.type=memory`；如果 console 请求可能在
   gateway-a/gateway-b 之间切换，建议使用 `session.store.type=redis`。logout 会删除
   Redis 中的共享 session，Redis key TTL 和 session 过期时间保持一致。
+- 浏览器 admin session 会额外使用一个每个 session 独立的 CSRF token。login 和
+  `me` 响应会返回 `session.csrf_token`；内置 console 会把它暂存在内存里，并在
+  基于浏览器 session 的写操作请求中自动带上 `X-ZCourier-CSRF-Token`。这些写操作
+  还必须使用 `Content-Type: application/json`；如果请求带了 `Origin` 或
+  `Referer`，来源必须和当前请求同源。不携带浏览器 admin session cookie 的
+  internal token/HMAC 机器调用不受这个浏览器保护逻辑影响。拒绝事件会写入
+  `admin_session_mutation_rejected` 审计，CSRF 拒绝会计入
+  `z_courier_admin_csrf_rejected_total`。
 - HMAC 模式下，浏览器直接持有 HMAC secret 并不理想，也无法自己完成安全签名链路。
   生产更适合由反向代理完成 operator 鉴权和内部签名，再转发到 gateway internal
   HTTP。

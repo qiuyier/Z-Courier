@@ -81,6 +81,12 @@ http://127.0.0.1:18080/console/
 gateway 进程内存态，重启后需要重新登录；`type=redis` 时，浏览器 session 会写入
 Redis，适合多 gateway 节点和负载均衡场景。
 
+浏览器 admin session 的写操作会额外校验 CSRF。login 和 `me` 响应会返回
+`session.csrf_token`，内置 console 会在本机 session 断开、下行 test push、
+message requeue/discard、retry scan、logout 等 JSON `POST` 请求里自动带上
+`X-ZCourier-CSRF-Token`。不携带浏览器 session cookie 的 internal token 或 HMAC
+调用仍然走原来的内部 API 约定。
+
 ## Admin API
 
 ### `GET /internal/admin/overview`

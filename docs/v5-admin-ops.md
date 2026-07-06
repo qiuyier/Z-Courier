@@ -293,6 +293,13 @@ cluster registry. It is bounded by `limit` and includes the owning
 also owns the local TCP session. This endpoint is a cluster-wide route view, not
 a remote session-disconnect API.
 
+Browser admin sessions add a CSRF guard to mutation endpoints. The login and
+`me` responses return `session.csrf_token`, and the embedded console sends it
+as `X-ZCourier-CSRF-Token` on JSON `POST` operations such as local session
+disconnect, downlink test push, message requeue/discard, retry scan, and
+logout. Direct internal token or HMAC callers that do not send the browser
+session cookie continue to use the normal internal API contract.
+
 `session/disconnect` is a guarded mutation for local sessions only. Browser
 admin sessions need the `session:disconnect` permission, which is granted to
 `operator` and `admin` roles. The request body requires `session_id` and may

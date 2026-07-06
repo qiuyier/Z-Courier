@@ -1,8 +1,13 @@
 package server
 
 import (
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/base64"
 	"io"
+	"mime"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -10,12 +15,15 @@ import (
 	"github.com/qiuyier/Z-Courier/internal/adminaudit"
 	"github.com/qiuyier/Z-Courier/internal/downlink"
 	"github.com/qiuyier/Z-Courier/internal/httpauth"
+	"github.com/qiuyier/Z-Courier/internal/metrics"
+	"go.uber.org/zap"
 )
 
 const (
 	adminSessionLoginPath  = "/internal/admin/session/login"
 	adminSessionMePath     = "/internal/admin/session/me"
 	adminSessionLogoutPath = "/internal/admin/session/logout"
+	adminCSRFHeader        = "X-ZCourier-CSRF-Token"
 )
 
 type adminSessionHTTPConfig struct {
@@ -44,10 +52,17 @@ type adminSessionInfo struct {
 	Principal   string    `json:"principal"`
 	Role        string    `json:"role"`
 	Permissions []string  `json:"permissions,omitempty"`
+	CSRFToken   string    `json:"csrf_token,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 	ExpiresAt   time.Time `json:"expires_at"`
 	LastSeenAt  time.Time `json:"last_seen_at"`
 	ExpiresInMS int64     `json:"expires_in_ms"`
+}
+
+type adminSessionCSRFResponse struct {
+	Code        string `json:"code"`
+	Reason      string `json:"reason,omitempty"`
+	GatewayNode string `json:"gateway_node"`
 }
 
 type adminSessionLoginHandler struct {
@@ -123,7 +138,7 @@ func (h *adminSessionLoginHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 	writeAdminSessionJSON(w, http.StatusOK, adminSessionResponse{
 		Code:        "ok",
 		GatewayNode: h.config.gatewayNode,
-		Session:     adminSessionInfoFromSession(session, h.config.sessions.now().UTC()),
+		Session:     adminSessionInfoFromSession(session, h.config.sessions.now().UTC(), adminSessionCSRFToken(token)),
 	})
 }
 
@@ -181,6 +196,7 @@ func (h *adminSessionMeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		writeAdminSessionJSON(w, http.StatusMethodNotAllowed, adminSessionResponse{Code: "method_not_allowed", GatewayNode: h.config.gatewayNode})
 		return
 	}
+	token, hasToken := adminSessionCookieToken(r, h.config.sessionConfig)
 	session, ok, err := adminSessionFromCookie(r, h.config.sessionConfig, h.config.sessions)
 	if err != nil {
 		writeAdminSessionJSON(w, http.StatusServiceUnavailable, adminSessionResponse{Code: "session_store_error", Reason: err.Error(), GatewayNode: h.config.gatewayNode})
@@ -190,10 +206,14 @@ func (h *adminSessionMeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		writeAdminSessionJSON(w, http.StatusUnauthorized, adminSessionResponse{Code: "unauthorized", GatewayNode: h.config.gatewayNode})
 		return
 	}
+	csrfToken := ""
+	if hasToken {
+		csrfToken = adminSessionCSRFToken(token)
+	}
 	writeAdminSessionJSON(w, http.StatusOK, adminSessionResponse{
 		Code:        "ok",
 		GatewayNode: h.config.gatewayNode,
-		Session:     adminSessionInfoFromSession(session, h.config.sessions.now().UTC()),
+		Session:     adminSessionInfoFromSession(session, h.config.sessions.now().UTC(), csrfToken),
 	})
 }
 
@@ -315,6 +335,156 @@ func withAdminSessionAuth(next http.Handler, sessions *adminSessionManager, conf
 	})
 }
 
+func withAdminSessionMutationGuard(next http.Handler, config AdminConsoleSessionConfig, logger *zap.Logger, audit adminaudit.Recorder, gatewayNode string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		identity, ok := httpauth.IdentityFromContext(r.Context())
+		if !ok || identity.Mode != httpauth.ModeAdminSession || !adminSessionMutationMethod(r.Method) {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		if !adminSessionJSONContentType(r) {
+			writeAdminSessionMutationRejected(w, r, identity, logger, audit, gatewayNode, http.StatusUnsupportedMediaType, "unsupported_media_type", "admin session mutation requests must use application/json", false)
+			return
+		}
+
+		token, ok := adminSessionCookieToken(r, config)
+		if !ok || !adminSessionCSRFEqual(adminSessionCSRFToken(token), r.Header.Get(adminCSRFHeader)) {
+			writeAdminSessionMutationRejected(w, r, identity, logger, audit, gatewayNode, http.StatusForbidden, "csrf_failed", "admin session mutation requires a valid CSRF token", true)
+			return
+		}
+
+		if ok, source := adminSessionSameOrigin(r); !ok {
+			reason := "admin session mutation origin is not allowed"
+			if source != "" {
+				reason = reason + ": " + source
+			}
+			writeAdminSessionMutationRejected(w, r, identity, logger, audit, gatewayNode, http.StatusForbidden, "same_origin_failed", reason, true)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+func adminSessionMutationMethod(method string) bool {
+	switch method {
+	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+		return true
+	default:
+		return false
+	}
+}
+
+func adminSessionJSONContentType(r *http.Request) bool {
+	contentType := strings.TrimSpace(r.Header.Get("Content-Type"))
+	if contentType == "" {
+		return false
+	}
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	return err == nil && strings.EqualFold(mediaType, "application/json")
+}
+
+func adminSessionCSRFToken(token string) string {
+	sum := sha256.Sum256([]byte("zcourier-admin-csrf-v1:" + strings.TrimSpace(token)))
+	return base64.RawURLEncoding.EncodeToString(sum[:])
+}
+
+func adminSessionCSRFEqual(expected string, actual string) bool {
+	expected = strings.TrimSpace(expected)
+	actual = strings.TrimSpace(actual)
+	if expected == "" || actual == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(expected), []byte(actual)) == 1
+}
+
+func adminSessionSameOrigin(r *http.Request) (bool, string) {
+	source := strings.TrimSpace(r.Header.Get("Origin"))
+	if source == "" {
+		source = strings.TrimSpace(r.Header.Get("Referer"))
+	}
+	if source == "" {
+		return true, ""
+	}
+
+	origin, err := url.Parse(source)
+	if err != nil || origin.Host == "" {
+		return false, source
+	}
+	if !strings.EqualFold(origin.Host, r.Host) {
+		return false, source
+	}
+	if expectedScheme := adminSessionRequestScheme(r); expectedScheme != "" && origin.Scheme != "" && !strings.EqualFold(origin.Scheme, expectedScheme) {
+		return false, source
+	}
+	return true, ""
+}
+
+func adminSessionRequestScheme(r *http.Request) string {
+	forwarded := strings.TrimSpace(r.Header.Get("X-Forwarded-Proto"))
+	if forwarded != "" {
+		if beforeComma, _, ok := strings.Cut(forwarded, ","); ok {
+			forwarded = beforeComma
+		}
+		return strings.ToLower(strings.TrimSpace(forwarded))
+	}
+	if r.TLS != nil {
+		return "https"
+	}
+	return "http"
+}
+
+func writeAdminSessionMutationRejected(
+	w http.ResponseWriter,
+	r *http.Request,
+	identity httpauth.Identity,
+	logger *zap.Logger,
+	audit adminaudit.Recorder,
+	gatewayNode string,
+	status int,
+	code string,
+	reason string,
+	countCSRF bool,
+) {
+	if countCSRF {
+		metrics.RecordAdminCSRFRejected(code)
+	}
+	adminaudit.Record(audit, adminaudit.Entry{
+		Action:         "admin_session_mutation_rejected",
+		Result:         code,
+		HTTPStatus:     status,
+		GatewayNode:    gatewayNode,
+		AuthMode:       identity.Mode,
+		Principal:      identity.Principal,
+		Role:           normalizeAdminRole(identity.Role),
+		AdminSessionID: identity.SessionID,
+		AuthKeyID:      identity.KeyID,
+		Method:         r.Method,
+		Path:           r.URL.Path,
+		RemoteAddr:     r.RemoteAddr,
+		Reason:         reason,
+	})
+	if logger != nil {
+		logger.Warn(
+			"admin session mutation rejected",
+			zap.String("audit_event", "admin_session_mutation_rejected"),
+			zap.String("code", code),
+			zap.String("reason", reason),
+			zap.String("principal", identity.Principal),
+			zap.String("session_id", identity.SessionID),
+			zap.String("method", r.Method),
+			zap.String("path", r.URL.Path),
+			zap.String("remote_addr", r.RemoteAddr),
+		)
+	}
+	writeAdminSessionCSRFJSON(w, status, adminSessionCSRFResponse{
+		Code:        code,
+		Reason:      reason,
+		GatewayNode: gatewayNode,
+	})
+}
+
 type adminSessionHMACBypassHandler struct {
 	direct   http.Handler
 	fallback http.Handler
@@ -375,11 +545,23 @@ func adminSessionFromCookie(r *http.Request, config AdminConsoleSessionConfig, s
 	if sessions == nil {
 		return adminSession{}, false, nil
 	}
-	cookie, err := r.Cookie(config.CookieName)
-	if err != nil {
+	token, ok := adminSessionCookieToken(r, config)
+	if !ok {
 		return adminSession{}, false, nil
 	}
-	return sessions.Lookup(cookie.Value)
+	return sessions.Lookup(token)
+}
+
+func adminSessionCookieToken(r *http.Request, config AdminConsoleSessionConfig) (string, bool) {
+	cookie, err := r.Cookie(config.CookieName)
+	if err != nil {
+		return "", false
+	}
+	token := strings.TrimSpace(cookie.Value)
+	if token == "" {
+		return "", false
+	}
+	return token, true
 }
 
 func requestWithAdminSession(r *http.Request, session adminSession, internalToken string) *http.Request {
@@ -438,7 +620,7 @@ func adminSessionSameSite(value string) http.SameSite {
 	}
 }
 
-func adminSessionInfoFromSession(session adminSession, now time.Time) *adminSessionInfo {
+func adminSessionInfoFromSession(session adminSession, now time.Time, csrfToken string) *adminSessionInfo {
 	expiresIn := session.ExpiresAt.Sub(now)
 	if expiresIn < 0 {
 		expiresIn = 0
@@ -448,6 +630,7 @@ func adminSessionInfoFromSession(session adminSession, now time.Time) *adminSess
 		Principal:   session.Principal,
 		Role:        normalizeAdminRole(session.Role),
 		Permissions: adminPermissionsForRole(session.Role),
+		CSRFToken:   csrfToken,
 		CreatedAt:   session.CreatedAt.UTC(),
 		ExpiresAt:   session.ExpiresAt.UTC(),
 		LastSeenAt:  session.LastSeenAt.UTC(),
@@ -456,6 +639,17 @@ func adminSessionInfoFromSession(session adminSession, now time.Time) *adminSess
 }
 
 func writeAdminSessionJSON(w http.ResponseWriter, status int, resp adminSessionResponse) {
+	data, err := sonic.Marshal(resp)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_, _ = w.Write(data)
+}
+
+func writeAdminSessionCSRFJSON(w http.ResponseWriter, status int, resp adminSessionCSRFResponse) {
 	data, err := sonic.Marshal(resp)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

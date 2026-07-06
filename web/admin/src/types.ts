@@ -62,6 +62,7 @@ export type AdminConsoleSession = {
   principal: string;
   role: string;
   permissions?: string[];
+  csrf_token?: string;
   created_at: string;
   expires_at: string;
   last_seen_at: string;

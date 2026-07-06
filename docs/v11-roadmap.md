@@ -206,6 +206,16 @@ Acceptance criteria:
 - Existing token/HMAC internal API clients remain compatible where they do not
   use browser sessions.
 
+Current implementation:
+
+- Login and `me` responses return a derived `session.csrf_token`.
+- The Web console stores that token in memory and sends
+  `X-ZCourier-CSRF-Token` on JSON mutation requests.
+- Session-authenticated mutations reject missing or invalid CSRF tokens,
+  unsupported content types, and mismatched `Origin` or `Referer` headers.
+- Rejections are logged and audited as `admin_session_mutation_rejected`; CSRF
+  failures increment `z_courier_admin_csrf_rejected_total`.
+
 ### V11.6 Admin Data Pagination And Retention
 
 Purpose: keep admin APIs predictable as production data grows.

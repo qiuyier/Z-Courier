@@ -63,6 +63,12 @@ export class APIError extends Error {
   }
 }
 
+let adminCSRFToken = "";
+
+export function setAdminCSRFToken(token?: string) {
+  adminCSRFToken = token?.trim() ?? "";
+}
+
 async function fetchAdminJSON<T>(path: string, signal?: AbortSignal): Promise<T> {
   const response = await fetch(path, {
     credentials: "same-origin",
@@ -89,6 +95,9 @@ async function fetchAdminJSON<T>(path: string, signal?: AbortSignal): Promise<T>
 async function postAdminJSON<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
   const headers = new Headers();
   headers.set("Content-Type", "application/json");
+  if (adminCSRFToken !== "") {
+    headers.set("X-ZCourier-CSRF-Token", adminCSRFToken);
+  }
 
   const response = await fetch(path, {
     credentials: "same-origin",

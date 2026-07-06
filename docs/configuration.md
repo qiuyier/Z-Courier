@@ -392,6 +392,16 @@ Use `session.store.type=redis` when console traffic can move across gateway
 nodes; logout deletes the shared Redis session, and Redis key TTL follows the
 session expiry.
 
+Browser admin sessions also use a per-session CSRF token. Login and `me`
+responses include `session.csrf_token`; the embedded console keeps it in memory
+and sends it as `X-ZCourier-CSRF-Token` on session-authenticated mutation
+requests. Those mutation requests must use `Content-Type: application/json`,
+and when `Origin` or `Referer` is present it must match the request origin.
+Programmatic internal token or HMAC clients that do not send a browser admin
+session cookie are not affected by this browser-only guard. Rejections are
+audited as `admin_session_mutation_rejected`, and CSRF rejections increment
+`z_courier_admin_csrf_rejected_total`.
+
 Admin audit events are produced by console and internal admin APIs such as
 login, permission denial, session disconnect, downlink test push, message
 requeue/discard, retry scans, and diagnostics actions. Use `audit.type=postgres`
