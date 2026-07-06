@@ -1286,8 +1286,8 @@ export default function App() {
 
           {activePage === "overview" && state.status === "error" && <ErrorBanner message={state.error} />}
           {activePage === "routes" && routeState.status === "error" && <ErrorBanner message={routeState.error} />}
-          {activePage === "sessions" && sessionsState.status === "error" && <ErrorBanner message={sessionsState.error} />}
-          {activePage === "sessions" && clusterRoutesState.status === "error" && <ErrorBanner message={clusterRoutesState.error} />}
+          {activePage === "sessions" && sessionScope === "local" && sessionsState.status === "error" && <ErrorBanner message={sessionsState.error} />}
+          {activePage === "sessions" && sessionScope === "cluster" && clusterRoutesState.status === "error" && <ErrorBanner message={clusterRoutesState.error} />}
           {activePage === "sessions" && clientRouteState.status === "error" && <ErrorBanner message={clientRouteState.error} />}
           {activePage === "messages" && messagesState.status === "error" && <ErrorBanner message={messagesState.error} />}
           {activePage === "audit" && auditState.status === "error" && <ErrorBanner message={auditState.error} />}
@@ -1300,9 +1300,7 @@ export default function App() {
             <OverviewSkeleton />
           ) : activePage === "routes" && authenticated && (routeState.status !== "error" || routeState.data) ? (
             <RoutesPage state={routeState} />
-          ) : activePage === "sessions" && authenticated && (
-            sessionScope === "cluster" ? (clusterRoutesState.status !== "error" || clusterRoutesState.data) : (sessionsState.status !== "error" || sessionsState.data)
-          ) ? (
+          ) : activePage === "sessions" && authenticated ? (
             <SessionsPage
               canDisconnectSessions={canDisconnectSessions}
               clientID={sessionClientID}
@@ -3115,6 +3113,7 @@ function DownlinkTestPushResult({ state }: { state: RemoteState<DownlinkTestPush
   const data = state.data;
   const code = data?.code ?? (state.status === "error" ? "failed" : state.status === "loading" ? "sending" : "not sent");
   const deliveryState = data?.delivery_state ?? "--";
+  const deliveryPath = data?.delivery_path ?? "--";
   const resultTone = deliveryState === "sent" || deliveryState === "queued" ? "ok" : state.status === "error" ? "warn" : "warn";
 
   return (
@@ -3150,12 +3149,18 @@ function DownlinkTestPushResult({ state }: { state: RemoteState<DownlinkTestPush
 
       {data && (
         <div className="mt-6 grid gap-3 md:grid-cols-2">
+          <DarkLineItem label="Path" value={deliveryPath} />
+          <DarkLineItem label="Target Node" value={data.target_gateway_node || "--"} />
           <DarkLineItem label="Client" value={data.client_id || "--"} />
           <DarkLineItem label="Device" value={data.device_id || "--"} />
           <DarkLineItem label="SessionID" value={data.session_id || "--"} />
           <DarkLineItem label="ConnID" value={data.conn_id?.toLocaleString() ?? "--"} />
+          <DarkLineItem label="Origin Node" value={data.origin_gateway_node || "--"} />
+          <DarkLineItem label="Target Addr" value={data.target_internal_addr || "--"} />
           <DarkLineItem label="MessageID" value={data.message_id || "--"} />
           <DarkLineItem label="TraceID" value={data.trace_id || "--"} />
+          {data.failure_stage && <DarkLineItem label="Failure Stage" value={data.failure_stage} />}
+          {data.failure_code && <DarkLineItem label="Failure Code" value={data.failure_code} />}
           {data.reason && <DarkLineItem label="Reason" value={data.reason} />}
         </div>
       )}

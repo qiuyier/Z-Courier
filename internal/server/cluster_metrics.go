@@ -12,12 +12,20 @@ type metricsRegistry struct {
 	inner cluster.OnlineRegistry
 }
 
+type metricsRouteListerRegistry struct {
+	*metricsRegistry
+}
+
 func newMetricsRegistry(inner cluster.OnlineRegistry) cluster.OnlineRegistry {
 	if inner == nil {
 		return nil
 	}
 
-	return &metricsRegistry{inner: inner}
+	base := &metricsRegistry{inner: inner}
+	if _, ok := inner.(cluster.RouteLister); ok {
+		return &metricsRouteListerRegistry{metricsRegistry: base}
+	}
+	return base
 }
 
 func (r *metricsRegistry) Bind(ctx context.Context, entry cluster.RouteEntry) error {
@@ -49,6 +57,10 @@ func (r *metricsRegistry) Touch(ctx context.Context, entry cluster.RouteEntry) e
 	err := r.inner.Touch(ctx, entry)
 	metrics.RecordClusterRegistryTouch(clusterTouchResult(err))
 	return err
+}
+
+func (r *metricsRouteListerRegistry) List(ctx context.Context, filter cluster.RouteListFilter) (cluster.RouteListResult, error) {
+	return r.inner.(cluster.RouteLister).List(ctx, filter)
 }
 
 func (r *metricsRegistry) Ping(ctx context.Context) error {

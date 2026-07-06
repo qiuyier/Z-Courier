@@ -75,7 +75,13 @@ func (h *debugPushAuditHandler) recordAndAudit(r *http.Request, statusCode int, 
 		TraceID:         resp.TraceID,
 		Reason:          resp.Reason,
 		Details: map[string]string{
-			"delivery_state": resp.DeliveryState,
+			"delivery_state":       resp.DeliveryState,
+			"delivery_path":        resp.DeliveryPath,
+			"origin_gateway_node":  resp.OriginGatewayNode,
+			"target_gateway_node":  resp.TargetGatewayNode,
+			"target_internal_addr": resp.TargetInternalAddr,
+			"failure_stage":        resp.FailureStage,
+			"failure_code":         resp.FailureCode,
 		},
 	})
 	if h.logger == nil {
@@ -94,6 +100,12 @@ func (h *debugPushAuditHandler) recordAndAudit(r *http.Request, statusCode int, 
 		zap.String("remote_addr", r.RemoteAddr),
 		zap.String("gateway_node", h.gatewayNode),
 		zap.String("delivery_state", resp.DeliveryState),
+		zap.String("delivery_path", resp.DeliveryPath),
+		zap.String("origin_gateway_node", resp.OriginGatewayNode),
+		zap.String("target_gateway_node", resp.TargetGatewayNode),
+		zap.String("target_internal_addr", resp.TargetInternalAddr),
+		zap.String("failure_stage", resp.FailureStage),
+		zap.String("failure_code", resp.FailureCode),
 		zap.String("target_client_id", resp.ClientID),
 		zap.String("target_device_id", resp.DeviceID),
 		zap.String("target_session_id", resp.SessionID),
@@ -119,6 +131,9 @@ func (h *debugPushAuditHandler) recordAndAudit(r *http.Request, statusCode int, 
 }
 
 func debugPushAuditResult(statusCode int, resp downlink.PushResponse) string {
+	if resp.FailureCode != "" {
+		return resp.FailureCode
+	}
 	if resp.DeliveryState != "" {
 		return resp.DeliveryState
 	}

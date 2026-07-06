@@ -278,6 +278,30 @@ go run ./cmd/admin route \
   实际连在 gateway-b 的客户端。
 - `route` 会看本机 session，也会看 Redis cluster route。
 
+## 下行 Test Push
+
+Console 的 Messages 页面提供 Test Downlink 功能，请求会走：
+
+```text
+POST /internal/debug/push
+```
+
+这个接口复用普通下行投递路径，并要求当前 admin session 拥有
+`downlink:test_push` 权限。集群场景下，test push 可以通过 Redis route 找到
+目标 gateway，再走 peer push。响应里会带上跨节点操作元数据：
+
+| 字段 | 含义 |
+| --- | --- |
+| `delivery_path` | `local` 表示本机 TCP 连接直写，`cluster_peer` 表示转给其他 gateway |
+| `origin_gateway_node` | 接收管理员请求的 gateway |
+| `target_gateway_node` | 目标客户端所在 gateway |
+| `target_internal_addr` | peer push 使用的内部 HTTP 地址 |
+| `failure_stage` | 失败阶段，例如 `session_lookup`、`route_lookup`、`peer_dispatch` |
+| `failure_code` | 具体失败原因，例如 `route_not_found`、`peer_auth_failed`、`peer_timeout`、`peer_target_not_found` |
+
+当前开放的跨节点控制台操作只有 test push。本机 session disconnect 仍然只作用于
+当前 gateway 的本机连接，不会静默跨节点踢人。
+
 ## 安全和脱敏
 
 admin API 和诊断 bundle 不应该泄漏：

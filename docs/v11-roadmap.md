@@ -169,6 +169,18 @@ Acceptance criteria:
 - All remote operation attempts are audited.
 - The console distinguishes local operations from cross-node operations.
 
+Implemented surface:
+
+- Downlink test push responses include `delivery_path`, origin/target gateway
+  metadata, and structured failure fields.
+- Peer dispatch failures are classified as `peer_auth_failed`, `peer_timeout`,
+  `peer_target_not_found`, `peer_not_configured`, and related codes.
+- Admin test-push audit logs include route metadata and use the structured
+  failure code as the audit result when one is available.
+- The console Push Result panel displays local versus cluster-peer delivery and
+  the target gateway details.
+- Remote session disconnect is intentionally not enabled in this phase.
+
 ### V11.5 Console Security Hardening
 
 Purpose: reduce browser-specific risks after introducing cookie-backed admin

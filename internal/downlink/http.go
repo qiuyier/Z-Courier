@@ -179,7 +179,8 @@ func (h *handler) pushOne(r *http.Request, req PushRequest) (PushResponse, int) 
 	resp, err := h.config.Service.Push(r.Context(), req)
 	if err != nil {
 		status := statusFromError(err)
-		metrics.RecordDownlinkPush(req.MsgID, codeFromStatus(status))
+		code := pushFailureCode(err, status)
+		metrics.RecordDownlinkPush(req.MsgID, code)
 		h.config.Logger.Warn(
 			"downlink push failed",
 			zap.String("client_id", req.ClientID),
@@ -189,14 +190,16 @@ func (h *handler) pushOne(r *http.Request, req PushRequest) (PushResponse, int) 
 			zap.String("trace_id", req.TraceID),
 			zap.Error(err),
 		)
-		return PushResponse{
-			Code:      codeFromStatus(status),
+		failureResp := PushResponse{
+			Code:      code,
 			Reason:    err.Error(),
 			ClientID:  req.ClientID,
 			DeviceID:  req.DeviceID,
 			MessageID: req.MessageID,
 			TraceID:   req.TraceID,
-		}, status
+		}
+		annotatePushResponseFailure(&failureResp, err)
+		return failureResp, status
 	}
 
 	status := http.StatusOK
@@ -238,6 +241,14 @@ func statusFromError(err error) int {
 	default:
 		return http.StatusBadGateway
 	}
+}
+
+func pushFailureCode(err error, status int) string {
+	failure := deliveryFailureFromError(err)
+	if failure.Code != "" && failure.Code != "error" {
+		return failure.Code
+	}
+	return codeFromStatus(status)
 }
 
 func codeFromStatus(status int) string {

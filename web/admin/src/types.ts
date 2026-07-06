@@ -368,6 +368,12 @@ export type DownlinkTestPushResponse = {
   code: string;
   reason?: string;
   delivery_state?: string;
+  delivery_path?: string;
+  origin_gateway_node?: string;
+  target_gateway_node?: string;
+  target_internal_addr?: string;
+  failure_stage?: string;
+  failure_code?: string;
   client_id?: string;
   device_id?: string;
   session_id?: string;

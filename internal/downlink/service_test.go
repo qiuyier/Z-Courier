@@ -304,6 +304,9 @@ func TestServiceReliablePushSendsRemoteClusterMessage(t *testing.T) {
 	if resp.DeliveryState != DeliveryStateSent || resp.SessionID != "remote-session" {
 		t.Fatalf("response = %+v, want remote sent", resp)
 	}
+	if resp.DeliveryPath != DeliveryPathClusterPeer || resp.OriginGatewayNode != "gateway-b" || resp.TargetGatewayNode != "gateway-a" {
+		t.Fatalf("response routing = %+v, want gateway-b -> gateway-a peer", resp)
+	}
 	if dispatcher.calls != 1 {
 		t.Fatalf("dispatcher calls = %d, want 1", dispatcher.calls)
 	}
@@ -353,6 +356,9 @@ func TestServiceReliablePushKeepsQueuedWhenClusterRouteMissing(t *testing.T) {
 	if resp.DeliveryState != DeliveryStateQueued {
 		t.Fatalf("DeliveryState = %q, want queued", resp.DeliveryState)
 	}
+	if resp.FailureStage != DeliveryFailureStageRouteLookup || resp.FailureCode != "route_not_found" {
+		t.Fatalf("failure = stage:%q code:%q, want route_not_found", resp.FailureStage, resp.FailureCode)
+	}
 	if dispatcher.calls != 0 {
 		t.Fatalf("dispatcher calls = %d, want 0", dispatcher.calls)
 	}
@@ -396,6 +402,9 @@ func TestServiceReliablePushUnbindsStaleRemoteClusterRoute(t *testing.T) {
 	if resp.DeliveryState != DeliveryStateQueued {
 		t.Fatalf("DeliveryState = %q, want queued", resp.DeliveryState)
 	}
+	if resp.FailureStage != DeliveryFailureStagePeerDispatch || resp.FailureCode != "peer_target_not_found" {
+		t.Fatalf("failure = stage:%q code:%q, want peer_target_not_found", resp.FailureStage, resp.FailureCode)
+	}
 	if _, ok, err := registry.Lookup(context.Background(), route.Key()); err != nil || ok {
 		t.Fatalf("registry.Lookup() after stale peer error = ok:%v err:%v, want not found", ok, err)
 	}
@@ -435,8 +444,56 @@ func TestServiceReliablePushKeepsRemoteRouteOnPeerFailure(t *testing.T) {
 	if resp.DeliveryState != DeliveryStateQueued {
 		t.Fatalf("DeliveryState = %q, want queued", resp.DeliveryState)
 	}
+	if resp.FailureStage != DeliveryFailureStagePeerDispatch || resp.FailureCode != "peer_error" {
+		t.Fatalf("failure = stage:%q code:%q, want peer_error", resp.FailureStage, resp.FailureCode)
+	}
 	if _, ok, err := registry.Lookup(context.Background(), route.Key()); err != nil || !ok {
 		t.Fatalf("registry.Lookup() after retryable peer error = ok:%v err:%v, want still bound", ok, err)
+	}
+}
+
+func TestServiceReliablePushClassifiesPeerAuthFailure(t *testing.T) {
+	now := time.UnixMilli(1760000000000)
+	store := NewMemoryStore()
+	store.now = func() time.Time { return now }
+	registry := cluster.NewMemoryRegistry(cluster.MemoryRegistryConfig{})
+	route := testClusterRoute("remote-session", "gateway-a")
+	if err := registry.Bind(context.Background(), route); err != nil {
+		t.Fatalf("registry.Bind() error = %v", err)
+	}
+
+	service := NewService(
+		fakeSessions{},
+		fakeConnections{},
+		WithStore(store),
+		WithClusterDelivery(ClusterDeliveryConfig{
+			GatewayNode: "gateway-b",
+			Registry:    registry,
+			PeerDispatcher: &fakePeerDispatcher{err: &PeerPushHTTPError{
+				StatusCode: http.StatusUnauthorized,
+				Code:       "unauthorized",
+			}},
+		}),
+	)
+	service.now = func() time.Time { return now }
+
+	resp, err := service.Push(context.Background(), PushRequest{
+		ClientID:  "client-1",
+		DeviceID:  "device-1",
+		MsgID:     2001,
+		MessageID: "message-1",
+	})
+	if err != nil {
+		t.Fatalf("Push() error = %v", err)
+	}
+	if resp.DeliveryState != DeliveryStateQueued {
+		t.Fatalf("DeliveryState = %q, want queued", resp.DeliveryState)
+	}
+	if resp.FailureStage != DeliveryFailureStagePeerDispatch || resp.FailureCode != "peer_auth_failed" {
+		t.Fatalf("failure = stage:%q code:%q, want peer_auth_failed", resp.FailureStage, resp.FailureCode)
+	}
+	if resp.TargetGatewayNode != "gateway-a" || resp.TargetInternalAddr != route.InternalAddr {
+		t.Fatalf("target = node:%q addr:%q, want gateway-a %q", resp.TargetGatewayNode, resp.TargetInternalAddr, route.InternalAddr)
 	}
 }
 

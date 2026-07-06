@@ -545,7 +545,7 @@ func TestInternalHTTPAdminCheck(t *testing.T) {
 		}},
 	})
 
-	server := mustInternalHTTPServer(t, config, service, &gatewayHealth{}, registry)
+	server := mustInternalHTTPServer(t, config, service, &gatewayHealth{}, newMetricsRegistry(registry))
 	req := httptest.NewRequest(http.MethodGet, "/internal/admin/check?timeout=1s", nil)
 	req.Header.Set(downlink.InternalTokenHeader, "secret")
 	rec := httptest.NewRecorder()
@@ -1871,6 +1871,9 @@ func TestInternalHTTPDebugPushOperatorSendsDownlink(t *testing.T) {
 	}
 	if resp.Code != "ok" || resp.DeliveryState != sdkbackend.DeliveryStateSent || resp.SessionID != "session-1" || resp.ConnID != 7 {
 		t.Fatalf("response = %+v, want sent session-1 conn 7", resp)
+	}
+	if resp.DeliveryPath != downlink.DeliveryPathLocal || resp.TargetGatewayNode != "gateway-a" {
+		t.Fatalf("routing response = %+v, want local gateway-a", resp)
 	}
 	if finder.gotConnID != 7 {
 		t.Fatalf("connection finder connID = %d, want 7", finder.gotConnID)

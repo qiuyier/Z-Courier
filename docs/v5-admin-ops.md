@@ -326,10 +326,26 @@ operator diagnostics and is guarded by the `downlink:test_push` permission,
 which is granted to `operator` and `admin` roles.
 
 The response is the normal downlink push response and can return `sent`,
-`queued`, or a failure code. Test pushes increment
-`z_courier_admin_downlink_test_push_total` in addition to the regular downlink
-push metrics, and audit logs include the admin principal, role, target client,
-target device, message id, trace id, and result.
+`queued`, or a failure code. V11 remote-operation metadata makes cluster test
+pushes explicit:
+
+| Field | Meaning |
+| --- | --- |
+| `delivery_path` | `local` for a direct local TCP write, `cluster_peer` for a peer gateway push |
+| `origin_gateway_node` | Gateway that accepted the operator request |
+| `target_gateway_node` | Gateway that owns the target client route |
+| `target_internal_addr` | Peer internal HTTP address used for the operation |
+| `failure_stage` | `session_lookup`, `route_lookup`, or `peer_dispatch` |
+| `failure_code` | More specific reason such as `route_not_found`, `peer_auth_failed`, `peer_timeout`, or `peer_target_not_found` |
+
+Remote test push is the only cross-node console operation currently surfaced.
+Local session disconnect remains local-only until a separate remote disconnect
+safety model is implemented.
+
+Test pushes increment `z_courier_admin_downlink_test_push_total` in addition to
+the regular downlink push metrics, and audit logs include the admin principal,
+role, target client, target device, message id, trace id, route metadata, and
+result.
 
 ### Existing Message Inspection
 

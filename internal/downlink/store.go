@@ -9,8 +9,13 @@ import (
 )
 
 const (
-	DeliveryStateSent   = sdkbackend.DeliveryStateSent
-	DeliveryStateQueued = sdkbackend.DeliveryStateQueued
+	DeliveryStateSent                = sdkbackend.DeliveryStateSent
+	DeliveryStateQueued              = sdkbackend.DeliveryStateQueued
+	DeliveryPathLocal                = sdkbackend.DeliveryPathLocal
+	DeliveryPathClusterPeer          = sdkbackend.DeliveryPathClusterPeer
+	DeliveryFailureStageSession      = sdkbackend.DeliveryFailureStageSessionLookup
+	DeliveryFailureStageRouteLookup  = sdkbackend.DeliveryFailureStageRouteLookup
+	DeliveryFailureStagePeerDispatch = sdkbackend.DeliveryFailureStagePeerDispatch
 )
 
 type RetryResult struct {

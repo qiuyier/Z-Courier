@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
+	"net"
 	"net/http"
 	"time"
 
@@ -304,6 +305,8 @@ func (s *Service) pushReliable(ctx context.Context, req PushRequest) (*PushRespo
 		if err := s.store.MarkAttemptFailed(ctx, message.MessageID, err.Error(), s.nextRetryAt(s.now())); err != nil {
 			return nil, fmt.Errorf("%w: %v", ErrStore, err)
 		}
+		resp.Reason = err.Error()
+		annotatePushResponseFailure(resp, err)
 		return resp, nil
 	}
 
@@ -580,7 +583,10 @@ func (s *Service) deliverOnline(ctx context.Context, req PushRequest) (*PushResp
 
 func (s *Service) pushCluster(ctx context.Context, req PushRequest) (*PushResponse, error) {
 	if s.onlineRegistry == nil {
-		return nil, ErrSessionNotFound
+		return nil, newDeliveryFailure(DeliveryFailureStageSession, "session_not_found", cluster.RouteEntry{
+			ClientID: req.ClientID,
+			DeviceID: req.DeviceID,
+		}, ErrSessionNotFound)
 	}
 
 	key := cluster.RouteKey{
@@ -589,20 +595,26 @@ func (s *Service) pushCluster(ctx context.Context, req PushRequest) (*PushRespon
 	}
 	entry, ok, err := s.onlineRegistry.Lookup(ctx, key)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrRegistry, err)
+		return nil, newDeliveryFailure(DeliveryFailureStageRouteLookup, "registry_error", cluster.RouteEntry{
+			ClientID: req.ClientID,
+			DeviceID: req.DeviceID,
+		}, fmt.Errorf("%w: %w", ErrRegistry, err))
 	}
 	if !ok {
-		return nil, ErrSessionNotFound
+		return nil, newDeliveryFailure(DeliveryFailureStageRouteLookup, "route_not_found", cluster.RouteEntry{
+			ClientID: req.ClientID,
+			DeviceID: req.DeviceID,
+		}, ErrSessionNotFound)
 	}
 
 	if entry.GatewayNode == s.gatewayNode || entry.InternalAddr == "" {
 		metrics.RecordClusterStaleRoute("local_or_empty_peer")
 		_ = s.onlineRegistry.Unbind(ctx, key, entry.SessionID)
-		return nil, ErrSessionNotFound
+		return nil, newDeliveryFailure(DeliveryFailureStageRouteLookup, "stale_route", entry, ErrSessionNotFound)
 	}
 	if s.peerDispatcher == nil {
 		metrics.RecordClusterPeerPush(entry.GatewayNode, "not_configured", 0)
-		return nil, ErrPeerNotConfigured
+		return nil, newDeliveryFailure(DeliveryFailureStagePeerDispatch, "peer_not_configured", entry, ErrPeerNotConfigured)
 	}
 
 	startedAt := time.Now()
@@ -615,7 +627,7 @@ func (s *Service) pushCluster(ctx context.Context, req PushRequest) (*PushRespon
 		} else {
 			metrics.RecordClusterPeerPush(entry.GatewayNode, "failure", time.Since(startedAt))
 		}
-		return nil, fmt.Errorf("%w: %w", ErrPeerDispatch, err)
+		return nil, newDeliveryFailure(DeliveryFailureStagePeerDispatch, classifyPeerFailureCode(err), entry, fmt.Errorf("%w: %w", ErrPeerDispatch, err))
 	}
 	metrics.RecordClusterPeerPush(entry.GatewayNode, "success", time.Since(startedAt))
 
@@ -625,14 +637,18 @@ func (s *Service) pushCluster(ctx context.Context, req PushRequest) (*PushRespon
 	}
 
 	return &PushResponse{
-		Code:          nonEmpty(peerResp.Code, "ok"),
-		DeliveryState: DeliveryStateSent,
-		ClientID:      nonEmpty(peerResp.ClientID, req.ClientID),
-		DeviceID:      nonEmpty(peerResp.DeviceID, req.DeviceID),
-		SessionID:     sessionID,
-		ConnID:        peerResp.ConnID,
-		MessageID:     req.MessageID,
-		TraceID:       req.TraceID,
+		Code:               nonEmpty(peerResp.Code, "ok"),
+		DeliveryState:      DeliveryStateSent,
+		DeliveryPath:       DeliveryPathClusterPeer,
+		OriginGatewayNode:  s.gatewayNode,
+		TargetGatewayNode:  entry.GatewayNode,
+		TargetInternalAddr: entry.InternalAddr,
+		ClientID:           nonEmpty(peerResp.ClientID, req.ClientID),
+		DeviceID:           nonEmpty(peerResp.DeviceID, req.DeviceID),
+		SessionID:          sessionID,
+		ConnID:             peerResp.ConnID,
+		MessageID:          req.MessageID,
+		TraceID:            req.TraceID,
 	}, nil
 }
 
@@ -671,15 +687,111 @@ func (s *Service) pushOnlineWithSession(req PushRequest, expectedSessionID strin
 	}
 
 	return &PushResponse{
-		Code:          "ok",
-		DeliveryState: DeliveryStateSent,
-		ClientID:      found.ClientID,
-		DeviceID:      found.DeviceID,
-		SessionID:     found.SessionID,
-		ConnID:        found.ConnID,
-		MessageID:     req.MessageID,
-		TraceID:       req.TraceID,
+		Code:              "ok",
+		DeliveryState:     DeliveryStateSent,
+		DeliveryPath:      DeliveryPathLocal,
+		TargetGatewayNode: nonEmpty(found.GatewayNode, s.gatewayNode),
+		ClientID:          found.ClientID,
+		DeviceID:          found.DeviceID,
+		SessionID:         found.SessionID,
+		ConnID:            found.ConnID,
+		MessageID:         req.MessageID,
+		TraceID:           req.TraceID,
 	}, nil
+}
+
+type DeliveryFailure struct {
+	Stage              string
+	Code               string
+	TargetGatewayNode  string
+	TargetInternalAddr string
+	cause              error
+}
+
+func (e *DeliveryFailure) Error() string {
+	if e == nil || e.cause == nil {
+		return ""
+	}
+	return e.cause.Error()
+}
+
+func (e *DeliveryFailure) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.cause
+}
+
+func newDeliveryFailure(stage, code string, target cluster.RouteEntry, cause error) *DeliveryFailure {
+	return &DeliveryFailure{
+		Stage:              stage,
+		Code:               code,
+		TargetGatewayNode:  target.GatewayNode,
+		TargetInternalAddr: target.InternalAddr,
+		cause:              cause,
+	}
+}
+
+func annotatePushResponseFailure(resp *PushResponse, err error) {
+	if resp == nil || err == nil {
+		return
+	}
+	failure := deliveryFailureFromError(err)
+	resp.FailureStage = failure.Stage
+	resp.FailureCode = failure.Code
+	resp.TargetGatewayNode = nonEmpty(resp.TargetGatewayNode, failure.TargetGatewayNode)
+	resp.TargetInternalAddr = nonEmpty(resp.TargetInternalAddr, failure.TargetInternalAddr)
+}
+
+func deliveryFailureFromError(err error) DeliveryFailure {
+	var failure *DeliveryFailure
+	if errors.As(err, &failure) && failure != nil {
+		return *failure
+	}
+	switch {
+	case errors.Is(err, ErrSessionNotFound):
+		return DeliveryFailure{Stage: DeliveryFailureStageSession, Code: "session_not_found"}
+	case errors.Is(err, ErrSessionMismatch):
+		return DeliveryFailure{Stage: DeliveryFailureStageSession, Code: "session_mismatch"}
+	case errors.Is(err, ErrConnectionNotFound):
+		return DeliveryFailure{Stage: DeliveryFailureStageSession, Code: "connection_not_found"}
+	case errors.Is(err, ErrPeerNotConfigured):
+		return DeliveryFailure{Stage: DeliveryFailureStagePeerDispatch, Code: "peer_not_configured"}
+	case errors.Is(err, ErrPeerDispatch):
+		return DeliveryFailure{Stage: DeliveryFailureStagePeerDispatch, Code: "peer_error"}
+	case errors.Is(err, ErrRegistry):
+		return DeliveryFailure{Stage: DeliveryFailureStageRouteLookup, Code: "registry_error"}
+	default:
+		return DeliveryFailure{Stage: "unknown", Code: "error"}
+	}
+}
+
+func classifyPeerFailureCode(err error) string {
+	var httpErr *PeerPushHTTPError
+	if errors.As(err, &httpErr) {
+		switch httpErr.StatusCode {
+		case http.StatusUnauthorized, http.StatusForbidden:
+			return "peer_auth_failed"
+		case http.StatusNotFound:
+			if httpErr.Code == "session_not_found" || httpErr.Code == "session_mismatch" {
+				return "peer_target_not_found"
+			}
+			return "peer_not_found"
+		case http.StatusConflict:
+			return "peer_target_conflict"
+		default:
+			return "peer_http_error"
+		}
+	}
+
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return "peer_timeout"
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "peer_timeout"
+	}
+	return "peer_error"
 }
 
 func pushRequestFromPeerPushRequest(req PeerPushRequest) PushRequest {

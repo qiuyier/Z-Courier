@@ -276,7 +276,10 @@ internal address, route TTL, and whether the queried gateway also has the local
 TCP session.
 `POST /internal/debug/push` is the browser-console test-push endpoint. It
 reuses the normal downlink delivery path and is protected by the
-`downlink:test_push` admin permission.
+`downlink:test_push` admin permission. Responses include remote-operation
+metadata such as `delivery_path`, `origin_gateway_node`, `target_gateway_node`,
+`failure_stage`, and `failure_code` so operators can distinguish local writes
+from cluster peer pushes and peer-dispatch failures.
 
 Downlink request envelope:
 

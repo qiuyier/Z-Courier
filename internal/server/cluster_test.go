@@ -70,6 +70,35 @@ func TestNewClusterRegistryCreatesRedisRegistry(t *testing.T) {
 	}
 }
 
+func TestMetricsRegistryForwardsRouteList(t *testing.T) {
+	inner := cluster.NewMemoryRegistry(cluster.MemoryRegistryConfig{TTL: 30 * time.Second})
+	entry := cluster.RouteEntry{
+		ClientID:     "client-1",
+		DeviceID:     "device-1",
+		SessionID:    "session-1",
+		GatewayNode:  "gateway-a",
+		InternalAddr: "http://gateway-a:18080",
+		TokenID:      "token-1",
+	}
+	if err := inner.Bind(context.Background(), entry); err != nil {
+		t.Fatalf("Bind() error = %v", err)
+	}
+
+	wrapped := newMetricsRegistry(inner)
+	lister, ok := wrapped.(cluster.RouteLister)
+	if !ok {
+		t.Fatal("newMetricsRegistry() does not expose RouteLister")
+	}
+
+	listed, err := lister.List(context.Background(), cluster.RouteListFilter{ClientID: "client-1", Limit: 10})
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if listed.Total != 1 || len(listed.Routes) != 1 || listed.Routes[0].SessionID != "session-1" {
+		t.Fatalf("List() = %+v, want session-1", listed)
+	}
+}
+
 func TestClusterBindHandlerBindsRoute(t *testing.T) {
 	now := time.Date(2026, 6, 9, 11, 0, 0, 0, time.UTC)
 	registry := cluster.NewMemoryRegistry(cluster.MemoryRegistryConfig{TTL: 30 * time.Second})
