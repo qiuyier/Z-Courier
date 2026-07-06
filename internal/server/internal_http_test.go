@@ -452,6 +452,15 @@ func TestInternalHTTPAdminDiagnostics(t *testing.T) {
 	if len(resp.Dependencies) == 0 || len(resp.Warnings) == 0 {
 		t.Fatalf("dependencies/warnings = %+v/%+v, want non-empty", resp.Dependencies, resp.Warnings)
 	}
+	if dependency := findAdminDependency(resp.Dependencies, "admin_audit_store"); dependency.Status != "configured" || dependency.Reason != "memory" {
+		t.Fatalf("admin audit dependency = %+v, want configured memory", dependency)
+	}
+	if dependency := findAdminDependency(resp.Dependencies, "admin_session_store"); dependency.Status != "disabled" || dependency.Reason != "memory" {
+		t.Fatalf("admin session dependency = %+v, want disabled memory", dependency)
+	}
+	if !hasAdminWarning(resp.Warnings, "non_durable_admin_audit_store") {
+		t.Fatalf("warnings = %+v, want non_durable_admin_audit_store", resp.Warnings)
+	}
 }
 
 func TestInternalHTTPAdminDiagnosticsReportsDegradedHTTPUpstream(t *testing.T) {
@@ -573,6 +582,12 @@ func TestInternalHTTPAdminCheck(t *testing.T) {
 	}
 	if findAdminCheck(resp.Checks, "downlink_store").Status != adminCheckStatusOK {
 		t.Fatalf("downlink check = %+v, want ok", findAdminCheck(resp.Checks, "downlink_store"))
+	}
+	if findAdminCheck(resp.Checks, "admin_audit_store").Status != adminCheckStatusOK {
+		t.Fatalf("admin audit check = %+v, want ok", findAdminCheck(resp.Checks, "admin_audit_store"))
+	}
+	if findAdminCheck(resp.Checks, "admin_session_store").Status != adminCheckStatusSkipped {
+		t.Fatalf("admin session check = %+v, want skipped", findAdminCheck(resp.Checks, "admin_session_store"))
 	}
 	if findAdminCheck(resp.Checks, "cluster_registry").Status != adminCheckStatusOK {
 		t.Fatalf("cluster check = %+v, want ok", findAdminCheck(resp.Checks, "cluster_registry"))
@@ -2170,6 +2185,24 @@ func findAdminCheck(checks []adminCheckResult, name string) adminCheckResult {
 		}
 	}
 	return adminCheckResult{}
+}
+
+func findAdminDependency(dependencies []adminDependency, name string) adminDependency {
+	for _, dependency := range dependencies {
+		if dependency.Name == name {
+			return dependency
+		}
+	}
+	return adminDependency{}
+}
+
+func hasAdminWarning(warnings []adminDiagnosticWarning, code string) bool {
+	for _, warning := range warnings {
+		if warning.Code == code {
+			return true
+		}
+	}
+	return false
 }
 
 var internalHMACTestSecret = []byte("0123456789abcdef0123456789abcdef")

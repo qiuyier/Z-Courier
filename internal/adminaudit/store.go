@@ -1,6 +1,7 @@
 package adminaudit
 
 import (
+	"context"
 	"net/url"
 	"strings"
 	"sync"
@@ -168,6 +169,10 @@ func (s *Store) List(query Query) Result {
 		result.NextCursor = result.Entries[len(result.Entries)-1].ID
 	}
 	return result
+}
+
+func (s *Store) Ping(ctx context.Context) error {
+	return ctx.Err()
 }
 
 func QueryFromValues(values url.Values) Query {

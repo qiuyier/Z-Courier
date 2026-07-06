@@ -104,6 +104,8 @@ func (h *adminCheckHandler) runChecks(ctx context.Context) []adminCheckResult {
 	checks := []adminCheckResult{
 		h.checkAuthVerifier(ctx),
 		h.checkDownlinkStore(ctx),
+		h.checkAdminAuditStore(ctx),
+		h.checkAdminSessionStore(ctx),
 		h.checkClusterRegistry(ctx),
 	}
 
@@ -152,6 +154,37 @@ func (h *adminCheckHandler) checkDownlinkStore(ctx context.Context) adminCheckRe
 		return adminCheckResult{Name: name, Status: adminCheckStatusSkipped, Target: h.config.config.DownlinkStorage.Type, Error: "downlink store does not expose an active health probe"}
 	}
 	return runAdminDependencyCheck(ctx, name, h.config.config.DownlinkStorage.Type, "downlink store ping failed", pinger.Ping)
+}
+
+func (h *adminCheckHandler) checkAdminAuditStore(ctx context.Context) adminCheckResult {
+	name := "admin_audit_store"
+	target := adminStorageType(h.config.config.AdminAuditStorage.Type)
+	if h.config.config.AdminAudit == nil {
+		return adminCheckResult{Name: name, Status: adminCheckStatusSkipped, Target: target, Error: "admin audit store is not configured"}
+	}
+
+	pinger, ok := h.config.config.AdminAudit.(dependencyPinger)
+	if !ok {
+		return adminCheckResult{Name: name, Status: adminCheckStatusSkipped, Target: target, Error: "admin audit store does not expose an active health probe"}
+	}
+	return runAdminDependencyCheck(ctx, name, target, "admin audit store ping failed", pinger.Ping)
+}
+
+func (h *adminCheckHandler) checkAdminSessionStore(ctx context.Context) adminCheckResult {
+	name := "admin_session_store"
+	target := adminStorageType(h.config.config.AdminConsole.Session.Store.Type)
+	if !h.config.config.AdminConsole.Session.Enabled {
+		return adminCheckResult{Name: name, Status: adminCheckStatusSkipped, Target: target, Error: "admin console sessions are disabled"}
+	}
+	if h.config.config.AdminSessions == nil || h.config.config.AdminSessions.store == nil {
+		return adminCheckResult{Name: name, Status: adminCheckStatusFailed, Target: target, Error: "admin session store is not configured"}
+	}
+
+	pinger, ok := h.config.config.AdminSessions.store.(dependencyPinger)
+	if !ok {
+		return adminCheckResult{Name: name, Status: adminCheckStatusSkipped, Target: target, Error: "admin session store does not expose an active health probe"}
+	}
+	return runAdminDependencyCheck(ctx, name, target, "admin session store ping failed", pinger.Ping)
 }
 
 func (h *adminCheckHandler) checkClusterRegistry(ctx context.Context) adminCheckResult {

@@ -121,6 +121,18 @@ CREATE INDEX IF NOT EXISTS z_courier_admin_audit_message_idx
 	return err
 }
 
+func (s *PostgresStore) Ping(ctx context.Context) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("postgres audit store is not configured")
+	}
+	if s.operationTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, s.operationTimeout)
+		defer cancel()
+	}
+	return s.db.PingContext(ctx)
+}
+
 func (s *PostgresStore) RecordAdminAudit(entry Entry) Entry {
 	entry = normalizeEntry(entry)
 	if s == nil || s.db == nil {

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -186,6 +187,10 @@ func (s *memoryAdminSessionStore) Delete(tokenKey [sha256.Size]byte) (bool, erro
 	}
 	delete(s.entries, tokenKey)
 	return true, nil
+}
+
+func (s *memoryAdminSessionStore) Ping(ctx context.Context) error {
+	return ctx.Err()
 }
 
 func adminSessionKey(token string) [sha256.Size]byte {

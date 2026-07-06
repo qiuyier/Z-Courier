@@ -266,6 +266,14 @@ Candidate work:
 - Add E2E coverage for Redis-backed admin sessions and persistent audit.
 - Write the `v0.11.0` release guide and upgrade notes.
 
+Current implementation:
+
+- `/internal/admin/diagnostics` reports admin audit and admin session storage
+  state, plus warnings for memory-only admin audit and node-local admin
+  sessions.
+- `/internal/admin/check` actively probes admin audit and admin session storage
+  when the configured store exposes a health probe.
+
 Acceptance criteria:
 
 - Operators can tell whether persistent audit and Redis admin sessions are

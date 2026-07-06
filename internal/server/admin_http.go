@@ -482,6 +482,8 @@ func adminDiagnosticDependencies(config Config, registry cluster.OnlineRegistry,
 	dependencies := []adminDependency{
 		{Name: "auth_verifier", Status: "configured", Reason: auth.ProviderName(config.Verifier)},
 		{Name: "downlink_store", Status: "configured", Reason: config.DownlinkStorage.Type},
+		{Name: "admin_audit_store", Status: "configured", Reason: adminStorageType(config.AdminAuditStorage.Type)},
+		{Name: "admin_session_store", Status: "disabled", Reason: adminStorageType(config.AdminConsole.Session.Store.Type)},
 		{Name: "cluster_registry", Status: "disabled"},
 		{Name: "http_upstream", Status: "not_configured"},
 		{Name: "nsq_upstream", Status: "not_configured"},
@@ -494,33 +496,59 @@ func adminDiagnosticDependencies(config Config, registry cluster.OnlineRegistry,
 		dependencies[1].Status = "not_configured"
 		dependencies[1].Reason = "downlink storage is disabled"
 	}
+	if config.AdminAudit == nil {
+		dependencies[2].Status = "not_configured"
+		dependencies[2].Reason = "admin audit store is not configured"
+	} else if adminStorageType(config.AdminAuditStorage.Type) == "postgres" && strings.TrimSpace(config.AdminAuditStorage.Postgres.DSN) == "" {
+		dependencies[2].Status = "not_configured"
+		dependencies[2].Reason = "admin audit postgres dsn is not configured"
+	}
+	if config.AdminConsole.Session.Enabled {
+		dependencies[3].Status = "configured"
+		dependencies[3].Reason = adminStorageType(config.AdminConsole.Session.Store.Type)
+		if config.AdminSessions == nil {
+			dependencies[3].Status = "not_configured"
+			dependencies[3].Reason = "admin session store is not configured"
+		} else if adminStorageType(config.AdminConsole.Session.Store.Type) == "redis" && strings.TrimSpace(config.AdminConsole.Session.Store.Redis.Addr) == "" {
+			dependencies[3].Status = "not_configured"
+			dependencies[3].Reason = "admin session redis addr is not configured"
+		}
+	}
 	if config.Cluster.Enabled {
-		dependencies[2].Status = "configured"
-		dependencies[2].Reason = config.Cluster.Registry.Type
+		dependencies[4].Status = "configured"
+		dependencies[4].Reason = config.Cluster.Registry.Type
 		if !clusterEnabled || registry == nil {
-			dependencies[2].Status = "not_configured"
-			dependencies[2].Reason = "cluster is enabled but no registry is attached"
+			dependencies[4].Status = "not_configured"
+			dependencies[4].Reason = "cluster is enabled but no registry is attached"
 		}
 	}
 	upstream := adminUpstreamDiagnosticsFromConfig(config)
 	if upstream.HTTPRoutes > 0 {
-		dependencies[3].Status = "configured"
-		dependencies[3].Reason = "configured routes: " + intString(upstream.HTTPRoutes)
+		dependencies[5].Status = "configured"
+		dependencies[5].Reason = "configured routes: " + intString(upstream.HTTPRoutes)
 		unavailable, degraded := adminUpstreamStateCounts(upstream.HTTPRouteStates)
 		switch {
 		case unavailable > 0:
-			dependencies[3].Status = "unavailable"
-			dependencies[3].Reason = "unavailable routes: " + intString(unavailable) + "/" + intString(upstream.HTTPRoutes)
+			dependencies[5].Status = "unavailable"
+			dependencies[5].Reason = "unavailable routes: " + intString(unavailable) + "/" + intString(upstream.HTTPRoutes)
 		case degraded > 0:
-			dependencies[3].Status = "degraded"
-			dependencies[3].Reason = "degraded routes: " + intString(degraded) + "/" + intString(upstream.HTTPRoutes)
+			dependencies[5].Status = "degraded"
+			dependencies[5].Reason = "degraded routes: " + intString(degraded) + "/" + intString(upstream.HTTPRoutes)
 		}
 	}
 	if upstream.NSQRoutes > 0 {
-		dependencies[4].Status = "configured"
-		dependencies[4].Reason = "configured routes: " + intString(upstream.NSQRoutes)
+		dependencies[6].Status = "configured"
+		dependencies[6].Reason = "configured routes: " + intString(upstream.NSQRoutes)
 	}
 	return dependencies
+}
+
+func adminStorageType(raw string) string {
+	raw = strings.ToLower(strings.TrimSpace(raw))
+	if raw == "" {
+		return "memory"
+	}
+	return raw
 }
 
 func adminUpstreamDiagnosticsFromConfig(config Config) adminUpstreamDiagnostics {
@@ -604,6 +632,18 @@ func adminDiagnosticWarnings(config Config, registry cluster.OnlineRegistry, dow
 		warnings = append(warnings, adminDiagnosticWarning{
 			Code:    "non_durable_downlink_store",
 			Message: "downlink storage is not durable across gateway restarts",
+		})
+	}
+	if adminStorageType(config.AdminAuditStorage.Type) == "memory" {
+		warnings = append(warnings, adminDiagnosticWarning{
+			Code:    "non_durable_admin_audit_store",
+			Message: "admin audit storage is memory-only; use postgres for production audit retention",
+		})
+	}
+	if config.AdminConsole.Session.Enabled && adminStorageType(config.AdminConsole.Session.Store.Type) == "memory" {
+		warnings = append(warnings, adminDiagnosticWarning{
+			Code:    "node_local_admin_session_store",
+			Message: "admin console sessions are node-local; use redis when console traffic can move across gateway nodes",
 		})
 	}
 	if adminInternalHTTPFromConfig(config).AuthMode == InternalHTTPAuthModeToken && adminBindsWildcard(config.InternalHTTPAddr) {

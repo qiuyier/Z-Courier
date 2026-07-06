@@ -41,6 +41,8 @@ func newInternalHTTPServer(config Config, logger *zap.Logger, service *downlink.
 			return nil, err
 		}
 	}
+	handlerConfig.AdminAudit = adminAudit
+	handlerConfig.AdminSessions = adminSessions
 	adminSessionConfig := newAdminSessionHTTPConfig(handlerConfig, adminSessions, adminAudit)
 	withConsoleSession := func(handler http.Handler) http.Handler {
 		return withAdminSessionAuth(handler, adminSessions, adminSessionConfig.sessionConfig, handlerConfig.InternalToken)

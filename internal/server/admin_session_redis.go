@@ -141,6 +141,18 @@ func (s *redisAdminSessionStore) Delete(tokenKey [sha256.Size]byte) (bool, error
 	return deleted > 0, nil
 }
 
+func (s *redisAdminSessionStore) Ping(ctx context.Context) error {
+	if err := s.ensureOpen(); err != nil {
+		return err
+	}
+	if s.operationTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, s.operationTimeout)
+		defer cancel()
+	}
+	return s.client.Ping(ctx).Err()
+}
+
 func (s *redisAdminSessionStore) Close() error {
 	if s == nil || s.client == nil {
 		return nil
