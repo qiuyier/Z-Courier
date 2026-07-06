@@ -302,6 +302,11 @@ POST /internal/debug/push
 当前开放的跨节点控制台操作只有 test push。本机 session disconnect 仍然只作用于
 当前 gateway 的本机连接，不会静默跨节点踢人。
 
+Console 打开 test push 确认弹窗前，会先用 `GET /internal/debug/route` 做一次
+best-effort route preflight。确认弹窗会显示预计投递路径是本机、跨节点、stale
+route，还是当前离线，并展示目标 gateway 和内部地址。这个结果只是操作提示，
+不是锁；真正发送前客户端仍然可能重连或断开。
+
 ## 安全和脱敏
 
 admin API 和诊断 bundle 不应该泄漏：

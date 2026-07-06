@@ -342,6 +342,13 @@ Remote test push is the only cross-node console operation currently surfaced.
 Local session disconnect remains local-only until a separate remote disconnect
 safety model is implemented.
 
+Before the console opens the test-push confirmation dialog, it performs a
+best-effort route preflight using `GET /internal/debug/route`. The confirmation
+shows whether the operation is expected to be local, cluster-peer, stale, or
+offline, plus the target gateway and internal address when known. This is an
+operator safety hint, not a lock: the client can reconnect or disconnect before
+the final send request reaches the gateway.
+
 Test pushes increment `z_courier_admin_downlink_test_push_total` in addition to
 the regular downlink push metrics, and audit logs include the admin principal,
 role, target client, target device, message id, trace id, route metadata, and

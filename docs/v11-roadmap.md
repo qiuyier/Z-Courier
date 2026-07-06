@@ -179,6 +179,8 @@ Implemented surface:
   failure code as the audit result when one is available.
 - The console Push Result panel displays local versus cluster-peer delivery and
   the target gateway details.
+- The console test-push confirmation runs a route preflight and shows the
+  expected delivery path before the operator confirms.
 - Remote session disconnect is intentionally not enabled in this phase.
 
 ### V11.5 Console Security Hardening

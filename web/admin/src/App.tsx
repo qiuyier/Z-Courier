@@ -204,6 +204,8 @@ type PreparedDownlinkTestPush = {
   traceID: string;
   ackRequired: boolean;
   body: string;
+  routeLookup?: AdminClientRouteLookup;
+  routeLookupError?: string;
   error?: string;
 };
 type DownlinkTestPushDialogState = PreparedDownlinkTestPush | null;
@@ -266,6 +268,7 @@ export default function App() {
   const [retryScanDialog, setRetryScanDialog] = useState<RetryScanDialogState>(null);
   const [retryScanPending, setRetryScanPending] = useState(false);
   const [downlinkTestPushDialog, setDownlinkTestPushDialog] = useState<DownlinkTestPushDialogState>(null);
+  const [downlinkTestPushPreflightPending, setDownlinkTestPushPreflightPending] = useState(false);
   const [downlinkTestPushPending, setDownlinkTestPushPending] = useState(false);
   const [activePage, setActivePage] = useState<PageID>("overview");
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
@@ -298,6 +301,7 @@ export default function App() {
     setRetryScanDialog(null);
     setRetryScanPending(false);
     setDownlinkTestPushDialog(null);
+    setDownlinkTestPushPreflightPending(false);
     setDownlinkTestPushPending(false);
     setSelectedSessionID("");
     setCheckRanAt(null);
@@ -782,7 +786,7 @@ export default function App() {
     setActivePage("messages");
   }, []);
 
-  const openDownlinkTestPush = useCallback(() => {
+  const openDownlinkTestPush = useCallback(async () => {
     if (!authenticated) {
       setDownlinkTestPushState({ status: "idle" });
       return;
@@ -808,7 +812,7 @@ export default function App() {
       return;
     }
 
-    setDownlinkTestPushDialog({
+    const prepared: PreparedDownlinkTestPush = {
       clientID,
       deviceID,
       msgID,
@@ -816,8 +820,25 @@ export default function App() {
       traceID: downlinkTestPushForm.traceID.trim(),
       ackRequired: downlinkTestPushForm.ackRequired,
       body: downlinkTestPushForm.body,
-    });
-  }, [authenticated, canTestDownlinkPush, downlinkTestPushForm]);
+    };
+
+    setDownlinkTestPushPreflightPending(true);
+    try {
+      const routeLookup = await fetchClientRoute(clientID, deviceID);
+      setClientRouteState({ status: "ready", data: routeLookup });
+      setDownlinkTestPushDialog({ ...prepared, routeLookup });
+    } catch (error) {
+      if (isUnauthorized(error)) {
+        expireSession();
+        return;
+      }
+      const message = requestErrorMessage(error);
+      setClientRouteState((current) => ({ status: "error", data: current.data, error: message }));
+      setDownlinkTestPushDialog({ ...prepared, routeLookupError: message });
+    } finally {
+      setDownlinkTestPushPreflightPending(false);
+    }
+  }, [authenticated, canTestDownlinkPush, downlinkTestPushForm, expireSession]);
 
   const closeDownlinkTestPush = useCallback(() => {
     if (downlinkTestPushPending) {
@@ -1332,6 +1353,7 @@ export default function App() {
               canRunRetryScan={canRunRetryScan}
               canTestDownlinkPush={canTestDownlinkPush}
               downlinkTestPushForm={downlinkTestPushForm}
+              downlinkTestPushPreflightPending={downlinkTestPushPreflightPending}
               downlinkTestPushState={downlinkTestPushState}
               limit={messageLimit}
               lookupID={messageLookupID}
@@ -2480,6 +2502,7 @@ function MessagesPage({
   canRunRetryScan,
   canTestDownlinkPush,
   downlinkTestPushForm,
+  downlinkTestPushPreflightPending,
   downlinkTestPushState,
   limit,
   lookupID,
@@ -2500,6 +2523,7 @@ function MessagesPage({
   canRunRetryScan: boolean;
   canTestDownlinkPush: boolean;
   downlinkTestPushForm: DownlinkTestPushForm;
+  downlinkTestPushPreflightPending: boolean;
   downlinkTestPushState: RemoteState<DownlinkTestPushResponse>;
   limit: number;
   lookupID: string;
@@ -2581,6 +2605,7 @@ function MessagesPage({
         form={downlinkTestPushForm}
         onChange={onDownlinkTestPushFormChange}
         onSubmit={onDownlinkTestPushSubmit}
+        preflightPending={downlinkTestPushPreflightPending}
         state={downlinkTestPushState}
       />
 
@@ -2965,17 +2990,25 @@ function DownlinkTestPushPanel({
   form,
   onChange,
   onSubmit,
+  preflightPending,
   state,
 }: {
   canTestDownlinkPush: boolean;
   form: DownlinkTestPushForm;
   onChange: (patch: Partial<DownlinkTestPushForm>) => void;
   onSubmit: () => void | Promise<void>;
+  preflightPending: boolean;
   state: RemoteState<DownlinkTestPushResponse>;
 }) {
   const running = state.status === "loading";
-  const disabled = running || !canTestDownlinkPush;
-  const title = !canTestDownlinkPush ? "Requires operator role" : running ? "Sending test push" : "Send test push";
+  const disabled = running || preflightPending || !canTestDownlinkPush;
+  const title = !canTestDownlinkPush
+    ? "Requires operator role"
+    : preflightPending
+      ? "Checking client route"
+      : running
+        ? "Sending test push"
+        : "Send test push";
 
   return (
     <section className="grid gap-5 xl:grid-cols-[1.05fr_0.95fr]">
@@ -3094,7 +3127,7 @@ function DownlinkTestPushPanel({
               type="submit"
             >
               <PlugsConnected size={16} weight="bold" />
-              {running ? "Sending..." : "Send Test Push"}
+              {preflightPending ? "Checking Route..." : running ? "Sending..." : "Send Test Push"}
             </button>
           </div>
 
@@ -3614,11 +3647,12 @@ function DownlinkTestPushDialog({
   const bodyBytes = new TextEncoder().encode(dialog.body).length;
   const messageID = dialog.messageID || "auto on send";
   const traceID = dialog.traceID || "same as message_id";
+  const preflight = downlinkTestPushPreflight(dialog);
 
   return (
     <ConfirmActionDialog
       confirmLabel="Send Test Push"
-      description="This sends one downlink message through the gateway internal debug push endpoint."
+      description="Route lookup ran before this confirmation. The route can still change before the message is sent."
       error={dialog.error}
       errorTitle="Test push failed"
       eyebrow="Test Downlink"
@@ -3637,6 +3671,23 @@ function DownlinkTestPushDialog({
         <LineItem label="MessageID" value={messageID} />
         <LineItem label="TraceID" value={traceID} />
       </div>
+      <div className="grid gap-3 rounded-lg border border-line bg-zinc-50 px-4 py-3 md:grid-cols-2">
+        <div className="flex min-w-0 items-center gap-2 md:col-span-2">
+          <RouteStatusBadge status={preflight.routeStatus} />
+          <StatusBadge label={preflight.deliveryPath} tone={preflight.routeStatus === "local" ? "ok" : preflight.routeStatus === "remote" ? "info" : "warn"} />
+        </div>
+        <LineItem label="Target Gateway" value={preflight.targetGateway} />
+        <LineItem label="Target Internal" value={preflight.targetInternalAddr} />
+        <LineItem label="Route Session" value={preflight.sessionID} />
+        <LineItem label="Route TTL" value={preflight.routeTTL} />
+      </div>
+      {preflight.warning && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <p className="font-semibold">Route preflight</p>
+          <p className="mt-1 leading-relaxed">{preflight.warning}</p>
+          {dialog.routeLookupError && <p className="mt-2 break-words font-mono text-xs">{dialog.routeLookupError}</p>}
+        </div>
+      )}
       <div className="rounded-lg border border-line bg-zinc-50 px-4 py-3">
         <p className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">Body Preview</p>
         <p className="mt-2 max-h-32 overflow-auto break-words font-mono text-sm text-ink">{dialog.body || "--"}</p>
@@ -4671,6 +4722,81 @@ function routeDetails(route: AdminRoute): Array<{ label: string; value: string }
 
 function healthyDependencyStatus(status: string): boolean {
   return status === "configured" || status === "ok" || status === "healthy" || status === "disabled";
+}
+
+type DownlinkTestPushPreflight = {
+  routeStatus: ClientRouteStatus;
+  deliveryPath: string;
+  targetGateway: string;
+  targetInternalAddr: string;
+  sessionID: string;
+  routeTTL: string;
+  warning?: string;
+};
+
+function downlinkTestPushPreflight(dialog: PreparedDownlinkTestPush): DownlinkTestPushPreflight {
+  if (dialog.routeLookupError) {
+    return {
+      routeStatus: "offline",
+      deliveryPath: "unknown",
+      targetGateway: "--",
+      targetInternalAddr: "--",
+      sessionID: "--",
+      routeTTL: "--",
+      warning: "The route preflight request failed. Sending may still queue the message if reliable storage is configured, or fail if the client is offline.",
+    };
+  }
+
+  const lookup = dialog.routeLookup;
+  if (!lookup) {
+    return {
+      routeStatus: "offline",
+      deliveryPath: "unknown",
+      targetGateway: "--",
+      targetInternalAddr: "--",
+      sessionID: "--",
+      routeTTL: "--",
+      warning: "No route preflight result is available. Sending may queue or fail depending on the current gateway state.",
+    };
+  }
+
+  const status = clientRouteStatus(lookup);
+  if (lookup.local_session_found && lookup.local_session) {
+    return {
+      routeStatus: status,
+      deliveryPath: "local",
+      targetGateway: lookup.local_session.gateway_node || lookup.gateway_node || "--",
+      targetInternalAddr: "--",
+      sessionID: lookup.local_session.session_id || "--",
+      routeTTL: "--",
+    };
+  }
+
+  if (lookup.cluster_route_found && lookup.cluster_route) {
+    return {
+      routeStatus: status,
+      deliveryPath: status === "stale" ? "cluster_peer stale" : "cluster_peer",
+      targetGateway: lookup.cluster_route.gateway_node || "--",
+      targetInternalAddr: lookup.cluster_route.internal_addr || "--",
+      sessionID: lookup.cluster_route.session_id || "--",
+      routeTTL: formatMillis(lookup.cluster_route.expires_in_ms),
+      warning: status === "stale"
+        ? "The cluster route is stale. Sending may queue the message or fail before a fresh route appears."
+        : undefined,
+    };
+  }
+
+  return {
+    routeStatus: status,
+    deliveryPath: "offline",
+    targetGateway: "--",
+    targetInternalAddr: "--",
+    sessionID: "--",
+    routeTTL: "--",
+    warning: lookup.cluster_enabled
+      ? "No local session or cluster route currently matches this client/device. Sending may queue the message if reliable storage is configured."
+      : "Cluster routing is disabled on this gateway and no local session was found. Sending may queue or fail depending on storage configuration.",
+  };
 }
 
 function clientRouteStatus(lookup?: AdminClientRouteLookup): ClientRouteStatus {
