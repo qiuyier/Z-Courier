@@ -62,6 +62,20 @@ type debugSessionsResponse struct {
 	Sessions      []debugSession `json:"sessions"`
 }
 
+type debugClusterRoutesResponse struct {
+	Code           string              `json:"code"`
+	Reason         string              `json:"reason,omitempty"`
+	GatewayNode    string              `json:"gateway_node"`
+	SessionID      string              `json:"session_id,omitempty"`
+	ClientID       string              `json:"client_id,omitempty"`
+	DeviceID       string              `json:"device_id,omitempty"`
+	Limit          int                 `json:"limit"`
+	Total          int                 `json:"total"`
+	UniqueClients  int                 `json:"unique_clients"`
+	ClusterEnabled bool                `json:"cluster_enabled"`
+	Routes         []debugClusterRoute `json:"routes"`
+}
+
 type debugSessionDisconnectRequest struct {
 	SessionID string `json:"session_id"`
 	ClientID  string `json:"client_id,omitempty"`
@@ -102,6 +116,8 @@ type debugClusterRoute struct {
 	UpdatedAt       *time.Time `json:"updated_at,omitempty"`
 	ExpiresAt       *time.Time `json:"expires_at,omitempty"`
 	ExpiresInMillis int64      `json:"expires_in_ms,omitempty"`
+	LocalRoute      bool       `json:"local_route"`
+	LocalSession    bool       `json:"local_session_found"`
 }
 
 func newDebugRouteHandler(config Config, registry cluster.OnlineRegistry) http.Handler {
@@ -110,6 +126,10 @@ func newDebugRouteHandler(config Config, registry cluster.OnlineRegistry) http.H
 
 func newDebugSessionsHandler(config Config) http.Handler {
 	return &debugSessionsHandler{config: debugConfig(config, nil)}
+}
+
+func newDebugClusterRoutesHandler(config Config, registry cluster.OnlineRegistry) http.Handler {
+	return &debugClusterRoutesHandler{config: debugConfig(config, registry)}
 }
 
 func newDebugSessionDisconnectHandler(config Config, connections downlink.ConnectionFinder, logger *zap.Logger, audit adminaudit.Recorder) http.Handler {
@@ -188,6 +208,7 @@ func (h *debugRouteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if ok {
 			resp.ClusterRouteFound = true
 			resp.ClusterRoute = debugClusterRouteFromEntry(entry, time.Now())
+			markDebugClusterRouteLocal(resp.ClusterRoute, entry, h.config)
 		}
 	}
 
@@ -275,6 +296,79 @@ func (h *debugSessionsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 }
 
 func (h *debugSessionsHandler) authorized(r *http.Request) bool {
+	return h.config.internalToken == "" || r.Header.Get(downlink.InternalTokenHeader) == h.config.internalToken
+}
+
+type debugClusterRoutesHandler struct {
+	config debugHandlerConfig
+}
+
+func (h *debugClusterRoutesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeDebugJSON(w, http.StatusMethodNotAllowed, debugClusterRoutesResponse{Code: "method_not_allowed", GatewayNode: h.config.gatewayNode})
+		return
+	}
+	if !h.authorized(r) {
+		writeDebugJSON(w, http.StatusUnauthorized, debugClusterRoutesResponse{Code: "unauthorized", GatewayNode: h.config.gatewayNode})
+		return
+	}
+
+	limit, err := parseDebugSessionLimit(r.URL.Query().Get("limit"))
+	if err != nil {
+		writeDebugJSON(w, http.StatusBadRequest, debugClusterRoutesResponse{Code: "bad_request", Reason: err.Error(), GatewayNode: h.config.gatewayNode})
+		return
+	}
+
+	filter := cluster.RouteListFilter{
+		SessionID: strings.TrimSpace(r.URL.Query().Get("session_id")),
+		ClientID:  strings.TrimSpace(r.URL.Query().Get("client_id")),
+		DeviceID:  strings.TrimSpace(r.URL.Query().Get("device_id")),
+		Limit:     limit,
+	}
+	resp := debugClusterRoutesResponse{
+		Code:           "ok",
+		GatewayNode:    h.config.gatewayNode,
+		SessionID:      filter.SessionID,
+		ClientID:       filter.ClientID,
+		DeviceID:       filter.DeviceID,
+		Limit:          limit,
+		ClusterEnabled: h.config.clusterEnabled,
+		Routes:         []debugClusterRoute{},
+	}
+	if h.config.registry == nil {
+		writeDebugJSON(w, http.StatusOK, resp)
+		return
+	}
+	lister, ok := h.config.registry.(cluster.RouteLister)
+	if !ok {
+		resp.Code = "registry_list_unsupported"
+		resp.Reason = "cluster registry does not support route listing"
+		writeDebugJSON(w, http.StatusNotImplemented, resp)
+		return
+	}
+
+	listed, err := lister.List(r.Context(), filter)
+	if err != nil {
+		resp.Code = "registry_list_failed"
+		resp.Reason = err.Error()
+		writeDebugJSON(w, http.StatusBadGateway, resp)
+		return
+	}
+
+	now := time.Now()
+	resp.Total = listed.Total
+	resp.UniqueClients = listed.UniqueClients
+	resp.Routes = make([]debugClusterRoute, 0, len(listed.Routes))
+	for _, entry := range listed.Routes {
+		route := debugClusterRouteFromEntry(entry, now)
+		markDebugClusterRouteLocal(route, entry, h.config)
+		resp.Routes = append(resp.Routes, *route)
+	}
+
+	writeDebugJSON(w, http.StatusOK, resp)
+}
+
+func (h *debugClusterRoutesHandler) authorized(r *http.Request) bool {
 	return h.config.internalToken == "" || r.Header.Get(downlink.InternalTokenHeader) == h.config.internalToken
 }
 
@@ -588,6 +682,22 @@ func debugClusterRouteFromEntry(entry cluster.RouteEntry, now time.Time) *debugC
 		ExpiresAt:       optionalDebugTime(entry.ExpiresAt),
 		ExpiresInMillis: expiresInMillis(entry.ExpiresAt, now),
 	}
+}
+
+func markDebugClusterRouteLocal(route *debugClusterRoute, entry cluster.RouteEntry, config debugHandlerConfig) {
+	if route == nil {
+		return
+	}
+	route.LocalRoute = entry.GatewayNode != "" && entry.GatewayNode == config.gatewayNode
+	if !route.LocalRoute || config.sessions == nil || entry.SessionID == "" {
+		return
+	}
+
+	found, ok := config.sessions.GetBySessionID(entry.SessionID)
+	if !ok || found == nil {
+		return
+	}
+	route.LocalSession = found.ClientID == entry.ClientID && found.DeviceID == entry.DeviceID
 }
 
 func expiresInMillis(expiresAt time.Time, now time.Time) int64 {

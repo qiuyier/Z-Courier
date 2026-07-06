@@ -212,6 +212,22 @@ export type AdminClusterRoute = {
   updated_at?: string;
   expires_at?: string;
   expires_in_ms?: number;
+  local_route: boolean;
+  local_session_found: boolean;
+};
+
+export type AdminClusterRoutes = {
+  code: string;
+  reason?: string;
+  gateway_node: string;
+  session_id?: string;
+  client_id?: string;
+  device_id?: string;
+  limit: number;
+  total: number;
+  unique_clients: number;
+  cluster_enabled: boolean;
+  routes: AdminClusterRoute[];
 };
 
 export type AdminClientRouteLookup = {

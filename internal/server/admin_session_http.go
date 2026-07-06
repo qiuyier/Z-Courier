@@ -356,6 +356,7 @@ func adminSessionProtectedPath(path string) bool {
 		"/internal/admin/diagnose",
 		"/internal/debug/route",
 		"/internal/debug/sessions",
+		"/internal/debug/cluster/routes",
 		"/internal/debug/session/disconnect",
 		"/internal/debug/push",
 		"/internal/message/status",

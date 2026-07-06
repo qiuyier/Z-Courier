@@ -196,7 +196,9 @@ runtime troubleshooting snapshot. `check` actively probes configured runtime
 dependencies. `diagnose` collects a safe JSON bundle for incident reports.
 `routes` shows enabled MsgID route ranges. `route` answers where the cluster
 would send a client/device. `sessions` answers which sessions are local to the
-gateway node you queried. `message` and `messages` inspect persisted downlink
+gateway node you queried. The web console also exposes a Cluster Routes scope
+that reads the online route registry so one gateway console can inspect clients
+connected to another node. `message` and `messages` inspect persisted downlink
 delivery state.
 
 Local service URLs and the manual workflow are documented in

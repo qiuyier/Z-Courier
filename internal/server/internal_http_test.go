@@ -1607,6 +1607,108 @@ func TestInternalHTTPDebugSessionsFiltersBySessionAndDevice(t *testing.T) {
 	}
 }
 
+func TestInternalHTTPDebugClusterRoutesListsRegistryRoutes(t *testing.T) {
+	sessions := session.NewManager()
+	if _, err := sessions.Bind(session.BindInput{
+		SessionID:   "session-local",
+		ConnID:      9,
+		ClientID:    "client-1",
+		DeviceID:    "device-1",
+		GatewayNode: "gateway-a",
+	}); err != nil {
+		t.Fatalf("Bind() error = %v", err)
+	}
+
+	now := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
+	registry := cluster.NewMemoryRegistry(cluster.MemoryRegistryConfig{TTL: time.Minute, Now: func() time.Time { return now }})
+	entries := []cluster.RouteEntry{
+		{
+			ClientID:     "client-1",
+			DeviceID:     "device-1",
+			SessionID:    "session-local",
+			GatewayNode:  "gateway-a",
+			InternalAddr: "http://gateway-a:18182",
+			TokenID:      "token-1",
+		},
+		{
+			ClientID:     "client-1",
+			DeviceID:     "device-2",
+			SessionID:    "session-remote",
+			GatewayNode:  "gateway-b",
+			InternalAddr: "http://gateway-b:18183",
+			TokenID:      "token-2",
+		},
+		{
+			ClientID:     "client-2",
+			DeviceID:     "device-1",
+			SessionID:    "session-other",
+			GatewayNode:  "gateway-b",
+			InternalAddr: "http://gateway-b:18183",
+			TokenID:      "token-3",
+		},
+	}
+	for _, entry := range entries {
+		if err := registry.Bind(context.Background(), entry); err != nil {
+			t.Fatalf("registry Bind(%s) error = %v", entry.SessionID, err)
+		}
+	}
+
+	service := downlink.NewService(sessions, testConnectionFinder{})
+	config := normalizeConfig(Config{
+		Sessions:         sessions,
+		GatewayNode:      "gateway-a",
+		InternalHTTPAddr: "127.0.0.1:18080",
+		InternalToken:    "secret",
+		Cluster: ClusterConfig{
+			Enabled:      true,
+			InternalAddr: "http://gateway-a:18182",
+		},
+	})
+	server := mustInternalHTTPServer(t, config, service, &gatewayHealth{}, registry)
+
+	req := httptest.NewRequest(http.MethodGet, "/internal/debug/cluster/routes?client_id=client-1&limit=1", nil)
+	req.Header.Set(downlink.InternalTokenHeader, "secret")
+	rec := httptest.NewRecorder()
+	server.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var resp debugClusterRoutesResponse
+	if err := sonic.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if resp.Code != "ok" || !resp.ClusterEnabled || resp.ClientID != "client-1" || resp.Total != 2 || resp.Limit != 1 || len(resp.Routes) != 1 {
+		t.Fatalf("response = %+v, want filtered total=2 limit=1 one route", resp)
+	}
+	if resp.UniqueClients != 1 {
+		t.Fatalf("UniqueClients = %d, want 1", resp.UniqueClients)
+	}
+	if got := resp.Routes[0]; got.SessionID != "session-local" || !got.LocalRoute || !got.LocalSession {
+		t.Fatalf("first route = %+v, want local session route", got)
+	}
+}
+
+func TestInternalHTTPDebugClusterRoutesRequiresToken(t *testing.T) {
+	sessions := session.NewManager()
+	service := downlink.NewService(sessions, testConnectionFinder{})
+	config := normalizeConfig(Config{
+		Sessions:         sessions,
+		InternalHTTPAddr: "127.0.0.1:18080",
+		InternalToken:    "secret",
+	})
+
+	server := mustInternalHTTPServer(t, config, service, &gatewayHealth{}, nil)
+	req := httptest.NewRequest(http.MethodGet, "/internal/debug/cluster/routes", nil)
+	rec := httptest.NewRecorder()
+	server.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+}
+
 func TestInternalHTTPDebugSessionDisconnectOperatorStopsLocalConnection(t *testing.T) {
 	sessions := session.NewManager()
 	if _, err := sessions.Bind(session.BindInput{

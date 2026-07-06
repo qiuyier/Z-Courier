@@ -135,6 +135,16 @@ Acceptance criteria:
 - APIs remain bounded and paginated.
 - Existing local-only session APIs keep working.
 
+Implemented surface:
+
+- `/internal/debug/cluster/routes` lists bounded online routes from the cluster
+  registry.
+- The admin console Sessions page can switch between Local Sessions and Cluster
+  Routes.
+- Cluster route cards show owning node, internal address, TTL, and whether the
+  queried gateway also owns the local TCP session.
+- Remote mutation actions stay out of this view and are handled by V11.4.
+
 ### V11.4 Remote Operation Safety Model
 
 Purpose: decide which operations can safely cross gateway nodes and make those

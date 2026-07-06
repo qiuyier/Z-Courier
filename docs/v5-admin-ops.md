@@ -274,6 +274,7 @@ The existing debug endpoints remain part of the operator workflow:
 ```text
 GET /internal/debug/route?client_id=...&device_id=...
 GET /internal/debug/sessions?session_id=...&client_id=...&device_id=...&limit=...
+GET /internal/debug/cluster/routes?session_id=...&client_id=...&device_id=...&limit=...
 POST /internal/debug/session/disconnect
 ```
 
@@ -285,6 +286,12 @@ It does not claim to list all sessions across all nodes. Operators can filter
 by `session_id`, by `client_id`, or by `client_id` plus `device_id`. A
 `session_id` lookup is exact; optional `client_id` and `device_id` values act
 as mismatch guards.
+
+`debug/cluster/routes` answers which online routes are currently present in the
+cluster registry. It is bounded by `limit` and includes the owning
+`gateway_node`, peer `internal_addr`, route TTL, and whether the queried gateway
+also owns the local TCP session. This endpoint is a cluster-wide route view, not
+a remote session-disconnect API.
 
 `session/disconnect` is a guarded mutation for local sessions only. Browser
 admin sessions need the `session:disconnect` permission, which is granted to

@@ -123,6 +123,7 @@ func newInternalHTTPServer(config Config, logger *zap.Logger, service *downlink.
 	mux.Handle("/internal/admin/diagnose", withConsolePermission(newAdminDiagnoseHandler(handlerConfig, health, registry, runtime, service), adminPermissionRead))
 	mux.Handle("/internal/debug/route", withConsolePermission(newDebugRouteHandler(handlerConfig, registry), adminPermissionRead))
 	mux.Handle("/internal/debug/sessions", withConsolePermission(newDebugSessionsHandler(handlerConfig), adminPermissionRead))
+	mux.Handle("/internal/debug/cluster/routes", withConsolePermission(newDebugClusterRoutesHandler(handlerConfig, registry), adminPermissionRead))
 	mux.Handle("/internal/debug/session/disconnect", withConsolePermission(newDebugSessionDisconnectHandler(handlerConfig, service.ConnectionFinder(), logger, adminAudit), adminPermissionSessionDisconnect))
 	debugPushConfig := debugConfig(handlerConfig, nil)
 	debugPushConfig.logger = logger

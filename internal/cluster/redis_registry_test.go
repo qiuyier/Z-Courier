@@ -63,6 +63,88 @@ func TestRedisRegistryLookupAcrossInstances(t *testing.T) {
 	}
 }
 
+func TestRedisRegistryListAcrossInstances(t *testing.T) {
+	server := miniredis.RunT(t)
+	now := time.Date(2026, 6, 9, 12, 0, 0, 0, time.UTC)
+	gatewayA := newTestRedisRegistry(t, server, 30*time.Second, &now)
+	defer gatewayA.Close()
+	gatewayB := newTestRedisRegistry(t, server, 30*time.Second, &now)
+	defer gatewayB.Close()
+
+	entries := []RouteEntry{
+		{
+			ClientID:     "client-2",
+			DeviceID:     "device-1",
+			SessionID:    "session-2",
+			GatewayNode:  "gateway-b",
+			InternalAddr: "http://gateway-b:18080",
+			TokenID:      "token-2",
+		},
+		{
+			ClientID:     "client-1",
+			DeviceID:     "device-2",
+			SessionID:    "session-1",
+			GatewayNode:  "gateway-a",
+			InternalAddr: "http://gateway-a:18080",
+			TokenID:      "token-1",
+		},
+		{
+			ClientID:     "client-1",
+			DeviceID:     "device-1",
+			SessionID:    "session-3",
+			GatewayNode:  "gateway-a",
+			InternalAddr: "http://gateway-a:18080",
+			TokenID:      "token-3",
+		},
+	}
+	for _, entry := range entries {
+		if err := gatewayA.Bind(context.Background(), entry); err != nil {
+			t.Fatalf("Bind(%s) error = %v", entry.SessionID, err)
+		}
+	}
+
+	listed, err := gatewayB.List(context.Background(), RouteListFilter{ClientID: "client-1", Limit: 1})
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if listed.Total != 2 || len(listed.Routes) != 1 {
+		t.Fatalf("List() = %+v, want total=2 one route", listed)
+	}
+	if listed.Routes[0].DeviceID != "device-1" || listed.Routes[0].SessionID != "session-3" {
+		t.Fatalf("first route = %+v, want sorted client-1/device-1", listed.Routes[0])
+	}
+
+	byDevice, err := gatewayB.List(context.Background(), RouteListFilter{ClientID: "client-1", DeviceID: "device-2"})
+	if err != nil {
+		t.Fatalf("List(exact) error = %v", err)
+	}
+	if byDevice.Total != 1 || len(byDevice.Routes) != 1 || byDevice.Routes[0].SessionID != "session-1" {
+		t.Fatalf("List(exact) = %+v, want session-1", byDevice)
+	}
+}
+
+func TestRedisRegistryListExpiresEntries(t *testing.T) {
+	server := miniredis.RunT(t)
+	now := time.Date(2026, 6, 9, 12, 0, 0, 0, time.UTC)
+	registry := newTestRedisRegistry(t, server, 10*time.Second, &now)
+	defer registry.Close()
+
+	entry := testRouteEntry("session-1")
+	if err := registry.Bind(context.Background(), entry); err != nil {
+		t.Fatalf("Bind() error = %v", err)
+	}
+
+	now = now.Add(11 * time.Second)
+	server.FastForward(11 * time.Second)
+	listed, err := registry.List(context.Background(), RouteListFilter{})
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if listed.Total != 0 || len(listed.Routes) != 0 {
+		t.Fatalf("List() after expiry = %+v, want empty", listed)
+	}
+}
+
 func TestRedisRegistryUnbindRequiresMatchingSessionID(t *testing.T) {
 	server := miniredis.RunT(t)
 	registry := newTestRedisRegistry(t, server, 30*time.Second, nil)

@@ -200,6 +200,69 @@ func (r *RedisRegistry) Lookup(ctx context.Context, key RouteKey) (RouteEntry, b
 	return entry, true, nil
 }
 
+func (r *RedisRegistry) List(ctx context.Context, filter RouteListFilter) (RouteListResult, error) {
+	if err := ctx.Err(); err != nil {
+		return RouteListResult{}, err
+	}
+	if err := r.ensureOpen(); err != nil {
+		return RouteListResult{}, err
+	}
+
+	if filter.ClientID != "" && filter.DeviceID != "" {
+		entry, ok, err := r.Lookup(ctx, RouteKey{ClientID: filter.ClientID, DeviceID: filter.DeviceID})
+		if err != nil || !ok || !routeEntryMatchesFilter(entry, filter) {
+			return RouteListResult{}, err
+		}
+		return RouteListResult{Total: 1, UniqueClients: 1, Routes: []RouteEntry{entry}}, nil
+	}
+
+	now := r.now()
+	var cursor uint64
+	routes := make([]RouteEntry, 0)
+	pattern := r.onlineRoutePattern()
+	for {
+		keys, nextCursor, err := r.client.Scan(ctx, cursor, pattern, 100).Result()
+		if err != nil {
+			return RouteListResult{}, err
+		}
+		for _, key := range keys {
+			fields, err := r.client.HGetAll(ctx, key).Result()
+			if err != nil {
+				return RouteListResult{}, err
+			}
+			if len(fields) == 0 {
+				continue
+			}
+			entry, err := routeEntryFromFields(fields)
+			if err != nil {
+				return RouteListResult{}, err
+			}
+			if err := validateRouteEntry(entry); err != nil {
+				return RouteListResult{}, err
+			}
+			if entry.Expired(now) {
+				_ = r.client.Del(ctx, key).Err()
+				continue
+			}
+			if routeEntryMatchesFilter(entry, filter) {
+				routes = append(routes, entry)
+			}
+		}
+		cursor = nextCursor
+		if cursor == 0 {
+			break
+		}
+	}
+
+	sortRouteEntries(routes)
+	total := len(routes)
+	uniqueClients := uniqueRouteClientCount(routes)
+	if filter.Limit > 0 && len(routes) > filter.Limit {
+		routes = routes[:filter.Limit]
+	}
+	return RouteListResult{Total: total, UniqueClients: uniqueClients, Routes: routes}, nil
+}
+
 func (r *RedisRegistry) Touch(ctx context.Context, entry RouteEntry) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -268,6 +331,10 @@ func (r *RedisRegistry) normalizeEntry(entry RouteEntry, now time.Time) RouteEnt
 
 func (r *RedisRegistry) routeKey(key RouteKey) string {
 	return r.keyPrefix + ":online:" + encodeKeyPart(key.ClientID) + ":" + encodeKeyPart(key.DeviceID)
+}
+
+func (r *RedisRegistry) onlineRoutePattern() string {
+	return r.keyPrefix + ":online:*"
 }
 
 func encodeKeyPart(value string) string {

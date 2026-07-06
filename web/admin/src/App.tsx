@@ -30,6 +30,7 @@ import {
   fetchAdminCheck,
   fetchAdminSession,
   fetchClientRoute,
+  fetchClusterRoutes,
   fetchDiagnosisBundle,
   fetchDiagnostics,
   fetchMessage,
@@ -49,6 +50,8 @@ import type {
   AdminCheck,
   AdminCheckResult,
   AdminClientRouteLookup,
+  AdminClusterRoute,
+  AdminClusterRoutes,
   AdminConsoleSession,
   AdminDiagnosisBundle,
   AdminDiagnostics,
@@ -166,6 +169,7 @@ type RemoteState<T> =
 type PageID = "overview" | "routes" | "sessions" | "messages" | "audit" | "checks" | "diagnostics";
 type MessageAction = "requeue" | "discard";
 type ClientRouteStatus = "idle" | "local" | "remote" | "offline" | "stale";
+type SessionScope = "local" | "cluster";
 type DownlinkTestPushForm = {
   clientID: string;
   deviceID: string;
@@ -221,6 +225,7 @@ export default function App() {
   const [state, setState] = useState<RemoteState<AdminOverview>>({ status: "idle" });
   const [routeState, setRouteState] = useState<RemoteState<AdminRoutes>>({ status: "idle" });
   const [sessionsState, setSessionsState] = useState<RemoteState<AdminSessions>>({ status: "idle" });
+  const [clusterRoutesState, setClusterRoutesState] = useState<RemoteState<AdminClusterRoutes>>({ status: "idle" });
   const [clientRouteState, setClientRouteState] = useState<RemoteState<AdminClientRouteLookup>>({ status: "idle" });
   const [diagnosticsState, setDiagnosticsState] = useState<RemoteState<AdminDiagnostics>>({ status: "idle" });
   const [diagnosisBundleState, setDiagnosisBundleState] = useState<RemoteState<AdminDiagnosisBundle>>({ status: "idle" });
@@ -236,6 +241,7 @@ export default function App() {
   const [sessionClientID, setSessionClientID] = useState("");
   const [sessionDeviceID, setSessionDeviceID] = useState("");
   const [sessionLimit, setSessionLimit] = useState(100);
+  const [sessionScope, setSessionScope] = useState<SessionScope>("local");
   const [selectedSessionID, setSelectedSessionID] = useState("");
   const [diagnosisClientID, setDiagnosisClientID] = useState("");
   const [diagnosisDeviceID, setDiagnosisDeviceID] = useState("");
@@ -274,6 +280,7 @@ export default function App() {
     setState({ status: "idle" });
     setRouteState({ status: "idle" });
     setSessionsState({ status: "idle" });
+    setClusterRoutesState({ status: "idle" });
     setClientRouteState({ status: "idle" });
     setDiagnosticsState({ status: "idle" });
     setDiagnosisBundleState({ status: "idle" });
@@ -357,19 +364,25 @@ export default function App() {
     async (signal?: AbortSignal) => {
       if (!authenticated) {
         setSessionsState({ status: "idle" });
+        setClusterRoutesState({ status: "idle" });
         return;
       }
-      setSessionsState((current) => ({ status: "loading", data: current.data }));
+      const params = {
+        clientID: sessionClientID,
+        deviceID: sessionDeviceID,
+        sessionID,
+        limit: sessionLimit,
+      };
       try {
-        const data = await fetchSessions(
-          {
-            clientID: sessionClientID,
-            deviceID: sessionDeviceID,
-            sessionID,
-            limit: sessionLimit,
-          },
-          signal,
-        );
+        if (sessionScope === "cluster") {
+          setClusterRoutesState((current) => ({ status: "loading", data: current.data }));
+          const data = await fetchClusterRoutes(params, signal);
+          setClusterRoutesState({ status: "ready", data });
+          return;
+        }
+
+        setSessionsState((current) => ({ status: "loading", data: current.data }));
+        const data = await fetchSessions(params, signal);
         setSessionsState({ status: "ready", data });
       } catch (error) {
         if (signal?.aborted) {
@@ -380,10 +393,14 @@ export default function App() {
           return;
         }
         const message = requestErrorMessage(error);
+        if (sessionScope === "cluster") {
+          setClusterRoutesState((current) => ({ status: "error", data: current.data, error: message }));
+          return;
+        }
         setSessionsState((current) => ({ status: "error", data: current.data, error: message }));
       }
     },
-    [authenticated, expireSession, sessionClientID, sessionDeviceID, sessionID, sessionLimit],
+    [authenticated, expireSession, sessionClientID, sessionDeviceID, sessionID, sessionLimit, sessionScope],
   );
 
   const lookupClientRoute = useCallback(
@@ -419,6 +436,16 @@ export default function App() {
       setSessionClientID(session.client_id);
       setSessionDeviceID(session.device_id);
       void lookupClientRoute(session.client_id, session.device_id);
+    },
+    [lookupClientRoute],
+  );
+
+  const lookupClusterRoute = useCallback(
+    (route: AdminClusterRoute) => {
+      setSelectedSessionID("");
+      setSessionClientID(route.client_id);
+      setSessionDeviceID(route.device_id);
+      void lookupClientRoute(route.client_id, route.device_id);
     },
     [lookupClientRoute],
   );
@@ -740,6 +767,21 @@ export default function App() {
     setActivePage("messages");
   }, []);
 
+  const useClusterRouteForDownlinkTestPush = useCallback((route: AdminClusterRoute) => {
+    const clientID = route.client_id?.trim();
+    const deviceID = route.device_id?.trim();
+    if (!clientID || !deviceID) {
+      return;
+    }
+    setDownlinkTestPushForm((current) => ({
+      ...current,
+      clientID,
+      deviceID,
+    }));
+    setDownlinkTestPushState({ status: "idle" });
+    setActivePage("messages");
+  }, []);
+
   const openDownlinkTestPush = useCallback(() => {
     if (!authenticated) {
       setDownlinkTestPushState({ status: "idle" });
@@ -959,6 +1001,7 @@ export default function App() {
     }
     if (!authenticated) {
       setSessionsState({ status: "idle" });
+      setClusterRoutesState({ status: "idle" });
       setClientRouteState({ status: "idle" });
       return;
     }
@@ -1244,6 +1287,7 @@ export default function App() {
           {activePage === "overview" && state.status === "error" && <ErrorBanner message={state.error} />}
           {activePage === "routes" && routeState.status === "error" && <ErrorBanner message={routeState.error} />}
           {activePage === "sessions" && sessionsState.status === "error" && <ErrorBanner message={sessionsState.error} />}
+          {activePage === "sessions" && clusterRoutesState.status === "error" && <ErrorBanner message={clusterRoutesState.error} />}
           {activePage === "sessions" && clientRouteState.status === "error" && <ErrorBanner message={clientRouteState.error} />}
           {activePage === "messages" && messagesState.status === "error" && <ErrorBanner message={messagesState.error} />}
           {activePage === "audit" && auditState.status === "error" && <ErrorBanner message={auditState.error} />}
@@ -1256,23 +1300,30 @@ export default function App() {
             <OverviewSkeleton />
           ) : activePage === "routes" && authenticated && (routeState.status !== "error" || routeState.data) ? (
             <RoutesPage state={routeState} />
-          ) : activePage === "sessions" && authenticated && (sessionsState.status !== "error" || sessionsState.data) ? (
+          ) : activePage === "sessions" && authenticated && (
+            sessionScope === "cluster" ? (clusterRoutesState.status !== "error" || clusterRoutesState.data) : (sessionsState.status !== "error" || sessionsState.data)
+          ) ? (
             <SessionsPage
               canDisconnectSessions={canDisconnectSessions}
               clientID={sessionClientID}
+              clusterState={clusterRoutesState}
               deviceID={sessionDeviceID}
               limit={sessionLimit}
               selectedSessionID={selectedSessionID}
               sessionID={sessionID}
+              sessionScope={sessionScope}
               onClientIDChange={setSessionClientID}
               onDeviceIDChange={setSessionDeviceID}
               onLimitChange={setSessionLimit}
               onLookupRoute={() => lookupClientRoute()}
+              onClusterRouteLookup={lookupClusterRoute}
               onSessionIDChange={setSessionID}
               onSessionSelect={setSelectedSessionID}
+              onSessionScopeChange={setSessionScope}
               onSessionDisconnect={openSessionDisconnect}
               onSessionRouteLookup={lookupSessionRoute}
               onSessionsRefresh={refreshSessions}
+              onUseClusterRouteForTestPush={useClusterRouteForDownlinkTestPush}
               onUseRouteForTestPush={useRouteForDownlinkTestPush}
               routeState={clientRouteState}
               state={sessionsState}
@@ -1540,52 +1591,68 @@ function RoutesPage({ state }: { state: RemoteState<AdminRoutes> }) {
 function SessionsPage({
   canDisconnectSessions,
   clientID,
+  clusterState,
   deviceID,
   limit,
   selectedSessionID,
   sessionID,
+  sessionScope,
   onClientIDChange,
   onDeviceIDChange,
   onLimitChange,
   onLookupRoute,
+  onClusterRouteLookup,
   onSessionIDChange,
   onSessionSelect,
+  onSessionScopeChange,
   onSessionDisconnect,
   onSessionRouteLookup,
   onSessionsRefresh,
+  onUseClusterRouteForTestPush,
   onUseRouteForTestPush,
   routeState,
   state,
 }: {
   canDisconnectSessions: boolean;
   clientID: string;
+  clusterState: RemoteState<AdminClusterRoutes>;
   deviceID: string;
   limit: number;
   selectedSessionID: string;
   sessionID: string;
+  sessionScope: SessionScope;
   onClientIDChange: (clientID: string) => void;
   onDeviceIDChange: (deviceID: string) => void;
   onLimitChange: (limit: number) => void;
   onLookupRoute: () => void | Promise<void>;
+  onClusterRouteLookup: (route: AdminClusterRoute) => void;
   onSessionIDChange: (sessionID: string) => void;
   onSessionSelect: (sessionID: string) => void;
+  onSessionScopeChange: (scope: SessionScope) => void;
   onSessionDisconnect: (session: AdminSession) => void;
   onSessionRouteLookup: (session: AdminSession) => void;
   onSessionsRefresh: () => void | Promise<void>;
+  onUseClusterRouteForTestPush: (route: AdminClusterRoute) => void;
   onUseRouteForTestPush: (lookup: AdminClientRouteLookup) => void;
   routeState: RemoteState<AdminClientRouteLookup>;
   state: RemoteState<AdminSessions>;
 }) {
   const sessions = state.data?.sessions ?? [];
+  const clusterRoutes = clusterState.data?.routes ?? [];
   const total = state.data?.total ?? sessions.length;
+  const clusterTotal = clusterState.data?.total ?? clusterRoutes.length;
   const uniqueClients = state.data?.unique_clients ?? new Set(sessions.map((session) => session.client_id)).size;
+  const clusterUniqueClients = clusterState.data?.unique_clients ?? new Set(clusterRoutes.map((route) => route.client_id)).size;
   const routeStatus = clientRouteStatus(routeState.data);
-  const loadingSessions = state.status === "loading";
+  const loadingSessions = sessionScope === "cluster" ? clusterState.status === "loading" : state.status === "loading";
   const loadingRoute = routeState.status === "loading";
   const selectedSession = sessions.find((session) => session.session_id === selectedSessionID) ?? (sessions.length === 1 ? sessions[0] : null);
-  const filtered = [state.data?.session_id, state.data?.client_id, state.data?.device_id].some((value) => (value ?? "") !== "");
+  const filtered = [sessionID, clientID, deviceID].some((value) => value.trim() !== "");
 
-  if (state.status === "loading" && !state.data) {
+  if (sessionScope === "local" && state.status === "loading" && !state.data) {
+    return <SessionsSkeleton />;
+  }
+  if (sessionScope === "cluster" && clusterState.status === "loading" && !clusterState.data) {
     return <SessionsSkeleton />;
   }
 
@@ -1594,19 +1661,44 @@ function SessionsPage({
       <section className="rounded-lg border border-line bg-white p-5 shadow-diffusion">
         <div className="grid gap-5 xl:grid-cols-[0.95fr_1.05fr]">
           <div>
-            <p className="text-sm font-medium text-zinc-500">Local Sessions</p>
+            <div className="inline-flex rounded-lg border border-line bg-zinc-50 p-1">
+              <button
+                className={[
+                  "inline-flex items-center justify-center rounded-md px-3 py-1.5 text-sm font-medium transition duration-300",
+                  sessionScope === "local" ? "bg-zinc-950 text-white shadow-sm" : "text-zinc-500 hover:bg-white hover:text-ink",
+                ].join(" ")}
+                onClick={() => onSessionScopeChange("local")}
+                type="button"
+              >
+                Local Sessions
+              </button>
+              <button
+                className={[
+                  "inline-flex items-center justify-center rounded-md px-3 py-1.5 text-sm font-medium transition duration-300",
+                  sessionScope === "cluster" ? "bg-zinc-950 text-white shadow-sm" : "text-zinc-500 hover:bg-white hover:text-ink",
+                ].join(" ")}
+                onClick={() => onSessionScopeChange("cluster")}
+                type="button"
+              >
+                Cluster Routes
+              </button>
+            </div>
             <div className="mt-2 flex flex-wrap items-end gap-3">
-              <h2 className="font-mono text-5xl tracking-tight text-ink">{total.toLocaleString()}</h2>
+              <h2 className="font-mono text-5xl tracking-tight text-ink">
+                {(sessionScope === "cluster" ? clusterTotal : total).toLocaleString()}
+              </h2>
               <RouteStatusBadge status={routeStatus} />
             </div>
-            <p className="mt-2 text-sm text-zinc-500">gateway node: {state.data?.gateway_node ?? "--"}</p>
+            <p className="mt-2 text-sm text-zinc-500">
+              gateway node: {(sessionScope === "cluster" ? clusterState.data?.gateway_node : state.data?.gateway_node) ?? "--"}
+            </p>
           </div>
 
           <div className="grid gap-3 md:grid-cols-2">
-            <MetricRow label="Loaded" value={sessions.length.toLocaleString()} />
-            <MetricRow label="Unique Clients" value={uniqueClients.toLocaleString()} />
-            <MetricRow label="Limit" value={(state.data?.limit ?? limit).toLocaleString()} />
-            <MetricRow label="Refresh State" value={state.status} />
+            <MetricRow label="Loaded" value={(sessionScope === "cluster" ? clusterRoutes.length : sessions.length).toLocaleString()} />
+            <MetricRow label="Unique Clients" value={(sessionScope === "cluster" ? clusterUniqueClients : uniqueClients).toLocaleString()} />
+            <MetricRow label="Limit" value={((sessionScope === "cluster" ? clusterState.data?.limit : state.data?.limit) ?? limit).toLocaleString()} />
+            <MetricRow label="Refresh State" value={sessionScope === "cluster" ? clusterState.status : state.status} />
           </div>
         </div>
       </section>
@@ -1685,7 +1777,7 @@ function SessionsPage({
               type="submit"
             >
               <ArrowClockwise size={16} weight="bold" />
-              {loadingSessions ? "Loading..." : "Refresh Sessions"}
+              {loadingSessions ? "Loading..." : sessionScope === "cluster" ? "Refresh Routes" : "Refresh Sessions"}
             </button>
           </form>
         </article>
@@ -1702,33 +1794,136 @@ function SessionsPage({
         />
       </section>
 
-      <SessionDetailPanel
-        canDisconnectSessions={canDisconnectSessions}
-        onDisconnect={onSessionDisconnect}
-        onLookupRoute={onSessionRouteLookup}
-        routeState={routeState}
-        session={selectedSession}
-      />
+      {sessionScope === "local" ? (
+        <>
+          <SessionDetailPanel
+            canDisconnectSessions={canDisconnectSessions}
+            onDisconnect={onSessionDisconnect}
+            onLookupRoute={onSessionRouteLookup}
+            routeState={routeState}
+            session={selectedSession}
+          />
 
-      {state.status !== "loading" && sessions.length === 0 ? (
-        <SessionsEmptyState filtered={filtered} />
+          {state.status !== "loading" && sessions.length === 0 ? (
+            <SessionsEmptyState filtered={filtered} />
+          ) : (
+            <section className="grid gap-3">
+              {sessions.map((session, index) => (
+                <SessionCard
+                  canDisconnectSessions={canDisconnectSessions}
+                  index={index}
+                  key={`${session.session_id}-${session.conn_id}`}
+                  onSelect={onSessionSelect}
+                  onDisconnect={onSessionDisconnect}
+                  onLookupRoute={onSessionRouteLookup}
+                  selected={selectedSession?.session_id === session.session_id}
+                  session={session}
+                />
+              ))}
+            </section>
+          )}
+        </>
       ) : (
-        <section className="grid gap-3">
-          {sessions.map((session, index) => (
-            <SessionCard
-              canDisconnectSessions={canDisconnectSessions}
-              index={index}
-              key={`${session.session_id}-${session.conn_id}`}
-              onSelect={onSessionSelect}
-              onDisconnect={onSessionDisconnect}
-              onLookupRoute={onSessionRouteLookup}
-              selected={selectedSession?.session_id === session.session_id}
-              session={session}
-            />
-          ))}
-        </section>
+        <ClusterRoutesList
+          filtered={filtered}
+          loading={clusterState.status === "loading"}
+          onLookupRoute={onClusterRouteLookup}
+          onUseRouteForTestPush={onUseClusterRouteForTestPush}
+          routes={clusterRoutes}
+        />
       )}
     </div>
+  );
+}
+
+function ClusterRoutesList({
+  filtered,
+  loading,
+  onLookupRoute,
+  onUseRouteForTestPush,
+  routes,
+}: {
+  filtered: boolean;
+  loading: boolean;
+  onLookupRoute: (route: AdminClusterRoute) => void;
+  onUseRouteForTestPush: (route: AdminClusterRoute) => void;
+  routes: AdminClusterRoute[];
+}) {
+  if (!loading && routes.length === 0) {
+    return <ClusterRoutesEmptyState filtered={filtered} />;
+  }
+
+  return (
+    <section className="grid gap-3">
+      {routes.map((route, index) => (
+        <ClusterRouteCard
+          index={index}
+          key={`${route.client_id}-${route.device_id}-${route.session_id}`}
+          onLookupRoute={onLookupRoute}
+          onUseRouteForTestPush={onUseRouteForTestPush}
+          route={route}
+        />
+      ))}
+    </section>
+  );
+}
+
+function ClusterRouteCard({
+  index,
+  onLookupRoute,
+  onUseRouteForTestPush,
+  route,
+}: {
+  index: number;
+  onLookupRoute: (route: AdminClusterRoute) => void;
+  onUseRouteForTestPush: (route: AdminClusterRoute) => void;
+  route: AdminClusterRoute;
+}) {
+  const status = clusterRouteStatus(route);
+
+  return (
+    <article
+      className="animate-rise overflow-hidden rounded-lg border border-line bg-white shadow-diffusion transition duration-300"
+      style={{ animationDelay: `${index * 45}ms` }}
+    >
+      <div className="grid gap-4 p-4 lg:grid-cols-[0.74fr_1.26fr] lg:p-5">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <RouteStatusBadge status={status} />
+            <StatusBadge label={route.local_route ? "current node" : "remote node"} tone={route.local_route ? "ok" : "info"} />
+          </div>
+          <h3 className="mt-4 break-words font-mono text-lg font-semibold tracking-tight">{route.client_id || "--"}</h3>
+          <p className="mt-2 break-words text-sm text-zinc-500">{route.device_id || "--"}</p>
+          <div className="mt-5 flex min-w-0 flex-wrap gap-2">
+            <button
+              className="inline-flex min-w-0 items-center justify-center gap-2 rounded-lg border border-line bg-zinc-950 px-3 py-2 text-xs font-medium text-white transition duration-300 hover:bg-zinc-800 active:translate-y-px"
+              onClick={() => onLookupRoute(route)}
+              type="button"
+            >
+              <MagnifyingGlass size={14} weight="bold" />
+              Lookup Route
+            </button>
+            <button
+              className="inline-flex min-w-0 items-center justify-center gap-2 rounded-lg border border-line bg-white px-3 py-2 text-xs font-medium text-ink transition duration-300 hover:border-zinc-300 hover:bg-zinc-50 active:translate-y-px"
+              onClick={() => onUseRouteForTestPush(route)}
+              type="button"
+            >
+              <PlugsConnected size={14} weight="bold" />
+              Use in Test Push
+            </button>
+          </div>
+        </div>
+
+        <div className="grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-3">
+          <MessageField label="Gateway" value={route.gateway_node || "--"} />
+          <MessageField label="Internal" value={route.internal_addr || "--"} wide />
+          <MessageField label="SessionID" value={route.session_id || "--"} wide />
+          <MessageField label="Token" value={route.token_id || "--"} />
+          <MessageField label="Updated" value={formatOptionalDate(route.updated_at)} />
+          <MessageField label="Expires In" value={formatMillis(route.expires_in_ms)} />
+        </div>
+      </div>
+    </article>
   );
 }
 
@@ -4282,6 +4477,22 @@ function MessagesEmptyState({ status }: { status: MessageStatus }) {
   );
 }
 
+function ClusterRoutesEmptyState({ filtered }: { filtered: boolean }) {
+  return (
+    <div className="rounded-lg border border-line bg-white px-5 py-8 shadow-diffusion">
+      <div className="max-w-xl">
+        <div className="grid size-12 place-items-center rounded-lg border border-line bg-zinc-50 text-accent">
+          <GitBranch size={22} weight="duotone" />
+        </div>
+        <h2 className="mt-5 text-2xl font-semibold tracking-tight">No Cluster Routes</h2>
+        <p className="mt-2 text-sm leading-relaxed text-zinc-500">
+          {filtered ? "No online route matched these filters." : "The cluster registry returned no online routes."}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function AuditEmptyState({ filtered }: { filtered: boolean }) {
   return (
     <div className="rounded-lg border border-line bg-white px-5 py-8 shadow-diffusion">
@@ -4471,6 +4682,16 @@ function clientRouteStatus(lookup?: AdminClientRouteLookup): ClientRouteStatus {
     return "remote";
   }
   return "offline";
+}
+
+function clusterRouteStatus(route: AdminClusterRoute): ClientRouteStatus {
+  if (route.local_session_found) {
+    return "local";
+  }
+  if ((route.expires_in_ms ?? 1) <= 0) {
+    return "stale";
+  }
+  return "remote";
 }
 
 function routeMatchesSession(lookup: AdminClientRouteLookup | undefined, session: AdminSession | null): boolean {

@@ -253,6 +253,14 @@ go run ./cmd/admin sessions \
 `sessions` 只查询当前 gateway 节点的本机连接。可以按 `session_id` 精确查询，
 也可以按 `client_id` 或 `client_id + device_id` 缩小结果范围。
 
+Console 的 Sessions 页面现在可以切换：
+
+- Local Sessions：调用 `/internal/debug/sessions`，只看当前 gateway 进程本机
+  TCP 连接。
+- Cluster Routes：调用 `/internal/debug/cluster/routes`，从 Redis cluster
+  registry 列出在线路由，可以看到连接归属的 `gateway_node`、`internal_addr`、
+  route TTL，以及当前 gateway 是否也拥有本机连接。
+
 查询 client/device 路由：
 
 ```bash
@@ -266,6 +274,8 @@ go run ./cmd/admin route \
 重点区别：
 
 - `sessions` 只看当前 gateway 本机连接。
+- `debug/cluster/routes` 看集群在线路由，适合在 gateway-a 的 console 里找
+  实际连在 gateway-b 的客户端。
 - `route` 会看本机 session，也会看 Redis cluster route。
 
 ## 安全和脱敏

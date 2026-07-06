@@ -80,6 +80,90 @@ func TestMemoryRegistryLookupExpiresEntries(t *testing.T) {
 	}
 }
 
+func TestMemoryRegistryListFiltersRoutes(t *testing.T) {
+	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
+	registry := NewMemoryRegistry(MemoryRegistryConfig{
+		TTL: time.Minute,
+		Now: func() time.Time {
+			return now
+		},
+	})
+
+	entries := []RouteEntry{
+		{
+			ClientID:     "client-2",
+			DeviceID:     "device-1",
+			SessionID:    "session-2",
+			GatewayNode:  "gateway-b",
+			InternalAddr: "http://gateway-b:18080",
+			TokenID:      "token-2",
+		},
+		{
+			ClientID:     "client-1",
+			DeviceID:     "device-2",
+			SessionID:    "session-1",
+			GatewayNode:  "gateway-a",
+			InternalAddr: "http://gateway-a:18080",
+			TokenID:      "token-1",
+		},
+		{
+			ClientID:     "client-1",
+			DeviceID:     "device-1",
+			SessionID:    "session-3",
+			GatewayNode:  "gateway-a",
+			InternalAddr: "http://gateway-a:18080",
+			TokenID:      "token-3",
+		},
+	}
+	for _, entry := range entries {
+		if err := registry.Bind(context.Background(), entry); err != nil {
+			t.Fatalf("Bind(%s) error = %v", entry.SessionID, err)
+		}
+	}
+
+	listed, err := registry.List(context.Background(), RouteListFilter{ClientID: "client-1", Limit: 1})
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if listed.Total != 2 || len(listed.Routes) != 1 {
+		t.Fatalf("List() = %+v, want total=2 one route", listed)
+	}
+	if listed.Routes[0].DeviceID != "device-1" || listed.Routes[0].SessionID != "session-3" {
+		t.Fatalf("first route = %+v, want sorted client-1/device-1", listed.Routes[0])
+	}
+
+	bySession, err := registry.List(context.Background(), RouteListFilter{SessionID: "session-2"})
+	if err != nil {
+		t.Fatalf("List(session) error = %v", err)
+	}
+	if bySession.Total != 1 || len(bySession.Routes) != 1 || bySession.Routes[0].ClientID != "client-2" {
+		t.Fatalf("List(session) = %+v, want client-2 route", bySession)
+	}
+}
+
+func TestMemoryRegistryListExpiresEntries(t *testing.T) {
+	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
+	registry := NewMemoryRegistry(MemoryRegistryConfig{
+		TTL: 10 * time.Second,
+		Now: func() time.Time {
+			return now
+		},
+	})
+	entry := testRouteEntry("session-1")
+	if err := registry.Bind(context.Background(), entry); err != nil {
+		t.Fatalf("Bind() error = %v", err)
+	}
+
+	now = now.Add(11 * time.Second)
+	listed, err := registry.List(context.Background(), RouteListFilter{})
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if listed.Total != 0 || len(listed.Routes) != 0 {
+		t.Fatalf("List() after expiry = %+v, want empty", listed)
+	}
+}
+
 func TestMemoryRegistryTouchRefreshesTTL(t *testing.T) {
 	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
 	registry := NewMemoryRegistry(MemoryRegistryConfig{

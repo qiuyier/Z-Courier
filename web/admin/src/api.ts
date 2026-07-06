@@ -2,6 +2,7 @@ import type {
   AdminAudit,
   AdminCheck,
   AdminClientRouteLookup,
+  AdminClusterRoutes,
   AdminDiagnosisBundle,
   AdminDiagnostics,
   AdminMessages,
@@ -170,6 +171,20 @@ export async function fetchSessions(params: SessionListParams, signal?: AbortSig
     query.set("device_id", params.deviceID.trim());
   }
   return fetchAdminJSON<AdminSessions>(`/internal/debug/sessions?${query.toString()}`, signal);
+}
+
+export async function fetchClusterRoutes(params: SessionListParams, signal?: AbortSignal): Promise<AdminClusterRoutes> {
+  const query = new URLSearchParams({ limit: String(params.limit) });
+  if (params.sessionID.trim() !== "") {
+    query.set("session_id", params.sessionID.trim());
+  }
+  if (params.clientID.trim() !== "") {
+    query.set("client_id", params.clientID.trim());
+  }
+  if (params.deviceID.trim() !== "") {
+    query.set("device_id", params.deviceID.trim());
+  }
+  return fetchAdminJSON<AdminClusterRoutes>(`/internal/debug/cluster/routes?${query.toString()}`, signal);
 }
 
 export async function fetchClientRoute(

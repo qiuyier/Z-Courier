@@ -259,6 +259,7 @@ POST /internal/message/discard
 POST /internal/debug/push
 GET /internal/debug/route
 GET /internal/debug/sessions
+GET /internal/debug/cluster/routes
 POST /internal/kick
 ```
 
@@ -268,6 +269,11 @@ session, if present, and the cluster online route, if cluster routing is enabled
 lists local sessions on the current gateway node. The filters are local-only:
 `session_id` is an exact lookup, while `client_id` and `device_id` narrow the
 local session list.
+`GET /internal/debug/cluster/routes?session_id=...&client_id=...&device_id=...&limit=...`
+lists online routes from the configured cluster registry. This is the
+cluster-wide view used by the admin console: it shows the owning gateway node,
+internal address, route TTL, and whether the queried gateway also has the local
+TCP session.
 `POST /internal/debug/push` is the browser-console test-push endpoint. It
 reuses the normal downlink delivery path and is protected by the
 `downlink:test_push` admin permission.

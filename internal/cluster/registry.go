@@ -3,6 +3,7 @@ package cluster
 import (
 	"context"
 	"errors"
+	"sort"
 	"time"
 )
 
@@ -20,6 +21,23 @@ type OnlineRegistry interface {
 	Lookup(ctx context.Context, key RouteKey) (RouteEntry, bool, error)
 	Touch(ctx context.Context, entry RouteEntry) error
 	Close() error
+}
+
+type RouteLister interface {
+	List(ctx context.Context, filter RouteListFilter) (RouteListResult, error)
+}
+
+type RouteListFilter struct {
+	SessionID string
+	ClientID  string
+	DeviceID  string
+	Limit     int
+}
+
+type RouteListResult struct {
+	Total         int
+	UniqueClients int
+	Routes        []RouteEntry
 }
 
 type RouteKey struct {
@@ -64,4 +82,45 @@ func validateRouteEntry(entry RouteEntry) error {
 		return ErrInvalidRouteEntry
 	}
 	return nil
+}
+
+func routeEntryMatchesFilter(entry RouteEntry, filter RouteListFilter) bool {
+	if filter.SessionID != "" && entry.SessionID != filter.SessionID {
+		return false
+	}
+	if filter.ClientID != "" && entry.ClientID != filter.ClientID {
+		return false
+	}
+	if filter.DeviceID != "" && entry.DeviceID != filter.DeviceID {
+		return false
+	}
+	return true
+}
+
+func sortRouteEntries(entries []RouteEntry) {
+	sort.Slice(entries, func(i, j int) bool {
+		left := entries[i]
+		right := entries[j]
+		if left.ClientID != right.ClientID {
+			return left.ClientID < right.ClientID
+		}
+		if left.DeviceID != right.DeviceID {
+			return left.DeviceID < right.DeviceID
+		}
+		if left.GatewayNode != right.GatewayNode {
+			return left.GatewayNode < right.GatewayNode
+		}
+		return left.SessionID < right.SessionID
+	})
+}
+
+func uniqueRouteClientCount(entries []RouteEntry) int {
+	seen := make(map[string]struct{})
+	for _, entry := range entries {
+		if entry.ClientID == "" {
+			continue
+		}
+		seen[entry.ClientID] = struct{}{}
+	}
+	return len(seen)
 }

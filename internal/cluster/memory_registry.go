@@ -114,6 +114,40 @@ func (r *MemoryRegistry) Lookup(ctx context.Context, key RouteKey) (RouteEntry, 
 	return entry, true, nil
 }
 
+func (r *MemoryRegistry) List(ctx context.Context, filter RouteListFilter) (RouteListResult, error) {
+	if err := ctx.Err(); err != nil {
+		return RouteListResult{}, err
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.closed {
+		return RouteListResult{}, ErrClosed
+	}
+
+	now := r.now()
+	routes := make([]RouteEntry, 0, len(r.entries))
+	for key, entry := range r.entries {
+		if entry.Expired(now) {
+			delete(r.entries, key)
+			continue
+		}
+		if !routeEntryMatchesFilter(entry, filter) {
+			continue
+		}
+		routes = append(routes, entry)
+	}
+
+	sortRouteEntries(routes)
+	total := len(routes)
+	uniqueClients := uniqueRouteClientCount(routes)
+	if filter.Limit > 0 && len(routes) > filter.Limit {
+		routes = routes[:filter.Limit]
+	}
+	return RouteListResult{Total: total, UniqueClients: uniqueClients, Routes: routes}, nil
+}
+
 func (r *MemoryRegistry) Touch(ctx context.Context, entry RouteEntry) error {
 	if err := ctx.Err(); err != nil {
 		return err
