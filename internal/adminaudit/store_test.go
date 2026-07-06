@@ -73,9 +73,41 @@ func TestStoreListFiltersAndClones(t *testing.T) {
 	}
 }
 
+func TestStoreListPaginatesWithCursor(t *testing.T) {
+	store := NewStore(StoreConfig{Capacity: 10})
+	for i := 1; i <= 5; i++ {
+		store.RecordAdminAudit(Entry{Action: fmt.Sprintf("event-%d", i), Result: "success"})
+	}
+
+	first := store.List(Query{Limit: 2})
+	if first.Total != 5 || len(first.Entries) != 2 || !first.HasMore || first.NextCursor == 0 {
+		t.Fatalf("first page = %+v, want two entries with next cursor", first)
+	}
+	if first.Entries[0].Action != "event-5" || first.Entries[1].Action != "event-4" {
+		t.Fatalf("first entries = %+v, want event-5/event-4", first.Entries)
+	}
+
+	second := store.List(Query{Limit: 2, Cursor: first.NextCursor})
+	if second.Total != 5 || len(second.Entries) != 2 || !second.HasMore || second.NextCursor == 0 {
+		t.Fatalf("second page = %+v, want two entries with next cursor", second)
+	}
+	if second.Entries[0].Action != "event-3" || second.Entries[1].Action != "event-2" {
+		t.Fatalf("second entries = %+v, want event-3/event-2", second.Entries)
+	}
+
+	third := store.List(Query{Limit: 2, Cursor: second.NextCursor})
+	if third.Total != 5 || len(third.Entries) != 1 || third.HasMore || third.NextCursor != 0 {
+		t.Fatalf("third page = %+v, want final single entry", third)
+	}
+	if third.Entries[0].Action != "event-1" {
+		t.Fatalf("third entry = %+v, want event-1", third.Entries[0])
+	}
+}
+
 func TestQueryFromValuesClampsLimit(t *testing.T) {
 	values := url.Values{
 		"limit":      []string{"50000"},
+		"cursor":     []string{"42"},
 		"action":     []string{" retry_scan "},
 		"client_id":  []string{" client-1 "},
 		"session_id": []string{" session-1 "},
@@ -84,8 +116,18 @@ func TestQueryFromValuesClampsLimit(t *testing.T) {
 	if query.Limit != MaxLimit {
 		t.Fatalf("limit = %d, want %d", query.Limit, MaxLimit)
 	}
+	if query.Cursor != 42 {
+		t.Fatalf("cursor = %d, want 42", query.Cursor)
+	}
 	if query.Action != "retry_scan" || query.ClientID != "client-1" || query.SessionID != "session-1" {
 		t.Fatalf("query = %+v, want trimmed values", query)
+	}
+}
+
+func TestQueryFromValuesIgnoresInvalidCursor(t *testing.T) {
+	query := QueryFromValues(url.Values{"cursor": []string{"not-a-number"}})
+	if query.Cursor != 0 {
+		t.Fatalf("cursor = %d, want 0 for invalid cursor", query.Cursor)
 	}
 }
 
@@ -97,9 +139,10 @@ func TestPostgresAuditWhereBuildsFilters(t *testing.T) {
 		ClientID:  "client-1",
 		SessionID: "session-1",
 		MessageID: "message-1",
+		Cursor:    123,
 	})
 
-	wantWhere := " WHERE action = $1 AND result = $2 AND principal LIKE '%' || $3 || '%' AND target_client_id = $4 AND (target_session_id = $5 OR admin_session_id = $5) AND message_id = $6"
+	wantWhere := " WHERE action = $1 AND result = $2 AND principal LIKE '%' || $3 || '%' AND target_client_id = $4 AND (target_session_id = $5 OR admin_session_id = $5) AND message_id = $6 AND id < $7"
 	if where != wantWhere {
 		t.Fatalf("where = %q, want %q", where, wantWhere)
 	}
@@ -110,6 +153,7 @@ func TestPostgresAuditWhereBuildsFilters(t *testing.T) {
 		"client-1",
 		"session-1",
 		"message-1",
+		int64(123),
 	}
 	if len(args) != len(wantArgs) {
 		t.Fatalf("args = %#v, want %#v", args, wantArgs)
@@ -147,7 +191,7 @@ func TestPostgresStoreIntegration(t *testing.T) {
 		_ = store.Close()
 	})
 
-	recorded := store.RecordAdminAudit(Entry{
+	firstRecorded := store.RecordAdminAudit(Entry{
 		Action:          "integration_test",
 		Result:          "success",
 		Principal:       "operator-a",
@@ -157,19 +201,36 @@ func TestPostgresStoreIntegration(t *testing.T) {
 		MessageID:       messageID,
 		Details:         map[string]string{"mode": "postgres"},
 	})
-	if recorded.ID == 0 {
-		t.Fatalf("recorded.ID = 0, want persisted id")
+	if firstRecorded.ID == 0 {
+		t.Fatalf("firstRecorded.ID = 0, want persisted id")
+	}
+	secondRecorded := store.RecordAdminAudit(Entry{
+		Action:    "integration_test_second",
+		Result:    "success",
+		MessageID: messageID,
+	})
+	if secondRecorded.ID == 0 {
+		t.Fatalf("secondRecorded.ID = 0, want persisted id")
 	}
 
 	result := store.List(Query{MessageID: messageID, Limit: 10})
-	if result.Total != 1 || len(result.Entries) != 1 {
-		t.Fatalf("result = %+v, want one persisted entry", result)
+	if result.Total != 2 || len(result.Entries) != 2 {
+		t.Fatalf("result = %+v, want two persisted entries", result)
 	}
 	entry := result.Entries[0]
-	if entry.Action != "integration_test" || entry.MessageID != messageID {
-		t.Fatalf("entry = %+v, want persisted integration event", entry)
+	if entry.Action != "integration_test_second" || entry.MessageID != messageID {
+		t.Fatalf("entry = %+v, want newest persisted integration event", entry)
 	}
-	if entry.Details["mode"] != "postgres" {
-		t.Fatalf("details = %+v, want postgres mode", entry.Details)
+
+	firstPage := store.List(Query{MessageID: messageID, Limit: 1})
+	if firstPage.Total != 2 || len(firstPage.Entries) != 1 || !firstPage.HasMore || firstPage.NextCursor == 0 {
+		t.Fatalf("first page = %+v, want paginated persisted result", firstPage)
+	}
+	secondPage := store.List(Query{MessageID: messageID, Limit: 1, Cursor: firstPage.NextCursor})
+	if secondPage.Total != 2 || len(secondPage.Entries) != 1 || secondPage.HasMore {
+		t.Fatalf("second page = %+v, want final persisted result", secondPage)
+	}
+	if secondPage.Entries[0].Action != "integration_test" || secondPage.Entries[0].Details["mode"] != "postgres" {
+		t.Fatalf("second page entry = %+v, want original postgres event", secondPage.Entries[0])
 	}
 }

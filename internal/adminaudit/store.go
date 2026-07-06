@@ -68,6 +68,7 @@ type Entry struct {
 
 type Query struct {
 	Limit     int
+	Cursor    uint64
 	Action    string
 	Result    string
 	Principal string
@@ -77,9 +78,12 @@ type Query struct {
 }
 
 type Result struct {
-	Limit   int
-	Total   int
-	Entries []Entry
+	Limit      int
+	Cursor     uint64
+	NextCursor uint64
+	HasMore    bool
+	Total      int
+	Entries    []Entry
 }
 
 func NewStore(config StoreConfig) *Store {
@@ -132,7 +136,7 @@ func (s *Store) RecordAdminAudit(entry Entry) Entry {
 func (s *Store) List(query Query) Result {
 	query = normalizeQuery(query)
 	if s == nil {
-		return Result{Limit: query.Limit}
+		return Result{Limit: query.Limit, Cursor: query.Cursor}
 	}
 
 	s.mu.RLock()
@@ -140,6 +144,7 @@ func (s *Store) List(query Query) Result {
 
 	result := Result{
 		Limit:   query.Limit,
+		Cursor:  query.Cursor,
 		Entries: make([]Entry, 0, query.Limit),
 	}
 	for i := len(s.entries) - 1; i >= 0; i-- {
@@ -148,9 +153,19 @@ func (s *Store) List(query Query) Result {
 			continue
 		}
 		result.Total++
+		if query.Cursor > 0 && entry.ID >= query.Cursor {
+			continue
+		}
 		if len(result.Entries) < query.Limit {
 			result.Entries = append(result.Entries, cloneEntry(entry))
+			continue
 		}
+		if query.Limit > 0 {
+			result.HasMore = true
+		}
+	}
+	if result.HasMore && len(result.Entries) > 0 {
+		result.NextCursor = result.Entries[len(result.Entries)-1].ID
 	}
 	return result
 }
@@ -158,6 +173,7 @@ func (s *Store) List(query Query) Result {
 func QueryFromValues(values url.Values) Query {
 	return Query{
 		Limit:     parseLimit(values.Get("limit")),
+		Cursor:    parseCursor(values.Get("cursor")),
 		Action:    strings.TrimSpace(values.Get("action")),
 		Result:    strings.TrimSpace(values.Get("result")),
 		Principal: strings.TrimSpace(values.Get("principal")),
@@ -175,6 +191,9 @@ func normalizeQuery(query Query) Query {
 	query.SessionID = strings.TrimSpace(query.SessionID)
 	query.MessageID = strings.TrimSpace(query.MessageID)
 	query.Limit = clampLimit(query.Limit)
+	if query.Cursor > maxCursor {
+		query.Cursor = maxCursor
+	}
 	return query
 }
 
@@ -270,6 +289,28 @@ func parseLimit(raw string) int {
 	}
 	return clampLimit(limit)
 }
+
+func parseCursor(raw string) uint64 {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0
+	}
+
+	var cursor uint64
+	for _, r := range raw {
+		if r < '0' || r > '9' {
+			return 0
+		}
+		digit := uint64(r - '0')
+		if cursor > (maxCursor-digit)/10 {
+			return maxCursor
+		}
+		cursor = cursor*10 + digit
+	}
+	return cursor
+}
+
+const maxCursor = uint64(1<<63 - 1)
 
 func clampLimit(limit int) int {
 	if limit <= 0 {

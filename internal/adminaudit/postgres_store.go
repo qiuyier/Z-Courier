@@ -195,43 +195,54 @@ func (s *PostgresStore) List(query Query) Result {
 	query = normalizeQuery(query)
 	result := Result{
 		Limit:   query.Limit,
+		Cursor:  query.Cursor,
 		Entries: make([]Entry, 0, query.Limit),
 	}
 	if s == nil || s.db == nil {
 		return result
 	}
 
-	where, args := postgresAuditWhere(query)
+	countQuery := query
+	countQuery.Cursor = 0
+	where, args := postgresAuditWhere(countQuery)
 	ctx, cancel := context.WithTimeout(context.Background(), s.operationTimeout)
 	defer cancel()
 
-	countQuery := "SELECT COUNT(*) FROM z_courier_admin_audit_events" + where
-	if err := s.db.QueryRowContext(ctx, countQuery, args...).Scan(&result.Total); err != nil {
-		return Result{Limit: query.Limit}
+	countSQL := "SELECT COUNT(*) FROM z_courier_admin_audit_events" + where
+	if err := s.db.QueryRowContext(ctx, countSQL, args...).Scan(&result.Total); err != nil {
+		return Result{Limit: query.Limit, Cursor: query.Cursor}
 	}
 
-	args = append(args, query.Limit)
+	where, args = postgresAuditWhere(query)
+	args = append(args, query.Limit+1)
 	rows, err := s.db.QueryContext(ctx, `
 SELECT `+postgresAuditColumns+`
 FROM z_courier_admin_audit_events
 `+where+`
-ORDER BY recorded_at DESC, id DESC
+ORDER BY id DESC
 LIMIT $`+fmt.Sprint(len(args))+`
 `, args...)
 	if err != nil {
-		return Result{Limit: query.Limit, Total: result.Total}
+		return Result{Limit: query.Limit, Cursor: query.Cursor, Total: result.Total}
 	}
 	defer rows.Close()
 
 	for rows.Next() {
 		entry, err := scanAuditEntry(rows)
 		if err != nil {
-			return Result{Limit: query.Limit, Total: result.Total, Entries: result.Entries}
+			return Result{Limit: query.Limit, Cursor: query.Cursor, Total: result.Total, Entries: result.Entries}
+		}
+		if len(result.Entries) >= query.Limit {
+			result.HasMore = true
+			break
 		}
 		result.Entries = append(result.Entries, entry)
 	}
 	if err := rows.Err(); err != nil {
-		return Result{Limit: query.Limit, Total: result.Total, Entries: result.Entries}
+		return Result{Limit: query.Limit, Cursor: query.Cursor, Total: result.Total, Entries: result.Entries}
+	}
+	if result.HasMore && len(result.Entries) > 0 {
+		result.NextCursor = result.Entries[len(result.Entries)-1].ID
 	}
 	return result
 }
@@ -270,6 +281,9 @@ func postgresAuditWhere(query Query) (string, []any) {
 	}
 	if query.MessageID != "" {
 		add("message_id = $%d", query.MessageID)
+	}
+	if query.Cursor > 0 {
+		add("id < $%d", int64(query.Cursor))
 	}
 	if len(conditions) == 0 {
 		return "", nil

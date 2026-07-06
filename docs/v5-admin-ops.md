@@ -402,6 +402,19 @@ the connected gateway node:
 GET /internal/admin/audit?limit=100
 ```
 
+Audit lists use stable cursor pagination. Results are ordered by descending
+audit event `id`. When a response has `has_more=true`, pass its `next_cursor`
+value as `cursor` to load the next page:
+
+```text
+GET /internal/admin/audit?limit=100&cursor=42
+```
+
+The response includes `limit`, `cursor`, `next_cursor`, `has_more`, `total`,
+and `events`. `total` is the count for the active filters before applying the
+cursor, so operators can see how many events match while paging through a
+bounded window.
+
 Optional filters:
 
 ```text
@@ -413,10 +426,10 @@ session_id=zs_...
 message_id=message-1
 ```
 
-The response is newest-first and capped at 1000 rows. It includes action,
-result, HTTP status, principal, role, admin session id, target client/session,
-message id, trace id, reason, and small structured details. It does not include
-internal tokens, HMAC secrets, message bodies, request bodies, or route secrets.
+Each page is capped at 1000 rows. Events include action, result, HTTP status,
+principal, role, admin session id, target client/session, message id, trace id,
+reason, and small structured details. The response does not include internal
+tokens, HMAC secrets, message bodies, request bodies, or route secrets.
 
 The first implementation is node-local and in-memory. For production incident
 retention, keep shipping gateway logs and Prometheus metrics to your normal log

@@ -2,6 +2,7 @@ package server
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/bytedance/sonic"
 	"github.com/qiuyier/Z-Courier/internal/adminaudit"
@@ -15,6 +16,9 @@ type adminAuditResponse struct {
 	Reason      string             `json:"reason,omitempty"`
 	GatewayNode string             `json:"gateway_node"`
 	Limit       int                `json:"limit"`
+	Cursor      string             `json:"cursor,omitempty"`
+	NextCursor  string             `json:"next_cursor,omitempty"`
+	HasMore     bool               `json:"has_more"`
 	Total       int                `json:"total"`
 	Events      []adminaudit.Entry `json:"events"`
 }
@@ -65,6 +69,9 @@ func (h *adminAuditHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Code:        "ok",
 		GatewayNode: h.gatewayNode,
 		Limit:       result.Limit,
+		Cursor:      formatAdminAuditCursor(result.Cursor),
+		NextCursor:  formatAdminAuditCursor(result.NextCursor),
+		HasMore:     result.HasMore,
 		Total:       result.Total,
 		Events:      result.Entries,
 	})
@@ -82,4 +89,11 @@ func writeAdminAuditJSON(w http.ResponseWriter, status int, resp adminAuditRespo
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_, _ = w.Write(data)
+}
+
+func formatAdminAuditCursor(cursor uint64) string {
+	if cursor == 0 {
+		return ""
+	}
+	return strconv.FormatUint(cursor, 10)
 }

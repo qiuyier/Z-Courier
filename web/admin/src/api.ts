@@ -40,6 +40,7 @@ export type AuditListParams = {
   clientID: string;
   sessionID: string;
   messageID: string;
+  cursor?: string;
   limit: number;
 };
 
@@ -164,6 +165,9 @@ export async function fetchAudit(params: AuditListParams, signal?: AbortSignal):
   }
   if (params.messageID.trim() !== "") {
     query.set("message_id", params.messageID.trim());
+  }
+  if (params.cursor?.trim()) {
+    query.set("cursor", params.cursor.trim());
   }
   return fetchAdminJSON<AdminAudit>(`/internal/admin/audit?${query.toString()}`, signal);
 }

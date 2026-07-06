@@ -175,6 +175,9 @@ export type AdminAudit = {
   reason?: string;
   gateway_node: string;
   limit: number;
+  cursor?: string;
+  next_cursor?: string;
+  has_more: boolean;
   total: number;
   events: AdminAuditEvent[];
 };

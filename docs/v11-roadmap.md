@@ -237,6 +237,15 @@ Acceptance criteria:
 - Tests cover limit caps, cursor behavior, empty pages, and invalid filters.
 - Documentation states default retention and operational tradeoffs.
 
+Current implementation:
+
+- `GET /internal/admin/audit` supports stable cursor pagination using descending
+  audit event IDs.
+- Audit responses include `cursor`, `next_cursor`, `has_more`, `limit`, `total`,
+  and `events`; `total` counts active filters before cursor paging.
+- Memory and PostgreSQL audit stores share the same `limit` cap and cursor
+  behavior.
+
 ### V11.7 Observability And Release Readiness
 
 Purpose: make V11 operational changes visible and releasable with the same

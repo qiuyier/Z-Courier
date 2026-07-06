@@ -213,6 +213,17 @@ go run ./cmd/admin retry-scan \
 GET /internal/admin/audit?limit=100
 ```
 
+审计列表使用稳定 cursor 分页。结果按审计事件 `id` 倒序返回。如果响应里
+`has_more=true`，把 `next_cursor` 作为下一次请求的 `cursor` 即可继续翻页：
+
+```text
+GET /internal/admin/audit?limit=100&cursor=42
+```
+
+响应会带上 `limit`、`cursor`、`next_cursor`、`has_more`、`total` 和
+`events`。`total` 表示当前过滤条件下的总匹配数，不受 cursor 影响；这样管理员在
+分页时仍然能看到一共有多少条事件匹配当前条件。
+
 可以按这些字段过滤：
 
 ```text
@@ -224,9 +235,9 @@ session_id=zs_...
 message_id=message-1
 ```
 
-响应按最新事件优先返回，最多 1000 条。事件里会包含 action、result、HTTP
-状态码、principal、role、admin session id、目标 client/session、message id、
-trace id、reason 和少量结构化 details。
+每页最多返回 1000 条。事件里会包含 action、result、HTTP 状态码、principal、
+role、admin session id、目标 client/session、message id、trace id、reason 和
+少量结构化 details。
 
 它不会返回 internal token、HMAC secret、message body、请求 body、route token
 等敏感或大体积内容。
