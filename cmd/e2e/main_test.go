@@ -120,6 +120,52 @@ func TestValidateDebugSessionsGoneRejectsStillPresentSession(t *testing.T) {
 	}
 }
 
+func TestValidateAdminStorageDiagnostics(t *testing.T) {
+	resp := adminDiagnosticsResponse{
+		Code:        "ok",
+		GatewayNode: "gateway-a",
+		AdminConsole: adminConsoleSummary{
+			Session: adminConsoleSessionSummary{
+				Enabled:         true,
+				CookieName:      "zcourier_admin_session",
+				StorageType:     "redis",
+				RedisConfigured: true,
+			},
+			Audit: adminConsoleAuditSummary{
+				StorageType:        "postgres",
+				StoreConfigured:    true,
+				PostgresConfigured: true,
+			},
+		},
+	}
+
+	if err := validateAdminStorageDiagnostics(resp, true); err != nil {
+		t.Fatalf("validateAdminStorageDiagnostics() error = %v", err)
+	}
+}
+
+func TestValidateAdminStorageDiagnosticsRejectsMemorySession(t *testing.T) {
+	resp := adminDiagnosticsResponse{
+		Code: "ok",
+		AdminConsole: adminConsoleSummary{
+			Session: adminConsoleSessionSummary{
+				Enabled:     true,
+				CookieName:  "zcourier_admin_session",
+				StorageType: "memory",
+			},
+			Audit: adminConsoleAuditSummary{
+				StorageType:        "postgres",
+				StoreConfigured:    true,
+				PostgresConfigured: true,
+			},
+		},
+	}
+
+	if err := validateAdminStorageDiagnostics(resp, true); err == nil {
+		t.Fatal("validateAdminStorageDiagnostics() error = nil, want memory session rejection")
+	}
+}
+
 func TestSumMetricSamplesMatchesLabelsInAnyOrder(t *testing.T) {
 	metricsText := `
 # HELP z_courier_cluster_peer_push_total Total number of cluster peer push attempts.
@@ -161,5 +207,29 @@ z_courier_downlink_push_total{msg_id="2001",result="queued"} 1
 	err := checkReconnectRetryMetrics(metricsText, config{ExpectRouteNode: "gateway-b"})
 	if err == nil {
 		t.Fatal("checkReconnectRetryMetrics() error = nil, want missing metric rejection")
+	}
+}
+
+func TestCheckAdminStorageMetrics(t *testing.T) {
+	metricsText := `
+z_courier_admin_audit_write_total{store="postgres",result="success"} 1
+z_courier_admin_session_store_operation_total{store="redis",operation="save",result="success"} 1
+z_courier_admin_session_store_operation_total{store="redis",operation="lookup",result="hit"} 2
+z_courier_admin_audit_write_duration_seconds_count{store="postgres",result="success"} 1
+z_courier_admin_session_store_operation_duration_seconds_count{store="redis",operation="save",result="success"} 1
+`
+
+	if err := checkAdminStorageMetrics(metricsText); err != nil {
+		t.Fatalf("checkAdminStorageMetrics() error = %v", err)
+	}
+}
+
+func TestCheckAdminStorageMetricsRejectsMissingMetric(t *testing.T) {
+	metricsText := `
+z_courier_admin_audit_write_total{store="postgres",result="success"} 1
+`
+
+	if err := checkAdminStorageMetrics(metricsText); err == nil {
+		t.Fatal("checkAdminStorageMetrics() error = nil, want missing metric rejection")
 	}
 }

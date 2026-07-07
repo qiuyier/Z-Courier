@@ -9,6 +9,8 @@ ZINX_CONFIG_A="$ROOT_DIR/conf/zinx.cluster-a.json"
 ZINX_CONFIG_B="$ROOT_DIR/conf/zinx.cluster-b.json"
 LOG_DIR="$ROOT_DIR/log"
 RUN_ID="$(date +%s)-$$"
+TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/z-courier-e2e-cluster.XXXXXX")"
+GATEWAY_BIN="$TMP_DIR/gateway"
 
 GATEWAY_A_PID=""
 GATEWAY_B_PID=""
@@ -20,6 +22,7 @@ cleanup() {
       wait "$pid" >/dev/null 2>&1 || true
     fi
   done
+  rm -rf "$TMP_DIR"
 }
 trap cleanup EXIT
 
@@ -88,12 +91,15 @@ done
 
 wait_http "nsqd" "http://127.0.0.1:14151/ping"
 
+echo "building gateway..."
+go build -o "$GATEWAY_BIN" ./cmd/gateway
+
 echo "starting gateway-a..."
-ZINX_CONFIG_FILE_PATH="$ZINX_CONFIG_A" go run ./cmd/gateway -config "$CONFIG_A" >"$LOG_DIR/e2e-cluster-gateway-a.log" 2>&1 &
+ZINX_CONFIG_FILE_PATH="$ZINX_CONFIG_A" "$GATEWAY_BIN" -config "$CONFIG_A" >"$LOG_DIR/e2e-cluster-gateway-a.log" 2>&1 &
 GATEWAY_A_PID="$!"
 
 echo "starting gateway-b..."
-ZINX_CONFIG_FILE_PATH="$ZINX_CONFIG_B" go run ./cmd/gateway -config "$CONFIG_B" >"$LOG_DIR/e2e-cluster-gateway-b.log" 2>&1 &
+ZINX_CONFIG_FILE_PATH="$ZINX_CONFIG_B" "$GATEWAY_BIN" -config "$CONFIG_B" >"$LOG_DIR/e2e-cluster-gateway-b.log" 2>&1 &
 GATEWAY_B_PID="$!"
 
 wait_http "gateway-a readiness" "http://127.0.0.1:18182/readyz"
@@ -111,5 +117,7 @@ go run ./cmd/e2e \
   -expect-session-url http://127.0.0.1:18183 \
   -expect-session-node gateway-b \
   -check-reconnect-retry \
+  -check-admin-storage \
+  -admin-session-peer-url http://127.0.0.1:18183 \
   -timeout 45s \
   "$@"

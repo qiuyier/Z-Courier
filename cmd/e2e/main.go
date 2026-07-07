@@ -58,6 +58,8 @@ type config struct {
 	ExpectSessionURL       string
 	ExpectSessionNode      string
 	CheckReconnectRetry    bool
+	CheckAdminStorage      bool
+	AdminSessionPeerURL    string
 }
 
 func main() {
@@ -96,11 +98,14 @@ func parseFlags() config {
 	flag.StringVar(&cfg.ExpectSessionURL, "expect-session-url", "", "gateway internal HTTP base URL expected to hold the local session; empty disables debug sessions check")
 	flag.StringVar(&cfg.ExpectSessionNode, "expect-session-node", "", "expected gateway node from expect-session-url")
 	flag.BoolVar(&cfg.CheckReconnectRetry, "check-reconnect-retry", false, "disconnect the client, queue a downlink, then verify reconnect flushes it")
+	flag.BoolVar(&cfg.CheckAdminStorage, "check-admin-storage", false, "verify Redis-backed admin sessions and PostgreSQL admin audit storage")
+	flag.StringVar(&cfg.AdminSessionPeerURL, "admin-session-peer-url", "", "peer gateway internal HTTP base URL used for Redis-backed admin session lookup; defaults to expect-session-url or internal-url")
 	flag.Parse()
 
 	cfg.InternalURL = strings.TrimRight(cfg.InternalURL, "/")
 	cfg.InternalAuthMode = strings.ToLower(strings.TrimSpace(cfg.InternalAuthMode))
 	cfg.ExpectSessionURL = strings.TrimRight(cfg.ExpectSessionURL, "/")
+	cfg.AdminSessionPeerURL = strings.TrimRight(cfg.AdminSessionPeerURL, "/")
 	cfg.MetricsURLs = parseMetricsURLs(metricsURLRaw, cfg.InternalURL+"/metrics")
 	return cfg
 }
@@ -224,6 +229,13 @@ func run(ctx context.Context, cfg config) error {
 		return err
 	}
 
+	if cfg.CheckAdminStorage {
+		if err := checkAdminStorage(ctx, cfg, db); err != nil {
+			return err
+		}
+		fmt.Println("admin storage verified")
+	}
+
 	if err := client.WaitDownlink(ctx, offlineMessageID); err != nil {
 		return fmt.Errorf("wait offline downlink flush: %w", err)
 	}
@@ -313,6 +325,246 @@ type debugSession struct {
 	DeviceID    string `json:"device_id"`
 	TokenID     string `json:"token_id"`
 	GatewayNode string `json:"gateway_node"`
+}
+
+type adminDiagnosticsResponse struct {
+	Code         string              `json:"code"`
+	GatewayNode  string              `json:"gateway_node"`
+	AdminConsole adminConsoleSummary `json:"admin_console"`
+}
+
+type adminConsoleSummary struct {
+	Session adminConsoleSessionSummary `json:"session"`
+	Audit   adminConsoleAuditSummary   `json:"audit"`
+}
+
+type adminConsoleSessionSummary struct {
+	Enabled         bool   `json:"enabled"`
+	CookieName      string `json:"cookie_name"`
+	StorageType     string `json:"storage_type"`
+	RedisConfigured bool   `json:"redis_configured"`
+}
+
+type adminConsoleAuditSummary struct {
+	StorageType        string `json:"storage_type"`
+	StoreConfigured    bool   `json:"store_configured"`
+	PostgresConfigured bool   `json:"postgres_configured"`
+}
+
+type adminSessionResponse struct {
+	Code        string            `json:"code"`
+	Reason      string            `json:"reason,omitempty"`
+	GatewayNode string            `json:"gateway_node"`
+	Session     *adminSessionInfo `json:"session,omitempty"`
+}
+
+type adminSessionInfo struct {
+	SessionID   string `json:"session_id"`
+	Principal   string `json:"principal"`
+	Role        string `json:"role"`
+	CSRFToken   string `json:"csrf_token,omitempty"`
+	ExpiresInMS int64  `json:"expires_in_ms"`
+}
+
+type adminSessionLoginResult struct {
+	Response adminSessionResponse
+	Cookie   *http.Cookie
+}
+
+func checkAdminStorage(ctx context.Context, cfg config, db *sql.DB) error {
+	peerURL := cfg.AdminSessionPeerURL
+	if peerURL == "" {
+		peerURL = cfg.ExpectSessionURL
+	}
+	if peerURL == "" {
+		peerURL = cfg.InternalURL
+	}
+
+	primaryDiagnostics, err := fetchAdminDiagnostics(ctx, cfg, cfg.InternalURL)
+	if err != nil {
+		return fmt.Errorf("fetch primary admin diagnostics: %w", err)
+	}
+	if err := validateAdminStorageDiagnostics(primaryDiagnostics, true); err != nil {
+		return fmt.Errorf("primary admin diagnostics: %w", err)
+	}
+
+	peerDiagnostics, err := fetchAdminDiagnostics(ctx, cfg, peerURL)
+	if err != nil {
+		return fmt.Errorf("fetch peer admin diagnostics: %w", err)
+	}
+	if err := validateAdminStorageDiagnostics(peerDiagnostics, true); err != nil {
+		return fmt.Errorf("peer admin diagnostics: %w", err)
+	}
+
+	login, err := loginAdminSession(ctx, cfg, cfg.InternalURL, primaryDiagnostics.AdminConsole.Session.CookieName)
+	if err != nil {
+		return fmt.Errorf("login admin session: %w", err)
+	}
+	sessionID := login.Response.Session.SessionID
+	if err := waitAdminAuditEvent(ctx, db, "admin_session_login", "success", sessionID, primaryDiagnostics.GatewayNode); err != nil {
+		return fmt.Errorf("wait admin audit login event: %w", err)
+	}
+
+	if err := verifyAdminSessionMe(ctx, cfg, cfg.InternalURL, login.Cookie, sessionID, primaryDiagnostics.GatewayNode); err != nil {
+		return fmt.Errorf("verify primary admin session: %w", err)
+	}
+
+	peerCookie := *login.Cookie
+	peerCookie.Name = peerDiagnostics.AdminConsole.Session.CookieName
+	if err := verifyAdminSessionMe(ctx, cfg, peerURL, &peerCookie, sessionID, peerDiagnostics.GatewayNode); err != nil {
+		return fmt.Errorf("verify peer admin session via redis: %w", err)
+	}
+
+	return nil
+}
+
+func fetchAdminDiagnostics(ctx context.Context, cfg config, baseURL string) (adminDiagnosticsResponse, error) {
+	var resp adminDiagnosticsResponse
+	if err := getInternalJSON(ctx, cfg, baseURL, "/internal/admin/diagnostics", &resp); err != nil {
+		return adminDiagnosticsResponse{}, err
+	}
+	return resp, nil
+}
+
+func validateAdminStorageDiagnostics(resp adminDiagnosticsResponse, requirePostgresAudit bool) error {
+	if resp.Code != "ok" {
+		return fmt.Errorf("diagnostics code = %q, want ok", resp.Code)
+	}
+	session := resp.AdminConsole.Session
+	if !session.Enabled {
+		return fmt.Errorf("admin session is disabled")
+	}
+	if session.StorageType != "redis" || !session.RedisConfigured {
+		return fmt.Errorf("admin session store = %s redis_configured=%v, want redis true", session.StorageType, session.RedisConfigured)
+	}
+	if strings.TrimSpace(session.CookieName) == "" {
+		return fmt.Errorf("admin session cookie name is empty")
+	}
+
+	audit := resp.AdminConsole.Audit
+	if !audit.StoreConfigured {
+		return fmt.Errorf("admin audit store is not configured")
+	}
+	if requirePostgresAudit && (audit.StorageType != "postgres" || !audit.PostgresConfigured) {
+		return fmt.Errorf("admin audit store = %s postgres_configured=%v, want postgres true", audit.StorageType, audit.PostgresConfigured)
+	}
+	return nil
+}
+
+func loginAdminSession(ctx context.Context, cfg config, baseURL string, cookieName string) (adminSessionLoginResult, error) {
+	requestCtx, cancel := context.WithTimeout(ctx, downlinkPushTimeout)
+	defer cancel()
+
+	body := []byte(`{}`)
+	req, err := http.NewRequestWithContext(requestCtx, http.MethodPost, baseURL+"/internal/admin/session/login", bytes.NewReader(body))
+	if err != nil {
+		return adminSessionLoginResult{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if err := applyInternalAuth(req, body, cfg); err != nil {
+		return adminSessionLoginResult{}, err
+	}
+
+	var resp adminSessionResponse
+	cookies, err := doAdminSessionRequest(req, http.StatusOK, &resp)
+	if err != nil {
+		return adminSessionLoginResult{}, err
+	}
+	if resp.Code != "ok" || resp.Session == nil {
+		return adminSessionLoginResult{}, fmt.Errorf("login response = %+v, want ok session", resp)
+	}
+	if resp.Session.SessionID == "" {
+		return adminSessionLoginResult{}, fmt.Errorf("login session_id is empty")
+	}
+
+	cookie := findCookie(cookies, cookieName)
+	if cookie == nil {
+		return adminSessionLoginResult{}, fmt.Errorf("login response missing cookie %q", cookieName)
+	}
+	if strings.TrimSpace(cookie.Value) == "" {
+		return adminSessionLoginResult{}, fmt.Errorf("login cookie %q is empty", cookieName)
+	}
+	return adminSessionLoginResult{Response: resp, Cookie: cookie}, nil
+}
+
+func verifyAdminSessionMe(ctx context.Context, cfg config, baseURL string, cookie *http.Cookie, wantSessionID string, wantGatewayNode string) error {
+	requestCtx, cancel := context.WithTimeout(ctx, downlinkPushTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(requestCtx, http.MethodGet, baseURL+"/internal/admin/session/me", nil)
+	if err != nil {
+		return err
+	}
+	req.AddCookie(cookie)
+
+	var resp adminSessionResponse
+	if _, err := doAdminSessionRequest(req, http.StatusOK, &resp); err != nil {
+		return err
+	}
+	if resp.Code != "ok" || resp.Session == nil {
+		return fmt.Errorf("me response = %+v, want ok session", resp)
+	}
+	if wantGatewayNode != "" && resp.GatewayNode != wantGatewayNode {
+		return fmt.Errorf("me gateway_node = %q, want %q", resp.GatewayNode, wantGatewayNode)
+	}
+	if resp.Session.SessionID != wantSessionID {
+		return fmt.Errorf("me session_id = %q, want %q", resp.Session.SessionID, wantSessionID)
+	}
+	if resp.Session.CSRFToken == "" {
+		return fmt.Errorf("me csrf_token is empty")
+	}
+	return nil
+}
+
+func doAdminSessionRequest(req *http.Request, wantStatus int, target any) ([]*http.Cookie, error) {
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != wantStatus {
+		return nil, fmt.Errorf("%s %s status = %d, want %d, body = %s", req.Method, req.URL.String(), resp.StatusCode, wantStatus, string(respBody))
+	}
+	if err := sonic.Unmarshal(respBody, target); err != nil {
+		return nil, err
+	}
+	return resp.Cookies(), nil
+}
+
+func findCookie(cookies []*http.Cookie, name string) *http.Cookie {
+	for _, cookie := range cookies {
+		if cookie.Name == name {
+			copy := *cookie
+			return &copy
+		}
+	}
+	return nil
+}
+
+func waitAdminAuditEvent(ctx context.Context, db *sql.DB, action, result, sessionID, gatewayNode string) error {
+	return waitUntil(ctx, func() (bool, error) {
+		var count int
+		err := db.QueryRowContext(ctx, `
+SELECT COUNT(*)
+FROM z_courier_admin_audit_events
+WHERE action = $1
+  AND result = $2
+  AND admin_session_id = $3
+  AND gateway_node = $4
+`, action, result, sessionID, gatewayNode).Scan(&count)
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		return count > 0, nil
+	})
 }
 
 func checkDebugCluster(ctx context.Context, cfg config) error {
@@ -763,6 +1015,11 @@ func checkMetrics(ctx context.Context, cfg config) error {
 			return err
 		}
 	}
+	if cfg.CheckAdminStorage {
+		if err := checkAdminStorageMetrics(string(body)); err != nil {
+			return err
+		}
+	}
 
 	return nil
 }
@@ -823,6 +1080,49 @@ func checkReconnectRetryMetrics(metricsText string, cfg config) error {
 		}
 		if value < expectation.Min {
 			return fmt.Errorf("reconnect retry metric %s%s = %.4f, want >= %.4f", expectation.Name, formatMetricLabels(expectation.Labels), value, expectation.Min)
+		}
+	}
+
+	return nil
+}
+
+func checkAdminStorageMetrics(metricsText string) error {
+	expectations := []metricExpectation{
+		{
+			Name:   "z_courier_admin_audit_write_total",
+			Labels: map[string]string{"store": "postgres", "result": "success"},
+			Min:    1,
+		},
+		{
+			Name:   "z_courier_admin_session_store_operation_total",
+			Labels: map[string]string{"store": "redis", "operation": "save", "result": "success"},
+			Min:    1,
+		},
+		{
+			Name:   "z_courier_admin_session_store_operation_total",
+			Labels: map[string]string{"store": "redis", "operation": "lookup", "result": "hit"},
+			Min:    1,
+		},
+		{
+			Name: "z_courier_admin_audit_write_duration_seconds_count",
+			Min:  1,
+		},
+		{
+			Name: "z_courier_admin_session_store_operation_duration_seconds_count",
+			Min:  1,
+		},
+	}
+
+	for _, expectation := range expectations {
+		value, found, err := sumMetricSamples(metricsText, expectation.Name, expectation.Labels)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return fmt.Errorf("admin storage metric %s%s not found", expectation.Name, formatMetricLabels(expectation.Labels))
+		}
+		if value < expectation.Min {
+			return fmt.Errorf("admin storage metric %s%s = %.4f, want >= %.4f", expectation.Name, formatMetricLabels(expectation.Labels), value, expectation.Min)
 		}
 	}
 
