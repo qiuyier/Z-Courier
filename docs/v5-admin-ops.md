@@ -445,6 +445,10 @@ discard. All audited events also increment:
 
 ```text
 z_courier_admin_action_total{action=...,result=...}
+z_courier_admin_audit_write_total{store=...,result=...}
+z_courier_admin_audit_write_duration_seconds_bucket{store=...,result=...,le=...}
+z_courier_admin_session_store_operation_total{store=...,operation=...,result=...}
+z_courier_admin_session_store_operation_duration_seconds_bucket{store=...,operation=...,result=...,le=...}
 ```
 
 ## CLI

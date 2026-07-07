@@ -134,6 +134,8 @@ and Slack live under `deploy/monitoring/alertmanager/examples/`.
 | `ZCourierDownlinkPushFailures` | Missing route, peer push issue, storage/retry problem | Run `cmd/admin route` for affected client/device |
 | `ZCourierDownlinkACKLatencyHigh` | Slow clients, network trouble, retry pressure | Check client connection stability and peer push latency |
 | `ZCourierRetryWorkerFailures` | PostgreSQL or retry claim problem | Check Postgres health and gateway retry worker logs |
+| `ZCourierAdminAuditWriteFailures` | Admin audit store configuration or PostgreSQL problem | Check `cmd/admin check`, audit storage config, and Postgres health |
+| `ZCourierAdminSessionStoreFailures` | Redis-backed admin session store problem | Check `cmd/admin check`, Redis reachability, and admin session config |
 | `ZCourierClusterPeerPushFailureRatioHigh` | Peer gateway unreachable or peer auth mismatch | Check peer internal HTTP, HMAC keys, and NetworkPolicy |
 | `ZCourierClusterStaleRoutesDetected` | Redis TTL/refresh issue or unbind cleanup problem | Inspect Redis route key and gateway disconnect logs |
 | `ZCourierJWKSRefreshFailures` | JWKS endpoint unreachable or malformed key set | Check JWKS endpoint status, response size, and key format |

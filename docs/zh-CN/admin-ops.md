@@ -268,6 +268,10 @@ session 断开、下行测试推送、retry scan、requeue 和 discard。所有�
 
 ```text
 z_courier_admin_action_total{action=...,result=...}
+z_courier_admin_audit_write_total{store=...,result=...}
+z_courier_admin_audit_write_duration_seconds_bucket{store=...,result=...,le=...}
+z_courier_admin_session_store_operation_total{store=...,operation=...,result=...}
+z_courier_admin_session_store_operation_duration_seconds_bucket{store=...,operation=...,result=...,le=...}
 ```
 
 ## 会话和路由查询

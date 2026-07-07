@@ -110,6 +110,40 @@ var (
 		[]string{"result"},
 	)
 
+	adminAuditWrite = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "z_courier_admin_audit_write_total",
+			Help: "Total number of admin audit store write attempts.",
+		},
+		[]string{"store", "result"},
+	)
+
+	adminAuditWriteDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "z_courier_admin_audit_write_duration_seconds",
+			Help:    "Duration of admin audit store write attempts in seconds.",
+			Buckets: []float64{0.0001, 0.0005, 0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5},
+		},
+		[]string{"store", "result"},
+	)
+
+	adminSessionStoreOperation = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "z_courier_admin_session_store_operation_total",
+			Help: "Total number of admin session store operations.",
+		},
+		[]string{"store", "operation", "result"},
+	)
+
+	adminSessionStoreOperationDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "z_courier_admin_session_store_operation_duration_seconds",
+			Help:    "Duration of admin session store operations in seconds.",
+			Buckets: []float64{0.0001, 0.0005, 0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5},
+		},
+		[]string{"store", "operation", "result"},
+	)
+
 	gatewayReadiness = promauto.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "z_courier_gateway_readiness",
@@ -532,6 +566,22 @@ func RecordDownlinkDiscard(result string) {
 
 func RecordAdminRetryScan(result string) {
 	adminRetryScan.WithLabelValues(nonEmpty(result, "unknown")).Inc()
+}
+
+func RecordAdminAuditWrite(store, result string, duration time.Duration) {
+	labels := []string{nonEmpty(store, "unknown"), nonEmpty(result, "unknown")}
+	adminAuditWrite.WithLabelValues(labels...).Inc()
+	if duration >= 0 {
+		adminAuditWriteDuration.WithLabelValues(labels...).Observe(duration.Seconds())
+	}
+}
+
+func RecordAdminSessionStoreOperation(store, operation, result string, duration time.Duration) {
+	labels := []string{nonEmpty(store, "unknown"), nonEmpty(operation, "unknown"), nonEmpty(result, "unknown")}
+	adminSessionStoreOperation.WithLabelValues(labels...).Inc()
+	if duration >= 0 {
+		adminSessionStoreOperationDuration.WithLabelValues(labels...).Observe(duration.Seconds())
+	}
 }
 
 func RecordDownlinkCleanupStatus(status, result string, deleted int) {

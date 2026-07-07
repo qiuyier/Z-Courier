@@ -273,6 +273,9 @@ Current implementation:
   sessions.
 - `/internal/admin/check` actively probes admin audit and admin session storage
   when the configured store exposes a health probe.
+- Prometheus exposes admin audit write and admin session store operation
+  counters and latency histograms. The bundled Grafana dashboards and alert
+  rules surface admin control plane storage failures.
 
 Acceptance criteria:
 

@@ -109,7 +109,9 @@ func Record(recorder Recorder, entry Entry) Entry {
 }
 
 func (s *Store) RecordAdminAudit(entry Entry) Entry {
+	startedAt := time.Now()
 	if s == nil {
+		metrics.RecordAdminAuditWrite("memory", "not_configured", time.Since(startedAt))
 		return normalizeEntry(entry)
 	}
 	entry = normalizeEntry(entry)
@@ -128,9 +130,11 @@ func (s *Store) RecordAdminAudit(entry Entry) Entry {
 	if len(s.entries) >= s.capacity {
 		copy(s.entries, s.entries[1:])
 		s.entries[len(s.entries)-1] = entry
+		metrics.RecordAdminAuditWrite("memory", "success", time.Since(startedAt))
 		return cloneEntry(entry)
 	}
 	s.entries = append(s.entries, entry)
+	metrics.RecordAdminAuditWrite("memory", "success", time.Since(startedAt))
 	return cloneEntry(entry)
 }
 

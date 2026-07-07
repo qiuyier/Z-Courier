@@ -9,6 +9,7 @@ import (
 
 	"github.com/bytedance/sonic"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/qiuyier/Z-Courier/internal/metrics"
 )
 
 type PostgresStoreConfig struct {
@@ -134,8 +135,10 @@ func (s *PostgresStore) Ping(ctx context.Context) error {
 }
 
 func (s *PostgresStore) RecordAdminAudit(entry Entry) Entry {
+	startedAt := time.Now()
 	entry = normalizeEntry(entry)
 	if s == nil || s.db == nil {
+		metrics.RecordAdminAuditWrite("postgres", "not_configured", time.Since(startedAt))
 		return cloneEntry(entry)
 	}
 	if entry.RecordedAt.IsZero() {
@@ -193,6 +196,7 @@ RETURNING id, recorded_at
 		details,
 	).Scan(&id, &recordedAt)
 	if err != nil {
+		metrics.RecordAdminAuditWrite("postgres", "error", time.Since(startedAt))
 		return cloneEntry(entry)
 	}
 
@@ -200,6 +204,7 @@ RETURNING id, recorded_at
 		entry.ID = uint64(id)
 	}
 	entry.RecordedAt = recordedAt.UTC()
+	metrics.RecordAdminAuditWrite("postgres", "success", time.Since(startedAt))
 	return cloneEntry(entry)
 }
 

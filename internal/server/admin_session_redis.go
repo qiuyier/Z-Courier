@@ -64,10 +64,13 @@ func newRedisAdminSessionStore(config AdminSessionRedisConfig) (*redisAdminSessi
 }
 
 func (s *redisAdminSessionStore) Save(tokenKey [sha256.Size]byte, session adminSession, ttl time.Duration) error {
+	startedAt := time.Now()
 	if err := s.ensureOpen(); err != nil {
+		recordAdminSessionStoreOperation("redis", "save", "error", startedAt)
 		return err
 	}
 	if ttl <= 0 {
+		recordAdminSessionStoreOperation("redis", "save", "error", startedAt)
 		return fmt.Errorf("admin session: ttl must be positive")
 	}
 
@@ -87,11 +90,18 @@ func (s *redisAdminSessionStore) Save(tokenKey [sha256.Size]byte, session adminS
 	pipe.HSet(ctx, s.sessionKey(tokenKey), fields)
 	pipe.PExpire(ctx, s.sessionKey(tokenKey), ttl)
 	_, err := pipe.Exec(ctx)
+	if err != nil {
+		recordAdminSessionStoreOperation("redis", "save", "error", startedAt)
+		return err
+	}
+	recordAdminSessionStoreOperation("redis", "save", "success", startedAt)
 	return err
 }
 
 func (s *redisAdminSessionStore) Lookup(tokenKey [sha256.Size]byte, now time.Time) (adminSession, bool, error) {
+	startedAt := time.Now()
 	if err := s.ensureOpen(); err != nil {
+		recordAdminSessionStoreOperation("redis", "lookup", "error", startedAt)
 		return adminSession{}, false, err
 	}
 
@@ -101,18 +111,22 @@ func (s *redisAdminSessionStore) Lookup(tokenKey [sha256.Size]byte, now time.Tim
 	key := s.sessionKey(tokenKey)
 	fields, err := s.client.HGetAll(ctx, key).Result()
 	if err != nil {
+		recordAdminSessionStoreOperation("redis", "lookup", "error", startedAt)
 		return adminSession{}, false, err
 	}
 	if len(fields) == 0 {
+		recordAdminSessionStoreOperation("redis", "lookup", "miss", startedAt)
 		return adminSession{}, false, nil
 	}
 
 	session, err := adminSessionFromRedisFields(fields)
 	if err != nil {
+		recordAdminSessionStoreOperation("redis", "lookup", "error", startedAt)
 		return adminSession{}, false, err
 	}
 	if !session.ExpiresAt.After(now) {
 		_ = s.client.Del(ctx, key).Err()
+		recordAdminSessionStoreOperation("redis", "lookup", "expired", startedAt)
 		return adminSession{}, false, nil
 	}
 
@@ -122,13 +136,17 @@ func (s *redisAdminSessionStore) Lookup(tokenKey [sha256.Size]byte, now time.Tim
 	pipe.HSet(ctx, key, "last_seen_at_unix_nano", session.LastSeenAt.UnixNano())
 	pipe.PExpire(ctx, key, remaining)
 	if _, err := pipe.Exec(ctx); err != nil {
+		recordAdminSessionStoreOperation("redis", "lookup", "error", startedAt)
 		return adminSession{}, false, err
 	}
+	recordAdminSessionStoreOperation("redis", "lookup", "hit", startedAt)
 	return session, true, nil
 }
 
 func (s *redisAdminSessionStore) Delete(tokenKey [sha256.Size]byte) (bool, error) {
+	startedAt := time.Now()
 	if err := s.ensureOpen(); err != nil {
+		recordAdminSessionStoreOperation("redis", "delete", "error", startedAt)
 		return false, err
 	}
 
@@ -136,7 +154,13 @@ func (s *redisAdminSessionStore) Delete(tokenKey [sha256.Size]byte) (bool, error
 	defer cancel()
 	deleted, err := s.client.Del(ctx, s.sessionKey(tokenKey)).Result()
 	if err != nil {
+		recordAdminSessionStoreOperation("redis", "delete", "error", startedAt)
 		return false, err
+	}
+	if deleted > 0 {
+		recordAdminSessionStoreOperation("redis", "delete", "deleted", startedAt)
+	} else {
+		recordAdminSessionStoreOperation("redis", "delete", "miss", startedAt)
 	}
 	return deleted > 0, nil
 }

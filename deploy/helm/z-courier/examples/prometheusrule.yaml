@@ -109,6 +109,28 @@ spec:
             description: "Retry scan or claim operations are failing. Check PostgreSQL, leases, and gateway logs."
             runbook_url: "https://github.com/qiuyier/Z-Courier/blob/main/docs/v5-production-runbook.md#retry-backlog-growing"
 
+        - alert: ZCourierAdminAuditWriteFailures
+          expr: sum(rate(z_courier_admin_audit_write_total{result!="success"}[5m])) > 0
+          for: 5m
+          labels:
+            severity: warning
+            component: admin-audit
+          annotations:
+            summary: "Z-Courier admin audit writes are failing"
+            description: "Admin audit store writes have failed for at least 5 minutes. Check admin audit storage configuration, PostgreSQL health, and gateway logs."
+            runbook_url: "https://github.com/qiuyier/Z-Courier/blob/main/docs/v5-production-runbook.md#postgresql-store-errors"
+
+        - alert: ZCourierAdminSessionStoreFailures
+          expr: sum(rate(z_courier_admin_session_store_operation_total{result=~"error|not_configured"}[5m])) > 0
+          for: 5m
+          labels:
+            severity: warning
+            component: admin-session
+          annotations:
+            summary: "Z-Courier admin session store operations are failing"
+            description: "Admin session store operations are failing. Check Redis-backed admin session settings, Redis reachability, and gateway logs."
+            runbook_url: "https://github.com/qiuyier/Z-Courier/blob/main/docs/v5-production-runbook.md#redis-route-issues"
+
         - alert: ZCourierClusterPeerPushFailureRatioHigh
           expr: (sum(rate(z_courier_cluster_peer_push_total{result!="success"}[5m])) / clamp_min(sum(rate(z_courier_cluster_peer_push_total[5m])), 1e-9)) > 0.05 and sum(rate(z_courier_cluster_peer_push_total[5m])) > 0.1
           for: 5m

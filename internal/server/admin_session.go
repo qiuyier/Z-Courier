@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/qiuyier/Z-Courier/internal/metrics"
 )
 
 const adminSessionIDPrefix = "zas_"
@@ -148,44 +150,56 @@ func (m *adminSessionManager) Delete(token string) (bool, error) {
 }
 
 func (s *memoryAdminSessionStore) Save(tokenKey [sha256.Size]byte, session adminSession, ttl time.Duration) error {
+	startedAt := time.Now()
 	if s == nil {
+		recordAdminSessionStoreOperation("memory", "save", "not_configured", startedAt)
 		return errors.New("admin session: memory store is nil")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.entries[tokenKey] = session
+	recordAdminSessionStoreOperation("memory", "save", "success", startedAt)
 	return nil
 }
 
 func (s *memoryAdminSessionStore) Lookup(tokenKey [sha256.Size]byte, now time.Time) (adminSession, bool, error) {
+	startedAt := time.Now()
 	if s == nil {
+		recordAdminSessionStoreOperation("memory", "lookup", "not_configured", startedAt)
 		return adminSession{}, false, nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	session, ok := s.entries[tokenKey]
 	if !ok {
+		recordAdminSessionStoreOperation("memory", "lookup", "miss", startedAt)
 		return adminSession{}, false, nil
 	}
 	if !session.ExpiresAt.After(now) {
 		delete(s.entries, tokenKey)
+		recordAdminSessionStoreOperation("memory", "lookup", "expired", startedAt)
 		return adminSession{}, false, nil
 	}
 	session.LastSeenAt = now
 	s.entries[tokenKey] = session
+	recordAdminSessionStoreOperation("memory", "lookup", "hit", startedAt)
 	return session, true, nil
 }
 
 func (s *memoryAdminSessionStore) Delete(tokenKey [sha256.Size]byte) (bool, error) {
+	startedAt := time.Now()
 	if s == nil {
+		recordAdminSessionStoreOperation("memory", "delete", "not_configured", startedAt)
 		return false, nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.entries[tokenKey]; !ok {
+		recordAdminSessionStoreOperation("memory", "delete", "miss", startedAt)
 		return false, nil
 	}
 	delete(s.entries, tokenKey)
+	recordAdminSessionStoreOperation("memory", "delete", "deleted", startedAt)
 	return true, nil
 }
 
@@ -195,6 +209,10 @@ func (s *memoryAdminSessionStore) Ping(ctx context.Context) error {
 
 func adminSessionKey(token string) [sha256.Size]byte {
 	return sha256.Sum256([]byte(token))
+}
+
+func recordAdminSessionStoreOperation(store, operation, result string, startedAt time.Time) {
+	metrics.RecordAdminSessionStoreOperation(store, operation, result, time.Since(startedAt))
 }
 
 func randomAdminSessionID() (string, error) {
