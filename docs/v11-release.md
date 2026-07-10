@@ -303,10 +303,11 @@ and are not release failure gates.
 
 ## Helm And Image Notes
 
-Before tagging, update `deploy/helm/z-courier/Chart.yaml` to the chart version
-chosen for the V11 release and set:
+The V11 gateway is published with Helm chart `0.6.0`. Before tagging, confirm
+`deploy/helm/z-courier/Chart.yaml` contains:
 
 ```yaml
+version: 0.6.0
 appVersion: "v0.11.0"
 ```
 
@@ -359,8 +360,7 @@ long-term production use.
 1. Commit and push the release documentation to `main`.
 2. Confirm `CHANGELOG.md` has the final `v0.11.0` date and scope when updating
    the changelog for this milestone.
-3. Update Helm chart `version` and `appVersion: "v0.11.0"` if publishing a chart
-   package with this release.
+3. Confirm Helm chart `version: 0.6.0` and `appVersion: "v0.11.0"`.
 4. Run the full release check on the intended release commit.
 5. Confirm GitHub Actions and the manual Kubernetes E2E are green.
 6. Review the GitHub release notes and known boundaries above.

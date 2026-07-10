@@ -7,12 +7,45 @@ semantic versioning after the first public MVP tag.
 
 ## [Unreleased]
 
+## [v0.11.0] - 2026-07-10
+
 ### Added
 
 - V11 roadmap covering production-grade admin control-plane work, including
   persistent audit storage, Redis-backed admin sessions, cluster-wide console
   views, remote operation safety, CSRF hardening, and bounded admin data
   pagination.
+- Optional PostgreSQL admin audit store with automatic schema creation,
+  filtering, stable cursor pagination, diagnostics, health probes, metrics,
+  dashboard panels, and alert rules.
+- Optional Redis admin session store so one browser session can be recognized
+  across gateway nodes, with TTL, logout invalidation, diagnostics, health
+  probes, metrics, and cluster E2E coverage.
+- Cluster route listing in the admin console, including owning gateway,
+  internal address, route age, TTL, and local-versus-remote state.
+- Cluster-aware downlink test-push preflight and delivery results with explicit
+  local or peer delivery paths, origin and target gateway metadata, structured
+  peer failure codes, and audited outcomes.
+- Stable cursor pagination for admin audit events and stored downlink messages,
+  including bounded API limits and forward/back navigation in the console.
+- `v0.11.0` release guide covering upgrade, production admin storage,
+  verification, security boundaries, known limitations, and rollback.
+
+### Changed
+
+- Admin diagnostics and diagnosis bundles now expose sanitized audit/session
+  storage state and warn about memory-only audit or node-local sessions in
+  clustered deployments.
+- Helm chart `0.6.0` and production values align with the `v0.11.0` gateway
+  image and its Redis session/PostgreSQL audit configuration.
+
+### Security
+
+- Cookie-authenticated admin mutations now require a derived CSRF token,
+  supported JSON content type, and valid browser origin or referer context.
+- CSRF failures are denied, logged, audited, and exposed through Prometheus.
+- Cross-node test push continues to use authenticated peer HTTP and reports
+  peer authentication, timeout, configuration, and target failures explicitly.
 
 ## [v0.10.0] - 2026-07-05
 
