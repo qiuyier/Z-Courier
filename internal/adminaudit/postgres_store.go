@@ -33,6 +33,8 @@ permission, target_client_id, target_device_id, target_session_id,
 target_conn_id, message_id, trace_id, reason, details
 `
 
+const postgresAuditMigrationLockID int64 = 8_789_121_360_511_466
+
 func NewPostgresStore(ctx context.Context, config PostgresStoreConfig) (*PostgresStore, error) {
 	if strings.TrimSpace(config.DSN) == "" {
 		return nil, fmt.Errorf("postgres dsn is required")
@@ -78,7 +80,22 @@ func (s *PostgresStore) Migrate(ctx context.Context) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("postgres audit store is not configured")
 	}
-	_, err := s.db.ExecContext(ctx, `
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	// PostgreSQL can still race while creating a new relation behind CREATE IF
+	// NOT EXISTS. Serialize first-start migrations across gateway nodes.
+	if _, err := tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock($1)", postgresAuditMigrationLockID); err != nil {
+		return err
+	}
+
+	if _, err := tx.ExecContext(ctx, `
 CREATE TABLE IF NOT EXISTS z_courier_admin_audit_events (
   id BIGSERIAL PRIMARY KEY,
   recorded_at TIMESTAMPTZ NOT NULL,
@@ -118,8 +135,11 @@ CREATE INDEX IF NOT EXISTS z_courier_admin_audit_admin_session_idx
   ON z_courier_admin_audit_events (admin_session_id, recorded_at DESC);
 CREATE INDEX IF NOT EXISTS z_courier_admin_audit_message_idx
   ON z_courier_admin_audit_events (message_id, recorded_at DESC);
-`)
-	return err
+`); err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }
 
 func (s *PostgresStore) Ping(ctx context.Context) error {

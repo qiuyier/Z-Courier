@@ -39,6 +39,12 @@ semantic versioning after the first public MVP tag.
 - Helm chart `0.6.0` and production values align with the `v0.11.0` gateway
   image and its Redis session/PostgreSQL audit configuration.
 
+### Fixed
+
+- PostgreSQL admin audit and downlink auto-migrations now use transaction-level
+  advisory locks, preventing concurrent gateway startup from racing while
+  creating shared tables and indexes.
+
 ### Security
 
 - Cookie-authenticated admin mutations now require a derived CSRF token,

@@ -23,6 +23,8 @@ type PostgresStore struct {
 	db *sql.DB
 }
 
+const postgresDownlinkMigrationLockID int64 = 8_789_121_360_511_467
+
 const postgresMessageColumns = `
 message_id, client_id, device_id, msg_id, body, ack_required, trace_id,
 session_id, status, attempts, next_retry_at, last_error, created_at,
@@ -64,7 +66,21 @@ func NewPostgresStore(ctx context.Context, config PostgresStoreConfig) (*Postgre
 }
 
 func (s *PostgresStore) Migrate(ctx context.Context) error {
-	_, err := s.db.ExecContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	// Serialize first-start migrations so concurrent gateway nodes do not race
+	// in PostgreSQL system catalogs while creating this table and its indexes.
+	if _, err := tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock($1)", postgresDownlinkMigrationLockID); err != nil {
+		return err
+	}
+
+	if _, err := tx.ExecContext(ctx, `
 CREATE TABLE IF NOT EXISTS z_courier_downlink_messages (
   message_id TEXT PRIMARY KEY,
   client_id TEXT NOT NULL,
@@ -101,8 +117,11 @@ CREATE INDEX IF NOT EXISTS z_courier_downlink_messages_status_updated_at_idx
   ON z_courier_downlink_messages (status, updated_at);
 CREATE INDEX IF NOT EXISTS z_courier_downlink_messages_status_updated_message_idx
   ON z_courier_downlink_messages (status, updated_at DESC, message_id ASC);
-	`)
-	return err
+	`); err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }
 
 func (s *PostgresStore) Ping(ctx context.Context) error {
