@@ -32,6 +32,7 @@ const (
 	defaultInternalURL  = "http://127.0.0.1:18082"
 	defaultPostgresDSN  = "postgres://zcourier:zcourier@127.0.0.1:15432/zcourier?sslmode=disable"
 	downlinkPushTimeout = 10 * time.Second
+	duplicateCheckDelay = 500 * time.Millisecond
 
 	internalAuthModeToken = "token"
 	internalAuthModeHMAC  = "hmac"
@@ -201,10 +202,30 @@ func run(ctx context.Context, cfg config) error {
 	onlineMessageID := fmt.Sprintf("e2e-%d-online", runID)
 	reconnectMessageID := fmt.Sprintf("e2e-%d-reconnect", runID)
 	upstreamMessageID := fmt.Sprintf("e2e-%d-upstream", runID)
+	offlineBody := []byte("offline-before-client")
+	onlineBody := []byte("online-after-client")
 
-	fmt.Println("checking offline queue path")
-	if err := pushDownlink(ctx, cfg, offlineMessageID, []byte("offline-before-client"), http.StatusAccepted); err != nil {
+	fmt.Println("checking offline queue and idempotency path")
+	offlineCreated, err := pushDownlink(ctx, cfg, offlineMessageID, offlineBody, http.StatusAccepted)
+	if err != nil {
 		return fmt.Errorf("push offline downlink: %w", err)
+	}
+	if err := validatePushOutcome(offlineCreated, offlineMessageID, downlink.SubmissionStateCreated, downlink.MessageStatusPending); err != nil {
+		return fmt.Errorf("validate offline downlink creation: %w", err)
+	}
+	offlineExisting, err := pushDownlink(ctx, cfg, offlineMessageID, offlineBody, http.StatusOK)
+	if err != nil {
+		return fmt.Errorf("replay offline downlink: %w", err)
+	}
+	if err := validatePushOutcome(offlineExisting, offlineMessageID, downlink.SubmissionStateExisting, downlink.MessageStatusPending); err != nil {
+		return fmt.Errorf("validate offline downlink replay: %w", err)
+	}
+	offlineConflict, err := pushDownlink(ctx, cfg, offlineMessageID, []byte("offline-conflict"), http.StatusConflict)
+	if err != nil {
+		return fmt.Errorf("conflict offline downlink: %w", err)
+	}
+	if err := validatePushConflict(offlineConflict, offlineMessageID); err != nil {
+		return fmt.Errorf("validate offline downlink conflict: %w", err)
 	}
 	if err := waitMessageStatus(ctx, db, offlineMessageID, string(downlink.MessageStatusPending)); err != nil {
 		return fmt.Errorf("wait offline message pending: %w", err)
@@ -236,11 +257,18 @@ func run(ctx context.Context, cfg config) error {
 		fmt.Println("admin storage verified")
 	}
 
-	if err := client.WaitDownlink(ctx, offlineMessageID); err != nil {
+	offlinePacket, err := client.WaitDownlinkPacket(ctx, offlineMessageID)
+	if err != nil {
 		return fmt.Errorf("wait offline downlink flush: %w", err)
+	}
+	if !bytes.Equal(offlinePacket.Body, offlineBody) {
+		return fmt.Errorf("offline downlink body = %q, want %q", offlinePacket.Body, offlineBody)
 	}
 	if err := waitMessageStatus(ctx, db, offlineMessageID, string(downlink.MessageStatusDelivered)); err != nil {
 		return fmt.Errorf("wait offline message delivered status: %w", err)
+	}
+	if err := client.ExpectNoDownlink(ctx, offlineMessageID, duplicateCheckDelay); err != nil {
+		return fmt.Errorf("offline idempotency delivery check: %w", err)
 	}
 	fmt.Println("offline message delivered")
 
@@ -253,15 +281,40 @@ func run(ctx context.Context, cfg config) error {
 		}
 	}
 
-	fmt.Println("checking online push path")
-	if err := pushDownlink(ctx, cfg, onlineMessageID, []byte("online-after-client"), http.StatusOK); err != nil {
+	fmt.Println("checking online push and idempotency path")
+	onlineCreated, err := pushDownlink(ctx, cfg, onlineMessageID, onlineBody, http.StatusOK)
+	if err != nil {
 		return fmt.Errorf("push online downlink: %w", err)
 	}
-	if err := client.WaitDownlink(ctx, onlineMessageID); err != nil {
+	if err := validatePushOutcome(onlineCreated, onlineMessageID, downlink.SubmissionStateCreated, downlink.MessageStatusSent); err != nil {
+		return fmt.Errorf("validate online downlink creation: %w", err)
+	}
+	onlinePacket, err := client.WaitDownlinkPacket(ctx, onlineMessageID)
+	if err != nil {
 		return fmt.Errorf("wait online downlink: %w", err)
+	}
+	if !bytes.Equal(onlinePacket.Body, onlineBody) {
+		return fmt.Errorf("online downlink body = %q, want %q", onlinePacket.Body, onlineBody)
 	}
 	if err := waitMessageStatus(ctx, db, onlineMessageID, string(downlink.MessageStatusDelivered)); err != nil {
 		return fmt.Errorf("wait online message delivered status: %w", err)
+	}
+	onlineExisting, err := pushDownlink(ctx, cfg, onlineMessageID, onlineBody, http.StatusOK)
+	if err != nil {
+		return fmt.Errorf("replay online downlink: %w", err)
+	}
+	if err := validatePushOutcome(onlineExisting, onlineMessageID, downlink.SubmissionStateExisting, downlink.MessageStatusDelivered); err != nil {
+		return fmt.Errorf("validate online downlink replay: %w", err)
+	}
+	onlineConflict, err := pushDownlink(ctx, cfg, onlineMessageID, []byte("online-conflict"), http.StatusConflict)
+	if err != nil {
+		return fmt.Errorf("conflict online downlink: %w", err)
+	}
+	if err := validatePushConflict(onlineConflict, onlineMessageID); err != nil {
+		return fmt.Errorf("validate online downlink conflict: %w", err)
+	}
+	if err := client.ExpectNoDownlink(ctx, onlineMessageID, duplicateCheckDelay); err != nil {
+		return fmt.Errorf("online idempotency delivery check: %w", err)
 	}
 	fmt.Println("online message delivered")
 
@@ -599,7 +652,7 @@ func checkReconnectRetry(ctx context.Context, cfg config, db *sql.DB, client *e2
 		return nil, fmt.Errorf("wait disconnected session cleanup: %w", err)
 	}
 
-	if err := pushDownlink(ctx, cfg, messageID, []byte("queued-while-disconnected"), http.StatusAccepted); err != nil {
+	if _, err := pushDownlink(ctx, cfg, messageID, []byte("queued-while-disconnected"), http.StatusAccepted); err != nil {
 		return nil, fmt.Errorf("push reconnect retry downlink: %w", err)
 	}
 	if err := waitMessagePendingAttempt(ctx, db, messageID); err != nil {
@@ -865,7 +918,8 @@ func waitPostgres(ctx context.Context, db *sql.DB) error {
 	})
 }
 
-func pushDownlink(ctx context.Context, cfg config, messageID string, body []byte, wantStatus int) error {
+func pushDownlink(ctx context.Context, cfg config, messageID string, body []byte, wantStatus int) (downlink.PushResponse, error) {
+	var zero downlink.PushResponse
 	requestCtx, cancel := context.WithTimeout(ctx, downlinkPushTimeout)
 	defer cancel()
 
@@ -879,37 +933,63 @@ func pushDownlink(ctx context.Context, cfg config, messageID string, body []byte
 		Body:        body,
 	})
 	if err != nil {
-		return err
+		return zero, err
 	}
 
 	req, err := http.NewRequestWithContext(requestCtx, http.MethodPost, cfg.InternalURL+"/internal/push", bytes.NewReader(reqBody))
 	if err != nil {
-		return err
+		return zero, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if err := applyInternalAuth(req, reqBody, cfg); err != nil {
-		return err
+		return zero, err
 	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return err
+		return zero, err
 	}
 	defer resp.Body.Close()
 
 	respBody, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != wantStatus {
-		return fmt.Errorf("push %s status = %d, want %d, body = %s", messageID, resp.StatusCode, wantStatus, string(respBody))
+		return zero, fmt.Errorf("push %s status = %d, want %d, body = %s", messageID, resp.StatusCode, wantStatus, string(respBody))
 	}
 
 	var pushResp downlink.PushResponse
 	if err := sonic.Unmarshal(respBody, &pushResp); err != nil {
-		return err
+		return zero, err
 	}
-	if pushResp.Code != "ok" {
-		return fmt.Errorf("push %s code = %q, reason = %s", messageID, pushResp.Code, pushResp.Reason)
+	if wantStatus < http.StatusBadRequest && pushResp.Code != "ok" {
+		return zero, fmt.Errorf("push %s code = %q, reason = %s", messageID, pushResp.Code, pushResp.Reason)
 	}
 
+	return pushResp, nil
+}
+
+func validatePushOutcome(response downlink.PushResponse, messageID, submissionState string, messageStatus downlink.MessageStatus) error {
+	if response.Code != "ok" {
+		return fmt.Errorf("code = %q, want ok: %s", response.Code, response.Reason)
+	}
+	if response.MessageID != messageID {
+		return fmt.Errorf("message_id = %q, want %q", response.MessageID, messageID)
+	}
+	if response.SubmissionState != submissionState {
+		return fmt.Errorf("submission_state = %q, want %q", response.SubmissionState, submissionState)
+	}
+	if response.MessageStatus != messageStatus {
+		return fmt.Errorf("message_status = %q, want %q", response.MessageStatus, messageStatus)
+	}
+	return nil
+}
+
+func validatePushConflict(response downlink.PushResponse, messageID string) error {
+	if response.Code != "message_id_conflict" {
+		return fmt.Errorf("code = %q, want message_id_conflict", response.Code)
+	}
+	if response.MessageID != messageID {
+		return fmt.Errorf("message_id = %q, want %q", response.MessageID, messageID)
+	}
 	return nil
 }
 
@@ -995,6 +1075,9 @@ func checkMetrics(ctx context.Context, cfg config) error {
 			return fmt.Errorf("metrics missing %s", name)
 		}
 	}
+	if err := checkIdempotencyMetrics(string(body)); err != nil {
+		return err
+	}
 
 	if cfg.RequireClusterMetrics {
 		for _, name := range []string{
@@ -1028,6 +1111,36 @@ type metricExpectation struct {
 	Name   string
 	Labels map[string]string
 	Min    float64
+}
+
+func checkIdempotencyMetrics(metricsText string) error {
+	expectations := []metricExpectation{
+		{
+			Name:   "z_courier_downlink_push_total",
+			Labels: map[string]string{"msg_id": "2001", "result": "idempotent_replay"},
+			Min:    2,
+		},
+		{
+			Name:   "z_courier_downlink_push_total",
+			Labels: map[string]string{"msg_id": "2001", "result": "message_id_conflict"},
+			Min:    2,
+		},
+	}
+
+	for _, expectation := range expectations {
+		value, found, err := sumMetricSamples(metricsText, expectation.Name, expectation.Labels)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return fmt.Errorf("idempotency metric %s%s not found", expectation.Name, formatMetricLabels(expectation.Labels))
+		}
+		if value < expectation.Min {
+			return fmt.Errorf("idempotency metric %s%s = %.4f, want >= %.4f", expectation.Name, formatMetricLabels(expectation.Labels), value, expectation.Min)
+		}
+	}
+
+	return nil
 }
 
 func checkReconnectRetryMetrics(metricsText string, cfg config) error {
@@ -1362,15 +1475,34 @@ func (c *e2eClient) WaitAck(ctx context.Context, messageID string, code protocol
 }
 
 func (c *e2eClient) WaitDownlink(ctx context.Context, messageID string) error {
+	_, err := c.WaitDownlinkPacket(ctx, messageID)
+	return err
+}
+
+func (c *e2eClient) WaitDownlinkPacket(ctx context.Context, messageID string) (*protocol.Packet, error) {
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return nil, ctx.Err()
 		case packet := <-c.downlink:
 			if packet.MessageID == messageID {
-				return nil
+				return packet, nil
 			}
 		}
+	}
+}
+
+func (c *e2eClient) ExpectNoDownlink(ctx context.Context, messageID string, duration time.Duration) error {
+	timer := time.NewTimer(duration)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case packet := <-c.downlink:
+		return fmt.Errorf("received unexpected downlink message_id=%q while checking %q", packet.MessageID, messageID)
+	case <-timer.C:
+		return nil
 	}
 }
 

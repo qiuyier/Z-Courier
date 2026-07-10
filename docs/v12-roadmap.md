@@ -105,8 +105,8 @@ Acceptance criteria:
   delivery write.
 - Incompatible reuse is rejected without modifying the original message.
 - PostgreSQL and memory stores have the same externally visible behavior.
-- Unit, integration, cluster E2E, Go SDK, and PHP SDK tests cover all three
-  outcomes.
+- Unit, PostgreSQL integration, single-node and cluster HTTP E2E, and Go
+  backend SDK tests cover all three outcomes.
 
 Current implementation:
 
@@ -120,8 +120,14 @@ Current implementation:
   `message_id_conflict`.
 - Go backend SDK responses expose `SubmissionState` and `MessageStatus`.
 - Memory, service, HTTP, SDK, and opt-in real PostgreSQL concurrency tests cover
-  the first implementation slice. Cluster and PHP E2E coverage remains to be
-  added before V12.1 is complete.
+  the store and service contracts.
+- Single-node and two-node cluster E2E verify `created`, compatible `existing`
+  replay, `message_id_conflict`, original-body preservation, and absence of an
+  extra client delivery. In the cluster run, the initial online write traverses
+  gateway-a to gateway-b through peer push while the replay stays suppressed.
+- The public Go backend SDK E2E covers all three submission outcomes. The PHP
+  SDK remains a client protocol SDK and therefore does not own the backend
+  `/internal/push` submission contract.
 
 ### V12.2 Delivery Policies And Backoff
 

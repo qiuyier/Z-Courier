@@ -184,6 +184,25 @@ z_courier_cluster_peer_push_total{result="failure",target_node="gateway-b"} 1
 	}
 }
 
+func TestCheckIdempotencyMetrics(t *testing.T) {
+	metricsText := `
+z_courier_downlink_push_total{msg_id="2001",result="idempotent_replay"} 2
+z_courier_downlink_push_total{msg_id="2001",result="message_id_conflict"} 2
+`
+	if err := checkIdempotencyMetrics(metricsText); err != nil {
+		t.Fatalf("checkIdempotencyMetrics() error = %v", err)
+	}
+}
+
+func TestCheckIdempotencyMetricsRejectsMissingOutcome(t *testing.T) {
+	metricsText := `
+z_courier_downlink_push_total{msg_id="2001",result="idempotent_replay"} 2
+`
+	if err := checkIdempotencyMetrics(metricsText); err == nil {
+		t.Fatal("checkIdempotencyMetrics() error = nil, want missing conflict rejection")
+	}
+}
+
 func TestCheckReconnectRetryMetrics(t *testing.T) {
 	metricsText := `
 z_courier_downlink_push_total{msg_id="2001",result="queued"} 2

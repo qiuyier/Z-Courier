@@ -12,7 +12,8 @@ semantic versioning after the first public MVP tag.
 - V12 reliable-downlink idempotency foundation: immutable request identity
   fingerprints, atomic `created`/`existing`/`conflict` store outcomes, safe
   compatible replay, explicit HTTP `409 message_id_conflict`, and additive Go
-  backend SDK response metadata.
+  backend SDK response metadata. Single-node, two-node cluster, and public Go
+  backend SDK E2E coverage verifies replay suppression and conflict behavior.
 
 ## [v0.11.0] - 2026-07-10
 

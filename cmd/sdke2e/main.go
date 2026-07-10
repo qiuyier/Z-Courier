@@ -3,8 +3,10 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"time"
 
@@ -168,7 +170,7 @@ func verifyDownlink(
 ) error {
 	messageID := fmt.Sprintf("sdk-e2e-downlink-%s-%d", phase, time.Now().UnixNano())
 	body := []byte("sdk-e2e-downlink-" + phase)
-	response, err := backend.Push(ctx, sdkbackend.PushRequest{
+	request := sdkbackend.PushRequest{
 		ClientID:    configuration.ClientID,
 		DeviceID:    configuration.DeviceID,
 		MsgID:       2001,
@@ -176,12 +178,13 @@ func verifyDownlink(
 		TraceID:     messageID,
 		AckRequired: true,
 		Body:        body,
-	})
+	}
+	response, err := backend.Push(ctx, request)
 	if err != nil {
 		return fmt.Errorf("%s downlink push: %w", phase, err)
 	}
-	if response.MessageID != messageID {
-		return fmt.Errorf("%s downlink push: message ID = %q, want %q", phase, response.MessageID, messageID)
+	if err := validateBackendPushResponse(response, messageID, sdkbackend.SubmissionStateCreated, sdkbackend.MessageStatusSent); err != nil {
+		return fmt.Errorf("%s downlink creation: %w", phase, err)
 	}
 
 	for {
@@ -196,7 +199,35 @@ func verifyDownlink(
 			if err := waitDelivered(ctx, backend, messageID); err != nil {
 				return fmt.Errorf("%s downlink ACK: %w", phase, err)
 			}
+
+			replayRequest := request
+			replayRequest.TraceID = messageID + "-replay"
+			replay, err := backend.Push(ctx, replayRequest)
+			if err != nil {
+				return fmt.Errorf("%s downlink replay: %w", phase, err)
+			}
+			if err := validateBackendPushResponse(replay, messageID, sdkbackend.SubmissionStateExisting, sdkbackend.MessageStatusDelivered); err != nil {
+				return fmt.Errorf("%s downlink replay: %w", phase, err)
+			}
+
+			conflictRequest := request
+			conflictRequest.Body = []byte("sdk-e2e-conflict-" + phase)
+			_, err = backend.Push(ctx, conflictRequest)
+			var apiErr *sdkbackend.APIError
+			if !errors.As(err, &apiErr) {
+				return fmt.Errorf("%s downlink conflict error = %v, want *backend.APIError", phase, err)
+			}
+			if apiErr.StatusCode != http.StatusConflict || apiErr.Code != "message_id_conflict" {
+				return fmt.Errorf(
+					"%s downlink conflict = HTTP %d code %q, want HTTP %d code message_id_conflict",
+					phase,
+					apiErr.StatusCode,
+					apiErr.Code,
+					http.StatusConflict,
+				)
+			}
 			fmt.Printf("sdk downlink delivered: phase=%s message_id=%s\n", phase, messageID)
+			fmt.Printf("sdk downlink idempotency verified: phase=%s message_id=%s\n", phase, messageID)
 			return nil
 		case err := <-downlinkErrors:
 			return fmt.Errorf("%s downlink handler: %w", phase, err)
@@ -204,6 +235,30 @@ func verifyDownlink(
 			return fmt.Errorf("%s downlink: %w", phase, ctx.Err())
 		}
 	}
+}
+
+func validateBackendPushResponse(
+	response *sdkbackend.PushResponse,
+	messageID string,
+	submissionState string,
+	messageStatus sdkbackend.MessageStatus,
+) error {
+	if response == nil {
+		return fmt.Errorf("response is nil")
+	}
+	if response.Code != "ok" {
+		return fmt.Errorf("code = %q, want ok: %s", response.Code, response.Reason)
+	}
+	if response.MessageID != messageID {
+		return fmt.Errorf("message ID = %q, want %q", response.MessageID, messageID)
+	}
+	if response.SubmissionState != submissionState {
+		return fmt.Errorf("submission state = %q, want %q", response.SubmissionState, submissionState)
+	}
+	if response.MessageStatus != messageStatus {
+		return fmt.Errorf("message status = %q, want %q", response.MessageStatus, messageStatus)
+	}
+	return nil
 }
 
 func waitDelivered(ctx context.Context, backend *sdkbackend.Client, messageID string) error {
