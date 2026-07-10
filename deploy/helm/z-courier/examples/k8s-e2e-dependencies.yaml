@@ -137,6 +137,7 @@ spec:
       containers:
         - name: nsqd
           image: nsqio/nsq:latest
+          imagePullPolicy: IfNotPresent
           command:
             - /nsqd
             - --broadcast-address=nsqd
