@@ -141,6 +141,32 @@ func TestPushSendsTokenAndDecodesQueuedResponse(t *testing.T) {
 	}
 }
 
+func TestPushReturnsMessageIDConflictAPIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeTestJSON(t, w, http.StatusConflict, PushResponse{
+			Code:      "message_id_conflict",
+			Reason:    "immutable identity differs",
+			MessageID: "message-1",
+		})
+	}))
+	defer server.Close()
+
+	client := newTestClient(t, server.URL, "")
+	_, err := client.Push(context.Background(), PushRequest{
+		ClientID:  "client-1",
+		DeviceID:  "device-1",
+		MsgID:     2001,
+		MessageID: "message-1",
+	})
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("Push() error = %v, want APIError", err)
+	}
+	if apiErr.StatusCode != http.StatusConflict || apiErr.Code != "message_id_conflict" {
+		t.Fatalf("APIError = %+v", apiErr)
+	}
+}
+
 func TestPushBatchDecodesMultiStatusWithoutReturningError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		writeTestJSON(t, w, http.StatusMultiStatus, BatchPushResponse{

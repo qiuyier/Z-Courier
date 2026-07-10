@@ -297,18 +297,30 @@ func (s *Service) pushReliable(ctx context.Context, req PushRequest) (*PushRespo
 		message.ClaimUntil = message.CreatedAt.Add(s.retryClaimLease)
 	}
 
-	message, err := s.store.Save(ctx, message)
+	saveResult, err := s.store.Save(ctx, message)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrStore, err)
 	}
+	message = saveResult.Message
+	switch saveResult.Outcome {
+	case SaveOutcomeExisting:
+		return pushResponseFromStoredMessage(message, SubmissionStateExisting), nil
+	case SaveOutcomeConflict:
+		return nil, fmt.Errorf("%w: %s", ErrMessageIDConflict, message.MessageID)
+	case SaveOutcomeCreated:
+	default:
+		return nil, fmt.Errorf("%w: unknown save outcome %q", ErrStore, saveResult.Outcome)
+	}
 
 	resp := &PushResponse{
-		Code:          "ok",
-		DeliveryState: DeliveryStateQueued,
-		ClientID:      message.ClientID,
-		DeviceID:      message.DeviceID,
-		MessageID:     message.MessageID,
-		TraceID:       message.TraceID,
+		Code:            "ok",
+		SubmissionState: SubmissionStateCreated,
+		MessageStatus:   MessageStatusPending,
+		DeliveryState:   DeliveryStateQueued,
+		ClientID:        message.ClientID,
+		DeviceID:        message.DeviceID,
+		MessageID:       message.MessageID,
+		TraceID:         message.TraceID,
 	}
 
 	sentResp, err := s.deliverOnline(ctx, pushRequestFromMessage(message))
@@ -325,8 +337,32 @@ func (s *Service) pushReliable(ctx context.Context, req PushRequest) (*PushRespo
 		return nil, fmt.Errorf("%w: %v", ErrStore, err)
 	}
 
+	sentResp.SubmissionState = SubmissionStateCreated
+	sentResp.MessageStatus = MessageStatusSent
 	sentResp.DeliveryState = DeliveryStateSent
 	return sentResp, nil
+}
+
+func pushResponseFromStoredMessage(message Message, submissionState string) *PushResponse {
+	deliveryState := ""
+	switch message.Status {
+	case MessageStatusPending:
+		deliveryState = DeliveryStateQueued
+	case MessageStatusSent, MessageStatusDelivered:
+		deliveryState = DeliveryStateSent
+	}
+
+	return &PushResponse{
+		Code:            "ok",
+		SubmissionState: submissionState,
+		MessageStatus:   message.Status,
+		DeliveryState:   deliveryState,
+		ClientID:        message.ClientID,
+		DeviceID:        message.DeviceID,
+		SessionID:       message.SessionID,
+		MessageID:       message.MessageID,
+		TraceID:         message.TraceID,
+	}
 }
 
 func (s *Service) RetryDue(ctx context.Context, limit int) (RetryResult, error) {

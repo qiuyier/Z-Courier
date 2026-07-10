@@ -6,6 +6,47 @@ import (
 	"time"
 )
 
+func TestMemoryStoreSaveReportsCreatedExistingAndConflict(t *testing.T) {
+	store := NewMemoryStore()
+	message := Message{
+		MessageID:   "message-1",
+		ClientID:    "client-1",
+		DeviceID:    "device-1",
+		MsgID:       2001,
+		AckRequired: true,
+		TraceID:     "trace-1",
+		Body:        []byte("hello"),
+	}
+
+	created, err := store.Save(context.Background(), message)
+	if err != nil {
+		t.Fatalf("Save created error = %v", err)
+	}
+	if created.Outcome != SaveOutcomeCreated || created.Message.MessageID != message.MessageID {
+		t.Fatalf("created result = %+v", created)
+	}
+
+	replay := message.Clone()
+	replay.TraceID = "trace-2"
+	existing, err := store.Save(context.Background(), replay)
+	if err != nil {
+		t.Fatalf("Save existing error = %v", err)
+	}
+	if existing.Outcome != SaveOutcomeExisting || existing.Message.TraceID != "trace-1" {
+		t.Fatalf("existing result = %+v", existing)
+	}
+
+	conflicting := message.Clone()
+	conflicting.Body = []byte("different")
+	conflict, err := store.Save(context.Background(), conflicting)
+	if err != nil {
+		t.Fatalf("Save conflict error = %v", err)
+	}
+	if conflict.Outcome != SaveOutcomeConflict || string(conflict.Message.Body) != "hello" {
+		t.Fatalf("conflict result = %+v", conflict)
+	}
+}
+
 func TestMemoryStoreListDuePending(t *testing.T) {
 	store := NewMemoryStore()
 	now := time.UnixMilli(1760000000000)

@@ -162,6 +162,37 @@ If the client is online, the gateway sends a protocol packet with the requested
 `MsgID`. If the client is offline and storage is configured, the message is
 queued for retry or bind-time flush.
 
+When reliable storage is enabled, `message_id` is also the idempotency key. The
+gateway compares the immutable request identity: `client_id`, `device_id`,
+`msg_id`, `ack_required`, and a digest of the opaque body. `trace_id` is not
+part of immutable identity.
+
+- A new message returns `submission_state = created` and is delivered or
+  queued normally.
+- A compatible replay returns HTTP `200`, `submission_state = existing`, and
+  the persisted `message_status` without starting another initial delivery.
+- Reusing the same `message_id` with different immutable identity returns HTTP
+  `409` with `code = message_id_conflict`; the original record is unchanged.
+
+Example compatible replay response:
+
+```json
+{
+  "code": "ok",
+  "submission_state": "existing",
+  "message_status": "sent",
+  "delivery_state": "sent",
+  "client_id": "dev-client",
+  "device_id": "device-1",
+  "message_id": "message-1",
+  "trace_id": "trace-1"
+}
+```
+
+This contract makes backend HTTP retries safe at the gateway submission
+boundary. It does not provide exactly-once client or business processing. A
+deployment without reliable storage does not persist an idempotency record.
+
 Backends can push multiple downlink messages in one internal request:
 
 ```text

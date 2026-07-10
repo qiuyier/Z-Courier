@@ -192,6 +192,21 @@ case backend.DeliveryStateQueued:
 }
 ```
 
+启用可靠存储后，可以通过 `SubmissionState` 区分首次提交和幂等重放：
+
+```go
+switch response.SubmissionState {
+case backend.SubmissionStateCreated:
+    // 本次请求创建了持久消息
+case backend.SubmissionStateExisting:
+    // 相同 MessageID 已存在，MessageStatus 是当前持久状态
+}
+```
+
+如果相同 `MessageID` 对应的 client、device、MsgID、ACK 要求或 Body 不同，
+gateway 会返回 HTTP `409` 和 `message_id_conflict`；`Client.Push` 会将它返回为
+`*backend.APIError`，且不会覆盖原消息。
+
 常用方法：
 
 ```go

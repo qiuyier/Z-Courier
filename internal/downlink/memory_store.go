@@ -21,9 +21,9 @@ func NewMemoryStore() *MemoryStore {
 	}
 }
 
-func (s *MemoryStore) Save(ctx context.Context, message Message) (Message, error) {
+func (s *MemoryStore) Save(ctx context.Context, message Message) (SaveResult, error) {
 	if err := ctx.Err(); err != nil {
-		return Message{}, err
+		return SaveResult{}, err
 	}
 	if message.MessageID == "" {
 		message.MessageID = NewMessageID()
@@ -39,16 +39,25 @@ func (s *MemoryStore) Save(ctx context.Context, message Message) (Message, error
 		message.UpdatedAt = now
 	}
 	message.Body = bytes.Clone(message.Body)
+	message.IdentityFingerprint = messageIdentityFingerprint(message)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if existing, ok := s.messages[message.MessageID]; ok {
-		return existing.Clone(), nil
+		if len(existing.IdentityFingerprint) != len(message.IdentityFingerprint) {
+			existing.IdentityFingerprint = messageIdentityFingerprint(existing)
+			s.messages[message.MessageID] = existing
+		}
+		outcome := SaveOutcomeExisting
+		if !messagesHaveSameIdentity(existing, message) {
+			outcome = SaveOutcomeConflict
+		}
+		return SaveResult{Message: existing.Clone(), Outcome: outcome}, nil
 	}
 
 	s.messages[message.MessageID] = message
-	return message.Clone(), nil
+	return SaveResult{Message: message.Clone(), Outcome: SaveOutcomeCreated}, nil
 }
 
 func (s *MemoryStore) Get(ctx context.Context, messageID string) (Message, bool, error) {

@@ -22,4 +22,5 @@ var (
 	ErrStore              = errors.New("downlink: store error")
 	ErrStoreNotConfigured = errors.New("downlink: store is not configured")
 	ErrMessageNotFound    = errors.New("downlink: message not found")
+	ErrMessageIDConflict  = errors.New("downlink: message_id immutable identity conflict")
 )

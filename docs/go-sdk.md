@@ -177,6 +177,23 @@ case backend.DeliveryStateQueued:
 }
 ```
 
+With reliable gateway storage, inspect `SubmissionState` to distinguish a new
+submission from an idempotent replay:
+
+```go
+switch response.SubmissionState {
+case backend.SubmissionStateCreated:
+    // This request created the durable message.
+case backend.SubmissionStateExisting:
+    // A compatible MessageID already exists. MessageStatus is its persisted state.
+}
+```
+
+The gateway returns HTTP `409` with `code = message_id_conflict` when the same
+`MessageID` is reused with different client/device, MsgID, ACK requirement, or
+body. `Client.Push` returns that response as `*backend.APIError` and does not
+overwrite the existing message.
+
 The client also provides:
 
 ```go

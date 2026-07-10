@@ -22,6 +22,11 @@ const (
 	DeliveryFailureStageRouteLookup = "route_lookup"
 	// DeliveryFailureStagePeerDispatch means peer gateway dispatch failed.
 	DeliveryFailureStagePeerDispatch = "peer_dispatch"
+
+	// SubmissionStateCreated means this request created a durable message.
+	SubmissionStateCreated = "created"
+	// SubmissionStateExisting means this request matched an existing durable message.
+	SubmissionStateExisting = "existing"
 )
 
 // PushRequest describes one opaque downlink message.
@@ -37,21 +42,23 @@ type PushRequest struct {
 
 // PushResponse reports whether a downlink message was sent or queued.
 type PushResponse struct {
-	Code               string `json:"code"`
-	Reason             string `json:"reason,omitempty"`
-	DeliveryState      string `json:"delivery_state,omitempty"`
-	DeliveryPath       string `json:"delivery_path,omitempty"`
-	OriginGatewayNode  string `json:"origin_gateway_node,omitempty"`
-	TargetGatewayNode  string `json:"target_gateway_node,omitempty"`
-	TargetInternalAddr string `json:"target_internal_addr,omitempty"`
-	FailureStage       string `json:"failure_stage,omitempty"`
-	FailureCode        string `json:"failure_code,omitempty"`
-	ClientID           string `json:"client_id,omitempty"`
-	DeviceID           string `json:"device_id,omitempty"`
-	SessionID          string `json:"session_id,omitempty"`
-	ConnID             uint64 `json:"conn_id,omitempty"`
-	MessageID          string `json:"message_id,omitempty"`
-	TraceID            string `json:"trace_id,omitempty"`
+	Code               string        `json:"code"`
+	Reason             string        `json:"reason,omitempty"`
+	SubmissionState    string        `json:"submission_state,omitempty"`
+	MessageStatus      MessageStatus `json:"message_status,omitempty"`
+	DeliveryState      string        `json:"delivery_state,omitempty"`
+	DeliveryPath       string        `json:"delivery_path,omitempty"`
+	OriginGatewayNode  string        `json:"origin_gateway_node,omitempty"`
+	TargetGatewayNode  string        `json:"target_gateway_node,omitempty"`
+	TargetInternalAddr string        `json:"target_internal_addr,omitempty"`
+	FailureStage       string        `json:"failure_stage,omitempty"`
+	FailureCode        string        `json:"failure_code,omitempty"`
+	ClientID           string        `json:"client_id,omitempty"`
+	DeviceID           string        `json:"device_id,omitempty"`
+	SessionID          string        `json:"session_id,omitempty"`
+	ConnID             uint64        `json:"conn_id,omitempty"`
+	MessageID          string        `json:"message_id,omitempty"`
+	TraceID            string        `json:"trace_id,omitempty"`
 }
 
 // BatchPushRequest describes a group of downlink messages.

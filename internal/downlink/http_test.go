@@ -121,6 +121,48 @@ func TestHandlerReliablePushQueued(t *testing.T) {
 	}
 }
 
+func TestHandlerReliablePushReturnsExistingAndRejectsConflict(t *testing.T) {
+	conn := &fakeConnection{}
+	handler := NewHandler(HandlerConfig{
+		Service: NewService(
+			fakeSessions{session: &session.Session{SessionID: "s1", ConnID: 1, ClientID: "c1", DeviceID: "d1"}},
+			fakeConnections{conn: conn},
+			WithStore(NewMemoryStore()),
+		),
+		InternalToken: "secret",
+		Logger:        zap.NewNop(),
+	})
+
+	push := func(body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/internal/push", strings.NewReader(body))
+		req.Header.Set(InternalTokenHeader, "secret")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		return rec
+	}
+
+	created := push(`{"client_id":"c1","device_id":"d1","msg_id":2001,"message_id":"m1","trace_id":"trace-1","body":"aGVsbG8="}`)
+	if created.Code != http.StatusOK || !strings.Contains(created.Body.String(), `"submission_state":"created"`) {
+		t.Fatalf("created response = %d %s", created.Code, created.Body.String())
+	}
+
+	existing := push(`{"client_id":"c1","device_id":"d1","msg_id":2001,"message_id":"m1","trace_id":"trace-2","body":"aGVsbG8="}`)
+	if existing.Code != http.StatusOK || !strings.Contains(existing.Body.String(), `"submission_state":"existing"`) {
+		t.Fatalf("existing response = %d %s", existing.Code, existing.Body.String())
+	}
+	if conn.calls != 1 {
+		t.Fatalf("connection calls = %d, want one", conn.calls)
+	}
+
+	conflict := push(`{"client_id":"c1","device_id":"d1","msg_id":2001,"message_id":"m1","body":"ZGlmZmVyZW50"}`)
+	if conflict.Code != http.StatusConflict || !strings.Contains(conflict.Body.String(), `"code":"message_id_conflict"`) {
+		t.Fatalf("conflict response = %d %s", conflict.Code, conflict.Body.String())
+	}
+	if conn.calls != 1 {
+		t.Fatalf("connection calls after conflict = %d, want one", conn.calls)
+	}
+}
+
 func TestBatchHandlerPushOK(t *testing.T) {
 	conn := &fakeConnection{}
 	handler := NewBatchHandler(HandlerConfig{

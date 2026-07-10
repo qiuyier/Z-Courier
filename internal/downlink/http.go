@@ -203,13 +203,19 @@ func (h *handler) pushOne(r *http.Request, req PushRequest) (PushResponse, int) 
 	}
 
 	status := http.StatusOK
-	if resp.DeliveryState == DeliveryStateQueued {
+	if resp.SubmissionState != SubmissionStateExisting && resp.DeliveryState == DeliveryStateQueued {
 		status = http.StatusAccepted
 	}
 
-	metrics.RecordDownlinkPush(req.MsgID, nonEmpty(resp.DeliveryState, "success"))
+	result := nonEmpty(resp.DeliveryState, "success")
+	if resp.SubmissionState == SubmissionStateExisting {
+		result = "idempotent_replay"
+	}
+	metrics.RecordDownlinkPush(req.MsgID, result)
 	h.config.Logger.Info(
 		"downlink push accepted",
+		zap.String("submission_state", resp.SubmissionState),
+		zap.String("message_status", string(resp.MessageStatus)),
 		zap.String("delivery_state", resp.DeliveryState),
 		zap.String("client_id", resp.ClientID),
 		zap.String("device_id", resp.DeviceID),
@@ -236,7 +242,7 @@ func statusFromError(err error) int {
 		return http.StatusBadRequest
 	case errors.Is(err, ErrSessionNotFound), errors.Is(err, ErrSessionMismatch):
 		return http.StatusNotFound
-	case errors.Is(err, ErrConnectionNotFound):
+	case errors.Is(err, ErrConnectionNotFound), errors.Is(err, ErrMessageIDConflict):
 		return http.StatusConflict
 	default:
 		return http.StatusBadGateway
@@ -244,6 +250,9 @@ func statusFromError(err error) int {
 }
 
 func pushFailureCode(err error, status int) string {
+	if errors.Is(err, ErrMessageIDConflict) {
+		return "message_id_conflict"
+	}
 	failure := deliveryFailureFromError(err)
 	if failure.Code != "" && failure.Code != "error" {
 		return failure.Code

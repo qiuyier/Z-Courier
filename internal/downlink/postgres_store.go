@@ -26,7 +26,8 @@ type PostgresStore struct {
 const postgresDownlinkMigrationLockID int64 = 8_789_121_360_511_467
 
 const postgresMessageColumns = `
-message_id, client_id, device_id, msg_id, body, ack_required, trace_id,
+message_id, client_id, device_id, msg_id, body, identity_fingerprint,
+ack_required, trace_id,
 session_id, status, attempts, next_retry_at, last_error, created_at,
 updated_at, sent_at, delivered_at, claim_owner, claim_until
 `
@@ -87,6 +88,7 @@ CREATE TABLE IF NOT EXISTS z_courier_downlink_messages (
   device_id TEXT NOT NULL,
   msg_id INTEGER NOT NULL,
   body BYTEA NOT NULL DEFAULT ''::bytea,
+  identity_fingerprint BYTEA NOT NULL DEFAULT ''::bytea,
   ack_required BOOLEAN NOT NULL DEFAULT false,
   trace_id TEXT NOT NULL DEFAULT '',
   session_id TEXT NOT NULL DEFAULT '',
@@ -105,6 +107,8 @@ ALTER TABLE z_courier_downlink_messages
   ADD COLUMN IF NOT EXISTS claim_owner TEXT NOT NULL DEFAULT '';
 ALTER TABLE z_courier_downlink_messages
   ADD COLUMN IF NOT EXISTS claim_until TIMESTAMPTZ;
+ALTER TABLE z_courier_downlink_messages
+  ADD COLUMN IF NOT EXISTS identity_fingerprint BYTEA NOT NULL DEFAULT ''::bytea;
 CREATE INDEX IF NOT EXISTS z_courier_downlink_messages_client_device_status_idx
   ON z_courier_downlink_messages (client_id, device_id, status);
 CREATE INDEX IF NOT EXISTS z_courier_downlink_messages_next_retry_at_idx
@@ -131,7 +135,7 @@ func (s *PostgresStore) Ping(ctx context.Context) error {
 	return s.db.PingContext(ctx)
 }
 
-func (s *PostgresStore) Save(ctx context.Context, message Message) (Message, error) {
+func (s *PostgresStore) Save(ctx context.Context, message Message) (SaveResult, error) {
 	if message.MessageID == "" {
 		message.MessageID = NewMessageID()
 	}
@@ -145,24 +149,28 @@ func (s *PostgresStore) Save(ctx context.Context, message Message) (Message, err
 	if message.UpdatedAt.IsZero() {
 		message.UpdatedAt = now
 	}
+	message.IdentityFingerprint = messageIdentityFingerprint(message)
 
-	_, err := s.db.ExecContext(ctx, `
+	inserted, err := scanMessage(s.db.QueryRowContext(ctx, `
 INSERT INTO z_courier_downlink_messages (
-  message_id, client_id, device_id, msg_id, body, ack_required, trace_id,
-  session_id, status, attempts, next_retry_at, last_error, created_at,
-  updated_at, sent_at, delivered_at, claim_owner, claim_until
+  message_id, client_id, device_id, msg_id, body, identity_fingerprint,
+  ack_required, trace_id, session_id, status, attempts, next_retry_at,
+  last_error, created_at, updated_at, sent_at, delivered_at, claim_owner,
+  claim_until
 ) VALUES (
-  $1, $2, $3, $4, $5, $6, $7,
-  $8, $9, $10, $11, $12, $13,
-  $14, $15, $16, $17, $18
+  $1, $2, $3, $4, $5, $6,
+  $7, $8, $9, $10, $11, $12,
+  $13, $14, $15, $16, $17, $18, $19
 )
 ON CONFLICT (message_id) DO NOTHING
+RETURNING `+postgresMessageColumns+`
 `,
 		message.MessageID,
 		message.ClientID,
 		message.DeviceID,
 		int64(message.MsgID),
 		bytes.Clone(message.Body),
+		bytes.Clone(message.IdentityFingerprint),
 		message.AckRequired,
 		message.TraceID,
 		message.SessionID,
@@ -176,20 +184,37 @@ ON CONFLICT (message_id) DO NOTHING
 		nullTime(message.DeliveredAt),
 		message.ClaimOwner,
 		nullTime(message.ClaimUntil),
-	)
-	if err != nil {
-		return Message{}, err
+	))
+	if err == nil {
+		return SaveResult{Message: inserted, Outcome: SaveOutcomeCreated}, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return SaveResult{}, err
 	}
 
 	stored, ok, err := s.Get(ctx, message.MessageID)
 	if err != nil {
-		return Message{}, err
+		return SaveResult{}, err
 	}
 	if !ok {
-		return Message{}, ErrMessageNotFound
+		return SaveResult{}, ErrMessageNotFound
+	}
+	if len(stored.IdentityFingerprint) != len(message.IdentityFingerprint) {
+		stored.IdentityFingerprint = messageIdentityFingerprint(stored)
+		if _, err := s.db.ExecContext(ctx, `
+UPDATE z_courier_downlink_messages
+SET identity_fingerprint = $2
+WHERE message_id = $1 AND octet_length(identity_fingerprint) = 0
+`, stored.MessageID, bytes.Clone(stored.IdentityFingerprint)); err != nil {
+			return SaveResult{}, err
+		}
 	}
 
-	return stored, nil
+	outcome := SaveOutcomeExisting
+	if !messagesHaveSameIdentity(stored, message) {
+		outcome = SaveOutcomeConflict
+	}
+	return SaveResult{Message: stored, Outcome: outcome}, nil
 }
 
 func (s *PostgresStore) Get(ctx context.Context, messageID string) (Message, bool, error) {
@@ -350,9 +375,9 @@ SET claim_owner = $4,
 FROM claimed
 WHERE m.message_id = claimed.message_id
 RETURNING m.message_id, m.client_id, m.device_id, m.msg_id, m.body,
-          m.ack_required, m.trace_id, m.session_id, m.status, m.attempts,
-          m.next_retry_at, m.last_error, m.created_at, m.updated_at,
-          m.sent_at, m.delivered_at, m.claim_owner, m.claim_until
+          m.identity_fingerprint, m.ack_required, m.trace_id, m.session_id,
+          m.status, m.attempts, m.next_retry_at, m.last_error, m.created_at,
+          m.updated_at, m.sent_at, m.delivered_at, m.claim_owner, m.claim_until
 `, string(MessageStatusPending), now, limit, owner, now.Add(lease), includeAckTimeout, string(MessageStatusSent), ackDeadline)
 	if err != nil {
 		return nil, err
@@ -581,6 +606,7 @@ func scanMessage(row rowScanner) (Message, error) {
 		&message.DeviceID,
 		&msgID,
 		&message.Body,
+		&message.IdentityFingerprint,
 		&message.AckRequired,
 		&message.TraceID,
 		&message.SessionID,
@@ -613,6 +639,7 @@ func scanMessage(row rowScanner) (Message, error) {
 		message.ClaimUntil = claimUntil.Time
 	}
 	message.Body = bytes.Clone(message.Body)
+	message.IdentityFingerprint = bytes.Clone(message.IdentityFingerprint)
 
 	return message, nil
 }

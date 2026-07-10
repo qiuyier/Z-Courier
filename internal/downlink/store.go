@@ -16,7 +16,22 @@ const (
 	DeliveryFailureStageSession      = sdkbackend.DeliveryFailureStageSessionLookup
 	DeliveryFailureStageRouteLookup  = sdkbackend.DeliveryFailureStageRouteLookup
 	DeliveryFailureStagePeerDispatch = sdkbackend.DeliveryFailureStagePeerDispatch
+	SubmissionStateCreated           = sdkbackend.SubmissionStateCreated
+	SubmissionStateExisting          = sdkbackend.SubmissionStateExisting
 )
+
+type SaveOutcome string
+
+const (
+	SaveOutcomeCreated  SaveOutcome = "created"
+	SaveOutcomeExisting SaveOutcome = "existing"
+	SaveOutcomeConflict SaveOutcome = "conflict"
+)
+
+type SaveResult struct {
+	Message Message
+	Outcome SaveOutcome
+}
 
 type RetryResult struct {
 	Scanned int
@@ -53,24 +68,25 @@ const (
 )
 
 type Message struct {
-	MessageID   string
-	ClientID    string
-	DeviceID    string
-	MsgID       uint32
-	Body        []byte
-	AckRequired bool
-	TraceID     string
-	SessionID   string
-	Status      MessageStatus
-	Attempts    int
-	NextRetryAt time.Time
-	LastError   string
-	ClaimOwner  string
-	ClaimUntil  time.Time
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-	SentAt      time.Time
-	DeliveredAt time.Time
+	MessageID           string
+	ClientID            string
+	DeviceID            string
+	MsgID               uint32
+	Body                []byte
+	IdentityFingerprint []byte
+	AckRequired         bool
+	TraceID             string
+	SessionID           string
+	Status              MessageStatus
+	Attempts            int
+	NextRetryAt         time.Time
+	LastError           string
+	ClaimOwner          string
+	ClaimUntil          time.Time
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
+	SentAt              time.Time
+	DeliveredAt         time.Time
 }
 
 type MessageListCursor struct {
@@ -96,11 +112,12 @@ type MessageListResult struct {
 
 func (m Message) Clone() Message {
 	m.Body = bytes.Clone(m.Body)
+	m.IdentityFingerprint = bytes.Clone(m.IdentityFingerprint)
 	return m
 }
 
 type Store interface {
-	Save(context.Context, Message) (Message, error)
+	Save(context.Context, Message) (SaveResult, error)
 	Get(context.Context, string) (Message, bool, error)
 	ListByStatus(context.Context, MessageStatus, int) ([]Message, error)
 	ListByStatusPage(context.Context, MessageListQuery) (MessageListResult, error)

@@ -108,6 +108,21 @@ Acceptance criteria:
 - Unit, integration, cluster E2E, Go SDK, and PHP SDK tests cover all three
   outcomes.
 
+Current implementation:
+
+- Reliable stores atomically classify save attempts as `created`, `existing`,
+  or `conflict` using a SHA-256 fingerprint of immutable request identity.
+- PostgreSQL persists the fingerprint in
+  `z_courier_downlink_messages.identity_fingerprint`; old rows are compatible
+  and lazily backfilled when replayed.
+- Compatible replay returns the persisted message state and skips direct or
+  peer redelivery. Immutable identity conflicts return HTTP `409` with
+  `message_id_conflict`.
+- Go backend SDK responses expose `SubmissionState` and `MessageStatus`.
+- Memory, service, HTTP, SDK, and opt-in real PostgreSQL concurrency tests cover
+  the first implementation slice. Cluster and PHP E2E coverage remains to be
+  added before V12.1 is complete.
+
 ### V12.2 Delivery Policies And Backoff
 
 Purpose: let operators tune delivery behavior by message class without

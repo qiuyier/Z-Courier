@@ -116,6 +116,74 @@ func TestServiceReliablePushStoresAndSendsOnlineMessage(t *testing.T) {
 	}
 }
 
+func TestServiceReliablePushReturnsExistingWithoutRedelivery(t *testing.T) {
+	sessions := fakeSessions{session: &session.Session{
+		SessionID: "session-1",
+		ConnID:    7,
+		ClientID:  "client-1",
+		DeviceID:  "device-1",
+	}}
+	conn := &fakeConnection{}
+	store := NewMemoryStore()
+	service := NewService(sessions, fakeConnections{conn: conn}, WithStore(store))
+	service.now = func() time.Time { return time.UnixMilli(1760000000000) }
+	store.now = service.now
+
+	request := PushRequest{
+		ClientID:    "client-1",
+		DeviceID:    "device-1",
+		MsgID:       2001,
+		MessageID:   "message-1",
+		TraceID:     "trace-1",
+		AckRequired: true,
+		Body:        []byte("hello"),
+	}
+	created, err := service.Push(context.Background(), request)
+	if err != nil {
+		t.Fatalf("created Push() error = %v", err)
+	}
+	if created.SubmissionState != SubmissionStateCreated || conn.calls != 1 {
+		t.Fatalf("created response = %+v calls=%d", created, conn.calls)
+	}
+
+	request.TraceID = "trace-retry"
+	existing, err := service.Push(context.Background(), request)
+	if err != nil {
+		t.Fatalf("existing Push() error = %v", err)
+	}
+	if existing.SubmissionState != SubmissionStateExisting || existing.MessageStatus != MessageStatusSent {
+		t.Fatalf("existing response = %+v", existing)
+	}
+	if existing.TraceID != "trace-1" {
+		t.Fatalf("existing TraceID = %q, want persisted trace-1", existing.TraceID)
+	}
+	if conn.calls != 1 {
+		t.Fatalf("connection calls = %d, want one initial delivery", conn.calls)
+	}
+}
+
+func TestServiceReliablePushRejectsMessageIDIdentityConflict(t *testing.T) {
+	conn := &fakeConnection{}
+	store := NewMemoryStore()
+	service := NewService(
+		fakeSessions{session: &session.Session{SessionID: "session-1", ConnID: 7, ClientID: "client-1", DeviceID: "device-1"}},
+		fakeConnections{conn: conn},
+		WithStore(store),
+	)
+
+	request := PushRequest{ClientID: "client-1", DeviceID: "device-1", MsgID: 2001, MessageID: "message-1", Body: []byte("hello")}
+	if _, err := service.Push(context.Background(), request); err != nil {
+		t.Fatalf("created Push() error = %v", err)
+	}
+	request.Body = []byte("different")
+	if _, err := service.Push(context.Background(), request); !errors.Is(err, ErrMessageIDConflict) {
+		t.Fatalf("conflicting Push() error = %v, want ErrMessageIDConflict", err)
+	}
+	if conn.calls != 1 {
+		t.Fatalf("connection calls = %d, want one initial delivery", conn.calls)
+	}
+}
+
 func TestServiceReliablePushClaimsMessageDuringOnlineSend(t *testing.T) {
 	now := time.UnixMilli(1760000000000)
 	store := NewMemoryStore()
@@ -1501,6 +1569,7 @@ type fakeConnection struct {
 	data       []byte
 	err        error
 	beforeSend func()
+	calls      int
 }
 
 func (f *fakeConnection) SendMsg(msgID uint32, data []byte) error {
@@ -1513,6 +1582,7 @@ func (f *fakeConnection) SendMsg(msgID uint32, data []byte) error {
 
 	f.msgID = msgID
 	f.data = append([]byte(nil), data...)
+	f.calls++
 	return nil
 }
 

@@ -165,6 +165,19 @@ POST /internal/push
 JSON 里的 `body` 是 base64，因为 Go JSON 对 `[]byte` 会这样编码。Z-Courier
 仍然把它当 opaque bytes。
 
+启用可靠存储后，`message_id` 同时也是下行提交的幂等键。gateway 会比较
+`client_id`、`device_id`、`msg_id`、`ack_required` 和不透明 Body 摘要；
+`trace_id` 不属于不可变身份。
+
+- 新消息返回 `submission_state = created`，然后正常发送或排队。
+- 相同身份的重复提交返回 HTTP `200`、`submission_state = existing`，并通过
+  `message_status` 返回已有状态，不会再次触发首次投递。
+- 同一 `message_id` 使用了不同不可变身份时返回 HTTP `409`，响应码为
+  `message_id_conflict`，原消息不会被覆盖。
+
+这个契约保护的是 backend 到 gateway 的提交重试，不代表客户端或业务处理是
+exactly-once。未启用可靠存储的部署不会保存幂等记录。
+
 批量推送使用：
 
 ```text
