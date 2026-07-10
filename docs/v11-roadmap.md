@@ -278,6 +278,9 @@ Current implementation:
   rules surface admin control plane storage failures.
 - Cluster E2E verifies Redis-backed admin session lookup across gateway nodes,
   PostgreSQL admin audit persistence, and the related admin storage metrics.
+- The `v0.11.0` release guide documents compatibility, production admin
+  storage, security boundaries, upgrade verification, rollback, and known
+  limitations.
 
 Acceptance criteria:
 

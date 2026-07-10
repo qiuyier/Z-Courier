@@ -95,9 +95,11 @@ retrospective and usage guide is in
 [docs/zh-CN/v10-release-retrospective.md](docs/zh-CN/v10-release-retrospective.md).
 
 V11 production control-plane planning is tracked in
-[docs/v11-roadmap.md](docs/v11-roadmap.md). It focuses on persistent audit,
+[docs/v11-roadmap.md](docs/v11-roadmap.md), and the `v0.11.0` release guide is
+in [docs/v11-release.md](docs/v11-release.md). It covers persistent audit,
 Redis-backed admin sessions, cluster-wide console views, remote operation
-safety, browser-session hardening, and bounded admin data APIs.
+safety, browser-session hardening, bounded admin data APIs, upgrade, and
+rollback.
 
 ## Quick Start
 
@@ -304,11 +306,12 @@ browser smoke coverage. See [docs/v10-roadmap.md](docs/v10-roadmap.md) and
 guidance are available in
 [docs/zh-CN/v10-release-retrospective.md](docs/zh-CN/v10-release-retrospective.md).
 
-V11 is the `v0.11.0` planning track. It focuses on making the admin control
-plane more production-ready for clustered deployments: persistent audit,
-Redis-backed admin sessions, cluster-wide views, safe remote operations, CSRF
-hardening, and bounded admin data pagination. See
-[docs/v11-roadmap.md](docs/v11-roadmap.md).
+V11 targets `v0.11.0` and makes the admin control plane more production-ready
+for clustered deployments: persistent audit, Redis-backed admin sessions,
+cluster-wide views, safe remote operations, CSRF hardening, bounded admin data
+pagination, and admin storage observability. See
+[docs/v11-roadmap.md](docs/v11-roadmap.md) and
+[docs/v11-release.md](docs/v11-release.md).
 
 ## Development
 
