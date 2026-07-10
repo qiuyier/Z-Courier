@@ -101,6 +101,11 @@ Redis-backed admin sessions, cluster-wide console views, remote operation
 safety, browser-session hardening, bounded admin data APIs, upgrade, and
 rollback.
 
+V12 reliable delivery planning is tracked in
+[docs/v12-roadmap.md](docs/v12-roadmap.md). It focuses on idempotent downlink
+submission, metadata-driven delivery policies, terminal failure handling,
+dead-letter events, and bounded fair retry behavior.
+
 ## Quick Start
 
 Run the single-node integration verifier from the repository root:
@@ -312,6 +317,11 @@ cluster-wide views, safe remote operations, CSRF hardening, bounded admin data
 pagination, and admin storage observability. See
 [docs/v11-roadmap.md](docs/v11-roadmap.md) and
 [docs/v11-release.md](docs/v11-release.md).
+
+V12 is the `v0.12.0` planning track. It returns to the reliable delivery path:
+idempotent backend submission, policy-selected retry, terminal failure events,
+queue capacity, and fair retry behavior, all without inspecting business
+payloads. See [docs/v12-roadmap.md](docs/v12-roadmap.md).
 
 ## Development
 
