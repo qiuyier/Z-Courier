@@ -153,6 +153,20 @@ Acceptance criteria:
 - Policy selection is visible in status APIs, diagnostics, and console views.
 - Existing configurations without policies preserve current retry behavior.
 
+Current implementation:
+
+- V12.2.1 defines an immutable delivery-policy set with an implicit `default`
+  policy and deterministic inclusive MsgID-range resolution.
+- YAML policies inherit omitted values from legacy `downlink.delivery` and
+  support `max_attempts`, `max_age`, `ack_timeout`, initial retry delay,
+  backoff multiplier, maximum retry delay, and bounded jitter.
+- Static validation rejects invalid names, durations, limits, duplicate names,
+  reversed ranges, overlapping enabled ranges, and unbounded exponential
+  backoff.
+- The resolver is available to the downlink service while retry execution is
+  intentionally unchanged. Persisted policy selection and per-message backoff
+  are the next V12.2 slice.
+
 ### V12.3 Terminal Failure And Dead-Letter Events
 
 Purpose: make exhausted delivery a first-class business-operational signal.

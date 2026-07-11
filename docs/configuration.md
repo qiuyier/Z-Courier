@@ -582,6 +582,48 @@ downlink:
 - `scan_limit`: maximum due messages scanned per retry tick.
 - `bind_flush_limit`: maximum pending messages flushed when a client binds.
 
+### Named Delivery Policies (V12.2 Foundation)
+
+The V12.2 policy resolver accepts named policies selected by inclusive MsgID
+ranges:
+
+```yaml
+downlink:
+  delivery:
+    retry_delay: 30s
+    retry_jitter: 5s
+    ack_timeout: 30s
+    max_attempts: 5
+  policies:
+    - name: critical
+      enabled: true
+      msg_id_min: 2100
+      msg_id_max: 2199
+      max_attempts: 10
+      max_age: 1h
+      ack_timeout: 10s
+      retry_delay: 1s
+      backoff_multiplier: 2
+      max_retry_delay: 30s
+      retry_jitter: 250ms
+```
+
+Configured ranges take precedence over the implicit `default` policy. MsgIDs
+outside every configured range use `downlink.delivery`. Omitted policy fields
+inherit the corresponding default value; `max_age` defaults to unlimited,
+`backoff_multiplier` defaults to `1`, and `max_retry_delay` defaults to the
+initial retry delay.
+
+Enabled policy names must be unique and use lowercase letters, digits, `_`, or
+`-`. Ranges are inclusive and cannot overlap. A multiplier greater than `1`
+requires an explicit `max_retry_delay`. Invalid policy configuration prevents
+the gateway from starting.
+
+V12.2.1 wires this validated resolver into the downlink service without
+changing the retry state machine. Persisting the selected policy and applying
+per-message backoff is completed in the next V12.2 slice. Until then,
+`downlink.delivery` remains the source of executed retry timing.
+
 ## Downlink Retention
 
 ```yaml

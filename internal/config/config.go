@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/qiuyier/Z-Courier/internal/auth"
+	"github.com/qiuyier/Z-Courier/internal/downlink"
 	"github.com/qiuyier/Z-Courier/internal/pipeline"
 	"github.com/qiuyier/Z-Courier/internal/server"
 	"github.com/qiuyier/Z-Courier/pkg/sdk/signing"
@@ -207,6 +208,7 @@ type UpstreamConfig struct {
 type DownlinkConfig struct {
 	Storage   DownlinkStorageConfig   `yaml:"storage"`
 	Delivery  DownlinkDeliveryConfig  `yaml:"delivery"`
+	Policies  []DownlinkPolicyConfig  `yaml:"policies"`
 	Retention DownlinkRetentionConfig `yaml:"retention"`
 }
 
@@ -232,6 +234,20 @@ type DownlinkDeliveryConfig struct {
 	MaxAttempts    int    `yaml:"max_attempts"`
 	ScanLimit      int    `yaml:"scan_limit"`
 	BindFlushLimit int    `yaml:"bind_flush_limit"`
+}
+
+type DownlinkPolicyConfig struct {
+	Name              string   `yaml:"name"`
+	Enabled           *bool    `yaml:"enabled"`
+	MsgIDMin          uint32   `yaml:"msg_id_min"`
+	MsgIDMax          uint32   `yaml:"msg_id_max"`
+	MaxAttempts       *int     `yaml:"max_attempts"`
+	MaxAge            string   `yaml:"max_age"`
+	AckTimeout        string   `yaml:"ack_timeout"`
+	RetryDelay        string   `yaml:"retry_delay"`
+	BackoffMultiplier *float64 `yaml:"backoff_multiplier"`
+	MaxRetryDelay     string   `yaml:"max_retry_delay"`
+	RetryJitter       string   `yaml:"retry_jitter"`
 }
 
 type DownlinkRetentionConfig struct {
@@ -1293,6 +1309,11 @@ func applyDownlinkConfig(out *server.Config, config DownlinkConfig) error {
 	if delivery.BindFlushLimit > 0 {
 		out.DownlinkDelivery.BindFlushLimit = delivery.BindFlushLimit
 	}
+	policies, err := toDownlinkPolicies(out.DownlinkDelivery, config.Policies)
+	if err != nil {
+		return err
+	}
+	out.DownlinkPolicies = policies
 
 	retention := config.Retention
 	deliveredTTL, err := parseOptionalPositiveDuration(retention.DeliveredTTL)
@@ -1331,6 +1352,96 @@ func applyDownlinkConfig(out *server.Config, config DownlinkConfig) error {
 	}
 
 	return nil
+}
+
+func toDownlinkPolicies(
+	delivery server.DownlinkDeliveryConfig,
+	configs []DownlinkPolicyConfig,
+) ([]downlink.DeliveryPolicyRule, error) {
+	defaultPolicy := downlink.DeliveryPolicy{
+		Name:              downlink.DefaultDeliveryPolicyName,
+		MaxAttempts:       delivery.MaxAttempts,
+		AckTimeout:        delivery.AckTimeout,
+		InitialRetryDelay: delivery.RetryDelay,
+		BackoffMultiplier: 1,
+		MaxRetryDelay:     delivery.RetryDelay,
+		RetryJitter:       delivery.RetryJitter,
+	}
+
+	rules := make([]downlink.DeliveryPolicyRule, 0, len(configs))
+	for index, config := range configs {
+		if config.Enabled != nil && !*config.Enabled {
+			continue
+		}
+
+		policy := defaultPolicy
+		policy.Name = strings.TrimSpace(config.Name)
+		if config.MaxAttempts != nil {
+			policy.MaxAttempts = *config.MaxAttempts
+		}
+
+		maxAge, err := parseOptionalDuration(config.MaxAge)
+		if err != nil {
+			return nil, fmt.Errorf("config: downlink policy #%d max_age: %w", index+1, err)
+		}
+		if config.MaxAge != "" {
+			policy.MaxAge = maxAge
+		}
+
+		ackTimeout, err := parseOptionalDuration(config.AckTimeout)
+		if err != nil {
+			return nil, fmt.Errorf("config: downlink policy #%d ack_timeout: %w", index+1, err)
+		}
+		if config.AckTimeout != "" {
+			policy.AckTimeout = ackTimeout
+		}
+
+		retryDelay, err := parseOptionalDuration(config.RetryDelay)
+		if err != nil {
+			return nil, fmt.Errorf("config: downlink policy #%d retry_delay: %w", index+1, err)
+		}
+		if config.RetryDelay != "" {
+			policy.InitialRetryDelay = retryDelay
+			if config.MaxRetryDelay == "" {
+				policy.MaxRetryDelay = retryDelay
+			}
+		}
+
+		if config.BackoffMultiplier != nil {
+			policy.BackoffMultiplier = *config.BackoffMultiplier
+		}
+		if policy.BackoffMultiplier > 1 && config.MaxRetryDelay == "" {
+			return nil, fmt.Errorf("config: downlink policy #%d max_retry_delay is required when backoff_multiplier is greater than 1", index+1)
+		}
+
+		maxRetryDelay, err := parseOptionalDuration(config.MaxRetryDelay)
+		if err != nil {
+			return nil, fmt.Errorf("config: downlink policy #%d max_retry_delay: %w", index+1, err)
+		}
+		if config.MaxRetryDelay != "" {
+			policy.MaxRetryDelay = maxRetryDelay
+		}
+
+		retryJitter, err := parseOptionalDuration(config.RetryJitter)
+		if err != nil {
+			return nil, fmt.Errorf("config: downlink policy #%d retry_jitter: %w", index+1, err)
+		}
+		if config.RetryJitter != "" {
+			policy.RetryJitter = retryJitter
+		}
+
+		rules = append(rules, downlink.DeliveryPolicyRule{
+			Policy:   policy,
+			MsgIDMin: config.MsgIDMin,
+			MsgIDMax: config.MsgIDMax,
+		})
+	}
+
+	set, err := downlink.NewDeliveryPolicySet(defaultPolicy, rules)
+	if err != nil {
+		return nil, fmt.Errorf("config: downlink policies: %w", err)
+	}
+	return set.Rules(), nil
 }
 
 func toUpstreamRoutes(routes []UpstreamRouteConfig) ([]server.UpstreamRouteConfig, error) {

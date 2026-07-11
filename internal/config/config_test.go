@@ -200,6 +200,19 @@ downlink:
     max_attempts: 6
     scan_limit: 77
     bind_flush_limit: 88
+  policies:
+    - name: critical
+      msg_id_min: 4000
+      msg_id_max: 4099
+      max_attempts: 9
+      max_age: 10m
+      ack_timeout: 4s
+      retry_delay: 2s
+      backoff_multiplier: 2
+      max_retry_delay: 20s
+      retry_jitter: 500ms
+    - name: bulk
+      msg_id_min: 5000
   retention:
     delivered_ttl: 24h
     failed_ttl: 48h
@@ -401,6 +414,35 @@ upstream:
 	}
 	if config.DownlinkDelivery.BindFlushLimit != 88 {
 		t.Fatalf("DownlinkDelivery BindFlushLimit = %d, want 88", config.DownlinkDelivery.BindFlushLimit)
+	}
+	if len(config.DownlinkPolicies) != 2 {
+		t.Fatalf("DownlinkPolicies length = %d, want 2", len(config.DownlinkPolicies))
+	}
+	critical := config.DownlinkPolicies[0]
+	if critical.Policy.Name != "critical" || critical.MsgIDMin != 4000 || critical.MsgIDMax != 4099 {
+		t.Fatalf("critical DownlinkPolicy = %+v", critical)
+	}
+	if critical.Policy.MaxAttempts != 9 ||
+		critical.Policy.MaxAge != 10*time.Minute ||
+		critical.Policy.AckTimeout != 4*time.Second ||
+		critical.Policy.InitialRetryDelay != 2*time.Second ||
+		critical.Policy.BackoffMultiplier != 2 ||
+		critical.Policy.MaxRetryDelay != 20*time.Second ||
+		critical.Policy.RetryJitter != 500*time.Millisecond {
+		t.Fatalf("critical DownlinkPolicy settings = %+v", critical.Policy)
+	}
+	bulk := config.DownlinkPolicies[1]
+	if bulk.Policy.Name != "bulk" || bulk.MsgIDMin != 5000 || bulk.MsgIDMax != 5000 {
+		t.Fatalf("bulk DownlinkPolicy = %+v", bulk)
+	}
+	if bulk.Policy.MaxAttempts != 6 ||
+		bulk.Policy.MaxAge != 0 ||
+		bulk.Policy.AckTimeout != 12*time.Second ||
+		bulk.Policy.InitialRetryDelay != 11*time.Second ||
+		bulk.Policy.BackoffMultiplier != 1 ||
+		bulk.Policy.MaxRetryDelay != 11*time.Second ||
+		bulk.Policy.RetryJitter != 3*time.Second {
+		t.Fatalf("bulk inherited DownlinkPolicy settings = %+v", bulk.Policy)
 	}
 	if config.DownlinkRetention.DeliveredTTL != 24*time.Hour {
 		t.Fatalf("DownlinkRetention DeliveredTTL = %v, want 24h", config.DownlinkRetention.DeliveredTTL)
@@ -1158,6 +1200,113 @@ downlink:
 	_, err := LoadServerConfig(path)
 	if err == nil {
 		t.Fatal("LoadServerConfig() error = nil, want error")
+	}
+}
+
+func TestLoadServerConfigRejectsInvalidDownlinkPolicy(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		config  string
+		message string
+	}{
+		{
+			name: "overlapping ranges",
+			config: `
+downlink:
+  policies:
+    - name: critical
+      msg_id_min: 2000
+      msg_id_max: 2099
+    - name: bulk
+      msg_id_min: 2099
+      msg_id_max: 2199
+`,
+			message: "overlaps",
+		},
+		{
+			name: "duplicate names",
+			config: `
+downlink:
+  policies:
+    - name: critical
+      msg_id_min: 2000
+    - name: critical
+      msg_id_min: 3000
+`,
+			message: "duplicate delivery policy name",
+		},
+		{
+			name: "invalid duration",
+			config: `
+downlink:
+  policies:
+    - name: critical
+      msg_id_min: 2000
+      max_age: tomorrow
+`,
+			message: "max_age",
+		},
+		{
+			name: "multiplier without maximum",
+			config: `
+downlink:
+  policies:
+    - name: critical
+      msg_id_min: 2000
+      backoff_multiplier: 2
+`,
+			message: "max_retry_delay is required",
+		},
+		{
+			name: "maximum below initial delay",
+			config: `
+downlink:
+  policies:
+    - name: critical
+      msg_id_min: 2000
+      retry_delay: 10s
+      max_retry_delay: 5s
+`,
+			message: "max_retry_delay must be greater than or equal to retry_delay",
+		},
+		{
+			name: "zero attempts",
+			config: `
+downlink:
+  policies:
+    - name: critical
+      msg_id_min: 2000
+      max_attempts: 0
+`,
+			message: "max_attempts",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			path := writeConfig(t, test.config)
+			_, err := LoadServerConfig(path)
+			if err == nil || !strings.Contains(err.Error(), test.message) {
+				t.Fatalf("LoadServerConfig() error = %v, want %q", err, test.message)
+			}
+		})
+	}
+}
+
+func TestLoadServerConfigIgnoresDisabledDownlinkPolicy(t *testing.T) {
+	path := writeConfig(t, `
+downlink:
+  policies:
+    - enabled: false
+      name: Invalid Name
+      msg_id_min: 0
+      max_age: tomorrow
+`)
+
+	config, err := LoadServerConfig(path)
+	if err != nil {
+		t.Fatalf("LoadServerConfig() error = %v", err)
+	}
+	if len(config.DownlinkPolicies) != 0 {
+		t.Fatalf("DownlinkPolicies = %+v, want empty", config.DownlinkPolicies)
 	}
 }
 

@@ -353,9 +353,48 @@ downlink:
     max_attempts: 10
     scan_limit: 500
     bind_flush_limit: 500
+  policies: []
 ```
 
 没有可靠存储时，离线消息无法长期保存。生产环境建议使用 PostgreSQL。
+
+### 命名下行策略（V12.2 基础能力）
+
+V12.2 策略解析器支持使用闭区间 MsgID 范围选择命名策略：
+
+```yaml
+downlink:
+  delivery:
+    retry_delay: 30s
+    retry_jitter: 5s
+    ack_timeout: 30s
+    max_attempts: 5
+  policies:
+    - name: critical
+      enabled: true
+      msg_id_min: 2100
+      msg_id_max: 2199
+      max_attempts: 10
+      max_age: 1h
+      ack_timeout: 10s
+      retry_delay: 1s
+      backoff_multiplier: 2
+      max_retry_delay: 30s
+      retry_jitter: 250ms
+```
+
+命中范围的策略优先于隐式的 `default` 策略；没有命中任何范围的 MsgID
+继续使用 `downlink.delivery`。策略中省略的字段继承默认值；`max_age`
+默认不限制，`backoff_multiplier` 默认是 `1`，`max_retry_delay` 默认等于
+初始重试延迟。
+
+启用的策略名称必须唯一，只能使用小写字母、数字、`_` 和 `-`。MsgID
+范围包含首尾值并且不能重叠。`backoff_multiplier` 大于 `1` 时必须显式
+配置 `max_retry_delay`。配置不合法时网关会拒绝启动。
+
+V12.2.1 已把经过校验的策略解析器接入下行服务，但还没有改变重试状态机。
+下一阶段会持久化消息选中的策略并执行逐消息退避。在此之前，实际执行的
+重试时间仍以 `downlink.delivery` 为准。
 
 ## Upstream Routes
 

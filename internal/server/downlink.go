@@ -13,7 +13,12 @@ import (
 	"github.com/qiuyier/Z-Courier/pkg/sdk/signing"
 )
 
-func newDownlinkService(config Config, connManager ziface.IConnManager, registry cluster.OnlineRegistry) (*downlink.Service, io.Closer, error) {
+func newDownlinkService(
+	config Config,
+	connManager ziface.IConnManager,
+	registry cluster.OnlineRegistry,
+	policies *downlink.DeliveryPolicySet,
+) (*downlink.Service, io.Closer, error) {
 	if config.DisableInternalHTTP || config.InternalHTTPAddr == "" {
 		return nil, nil, nil
 	}
@@ -55,6 +60,7 @@ func newDownlinkService(config Config, connManager ziface.IConnManager, registry
 		downlink.WithAckTimeout(config.DownlinkDelivery.AckTimeout),
 		downlink.WithRetryClaim(config.GatewayNode, config.DownlinkDelivery.RetryLease),
 		downlink.WithMaxAttempts(config.DownlinkDelivery.MaxAttempts),
+		downlink.WithDeliveryPolicies(policies),
 	)
 	if registry != nil {
 		options = append(options, downlink.WithClusterDelivery(downlink.ClusterDeliveryConfig{
@@ -65,6 +71,23 @@ func newDownlinkService(config Config, connManager ziface.IConnManager, registry
 	}
 
 	return downlink.NewService(config.Sessions, zinxConnectionFinder{connManager: connManager}, options...), closer, nil
+}
+
+func newDownlinkPolicySet(config Config) (*downlink.DeliveryPolicySet, error) {
+	defaultPolicy := downlink.DeliveryPolicy{
+		Name:              downlink.DefaultDeliveryPolicyName,
+		MaxAttempts:       config.DownlinkDelivery.MaxAttempts,
+		AckTimeout:        config.DownlinkDelivery.AckTimeout,
+		InitialRetryDelay: config.DownlinkDelivery.RetryDelay,
+		BackoffMultiplier: 1,
+		MaxRetryDelay:     config.DownlinkDelivery.RetryDelay,
+		RetryJitter:       config.DownlinkDelivery.RetryJitter,
+	}
+	set, err := downlink.NewDeliveryPolicySet(defaultPolicy, config.DownlinkPolicies)
+	if err != nil {
+		return nil, fmt.Errorf("downlink delivery policies: %w", err)
+	}
+	return set, nil
 }
 
 func newDownlinkStore(config Config) (downlink.Store, io.Closer, error) {

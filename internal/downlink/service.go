@@ -28,17 +28,18 @@ type ConnectionFinder interface {
 }
 
 type Service struct {
-	sessions        SessionFinder
-	connections     ConnectionFinder
-	store           Store
-	now             func() time.Time
-	retryDelay      time.Duration
-	retryJitter     time.Duration
-	retryJitterFunc func(time.Duration) time.Duration
-	ackTimeout      time.Duration
-	retryClaimOwner string
-	retryClaimLease time.Duration
-	maxAttempts     int
+	sessions         SessionFinder
+	connections      ConnectionFinder
+	store            Store
+	now              func() time.Time
+	retryDelay       time.Duration
+	retryJitter      time.Duration
+	retryJitterFunc  func(time.Duration) time.Duration
+	ackTimeout       time.Duration
+	retryClaimOwner  string
+	retryClaimLease  time.Duration
+	maxAttempts      int
+	deliveryPolicies *DeliveryPolicySet
 
 	gatewayNode    string
 	onlineRegistry cluster.OnlineRegistry
@@ -87,6 +88,14 @@ func WithMaxAttempts(maxAttempts int) ServiceOption {
 	return func(s *Service) {
 		if maxAttempts > 0 {
 			s.maxAttempts = maxAttempts
+		}
+	}
+}
+
+func WithDeliveryPolicies(policies *DeliveryPolicySet) ServiceOption {
+	return func(s *Service) {
+		if policies != nil {
+			s.deliveryPolicies = policies
 		}
 	}
 }
@@ -142,6 +151,26 @@ func (s *Service) ConnectionFinder() ConnectionFinder {
 		return nil
 	}
 	return s.connections
+}
+
+// DeliveryPolicy resolves the configured policy contract for a MsgID. Policy
+// execution and persistence are integrated in the next V12 delivery slice.
+func (s *Service) DeliveryPolicy(msgID uint32) DeliveryPolicy {
+	if s != nil && s.deliveryPolicies != nil {
+		return s.deliveryPolicies.Resolve(msgID)
+	}
+	if s == nil {
+		return DeliveryPolicy{}
+	}
+	return DeliveryPolicy{
+		Name:              DefaultDeliveryPolicyName,
+		MaxAttempts:       s.maxAttempts,
+		AckTimeout:        s.ackTimeout,
+		InitialRetryDelay: s.retryDelay,
+		BackoffMultiplier: 1,
+		MaxRetryDelay:     s.retryDelay,
+		RetryJitter:       s.retryJitter,
+	}
 }
 
 func (s *Service) MessageStatus(ctx context.Context, messageID string) (Message, bool, error) {

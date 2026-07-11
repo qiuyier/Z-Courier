@@ -41,6 +41,7 @@ type Config struct {
 	DownlinkStore              downlink.Store
 	DownlinkStorage            DownlinkStorageConfig
 	DownlinkDelivery           DownlinkDeliveryConfig
+	DownlinkPolicies           []downlink.DeliveryPolicyRule
 	DownlinkRetention          DownlinkRetentionConfig
 }
 

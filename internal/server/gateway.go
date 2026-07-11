@@ -66,6 +66,11 @@ func New(config Config, logger *zap.Logger) (*Gateway, error) {
 
 	config = normalizeConfig(config)
 	authVerifierCloser, _ := config.Verifier.(io.Closer)
+	deliveryPolicies, err := newDownlinkPolicySet(config)
+	if err != nil {
+		closeWithLog(authVerifierCloser, logger, "authentication verifier")
+		return nil, err
+	}
 	msgIDs, err := registeredMsgIDs(config)
 	if err != nil {
 		closeWithLog(authVerifierCloser, logger, "authentication verifier")
@@ -86,7 +91,7 @@ func New(config Config, logger *zap.Logger) (*Gateway, error) {
 		return nil, err
 	}
 	zServer := znet.NewServer()
-	downlinkService, downlinkCloser, err := newDownlinkService(config, zServer.GetConnMgr(), clusterRegistry)
+	downlinkService, downlinkCloser, err := newDownlinkService(config, zServer.GetConnMgr(), clusterRegistry, deliveryPolicies)
 	if err != nil {
 		if upstream != nil {
 			_ = upstream.Close()
