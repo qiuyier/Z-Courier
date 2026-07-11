@@ -115,6 +115,7 @@ type MessageStatusResponse struct {
 	MsgID         uint32        `json:"msg_id,omitempty"`
 	TraceID       string        `json:"trace_id,omitempty"`
 	SessionID     string        `json:"session_id,omitempty"`
+	PolicyName    string        `json:"policy_name,omitempty"`
 	Status        MessageStatus `json:"status,omitempty"`
 	Attempts      int           `json:"attempts,omitempty"`
 	LastError     string        `json:"last_error,omitempty"`

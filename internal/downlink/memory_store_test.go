@@ -504,7 +504,7 @@ func TestMemoryStoreMarkFailed(t *testing.T) {
 		t.Fatalf("Save error = %v", err)
 	}
 
-	if err := store.MarkFailed(context.Background(), "message-1", "offline", now.Add(time.Second)); err != nil {
+	if err := store.MarkFailed(context.Background(), "message-1", "offline", now.Add(time.Second), true); err != nil {
 		t.Fatalf("MarkFailed() error = %v", err)
 	}
 
@@ -579,7 +579,7 @@ func TestMemoryStoreMarkSentDoesNotOverwriteDelivered(t *testing.T) {
 		t.Fatalf("Save error = %v", err)
 	}
 
-	if err := store.MarkSent(context.Background(), "message-1", "session-origin", now.Add(2*time.Second)); err != nil {
+	if err := store.MarkSent(context.Background(), "message-1", "session-origin", now.Add(2*time.Second), time.Time{}); err != nil {
 		t.Fatalf("MarkSent() error = %v", err)
 	}
 

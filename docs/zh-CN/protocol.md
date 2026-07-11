@@ -186,6 +186,35 @@ POST /internal/push/batch
 
 如果部分消息失败，HTTP 可能返回 `207 Multi-Status`，响应里会给出每条消息的结果。
 
+## 查询下行状态
+
+后端可以通过 `message_id` 查询可靠下行消息：
+
+```text
+GET /internal/message/status?message_id=message-1
+```
+
+响应包含当前投递状态、尝试次数、重试时间和命中的策略，例如：
+
+```json
+{
+  "code": "ok",
+  "message_id": "message-1",
+  "client_id": "dev-client",
+  "device_id": "device-1",
+  "msg_id": 2001,
+  "policy_name": "critical",
+  "status": "delivered",
+  "attempts": 1,
+  "body_size_bytes": 5
+}
+```
+
+对于 V12.2.2 之后接收的新消息，`policy_name` 是消息首次被可靠存储接受时选中的
+策略快照名称。即使之后修改网关配置，存量消息仍按已保存的策略参数执行，因此这个
+字段可以帮助排查它为什么采用当前的 ACK、重试和终止限制。升级前没有快照的旧行会
+按当前 MsgID 策略回退解析。
+
 ## 下行 ACK
 
 如果下行消息要求 ACK，客户端收到后应该发送：

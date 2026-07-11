@@ -358,7 +358,7 @@ downlink:
 
 没有可靠存储时，离线消息无法长期保存。生产环境建议使用 PostgreSQL。
 
-### 命名下行策略（V12.2 基础能力）
+### 命名下行策略（V12.2）
 
 V12.2 策略解析器支持使用闭区间 MsgID 范围选择命名策略：
 
@@ -392,9 +392,20 @@ downlink:
 范围包含首尾值并且不能重叠。`backoff_multiplier` 大于 `1` 时必须显式
 配置 `max_retry_delay`。配置不合法时网关会拒绝启动。
 
-V12.2.1 已把经过校验的策略解析器接入下行服务，但还没有改变重试状态机。
-下一阶段会持久化消息选中的策略并执行逐消息退避。在此之前，实际执行的
-重试时间仍以 `downlink.delivery` 为准。
+每一条新接收的可靠下行消息都会把命中的策略名称和全部执行参数一起持久化。
+因此后续修改配置只影响新消息，存量消息仍按创建时的策略执行。V12.2.2 之前
+创建、没有策略快照的旧数据，会按其 MsgID 使用当前配置解析出的策略。
+
+第 `N` 次失败后（从 `1` 开始），基础重试延迟为：
+
+```text
+min(retry_delay * backoff_multiplier^(N-1), max_retry_delay)
+```
+
+之后再叠加 `0` 到 `retry_jitter` 的随机抖动。要求 ACK 的消息会根据自己的
+`ack_timeout` 持久化 ACK 截止时间。下一次发送会违反次数或消息年龄上限时，
+retry worker 会把消息标记为 `failed`，并写入 `max_attempts_exceeded` 或
+`max_age_exceeded`。状态/列表接口和管理控制台都会显示持久化的 `policy_name`。
 
 ## Upstream Routes
 

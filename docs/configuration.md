@@ -582,7 +582,7 @@ downlink:
 - `scan_limit`: maximum due messages scanned per retry tick.
 - `bind_flush_limit`: maximum pending messages flushed when a client binds.
 
-### Named Delivery Policies (V12.2 Foundation)
+### Named Delivery Policies (V12.2)
 
 The V12.2 policy resolver accepts named policies selected by inclusive MsgID
 ranges:
@@ -619,10 +619,23 @@ Enabled policy names must be unique and use lowercase letters, digits, `_`, or
 requires an explicit `max_retry_delay`. Invalid policy configuration prevents
 the gateway from starting.
 
-V12.2.1 wires this validated resolver into the downlink service without
-changing the retry state machine. Persisting the selected policy and applying
-per-message backoff is completed in the next V12.2 slice. Until then,
-`downlink.delivery` remains the source of executed retry timing.
+For every newly accepted reliable message, the gateway persists the resolved
+policy name and all execution parameters with the message. Later configuration
+changes therefore affect new messages only; existing messages continue under
+their recorded policy. Rows created before V12.2.2 do not have a snapshot and
+fall back to the currently resolved policy for their MsgID.
+
+After failed attempt `N` (starting at `1`), the base retry delay is:
+
+```text
+min(retry_delay * backoff_multiplier^(N-1), max_retry_delay)
+```
+
+The gateway then adds a random duration from `0` through `retry_jitter`.
+ACK-required messages persist their own ACK deadline from `ack_timeout`.
+The retry worker marks a message `failed` with `max_attempts_exceeded` or
+`max_age_exceeded` before another delivery can violate the selected policy.
+The status/list APIs and admin console expose the persisted `policy_name`.
 
 ## Downlink Retention
 

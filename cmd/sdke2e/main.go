@@ -23,6 +23,7 @@ type config struct {
 	DeviceID      string
 	Token         string
 	UpstreamMsgID uint32
+	PolicyName    string
 	Timeout       time.Duration
 }
 
@@ -47,6 +48,7 @@ func parseConfig() config {
 	flag.StringVar(&configuration.DeviceID, "device-id", "sdk-e2e-device", "device ID")
 	flag.StringVar(&configuration.Token, "token", "e2e-token", "client authentication token")
 	upstreamMsgID := flag.Uint("upstream-msg-id", 2001, "business upstream MsgID")
+	flag.StringVar(&configuration.PolicyName, "expect-policy-name", "", "expected downlink policy name; empty disables the check")
 	flag.DurationVar(&configuration.Timeout, "timeout", 30*time.Second, "overall verification timeout")
 	flag.Parse()
 	if uint64(*upstreamMsgID) > uint64(^uint32(0)) {
@@ -196,7 +198,7 @@ func verifyDownlink(
 			if !bytes.Equal(packet.Body, body) {
 				return fmt.Errorf("%s downlink: body = %q, want %q", phase, packet.Body, body)
 			}
-			if err := waitDelivered(ctx, backend, messageID); err != nil {
+			if err := waitDelivered(ctx, backend, messageID, configuration.PolicyName); err != nil {
 				return fmt.Errorf("%s downlink ACK: %w", phase, err)
 			}
 
@@ -261,7 +263,7 @@ func validateBackendPushResponse(
 	return nil
 }
 
-func waitDelivered(ctx context.Context, backend *sdkbackend.Client, messageID string) error {
+func waitDelivered(ctx context.Context, backend *sdkbackend.Client, messageID, expectedPolicyName string) error {
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
 	for {
@@ -271,6 +273,9 @@ func waitDelivered(ctx context.Context, backend *sdkbackend.Client, messageID st
 		}
 		switch status.Status {
 		case sdkbackend.MessageStatusDelivered:
+			if expectedPolicyName != "" && status.PolicyName != expectedPolicyName {
+				return fmt.Errorf("message policy = %q, want %q", status.PolicyName, expectedPolicyName)
+			}
 			return nil
 		case sdkbackend.MessageStatusFailed, sdkbackend.MessageStatusDiscarded:
 			return fmt.Errorf("message entered terminal status %q: %s", status.Status, status.LastError)

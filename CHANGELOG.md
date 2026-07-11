@@ -14,9 +14,11 @@ semantic versioning after the first public MVP tag.
   compatible replay, explicit HTTP `409 message_id_conflict`, and additive Go
   backend SDK response metadata. Single-node, two-node cluster, and public Go
   backend SDK E2E coverage verifies replay suppression and conflict behavior.
-- V12.2 delivery-policy foundation with a legacy-compatible default policy,
-  named inclusive MsgID-range selectors, inherited retry parameters,
-  deterministic resolution, and strict overlap/backoff validation.
+- V12.2 delivery policies with a legacy-compatible default, named inclusive
+  MsgID-range selectors, immutable per-message policy snapshots, per-policy ACK
+  deadlines, bounded exponential backoff and jitter, attempt/age exhaustion,
+  PostgreSQL migration compatibility, and policy visibility across status APIs,
+  the Go backend SDK, diagnostics, console views, and single/cluster E2E.
 
 ## [v0.11.0] - 2026-07-10
 

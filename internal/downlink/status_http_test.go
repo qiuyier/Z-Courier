@@ -56,6 +56,9 @@ func TestStatusHandlerGetOK(t *testing.T) {
 	if resp.Code != "ok" || resp.MessageID != "message-1" || resp.Status != MessageStatusSent {
 		t.Fatalf("response = %+v, want message-1 sent", resp)
 	}
+	if resp.PolicyName != DefaultDeliveryPolicyName {
+		t.Fatalf("PolicyName = %q, want %q", resp.PolicyName, DefaultDeliveryPolicyName)
+	}
 	if resp.BodySizeBytes != len("hello") {
 		t.Fatalf("BodySizeBytes = %d, want %d", resp.BodySizeBytes, len("hello"))
 	}

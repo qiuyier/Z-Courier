@@ -203,9 +203,10 @@ func TestMessageQueriesEncodeParameters(t *testing.T) {
 				t.Errorf("message_id = %q, want escaped message / 1", got)
 			}
 			writeTestJSON(t, w, http.StatusOK, MessageStatusResponse{
-				Code:      "ok",
-				MessageID: "message / 1",
-				Status:    MessageStatusSent,
+				Code:       "ok",
+				MessageID:  "message / 1",
+				PolicyName: "critical",
+				Status:     MessageStatusSent,
 			})
 		case listPath:
 			if got := r.URL.Query().Get("status"); got != string(MessageStatusFailed) {
@@ -240,7 +241,7 @@ func TestMessageQueriesEncodeParameters(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetMessage() error = %v", err)
 	}
-	if status.MessageID != "message / 1" || status.Status != MessageStatusSent {
+	if status.MessageID != "message / 1" || status.PolicyName != "critical" || status.Status != MessageStatusSent {
 		t.Fatalf("status response = %+v", status)
 	}
 

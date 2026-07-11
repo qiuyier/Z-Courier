@@ -11,8 +11,8 @@ import (
 const DefaultDeliveryPolicyName = "default"
 
 // DeliveryPolicy is the resolved retry contract for one message class.
-// Policy execution is intentionally integrated separately from selection so
-// the resolver remains deterministic and independently testable.
+// Selection remains separate from execution so the resolver is deterministic
+// and each persisted message can keep an immutable policy snapshot.
 type DeliveryPolicy struct {
 	Name              string
 	MaxAttempts       int

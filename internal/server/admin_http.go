@@ -101,16 +101,18 @@ type adminConsoleAuditSummary struct {
 }
 
 type adminDownlinkSummary struct {
-	StorageType     string `json:"storage_type"`
-	StoreConfigured bool   `json:"store_configured"`
-	RetryInterval   string `json:"retry_interval,omitempty"`
-	RetryDelay      string `json:"retry_delay,omitempty"`
-	RetryJitter     string `json:"retry_jitter,omitempty"`
-	AckTimeout      string `json:"ack_timeout,omitempty"`
-	RetryLease      string `json:"retry_lease,omitempty"`
-	MaxAttempts     int    `json:"max_attempts,omitempty"`
-	ScanLimit       int    `json:"scan_limit,omitempty"`
-	BindFlushLimit  int    `json:"bind_flush_limit,omitempty"`
+	StorageType     string   `json:"storage_type"`
+	StoreConfigured bool     `json:"store_configured"`
+	PolicyCount     int      `json:"policy_count"`
+	PolicyNames     []string `json:"policy_names"`
+	RetryInterval   string   `json:"retry_interval,omitempty"`
+	RetryDelay      string   `json:"retry_delay,omitempty"`
+	RetryJitter     string   `json:"retry_jitter,omitempty"`
+	AckTimeout      string   `json:"ack_timeout,omitempty"`
+	RetryLease      string   `json:"retry_lease,omitempty"`
+	MaxAttempts     int      `json:"max_attempts,omitempty"`
+	ScanLimit       int      `json:"scan_limit,omitempty"`
+	BindFlushLimit  int      `json:"bind_flush_limit,omitempty"`
 }
 
 type adminUpstreamSummary struct {
@@ -443,9 +445,16 @@ func adminConsoleFromConfig(config Config) adminConsoleSummary {
 }
 
 func adminDownlinkFromConfig(config Config) adminDownlinkSummary {
+	policyNames := make([]string, 1, len(config.DownlinkPolicies)+1)
+	policyNames[0] = downlink.DefaultDeliveryPolicyName
+	for _, rule := range config.DownlinkPolicies {
+		policyNames = append(policyNames, rule.Policy.Name)
+	}
 	return adminDownlinkSummary{
 		StorageType:     config.DownlinkStorage.Type,
 		StoreConfigured: config.DownlinkStore != nil,
+		PolicyCount:     len(policyNames),
+		PolicyNames:     policyNames,
 		RetryInterval:   durationString(config.DownlinkDelivery.RetryInterval),
 		RetryDelay:      durationString(config.DownlinkDelivery.RetryDelay),
 		RetryJitter:     durationString(config.DownlinkDelivery.RetryJitter),

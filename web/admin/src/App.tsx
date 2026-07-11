@@ -3518,6 +3518,7 @@ function MessageLookupPanel({
             <DarkLineItem label="Client" value={lookupState.data.client_id || "--"} />
             <DarkLineItem label="Device" value={lookupState.data.device_id || "--"} />
             <DarkLineItem label="MsgID" value={lookupState.data.msg_id?.toLocaleString() ?? "--"} />
+            <DarkLineItem label="Policy" value={lookupState.data.policy_name || "default"} />
             <DarkLineItem label="Attempts" value={lookupState.data.attempts?.toLocaleString() ?? "0"} />
           </div>
           <div className="mt-4 border-t border-white/10 pt-4">
@@ -3551,6 +3552,9 @@ function MessageCard({
             <MessageStatusBadge status={message.status} />
             <span className="rounded-md border border-line bg-zinc-50 px-2.5 py-1 font-mono text-xs text-zinc-600">
               MsgID {message.msg_id?.toLocaleString() ?? "--"}
+            </span>
+            <span className="rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 font-mono text-xs text-emerald-800">
+              Policy {message.policy_name || "default"}
             </span>
           </div>
           <h3 className="mt-4 truncate font-mono text-lg font-semibold tracking-tight">{message.message_id || "--"}</h3>
@@ -4108,6 +4112,7 @@ function DiagnosticsPage({
             <MetricRow label="NSQ Routes" value={diagnostics.upstream.nsq_routes.toLocaleString()} />
             <MetricRow label="Capacity-Limited" value={diagnostics.upstream.routes_with_capacity_limit.toLocaleString()} />
             <MetricRow label="Downlink Store" value={diagnostics.downlink.store_configured ? diagnostics.downlink.storage_type : "not configured"} />
+            <MetricRow label="Delivery Policies" value={(diagnostics.downlink.policy_count ?? 1).toLocaleString()} />
           </div>
         </div>
       </section>
@@ -4145,7 +4150,7 @@ function DiagnosticsPage({
         </section>
       )}
 
-      <section className="grid gap-5 xl:grid-cols-2">
+      <section className="grid gap-5 xl:grid-cols-3">
         <DiagnosticsConfigPanel title="Internal HTTP" rows={[
           ["Enabled", diagnostics.internal_http.enabled ? "enabled" : "disabled"],
           ["Address", diagnostics.internal_http.addr || "--"],
@@ -4157,6 +4162,10 @@ function DiagnosticsPage({
           ["Registry", diagnostics.cluster.registry_type || "--"],
           ["Registry TTL", diagnostics.cluster.registry_ttl || "--"],
           ["Peer Auth", diagnostics.cluster.peer_auth_mode || "--"],
+        ]} />
+        <DiagnosticsConfigPanel title="Downlink Policies" rows={[
+          ["Count", (diagnostics.downlink.policy_count ?? 1).toLocaleString()],
+          ["Names", (diagnostics.downlink.policy_names ?? ["default"]).join(", ")],
         ]} />
       </section>
     </div>

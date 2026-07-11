@@ -1,6 +1,9 @@
 package downlink
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestMessageIdentityFingerprintIgnoresMutableMetadata(t *testing.T) {
 	left := Message{
@@ -18,6 +21,15 @@ func TestMessageIdentityFingerprintIgnoresMutableMetadata(t *testing.T) {
 	right.SessionID = "session-2"
 	right.Status = MessageStatusDelivered
 	right.Attempts = 9
+	right.Policy = DeliveryPolicy{
+		Name:              "critical",
+		MaxAttempts:       10,
+		MaxAge:            time.Hour,
+		AckTimeout:        time.Second,
+		InitialRetryDelay: time.Second,
+		BackoffMultiplier: 2,
+		MaxRetryDelay:     time.Minute,
+	}
 
 	if !messagesHaveSameIdentity(left, right) {
 		t.Fatal("mutable delivery metadata changed immutable identity")

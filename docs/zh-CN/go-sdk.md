@@ -218,6 +218,10 @@ client.Requeue(ctx, "message-id")
 client.Discard(ctx, "message-id", "operator decision")
 ```
 
+`MessageStatusResponse.PolicyName` 表示 V12.2.2 之后的新消息持久化时命中的下行
+策略。管理员之后修改新消息的策略配置，不会改变这个存量消息返回的策略名称和
+执行参数；升级前没有快照的旧行会按当前 MsgID 策略回退解析。
+
 非 2xx 响应会返回 `*backend.APIError`。不要解析错误字符串，使用 `errors.As`：
 
 ```go

@@ -329,6 +329,154 @@ func TestServiceReliablePushAppliesRetryJitter(t *testing.T) {
 	}
 }
 
+func TestServiceReliablePushPersistsPolicySnapshotAndUsesBoundedBackoff(t *testing.T) {
+	now := time.UnixMilli(1760000000000)
+	store := NewMemoryStore()
+	policy := testDeliveryPolicy("critical")
+	policy.MaxAttempts = 10
+	policy.MaxAge = time.Hour
+	policy.AckTimeout = 7 * time.Second
+	policy.InitialRetryDelay = 2 * time.Second
+	policy.BackoffMultiplier = 2
+	policy.MaxRetryDelay = 5 * time.Second
+	policy.RetryJitter = time.Second
+	policies, err := NewDeliveryPolicySet(testDeliveryPolicy(DefaultDeliveryPolicyName), []DeliveryPolicyRule{{
+		Policy:   policy,
+		MsgIDMin: 2000,
+		MsgIDMax: 2099,
+	}})
+	if err != nil {
+		t.Fatalf("NewDeliveryPolicySet() error = %v", err)
+	}
+	service := NewService(fakeSessions{}, fakeConnections{}, WithStore(store), WithDeliveryPolicies(policies))
+	service.now = func() time.Time { return now }
+	store.now = service.now
+	service.retryJitterFunc = func(max time.Duration) time.Duration {
+		if max != time.Second {
+			t.Fatalf("retry jitter max = %v, want 1s", max)
+		}
+		return 500 * time.Millisecond
+	}
+
+	if _, err := service.Push(context.Background(), PushRequest{
+		ClientID:  "client-1",
+		DeviceID:  "device-1",
+		MsgID:     2001,
+		MessageID: "message-policy",
+		Body:      []byte("hello"),
+	}); err != nil {
+		t.Fatalf("Push() error = %v", err)
+	}
+
+	stored, ok, err := store.Get(context.Background(), "message-policy")
+	if err != nil || !ok {
+		t.Fatalf("Get() = ok:%v err:%v", ok, err)
+	}
+	if stored.Policy != policy {
+		t.Fatalf("stored Policy = %+v, want %+v", stored.Policy, policy)
+	}
+	if want := now.Add(2500 * time.Millisecond); !stored.NextRetryAt.Equal(want) {
+		t.Fatalf("first NextRetryAt = %v, want %v", stored.NextRetryAt, want)
+	}
+
+	// A later configuration change must not alter the stored message contract.
+	service.deliveryPolicies, err = NewDeliveryPolicySet(testDeliveryPolicy(DefaultDeliveryPolicyName), nil)
+	if err != nil {
+		t.Fatalf("replace policies: %v", err)
+	}
+	now = stored.NextRetryAt
+	if _, err := service.RetryDue(context.Background(), 10); err != nil {
+		t.Fatalf("first RetryDue() error = %v", err)
+	}
+	stored, _, _ = store.Get(context.Background(), "message-policy")
+	if want := now.Add(4500 * time.Millisecond); !stored.NextRetryAt.Equal(want) {
+		t.Fatalf("second NextRetryAt = %v, want %v", stored.NextRetryAt, want)
+	}
+
+	now = stored.NextRetryAt
+	if _, err := service.RetryDue(context.Background(), 10); err != nil {
+		t.Fatalf("second RetryDue() error = %v", err)
+	}
+	stored, _, _ = store.Get(context.Background(), "message-policy")
+	if want := now.Add(5500 * time.Millisecond); !stored.NextRetryAt.Equal(want) {
+		t.Fatalf("bounded NextRetryAt = %v, want %v", stored.NextRetryAt, want)
+	}
+}
+
+func TestServiceReliablePushUsesPolicyAckDeadline(t *testing.T) {
+	now := time.UnixMilli(1760000000000)
+	store := NewMemoryStore()
+	policy := testDeliveryPolicy("critical")
+	policy.AckTimeout = 7 * time.Second
+	policies, err := NewDeliveryPolicySet(testDeliveryPolicy(DefaultDeliveryPolicyName), []DeliveryPolicyRule{{
+		Policy:   policy,
+		MsgIDMin: 2001,
+	}})
+	if err != nil {
+		t.Fatalf("NewDeliveryPolicySet() error = %v", err)
+	}
+	service := NewService(
+		fakeSessions{session: &session.Session{SessionID: "session-1", ConnID: 7, ClientID: "client-1", DeviceID: "device-1"}},
+		fakeConnections{conn: &fakeConnection{}},
+		WithStore(store),
+		WithDeliveryPolicies(policies),
+	)
+	service.now = func() time.Time { return now }
+	store.now = service.now
+
+	if _, err := service.Push(context.Background(), PushRequest{
+		ClientID:    "client-1",
+		DeviceID:    "device-1",
+		MsgID:       2001,
+		MessageID:   "message-ack-policy",
+		AckRequired: true,
+	}); err != nil {
+		t.Fatalf("Push() error = %v", err)
+	}
+	stored, _, _ := store.Get(context.Background(), "message-ack-policy")
+	if want := now.Add(7 * time.Second); !stored.NextRetryAt.Equal(want) {
+		t.Fatalf("NextRetryAt = %v, want ACK deadline %v", stored.NextRetryAt, want)
+	}
+}
+
+func TestServiceRetryDueStopsMessageAtPolicyMaxAge(t *testing.T) {
+	now := time.UnixMilli(1760000000000)
+	store := NewMemoryStore()
+	policy := testDeliveryPolicy("critical")
+	policy.MaxAge = time.Minute
+	if _, err := store.Save(context.Background(), Message{
+		MessageID:   "message-old",
+		ClientID:    "client-1",
+		DeviceID:    "device-1",
+		MsgID:       2001,
+		Policy:      policy,
+		Status:      MessageStatusPending,
+		Attempts:    1,
+		NextRetryAt: now,
+		CreatedAt:   now.Add(-time.Minute),
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	store.now = func() time.Time { return now }
+	service := NewService(fakeSessions{}, fakeConnections{}, WithStore(store))
+	service.now = func() time.Time { return now }
+
+	result, err := service.RetryDue(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("RetryDue() error = %v", err)
+	}
+	if result.Failed != 1 || result.Sent != 0 || result.Queued != 0 {
+		t.Fatalf("RetryDue() result = %+v, want one failed", result)
+	}
+	stored, _, _ := store.Get(context.Background(), "message-old")
+	if stored.Status != MessageStatusFailed || stored.LastError != failureReasonMaxAge {
+		t.Fatalf("stored message = %+v, want max-age failure", stored)
+	}
+	if stored.Attempts != 1 {
+		t.Fatalf("Attempts = %d, want unchanged 1", stored.Attempts)
+	}
+}
+
 func TestServiceReliablePushSendsRemoteClusterMessage(t *testing.T) {
 	now := time.UnixMilli(1760000000000)
 	store := NewMemoryStore()
@@ -836,8 +984,11 @@ func TestServiceRetryDueMarksAckTimedOutMessageFailedAfterMaxAttempts(t *testing
 	if stored.Status != MessageStatusFailed {
 		t.Fatalf("stored Status = %q, want failed", stored.Status)
 	}
-	if stored.LastError != "downlink ack timeout" {
-		t.Fatalf("stored LastError = %q, want downlink ack timeout", stored.LastError)
+	if stored.LastError != failureReasonMaxAttempts {
+		t.Fatalf("stored LastError = %q, want %s", stored.LastError, failureReasonMaxAttempts)
+	}
+	if stored.Attempts != 2 {
+		t.Fatalf("stored Attempts = %d, want 2", stored.Attempts)
 	}
 }
 

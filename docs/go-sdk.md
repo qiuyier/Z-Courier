@@ -207,6 +207,11 @@ message, err := client.Requeue(ctx, "order-event-42")
 message, err := client.Discard(ctx, "order-event-42", "operator decision")
 ```
 
+`MessageStatusResponse.PolicyName` reports the persisted delivery policy used
+by a V12.2.2-or-later message. The value remains stable when operators change
+policy rules for newly accepted messages. Pre-V12.2.2 rows without a snapshot
+use the current MsgID policy as a compatibility fallback.
+
 `PushBatch` treats HTTP `207 Multi-Status` as a decoded result, not as a method
 error. Check `batch.Failed` and each item in `batch.Results` for partial or total
 item failure.

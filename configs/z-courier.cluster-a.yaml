@@ -102,6 +102,18 @@ downlink:
     max_attempts: 5
     scan_limit: 100
     bind_flush_limit: 100
+  policies:
+    - name: integration-reliable
+      enabled: true
+      msg_id_min: 2001
+      msg_id_max: 2001
+      max_attempts: 5
+      max_age: 1h
+      ack_timeout: 1s
+      retry_delay: 1s
+      backoff_multiplier: 2
+      max_retry_delay: 4s
+      retry_jitter: 0s
   retention:
     delivered_ttl: 24h
     failed_ttl: 168h

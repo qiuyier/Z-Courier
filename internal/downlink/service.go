@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"math/rand/v2"
 	"net"
 	"net/http"
@@ -13,6 +14,11 @@ import (
 	"github.com/qiuyier/Z-Courier/internal/metrics"
 	"github.com/qiuyier/Z-Courier/internal/protocol"
 	"github.com/qiuyier/Z-Courier/internal/session"
+)
+
+const (
+	failureReasonMaxAttempts = "max_attempts_exceeded"
+	failureReasonMaxAge      = "max_age_exceeded"
 )
 
 type SessionFinder interface {
@@ -173,6 +179,18 @@ func (s *Service) DeliveryPolicy(msgID uint32) DeliveryPolicy {
 	}
 }
 
+func (s *Service) policyForMessage(message Message) DeliveryPolicy {
+	if message.Policy.Name != "" && validateDeliveryPolicy(message.Policy) == nil {
+		return message.Policy
+	}
+	return s.DeliveryPolicy(message.MsgID)
+}
+
+func (s *Service) attachResolvedPolicy(message Message) Message {
+	message.Policy = s.policyForMessage(message)
+	return message
+}
+
 func (s *Service) MessageStatus(ctx context.Context, messageID string) (Message, bool, error) {
 	if messageID == "" {
 		return Message{}, false, ErrMissingMessageID
@@ -184,6 +202,9 @@ func (s *Service) MessageStatus(ctx context.Context, messageID string) (Message,
 	message, ok, err := s.store.Get(ctx, messageID)
 	if err != nil {
 		return Message{}, false, fmt.Errorf("%w: %v", ErrStore, err)
+	}
+	if ok {
+		message = s.attachResolvedPolicy(message)
 	}
 	return message, ok, nil
 }
@@ -210,6 +231,9 @@ func (s *Service) ListMessagesPage(ctx context.Context, query MessageListQuery) 
 	result, err := s.store.ListByStatusPage(ctx, query)
 	if err != nil {
 		return MessageListResult{}, fmt.Errorf("%w: %v", ErrStore, err)
+	}
+	for index := range result.Messages {
+		result.Messages[index] = s.attachResolvedPolicy(result.Messages[index])
 	}
 	return result, nil
 }
@@ -243,7 +267,7 @@ func (s *Service) Requeue(ctx context.Context, messageID string) (Message, error
 	if !ok {
 		return Message{}, ErrMessageNotFound
 	}
-	return message, nil
+	return s.attachResolvedPolicy(message), nil
 }
 
 func (s *Service) Discard(ctx context.Context, messageID, reason string) (Message, error) {
@@ -275,7 +299,7 @@ func (s *Service) Discard(ctx context.Context, messageID, reason string) (Messag
 	if !ok {
 		return Message{}, ErrMessageNotFound
 	}
-	return message, nil
+	return s.attachResolvedPolicy(message), nil
 }
 
 func (s *Service) Push(ctx context.Context, req PushRequest) (*PushResponse, error) {
@@ -321,6 +345,7 @@ func (s *Service) PushPeer(ctx context.Context, req PeerPushRequest, gatewayNode
 
 func (s *Service) pushReliable(ctx context.Context, req PushRequest) (*PushResponse, error) {
 	message := messageFromPushRequest(req, s.now())
+	message.Policy = s.DeliveryPolicy(req.MsgID)
 	if s.retryClaimOwner != "" && s.retryClaimLease > 0 {
 		message.ClaimOwner = s.retryClaimOwner
 		message.ClaimUntil = message.CreatedAt.Add(s.retryClaimLease)
@@ -354,7 +379,13 @@ func (s *Service) pushReliable(ctx context.Context, req PushRequest) (*PushRespo
 
 	sentResp, err := s.deliverOnline(ctx, pushRequestFromMessage(message))
 	if err != nil {
-		if err := s.store.MarkAttemptFailed(ctx, message.MessageID, err.Error(), s.nextRetryAt(s.now())); err != nil {
+		failedAt := s.now()
+		if err := s.store.MarkAttemptFailed(
+			ctx,
+			message.MessageID,
+			err.Error(),
+			s.nextRetryAt(failedAt, message.Policy, message.Attempts),
+		); err != nil {
 			return nil, fmt.Errorf("%w: %v", ErrStore, err)
 		}
 		resp.Reason = err.Error()
@@ -362,7 +393,14 @@ func (s *Service) pushReliable(ctx context.Context, req PushRequest) (*PushRespo
 		return resp, nil
 	}
 
-	if err := s.store.MarkSent(ctx, message.MessageID, sentResp.SessionID, s.now()); err != nil {
+	sentAt := s.now()
+	if err := s.store.MarkSent(
+		ctx,
+		message.MessageID,
+		sentResp.SessionID,
+		sentAt,
+		ackDeadline(message, message.Policy, sentAt),
+	); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrStore, err)
 	}
 
@@ -542,7 +580,7 @@ func (s *Service) Ack(ctx context.Context, clientID, deviceID string, req Client
 	message.ClaimUntil = time.Time{}
 	message.DeliveredAt = deliveredAt
 	message.UpdatedAt = deliveredAt
-	return message, nil
+	return s.attachResolvedPolicy(message), nil
 }
 
 func (s *Service) retryMessages(ctx context.Context, messages []Message) (RetryResult, error) {
@@ -571,63 +609,127 @@ func (s *Service) retryMessages(ctx context.Context, messages []Message) (RetryR
 }
 
 func (s *Service) retryMessage(ctx context.Context, message Message) (MessageStatus, error) {
-	if s.ackTimedOut(message) && s.maxAttempts > 0 && message.Attempts >= s.maxAttempts {
-		if err := s.store.MarkFailed(ctx, message.MessageID, "downlink ack timeout", s.now()); err != nil {
+	policy := s.policyForMessage(message)
+	now := s.now()
+	if policyMaxAgeExceeded(message, policy, now) {
+		if err := s.store.MarkFailed(ctx, message.MessageID, failureReasonMaxAge, now, false); err != nil {
 			return "", fmt.Errorf("%w: %v", ErrStore, err)
 		}
 		return MessageStatusFailed, nil
 	}
+	if message.Attempts >= policy.MaxAttempts {
+		if err := s.store.MarkFailed(ctx, message.MessageID, failureReasonMaxAttempts, now, false); err != nil {
+			return "", fmt.Errorf("%w: %v", ErrStore, err)
+		}
+		return MessageStatusFailed, nil
+	}
+	if message.Status == MessageStatusSent && !s.ackTimedOut(message, policy, now) {
+		return MessageStatusSent, nil
+	}
 
 	sentResp, err := s.deliverOnline(ctx, pushRequestFromMessage(message))
 	if err != nil {
-		if s.maxAttempts > 0 && message.Attempts+1 >= s.maxAttempts {
-			if err := s.store.MarkFailed(ctx, message.MessageID, err.Error(), s.now()); err != nil {
+		failedAt := s.now()
+		if policyMaxAgeExceeded(message, policy, failedAt) {
+			if err := s.store.MarkFailed(ctx, message.MessageID, failureReasonMaxAge, failedAt, true); err != nil {
+				return "", fmt.Errorf("%w: %v", ErrStore, err)
+			}
+			return MessageStatusFailed, nil
+		}
+		if message.Attempts+1 >= policy.MaxAttempts {
+			if err := s.store.MarkFailed(ctx, message.MessageID, failureReasonMaxAttempts, failedAt, true); err != nil {
 				return "", fmt.Errorf("%w: %v", ErrStore, err)
 			}
 			return MessageStatusFailed, nil
 		}
 
-		if err := s.store.MarkAttemptFailed(ctx, message.MessageID, err.Error(), s.nextRetryAt(s.now())); err != nil {
+		if err := s.store.MarkAttemptFailed(
+			ctx,
+			message.MessageID,
+			err.Error(),
+			s.nextRetryAt(failedAt, policy, message.Attempts),
+		); err != nil {
 			return "", fmt.Errorf("%w: %v", ErrStore, err)
 		}
 		return MessageStatusPending, nil
 	}
 
-	if err := s.store.MarkSent(ctx, message.MessageID, sentResp.SessionID, s.now()); err != nil {
+	sentAt := s.now()
+	if err := s.store.MarkSent(
+		ctx,
+		message.MessageID,
+		sentResp.SessionID,
+		sentAt,
+		ackDeadline(message, policy, sentAt),
+	); err != nil {
 		return "", fmt.Errorf("%w: %v", ErrStore, err)
 	}
 
 	return MessageStatusSent, nil
 }
 
-func (s *Service) ackTimedOut(message Message) bool {
-	if message.Status != MessageStatusSent || !message.AckRequired || message.SentAt.IsZero() || s.ackTimeout <= 0 {
+func (s *Service) ackTimedOut(message Message, policy DeliveryPolicy, now time.Time) bool {
+	if message.Status != MessageStatusSent || !message.AckRequired {
 		return false
 	}
-
-	return !message.SentAt.Add(s.ackTimeout).After(s.now())
+	deadline := message.NextRetryAt
+	if deadline.IsZero() {
+		if message.SentAt.IsZero() || policy.AckTimeout <= 0 {
+			return false
+		}
+		deadline = message.SentAt.Add(policy.AckTimeout)
+	}
+	return !deadline.After(now)
 }
 
-func (s *Service) nextRetryAt(now time.Time) time.Time {
-	return now.Add(s.retryDelay + s.nextRetryJitter())
+func (s *Service) nextRetryAt(now time.Time, policy DeliveryPolicy, attempts int) time.Time {
+	return now.Add(retryDelayForAttempt(policy, attempts) + s.nextRetryJitter(policy.RetryJitter))
 }
 
-func (s *Service) nextRetryJitter() time.Duration {
-	if s.retryJitter <= 0 {
+func retryDelayForAttempt(policy DeliveryPolicy, attempts int) time.Duration {
+	if attempts < 0 {
+		attempts = 0
+	}
+	delay := float64(policy.InitialRetryDelay) * math.Pow(policy.BackoffMultiplier, float64(attempts))
+	if math.IsInf(delay, 0) || math.IsNaN(delay) || delay >= float64(policy.MaxRetryDelay) {
+		return policy.MaxRetryDelay
+	}
+	if delay <= 0 {
+		return policy.InitialRetryDelay
+	}
+	return time.Duration(delay)
+}
+
+func (s *Service) nextRetryJitter(maxJitter time.Duration) time.Duration {
+	if maxJitter <= 0 {
 		return 0
 	}
 	jitterFunc := s.retryJitterFunc
 	if jitterFunc == nil {
 		jitterFunc = randomRetryJitter
 	}
-	jitter := jitterFunc(s.retryJitter)
+	jitter := jitterFunc(maxJitter)
 	if jitter < 0 {
 		return 0
 	}
-	if jitter > s.retryJitter {
-		return s.retryJitter
+	if jitter > maxJitter {
+		return maxJitter
 	}
 	return jitter
+}
+
+func policyMaxAgeExceeded(message Message, policy DeliveryPolicy, now time.Time) bool {
+	if policy.MaxAge <= 0 || message.CreatedAt.IsZero() {
+		return false
+	}
+	return !message.CreatedAt.Add(policy.MaxAge).After(now)
+}
+
+func ackDeadline(message Message, policy DeliveryPolicy, sentAt time.Time) time.Time {
+	if !message.AckRequired || policy.AckTimeout <= 0 || sentAt.IsZero() {
+		return time.Time{}
+	}
+	return sentAt.Add(policy.AckTimeout)
 }
 
 func randomRetryJitter(max time.Duration) time.Duration {

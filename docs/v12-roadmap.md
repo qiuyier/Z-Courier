@@ -163,9 +163,19 @@ Current implementation:
 - Static validation rejects invalid names, durations, limits, duplicate names,
   reversed ranges, overlapping enabled ranges, and unbounded exponential
   backoff.
-- The resolver is available to the downlink service while retry execution is
-  intentionally unchanged. Persisted policy selection and per-message backoff
-  are the next V12.2 slice.
+- V12.2.2 snapshots the selected policy and all retry parameters with every new
+  reliable message. PostgreSQL auto-migration adds the snapshot columns while
+  pre-V12.2.2 rows retain a current-policy fallback.
+- The retry state machine executes per-message ACK deadlines, bounded
+  exponential backoff plus jitter, `max_attempts`, and `max_age`. Exhaustion
+  records stable `max_attempts_exceeded` or `max_age_exceeded` reasons without
+  inventing delivery attempts that did not happen.
+- Status/list APIs and the Go backend SDK expose `policy_name`; diagnostics
+  report loaded policy names, and the admin console displays policy selection
+  in message lookup/list views.
+- Unit tests inject clock and jitter behavior, the opt-in PostgreSQL test covers
+  migration/snapshot compatibility, and single/cluster E2E validate policy
+  persistence and API visibility for MsgID `2001`.
 
 ### V12.3 Terminal Failure And Dead-Letter Events
 

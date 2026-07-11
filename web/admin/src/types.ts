@@ -79,6 +79,8 @@ export type AdminSessionResponse = {
 export type DownlinkSummary = {
   storage_type: string;
   store_configured: boolean;
+  policy_count?: number;
+  policy_names?: string[];
   retry_interval?: string;
   retry_delay?: string;
   retry_jitter?: string;
@@ -354,6 +356,7 @@ export type MessageStatusResponse = {
   msg_id?: number;
   trace_id?: string;
   session_id?: string;
+  policy_name?: string;
   status?: MessageStatus;
   attempts?: number;
   last_error?: string;

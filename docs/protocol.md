@@ -245,6 +245,7 @@ The response includes the current reliable delivery status and retry metadata:
   "msg_id": 2001,
   "trace_id": "trace-1",
   "session_id": "zs_...",
+  "policy_name": "critical",
   "status": "delivered",
   "attempts": 1,
   "body_size_bytes": 5,
@@ -254,6 +255,12 @@ The response includes the current reliable delivery status and retry metadata:
   "delivered_at": "2026-06-13T12:00:01Z"
 }
 ```
+
+For messages accepted by V12.2.2 or later, `policy_name` is the immutable
+delivery-policy snapshot selected when the reliable message was first
+accepted. It explains which retry and ACK limits govern that message even
+after gateway configuration changes. Older rows without a snapshot resolve
+against the current MsgID policy as a compatibility fallback.
 
 Backends and operators can list stored messages by delivery status:
 

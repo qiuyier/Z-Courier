@@ -374,6 +374,18 @@ func TestInternalHTTPAdminDiagnostics(t *testing.T) {
 		DownlinkDelivery: DownlinkDeliveryConfig{
 			RetryJitter: 5 * time.Second,
 		},
+		DownlinkPolicies: []downlink.DeliveryPolicyRule{{
+			Policy: downlink.DeliveryPolicy{
+				Name:              "critical",
+				MaxAttempts:       5,
+				AckTimeout:        time.Second,
+				InitialRetryDelay: time.Second,
+				BackoffMultiplier: 1,
+				MaxRetryDelay:     time.Second,
+			},
+			MsgIDMin: 2001,
+			MsgIDMax: 2001,
+		}},
 		Cluster: ClusterConfig{
 			Enabled:      true,
 			InternalAddr: "http://gateway-a:18080",
@@ -448,6 +460,9 @@ func TestInternalHTTPAdminDiagnostics(t *testing.T) {
 	}
 	if resp.Downlink.RetryJitter != "5s" {
 		t.Fatalf("downlink diagnostics retry_jitter = %q, want 5s", resp.Downlink.RetryJitter)
+	}
+	if resp.Downlink.PolicyCount != 2 || strings.Join(resp.Downlink.PolicyNames, ",") != "default,critical" {
+		t.Fatalf("downlink diagnostics policies = %d/%v, want 2/[default critical]", resp.Downlink.PolicyCount, resp.Downlink.PolicyNames)
 	}
 	if len(resp.Dependencies) == 0 || len(resp.Warnings) == 0 {
 		t.Fatalf("dependencies/warnings = %+v/%+v, want non-empty", resp.Dependencies, resp.Warnings)

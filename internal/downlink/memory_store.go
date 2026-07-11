@@ -161,7 +161,13 @@ func messageDueForRetry(message Message, now time.Time, ackTimeout time.Duration
 	case MessageStatusPending:
 		return message.NextRetryAt.IsZero() || !message.NextRetryAt.After(now)
 	case MessageStatusSent:
-		if !message.AckRequired || ackTimeout <= 0 || message.SentAt.IsZero() {
+		if !message.AckRequired {
+			return false
+		}
+		if !message.NextRetryAt.IsZero() {
+			return !message.NextRetryAt.After(now)
+		}
+		if ackTimeout <= 0 || message.SentAt.IsZero() {
 			return false
 		}
 		return !message.SentAt.Add(ackTimeout).After(now)
@@ -199,7 +205,7 @@ func claimActive(message Message, now time.Time) bool {
 	return !message.ClaimUntil.IsZero() && message.ClaimUntil.After(now)
 }
 
-func (s *MemoryStore) MarkSent(ctx context.Context, messageID, sessionID string, sentAt time.Time) error {
+func (s *MemoryStore) MarkSent(ctx context.Context, messageID, sessionID string, sentAt, nextRetryAt time.Time) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -224,7 +230,7 @@ func (s *MemoryStore) MarkSent(ctx context.Context, messageID, sessionID string,
 	message.Status = MessageStatusSent
 	message.Attempts++
 	message.LastError = ""
-	message.NextRetryAt = time.Time{}
+	message.NextRetryAt = nextRetryAt
 	message.ClaimOwner = ""
 	message.ClaimUntil = time.Time{}
 	message.SentAt = sentAt
@@ -285,7 +291,7 @@ func (s *MemoryStore) MarkAttemptFailed(ctx context.Context, messageID, reason s
 	return nil
 }
 
-func (s *MemoryStore) MarkFailed(ctx context.Context, messageID, reason string, failedAt time.Time) error {
+func (s *MemoryStore) MarkFailed(ctx context.Context, messageID, reason string, failedAt time.Time, attempted bool) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -304,7 +310,9 @@ func (s *MemoryStore) MarkFailed(ctx context.Context, messageID, reason string, 
 		return nil
 	}
 	message.Status = MessageStatusFailed
-	message.Attempts++
+	if attempted {
+		message.Attempts++
+	}
 	message.LastError = reason
 	message.NextRetryAt = time.Time{}
 	message.ClaimOwner = ""

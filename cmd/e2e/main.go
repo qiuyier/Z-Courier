@@ -61,6 +61,7 @@ type config struct {
 	CheckReconnectRetry    bool
 	CheckAdminStorage      bool
 	AdminSessionPeerURL    string
+	ExpectPolicyName       string
 }
 
 func main() {
@@ -101,6 +102,7 @@ func parseFlags() config {
 	flag.BoolVar(&cfg.CheckReconnectRetry, "check-reconnect-retry", false, "disconnect the client, queue a downlink, then verify reconnect flushes it")
 	flag.BoolVar(&cfg.CheckAdminStorage, "check-admin-storage", false, "verify Redis-backed admin sessions and PostgreSQL admin audit storage")
 	flag.StringVar(&cfg.AdminSessionPeerURL, "admin-session-peer-url", "", "peer gateway internal HTTP base URL used for Redis-backed admin session lookup; defaults to expect-session-url or internal-url")
+	flag.StringVar(&cfg.ExpectPolicyName, "expect-policy-name", "", "expected persisted delivery policy for MsgID 2001; empty disables the check")
 	flag.Parse()
 
 	cfg.InternalURL = strings.TrimRight(cfg.InternalURL, "/")
@@ -229,6 +231,19 @@ func run(ctx context.Context, cfg config) error {
 	}
 	if err := waitMessageStatus(ctx, db, offlineMessageID, string(downlink.MessageStatusPending)); err != nil {
 		return fmt.Errorf("wait offline message pending: %w", err)
+	}
+	if cfg.ExpectPolicyName != "" {
+		if err := waitMessagePolicy(ctx, db, offlineMessageID, cfg.ExpectPolicyName); err != nil {
+			return fmt.Errorf("wait offline message policy: %w", err)
+		}
+		status, err := getMessageStatus(ctx, cfg, offlineMessageID)
+		if err != nil {
+			return fmt.Errorf("query offline message policy: %w", err)
+		}
+		if status.PolicyName != cfg.ExpectPolicyName {
+			return fmt.Errorf("offline message policy_name = %q, want %q", status.PolicyName, cfg.ExpectPolicyName)
+		}
+		fmt.Printf("delivery policy verified: %s\n", status.PolicyName)
 	}
 
 	client := newE2EClient(cfg)
@@ -1012,6 +1027,53 @@ WHERE message_id = $1
 		}
 		return true, nil
 	})
+}
+
+func waitMessagePolicy(ctx context.Context, db *sql.DB, messageID, wantPolicy string) error {
+	return waitUntil(ctx, func() (bool, error) {
+		var policyName string
+		err := db.QueryRowContext(ctx, `
+SELECT policy_name
+FROM z_courier_downlink_messages
+WHERE message_id = $1
+`, messageID).Scan(&policyName)
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		return policyName == wantPolicy, nil
+	})
+}
+
+func getMessageStatus(ctx context.Context, cfg config, messageID string) (downlink.MessageStatusResponse, error) {
+	var zero downlink.MessageStatusResponse
+	query := url.Values{"message_id": []string{messageID}}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, cfg.InternalURL+"/internal/message/status?"+query.Encode(), nil)
+	if err != nil {
+		return zero, err
+	}
+	if err := applyInternalAuth(req, nil, cfg); err != nil {
+		return zero, err
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return zero, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return zero, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return zero, fmt.Errorf("status = %d, body = %s", resp.StatusCode, string(body))
+	}
+	if err := sonic.Unmarshal(body, &zero); err != nil {
+		return downlink.MessageStatusResponse{}, err
+	}
+	return zero, nil
 }
 
 func waitMessagePendingAttempt(ctx context.Context, db *sql.DB, messageID string) error {

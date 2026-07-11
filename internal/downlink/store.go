@@ -77,6 +77,7 @@ type Message struct {
 	AckRequired         bool
 	TraceID             string
 	SessionID           string
+	Policy              DeliveryPolicy
 	Status              MessageStatus
 	Attempts            int
 	NextRetryAt         time.Time
@@ -123,10 +124,10 @@ type Store interface {
 	ListByStatusPage(context.Context, MessageListQuery) (MessageListResult, error)
 	ListDueRetry(context.Context, time.Time, time.Duration, int) ([]Message, error)
 	ListPendingByClientDevice(context.Context, string, string, int) ([]Message, error)
-	MarkSent(context.Context, string, string, time.Time) error
+	MarkSent(context.Context, string, string, time.Time, time.Time) error
 	MarkDelivered(context.Context, string, string, string, time.Time) error
 	MarkAttemptFailed(context.Context, string, string, time.Time) error
-	MarkFailed(context.Context, string, string, time.Time) error
+	MarkFailed(context.Context, string, string, time.Time, bool) error
 	Requeue(context.Context, string, time.Time) error
 	Discard(context.Context, string, string, time.Time) error
 	DeleteExpired(context.Context, MessageStatus, time.Time, int) (int, error)

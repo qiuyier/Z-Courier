@@ -27,7 +27,9 @@ const postgresDownlinkMigrationLockID int64 = 8_789_121_360_511_467
 
 const postgresMessageColumns = `
 message_id, client_id, device_id, msg_id, body, identity_fingerprint,
-ack_required, trace_id,
+ack_required, trace_id, policy_name, policy_max_attempts, policy_max_age_ns,
+policy_ack_timeout_ns, policy_retry_delay_ns, policy_backoff_multiplier,
+policy_max_retry_delay_ns, policy_retry_jitter_ns,
 session_id, status, attempts, next_retry_at, last_error, created_at,
 updated_at, sent_at, delivered_at, claim_owner, claim_until
 `
@@ -91,6 +93,14 @@ CREATE TABLE IF NOT EXISTS z_courier_downlink_messages (
   identity_fingerprint BYTEA NOT NULL DEFAULT ''::bytea,
   ack_required BOOLEAN NOT NULL DEFAULT false,
   trace_id TEXT NOT NULL DEFAULT '',
+  policy_name TEXT NOT NULL DEFAULT '',
+  policy_max_attempts INTEGER NOT NULL DEFAULT 0,
+  policy_max_age_ns BIGINT NOT NULL DEFAULT 0,
+  policy_ack_timeout_ns BIGINT NOT NULL DEFAULT 0,
+  policy_retry_delay_ns BIGINT NOT NULL DEFAULT 0,
+  policy_backoff_multiplier DOUBLE PRECISION NOT NULL DEFAULT 0,
+  policy_max_retry_delay_ns BIGINT NOT NULL DEFAULT 0,
+  policy_retry_jitter_ns BIGINT NOT NULL DEFAULT 0,
   session_id TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL,
   attempts INTEGER NOT NULL DEFAULT 0,
@@ -109,6 +119,22 @@ ALTER TABLE z_courier_downlink_messages
   ADD COLUMN IF NOT EXISTS claim_until TIMESTAMPTZ;
 ALTER TABLE z_courier_downlink_messages
   ADD COLUMN IF NOT EXISTS identity_fingerprint BYTEA NOT NULL DEFAULT ''::bytea;
+ALTER TABLE z_courier_downlink_messages
+  ADD COLUMN IF NOT EXISTS policy_name TEXT NOT NULL DEFAULT '';
+ALTER TABLE z_courier_downlink_messages
+  ADD COLUMN IF NOT EXISTS policy_max_attempts INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE z_courier_downlink_messages
+  ADD COLUMN IF NOT EXISTS policy_max_age_ns BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE z_courier_downlink_messages
+  ADD COLUMN IF NOT EXISTS policy_ack_timeout_ns BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE z_courier_downlink_messages
+  ADD COLUMN IF NOT EXISTS policy_retry_delay_ns BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE z_courier_downlink_messages
+  ADD COLUMN IF NOT EXISTS policy_backoff_multiplier DOUBLE PRECISION NOT NULL DEFAULT 0;
+ALTER TABLE z_courier_downlink_messages
+  ADD COLUMN IF NOT EXISTS policy_max_retry_delay_ns BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE z_courier_downlink_messages
+  ADD COLUMN IF NOT EXISTS policy_retry_jitter_ns BIGINT NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS z_courier_downlink_messages_client_device_status_idx
   ON z_courier_downlink_messages (client_id, device_id, status);
 CREATE INDEX IF NOT EXISTS z_courier_downlink_messages_next_retry_at_idx
@@ -154,13 +180,18 @@ func (s *PostgresStore) Save(ctx context.Context, message Message) (SaveResult, 
 	inserted, err := scanMessage(s.db.QueryRowContext(ctx, `
 INSERT INTO z_courier_downlink_messages (
   message_id, client_id, device_id, msg_id, body, identity_fingerprint,
-  ack_required, trace_id, session_id, status, attempts, next_retry_at,
-  last_error, created_at, updated_at, sent_at, delivered_at, claim_owner,
-  claim_until
+  ack_required, trace_id, policy_name, policy_max_attempts, policy_max_age_ns,
+  policy_ack_timeout_ns, policy_retry_delay_ns, policy_backoff_multiplier,
+  policy_max_retry_delay_ns, policy_retry_jitter_ns, session_id, status,
+  attempts, next_retry_at, last_error, created_at, updated_at, sent_at,
+  delivered_at, claim_owner, claim_until
 ) VALUES (
   $1, $2, $3, $4, $5, $6,
-  $7, $8, $9, $10, $11, $12,
-  $13, $14, $15, $16, $17, $18, $19
+  $7, $8, $9, $10, $11,
+  $12, $13, $14,
+  $15, $16, $17, $18,
+  $19, $20, $21, $22, $23, $24,
+  $25, $26, $27
 )
 ON CONFLICT (message_id) DO NOTHING
 RETURNING `+postgresMessageColumns+`
@@ -173,6 +204,14 @@ RETURNING `+postgresMessageColumns+`
 		bytes.Clone(message.IdentityFingerprint),
 		message.AckRequired,
 		message.TraceID,
+		message.Policy.Name,
+		message.Policy.MaxAttempts,
+		int64(message.Policy.MaxAge),
+		int64(message.Policy.AckTimeout),
+		int64(message.Policy.InitialRetryDelay),
+		message.Policy.BackoffMultiplier,
+		int64(message.Policy.MaxRetryDelay),
+		int64(message.Policy.RetryJitter),
 		message.SessionID,
 		string(message.Status),
 		message.Attempts,
@@ -321,7 +360,10 @@ SELECT `+postgresMessageColumns+`
 FROM z_courier_downlink_messages
 WHERE (
     (status = $1 AND (next_retry_at IS NULL OR next_retry_at <= $2))
-    OR ($4 AND status = $5 AND ack_required = true AND sent_at IS NOT NULL AND sent_at <= $6)
+    OR (status = $5 AND ack_required = true AND (
+      (next_retry_at IS NOT NULL AND next_retry_at <= $2)
+      OR (next_retry_at IS NULL AND $4 AND sent_at IS NOT NULL AND sent_at <= $6)
+    ))
   )
   AND (claim_until IS NULL OR claim_until <= $2)
 ORDER BY created_at ASC, message_id ASC
@@ -361,7 +403,10 @@ WITH claimed AS (
   FROM z_courier_downlink_messages
   WHERE (
       (status = $1 AND (next_retry_at IS NULL OR next_retry_at <= $2))
-      OR ($6 AND status = $7 AND ack_required = true AND sent_at IS NOT NULL AND sent_at <= $8)
+      OR (status = $7 AND ack_required = true AND (
+        (next_retry_at IS NOT NULL AND next_retry_at <= $2)
+        OR (next_retry_at IS NULL AND $6 AND sent_at IS NOT NULL AND sent_at <= $8)
+      ))
     )
     AND (claim_until IS NULL OR claim_until <= $2)
   ORDER BY created_at ASC, message_id ASC
@@ -375,7 +420,10 @@ SET claim_owner = $4,
 FROM claimed
 WHERE m.message_id = claimed.message_id
 RETURNING m.message_id, m.client_id, m.device_id, m.msg_id, m.body,
-          m.identity_fingerprint, m.ack_required, m.trace_id, m.session_id,
+          m.identity_fingerprint, m.ack_required, m.trace_id, m.policy_name,
+          m.policy_max_attempts, m.policy_max_age_ns, m.policy_ack_timeout_ns,
+          m.policy_retry_delay_ns, m.policy_backoff_multiplier,
+          m.policy_max_retry_delay_ns, m.policy_retry_jitter_ns, m.session_id,
           m.status, m.attempts, m.next_retry_at, m.last_error, m.created_at,
           m.updated_at, m.sent_at, m.delivered_at, m.claim_owner, m.claim_until
 `, string(MessageStatusPending), now, limit, owner, now.Add(lease), includeAckTimeout, string(MessageStatusSent), ackDeadline)
@@ -411,24 +459,24 @@ LIMIT $5
 	return scanMessages(rows)
 }
 
-func (s *PostgresStore) MarkSent(ctx context.Context, messageID, sessionID string, sentAt time.Time) error {
+func (s *PostgresStore) MarkSent(ctx context.Context, messageID, sessionID string, sentAt, nextRetryAt time.Time) error {
 	if sentAt.IsZero() {
 		sentAt = time.Now()
 	}
 
 	result, err := s.db.ExecContext(ctx, `
 UPDATE z_courier_downlink_messages
-SET status = CASE WHEN status IN ($5, $6) THEN status ELSE $2 END,
-    session_id = CASE WHEN status IN ($5, $6) THEN session_id ELSE $3 END,
-    attempts = CASE WHEN status IN ($5, $6) THEN attempts ELSE attempts + 1 END,
-    last_error = CASE WHEN status IN ($5, $6) THEN last_error ELSE '' END,
-    next_retry_at = CASE WHEN status IN ($5, $6) THEN next_retry_at ELSE NULL END,
-    claim_owner = CASE WHEN status IN ($5, $6) THEN claim_owner ELSE '' END,
-    claim_until = CASE WHEN status IN ($5, $6) THEN claim_until ELSE NULL END,
-    sent_at = CASE WHEN status IN ($5, $6) THEN sent_at ELSE $4 END,
-    updated_at = CASE WHEN status IN ($5, $6) THEN updated_at ELSE $4 END
+SET status = CASE WHEN status IN ($6, $7) THEN status ELSE $2 END,
+    session_id = CASE WHEN status IN ($6, $7) THEN session_id ELSE $3 END,
+    attempts = CASE WHEN status IN ($6, $7) THEN attempts ELSE attempts + 1 END,
+    last_error = CASE WHEN status IN ($6, $7) THEN last_error ELSE '' END,
+    next_retry_at = CASE WHEN status IN ($6, $7) THEN next_retry_at ELSE $5 END,
+    claim_owner = CASE WHEN status IN ($6, $7) THEN claim_owner ELSE '' END,
+    claim_until = CASE WHEN status IN ($6, $7) THEN claim_until ELSE NULL END,
+    sent_at = CASE WHEN status IN ($6, $7) THEN sent_at ELSE $4 END,
+    updated_at = CASE WHEN status IN ($6, $7) THEN updated_at ELSE $4 END
 WHERE message_id = $1
-`, messageID, string(MessageStatusSent), sessionID, sentAt, string(MessageStatusDelivered), string(MessageStatusDiscarded))
+`, messageID, string(MessageStatusSent), sessionID, sentAt, nullTime(nextRetryAt), string(MessageStatusDelivered), string(MessageStatusDiscarded))
 	if err != nil {
 		return err
 	}
@@ -480,22 +528,22 @@ WHERE message_id = $1
 	return requireAffected(result)
 }
 
-func (s *PostgresStore) MarkFailed(ctx context.Context, messageID, reason string, failedAt time.Time) error {
+func (s *PostgresStore) MarkFailed(ctx context.Context, messageID, reason string, failedAt time.Time, attempted bool) error {
 	if failedAt.IsZero() {
 		failedAt = time.Now()
 	}
 
 	result, err := s.db.ExecContext(ctx, `
 UPDATE z_courier_downlink_messages
-SET status = CASE WHEN status IN ($5, $6) THEN status ELSE $2 END,
-    attempts = CASE WHEN status IN ($5, $6) THEN attempts ELSE attempts + 1 END,
-    last_error = CASE WHEN status IN ($5, $6) THEN last_error ELSE $3 END,
-    next_retry_at = CASE WHEN status IN ($5, $6) THEN next_retry_at ELSE NULL END,
-    claim_owner = CASE WHEN status IN ($5, $6) THEN claim_owner ELSE '' END,
-    claim_until = CASE WHEN status IN ($5, $6) THEN claim_until ELSE NULL END,
-    updated_at = CASE WHEN status IN ($5, $6) THEN updated_at ELSE $4 END
+SET status = CASE WHEN status IN ($6, $7) THEN status ELSE $2 END,
+    attempts = CASE WHEN status IN ($6, $7) THEN attempts ELSE attempts + CASE WHEN $5 THEN 1 ELSE 0 END END,
+    last_error = CASE WHEN status IN ($6, $7) THEN last_error ELSE $3 END,
+    next_retry_at = CASE WHEN status IN ($6, $7) THEN next_retry_at ELSE NULL END,
+    claim_owner = CASE WHEN status IN ($6, $7) THEN claim_owner ELSE '' END,
+    claim_until = CASE WHEN status IN ($6, $7) THEN claim_until ELSE NULL END,
+    updated_at = CASE WHEN status IN ($6, $7) THEN updated_at ELSE $4 END
 WHERE message_id = $1
-`, messageID, string(MessageStatusFailed), reason, failedAt, string(MessageStatusDelivered), string(MessageStatusDiscarded))
+`, messageID, string(MessageStatusFailed), reason, failedAt, attempted, string(MessageStatusDelivered), string(MessageStatusDiscarded))
 	if err != nil {
 		return err
 	}
@@ -599,6 +647,11 @@ func scanMessage(row rowScanner) (Message, error) {
 	var sentAt sql.NullTime
 	var deliveredAt sql.NullTime
 	var claimUntil sql.NullTime
+	var policyMaxAge int64
+	var policyAckTimeout int64
+	var policyRetryDelay int64
+	var policyMaxRetryDelay int64
+	var policyRetryJitter int64
 
 	if err := row.Scan(
 		&message.MessageID,
@@ -609,6 +662,14 @@ func scanMessage(row rowScanner) (Message, error) {
 		&message.IdentityFingerprint,
 		&message.AckRequired,
 		&message.TraceID,
+		&message.Policy.Name,
+		&message.Policy.MaxAttempts,
+		&policyMaxAge,
+		&policyAckTimeout,
+		&policyRetryDelay,
+		&message.Policy.BackoffMultiplier,
+		&policyMaxRetryDelay,
+		&policyRetryJitter,
 		&message.SessionID,
 		&status,
 		&message.Attempts,
@@ -626,6 +687,11 @@ func scanMessage(row rowScanner) (Message, error) {
 
 	message.MsgID = uint32(msgID)
 	message.Status = MessageStatus(status)
+	message.Policy.MaxAge = time.Duration(policyMaxAge)
+	message.Policy.AckTimeout = time.Duration(policyAckTimeout)
+	message.Policy.InitialRetryDelay = time.Duration(policyRetryDelay)
+	message.Policy.MaxRetryDelay = time.Duration(policyMaxRetryDelay)
+	message.Policy.RetryJitter = time.Duration(policyRetryJitter)
 	if nextRetryAt.Valid {
 		message.NextRetryAt = nextRetryAt.Time
 	}

@@ -113,6 +113,7 @@ func responseFromMessage(message Message) MessageStatusResponse {
 		MsgID:         message.MsgID,
 		TraceID:       message.TraceID,
 		SessionID:     message.SessionID,
+		PolicyName:    message.Policy.Name,
 		Status:        message.Status,
 		Attempts:      message.Attempts,
 		LastError:     message.LastError,
