@@ -41,6 +41,7 @@ type Service struct {
 	retryClaimLease           time.Duration
 	maxAttempts               int
 	deliveryPolicies          *DeliveryPolicySet
+	queueCapacity             QueueCapacity
 	terminalPublisher         TerminalPublisher
 	terminalGatewayNode       string
 	terminalRetryDelay        time.Duration
@@ -106,6 +107,12 @@ func WithDeliveryPolicies(policies *DeliveryPolicySet) ServiceOption {
 		if policies != nil {
 			s.deliveryPolicies = policies
 		}
+	}
+}
+
+func WithQueueCapacity(capacity QueueCapacity) ServiceOption {
+	return func(s *Service) {
+		s.queueCapacity = capacity
 	}
 }
 
@@ -294,8 +301,23 @@ func (s *Service) Requeue(ctx context.Context, messageID string) (Message, error
 		return Message{}, ErrInvalidTransition
 	}
 
-	if err := s.store.Requeue(ctx, messageID, s.now()); err != nil {
-		return Message{}, fmt.Errorf("%w: %v", ErrStore, err)
+	requeuedAt := s.now()
+	var requeueErr error
+	if s.queueCapacity.Enabled() {
+		capacityStore, ok := s.store.(CapacityStore)
+		if !ok {
+			return Message{}, fmt.Errorf("%w: queue capacity requires a capacity-capable store", ErrStore)
+		}
+		requeueErr = capacityStore.RequeueWithCapacity(ctx, messageID, requeuedAt, s.queueCapacity)
+	} else {
+		requeueErr = s.store.Requeue(ctx, messageID, requeuedAt)
+	}
+	if requeueErr != nil {
+		if errors.Is(requeueErr, ErrQueueCapacityExceeded) {
+			recordQueueCapacityRejection(requeueErr)
+			return Message{}, requeueErr
+		}
+		return Message{}, fmt.Errorf("%w: %v", ErrStore, requeueErr)
 	}
 	message, ok, err = s.store.Get(ctx, messageID)
 	if err != nil {
@@ -389,8 +411,22 @@ func (s *Service) pushReliable(ctx context.Context, req PushRequest) (*PushRespo
 		message.ClaimUntil = message.CreatedAt.Add(s.retryClaimLease)
 	}
 
-	saveResult, err := s.store.Save(ctx, message)
+	var saveResult SaveResult
+	var err error
+	if s.queueCapacity.Enabled() {
+		capacityStore, ok := s.store.(CapacityStore)
+		if !ok {
+			return nil, fmt.Errorf("%w: queue capacity requires a capacity-capable store", ErrStore)
+		}
+		saveResult, err = capacityStore.SaveWithCapacity(ctx, message, s.queueCapacity)
+	} else {
+		saveResult, err = s.store.Save(ctx, message)
+	}
 	if err != nil {
+		if errors.Is(err, ErrQueueCapacityExceeded) {
+			recordQueueCapacityRejection(err)
+			return nil, err
+		}
 		return nil, fmt.Errorf("%w: %v", ErrStore, err)
 	}
 	message = saveResult.Message
@@ -446,6 +482,15 @@ func (s *Service) pushReliable(ctx context.Context, req PushRequest) (*PushRespo
 	sentResp.MessageStatus = MessageStatusSent
 	sentResp.DeliveryState = DeliveryStateSent
 	return sentResp, nil
+}
+
+func recordQueueCapacityRejection(err error) {
+	var capacityErr *QueueCapacityError
+	if errors.As(err, &capacityErr) {
+		metrics.RecordDownlinkQueueCapacityRejected(capacityErr.Scope)
+		return
+	}
+	metrics.RecordDownlinkQueueCapacityRejected("unknown")
 }
 
 func pushResponseFromStoredMessage(message Message, submissionState string) *PushResponse {
@@ -1037,6 +1082,19 @@ func annotatePushResponseFailure(resp *PushResponse, err error) {
 	resp.FailureCode = failure.Code
 	resp.TargetGatewayNode = nonEmpty(resp.TargetGatewayNode, failure.TargetGatewayNode)
 	resp.TargetInternalAddr = nonEmpty(resp.TargetInternalAddr, failure.TargetInternalAddr)
+}
+
+func annotateQueueCapacityResponse(resp *PushResponse, err error) {
+	if resp == nil || err == nil {
+		return
+	}
+	var capacityErr *QueueCapacityError
+	if !errors.As(err, &capacityErr) || capacityErr == nil {
+		return
+	}
+	resp.CapacityScope = capacityErr.Scope
+	resp.CapacityLimit = capacityErr.Limit
+	resp.CapacityPending = capacityErr.Pending
 }
 
 func deliveryFailureFromError(err error) DeliveryFailure {

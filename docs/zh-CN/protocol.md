@@ -186,6 +186,24 @@ POST /internal/push/batch
 
 如果部分消息失败，HTTP 可能返回 `207 Multi-Status`，响应里会给出每条消息的结果。
 
+可靠队列容量已满时，新消息返回 HTTP `429`：
+
+```json
+{
+  "code": "queue_capacity_exceeded",
+  "capacity_scope": "device",
+  "capacity_limit": 1000,
+  "capacity_pending": 1000,
+  "client_id": "dev-client",
+  "device_id": "device-1",
+  "message_id": "message-1"
+}
+```
+
+`capacity_scope` 是 `global` 或 `device`。后端之后可以退避重试，但必须复用同一个
+`message_id`。这次请求没有被网关接受或持久化；兼容的幂等重放会先于容量检查，
+仍然返回已有状态。
+
 ## 查询下行状态
 
 后端可以通过 `message_id` 查询可靠下行消息：

@@ -386,6 +386,10 @@ func TestInternalHTTPAdminDiagnostics(t *testing.T) {
 			MsgIDMin: 2001,
 			MsgIDMax: 2001,
 		}},
+		DownlinkCapacity: downlink.QueueCapacity{
+			MaxPendingGlobal:    5000,
+			MaxPendingPerDevice: 50,
+		},
 		DownlinkTerminal: DownlinkTerminalConfig{
 			PublisherType: "nsq",
 			NSQ: NSQUpstreamConfig{
@@ -472,6 +476,9 @@ func TestInternalHTTPAdminDiagnostics(t *testing.T) {
 	}
 	if resp.Downlink.PolicyCount != 2 || strings.Join(resp.Downlink.PolicyNames, ",") != "default,critical" {
 		t.Fatalf("downlink diagnostics policies = %d/%v, want 2/[default critical]", resp.Downlink.PolicyCount, resp.Downlink.PolicyNames)
+	}
+	if resp.Downlink.MaxPendingGlobal != 5000 || resp.Downlink.MaxPendingPerDevice != 50 {
+		t.Fatalf("downlink capacity diagnostics = %+v", resp.Downlink)
 	}
 	if resp.Downlink.TerminalPublisher != "nsq" || resp.Downlink.TerminalTopic != "terminal_events" ||
 		resp.Downlink.TerminalRetryInterval != "5s" || resp.Downlink.TerminalRetryDelay != "30s" {

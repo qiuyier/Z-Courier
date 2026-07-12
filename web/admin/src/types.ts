@@ -81,6 +81,8 @@ export type DownlinkSummary = {
   store_configured: boolean;
   policy_count?: number;
   policy_names?: string[];
+  max_pending_global?: number;
+  max_pending_per_device?: number;
   terminal_publisher?: string;
   terminal_topic?: string;
   terminal_retry_interval?: string;
@@ -371,6 +373,9 @@ export type MessageStatusResponse = {
   terminal_next_publish_at?: string | null;
   terminal_publish_error?: string;
   terminal_published_at?: string | null;
+  capacity_scope?: string;
+  capacity_limit?: number;
+  capacity_pending?: number;
   next_retry_at?: string | null;
   claim_owner?: string;
   claim_until?: string | null;

@@ -292,6 +292,14 @@
             "bindFlushLimit": { "$ref": "#/definitions/nonNegativeInteger" }
           }
         },
+        "capacity": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "maxPendingGlobal": { "$ref": "#/definitions/nonNegativeInteger" },
+            "maxPendingPerDevice": { "$ref": "#/definitions/nonNegativeInteger" }
+          }
+        },
         "retention": {
           "type": "object",
           "additionalProperties": false,

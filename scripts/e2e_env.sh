@@ -20,6 +20,14 @@ e2e_check_gateway_alive() {
   fi
 }
 
+e2e_require_port_free() {
+  local port="$1"
+  if (echo >/dev/tcp/127.0.0.1/"$port") >/dev/null 2>&1; then
+    echo "gateway test port $port is already in use" >&2
+    return 1
+  fi
+}
+
 e2e_wait_http() {
   local name="$1"
   local url="$2"
@@ -68,6 +76,9 @@ e2e_start_gateway() {
     fi
     sleep 1
   done
+
+  e2e_require_port_free 9899
+  e2e_require_port_free 18082
 
   echo "starting gateway..."
   ZINX_CONFIG_FILE_PATH="$E2E_ZINX_CONFIG_FILE" go run ./cmd/gateway -config "$E2E_CONFIG_FILE" &

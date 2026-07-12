@@ -637,6 +637,50 @@ The retry worker marks a message `failed` with `max_attempts_exceeded` or
 `max_age_exceeded` before another delivery can violate the selected policy.
 The status/list APIs and admin console expose the persisted `policy_name`.
 
+## Downlink Queue Capacity (V12.4)
+
+Queue admission limits protect PostgreSQL and retry workers from an unbounded
+offline backlog:
+
+```yaml
+downlink:
+  capacity:
+    max_pending_global: 1000000
+    max_pending_per_device: 1000
+```
+
+- `max_pending_global`: maximum pending messages across the shared downlink
+  store. `0` means unlimited.
+- `max_pending_per_device`: maximum pending messages for one
+  `client_id + device_id`. `0` means unlimited.
+
+When both limits are enabled, the per-device limit cannot exceed the global
+limit. Capacity requires reliable downlink storage. All gateway nodes sharing
+one PostgreSQL database must use the same capacity configuration.
+
+The store checks idempotency before capacity: replaying the same compatible
+`message_id` still returns the existing message when the queue is full, while
+a conflicting identity still returns HTTP `409`. A new message over capacity
+returns HTTP `429` with `code = queue_capacity_exceeded`, plus
+`capacity_scope`, `capacity_limit`, and `capacity_pending`. The rejected
+message is not persisted and does not produce a terminal event. Manual requeue
+uses the same admission rules.
+
+PostgreSQL serializes each capacity decision and insert with transaction-level
+advisory locks, so two gateway nodes cannot intentionally consume the last
+slot together. The memory store provides the same semantics within one
+process. These are admission limits, not eviction rules: the gateway never
+deletes an older pending message to make room.
+
+Reliable pushes are persisted before online delivery. Consequently, a new
+online push also needs admission before the gateway can attempt the socket
+write. Prefer a meaningful per-device limit to isolate one offline device, and
+size the global limit from expected offline devices, message rate, offline
+duration, average Body size, PostgreSQL headroom, and retry throughput.
+Because a nonzero global limit coordinates every admission through one shared
+database lock, benchmark the intended workload before enabling it. The
+production examples therefore enable only the per-device limit by default.
+
 ## Downlink Terminal Events
 
 Terminal events export bounded metadata when a reliable message becomes

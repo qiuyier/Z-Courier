@@ -24,6 +24,10 @@ func NewMemoryStore() *MemoryStore {
 }
 
 func (s *MemoryStore) Save(ctx context.Context, message Message) (SaveResult, error) {
+	return s.SaveWithCapacity(ctx, message, QueueCapacity{})
+}
+
+func (s *MemoryStore) SaveWithCapacity(ctx context.Context, message Message, capacity QueueCapacity) (SaveResult, error) {
 	if err := ctx.Err(); err != nil {
 		return SaveResult{}, err
 	}
@@ -56,6 +60,11 @@ func (s *MemoryStore) Save(ctx context.Context, message Message) (SaveResult, er
 			outcome = SaveOutcomeConflict
 		}
 		return SaveResult{Message: existing.Clone(), Outcome: outcome}, nil
+	}
+	if message.Status == MessageStatusPending {
+		if err := s.checkQueueCapacityLocked(message.ClientID, message.DeviceID, capacity); err != nil {
+			return SaveResult{}, err
+		}
 	}
 
 	s.messages[message.MessageID] = message
@@ -347,6 +356,15 @@ func (s *MemoryStore) MarkFailed(ctx context.Context, messageID string, transiti
 }
 
 func (s *MemoryStore) Requeue(ctx context.Context, messageID string, requeuedAt time.Time) error {
+	return s.RequeueWithCapacity(ctx, messageID, requeuedAt, QueueCapacity{})
+}
+
+func (s *MemoryStore) RequeueWithCapacity(
+	ctx context.Context,
+	messageID string,
+	requeuedAt time.Time,
+	capacity QueueCapacity,
+) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -360,6 +378,11 @@ func (s *MemoryStore) Requeue(ctx context.Context, messageID string, requeuedAt 
 	message, ok := s.messages[messageID]
 	if !ok {
 		return ErrMessageNotFound
+	}
+	if message.Status != MessageStatusPending {
+		if err := s.checkQueueCapacityLocked(message.ClientID, message.DeviceID, capacity); err != nil {
+			return err
+		}
 	}
 	message.Status = MessageStatusPending
 	message.Attempts = 0
@@ -379,6 +402,31 @@ func (s *MemoryStore) Requeue(ctx context.Context, messageID string, requeuedAt 
 	message.TerminalPublishedAt = time.Time{}
 	message.UpdatedAt = requeuedAt
 	s.messages[messageID] = message
+	return nil
+}
+
+func (s *MemoryStore) checkQueueCapacityLocked(clientID, deviceID string, capacity QueueCapacity) error {
+	if !capacity.Enabled() {
+		return nil
+	}
+
+	globalPending := 0
+	devicePending := 0
+	for _, message := range s.messages {
+		if message.Status != MessageStatusPending {
+			continue
+		}
+		globalPending++
+		if message.ClientID == clientID && message.DeviceID == deviceID {
+			devicePending++
+		}
+	}
+	if capacity.MaxPendingGlobal > 0 && globalPending >= capacity.MaxPendingGlobal {
+		return newQueueCapacityError(QueueCapacityScopeGlobal, globalPending, capacity.MaxPendingGlobal)
+	}
+	if capacity.MaxPendingPerDevice > 0 && devicePending >= capacity.MaxPendingPerDevice {
+		return newQueueCapacityError(QueueCapacityScopeDevice, devicePending, capacity.MaxPendingPerDevice)
+	}
 	return nil
 }
 

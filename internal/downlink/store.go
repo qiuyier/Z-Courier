@@ -144,6 +144,13 @@ type ClaimStore interface {
 	ClaimDueRetry(context.Context, time.Time, time.Duration, int, string, time.Duration) ([]Message, error)
 }
 
+// CapacityStore atomically applies queue admission limits with message writes.
+// Store implementations may keep the legacy methods as unlimited delegates.
+type CapacityStore interface {
+	SaveWithCapacity(context.Context, Message, QueueCapacity) (SaveResult, error)
+	RequeueWithCapacity(context.Context, string, time.Time, QueueCapacity) error
+}
+
 func messageFromPushRequest(req PushRequest, now time.Time) Message {
 	messageID := req.MessageID
 	if messageID == "" {

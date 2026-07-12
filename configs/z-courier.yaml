@@ -98,6 +98,9 @@ downlink:
     scan_limit: 100
     bind_flush_limit: 100
   policies: []
+  capacity:
+    max_pending_global: 0
+    max_pending_per_device: 0
   terminal:
     publisher:
       type: none

@@ -63,6 +63,8 @@ type config struct {
 	CheckAdminStorage      bool
 	AdminSessionPeerURL    string
 	ExpectPolicyName       string
+	CheckQueueCapacity     bool
+	ExpectPerDeviceLimit   int
 	CheckTerminalEvent     bool
 	TerminalNSQDAddress    string
 	ExpectTerminalPolicy   string
@@ -107,6 +109,8 @@ func parseFlags() config {
 	flag.BoolVar(&cfg.CheckAdminStorage, "check-admin-storage", false, "verify Redis-backed admin sessions and PostgreSQL admin audit storage")
 	flag.StringVar(&cfg.AdminSessionPeerURL, "admin-session-peer-url", "", "peer gateway internal HTTP base URL used for Redis-backed admin session lookup; defaults to expect-session-url or internal-url")
 	flag.StringVar(&cfg.ExpectPolicyName, "expect-policy-name", "", "expected persisted delivery policy for MsgID 2001; empty disables the check")
+	flag.BoolVar(&cfg.CheckQueueCapacity, "check-queue-capacity", false, "fill one offline device queue and verify explicit capacity rejection")
+	flag.IntVar(&cfg.ExpectPerDeviceLimit, "expect-per-device-limit", 2, "expected pending-message capacity for the E2E device")
 	flag.BoolVar(&cfg.CheckTerminalEvent, "check-terminal-event", false, "force a message to terminal failure and verify its NSQ event")
 	flag.StringVar(&cfg.TerminalNSQDAddress, "terminal-nsqd-address", "127.0.0.1:14150", "NSQ TCP address used to consume terminal events")
 	flag.StringVar(&cfg.ExpectTerminalPolicy, "expect-terminal-policy", "integration-terminal", "expected policy for the terminal-event E2E message")
@@ -142,6 +146,9 @@ func parseMetricsURLs(raw, fallback string) []string {
 }
 
 func validateInternalAuthConfig(cfg config) error {
+	if cfg.CheckQueueCapacity && cfg.ExpectPerDeviceLimit <= 0 {
+		return fmt.Errorf("expect-per-device-limit must be greater than 0 when check-queue-capacity is enabled")
+	}
 	switch cfg.InternalAuthMode {
 	case internalAuthModeToken:
 		return nil
@@ -222,6 +229,11 @@ func run(ctx context.Context, cfg config) error {
 			return fmt.Errorf("start terminal event collector: %w", err)
 		}
 		defer terminalCollector.Close()
+	}
+	if cfg.CheckQueueCapacity {
+		if err := checkQueueCapacity(ctx, cfg, db, runID); err != nil {
+			return err
+		}
 	}
 
 	fmt.Println("checking offline queue and idempotency path")
@@ -1043,6 +1055,62 @@ func validatePushConflict(response downlink.PushResponse, messageID string) erro
 	return nil
 }
 
+func checkQueueCapacity(ctx context.Context, cfg config, db *sql.DB, runID int64) error {
+	fmt.Println("checking per-device queue capacity path")
+	deviceID := fmt.Sprintf("%s-capacity-offline-%d", cfg.DeviceID, runID)
+	acceptedIDs := make([]string, 0, cfg.ExpectPerDeviceLimit)
+	for index := 0; index < cfg.ExpectPerDeviceLimit; index++ {
+		messageID := fmt.Sprintf("e2e-%d-capacity-%d", runID, index+1)
+		accepted, err := pushDownlinkTarget(
+			ctx,
+			cfg,
+			deviceID,
+			2001,
+			messageID,
+			[]byte(fmt.Sprintf("capacity-%d", index+1)),
+			http.StatusAccepted,
+		)
+		if err != nil {
+			return fmt.Errorf("push capacity message %d: %w", index+1, err)
+		}
+		if err := validatePushOutcome(accepted, messageID, downlink.SubmissionStateCreated, downlink.MessageStatusPending); err != nil {
+			return fmt.Errorf("validate capacity message %d: %w", index+1, err)
+		}
+		acceptedIDs = append(acceptedIDs, messageID)
+	}
+	rejectedID := fmt.Sprintf("e2e-%d-capacity-rejected", runID)
+
+	replay, err := pushDownlinkTarget(ctx, cfg, deviceID, 2001, acceptedIDs[0], []byte("capacity-1"), http.StatusOK)
+	if err != nil {
+		return fmt.Errorf("replay capacity message: %w", err)
+	}
+	if err := validatePushOutcome(replay, acceptedIDs[0], downlink.SubmissionStateExisting, downlink.MessageStatusPending); err != nil {
+		return fmt.Errorf("validate capacity replay: %w", err)
+	}
+	rejectedBody := []byte(fmt.Sprintf("capacity-%d", cfg.ExpectPerDeviceLimit+1))
+	rejected, err := pushDownlinkTarget(ctx, cfg, deviceID, 2001, rejectedID, rejectedBody, http.StatusTooManyRequests)
+	if err != nil {
+		return fmt.Errorf("push rejected capacity message: %w", err)
+	}
+	if rejected.Code != "queue_capacity_exceeded" || rejected.CapacityScope != downlink.QueueCapacityScopeDevice ||
+		rejected.CapacityLimit != cfg.ExpectPerDeviceLimit || rejected.CapacityPending != cfg.ExpectPerDeviceLimit {
+		return fmt.Errorf("capacity rejection = %+v", rejected)
+	}
+	var persisted int
+	if err := db.QueryRowContext(ctx, `
+SELECT COUNT(*)
+FROM z_courier_downlink_messages
+WHERE message_id = $1
+`, rejectedID).Scan(&persisted); err != nil {
+		return fmt.Errorf("query rejected capacity message: %w", err)
+	}
+	if persisted != 0 {
+		return fmt.Errorf("rejected capacity message persisted rows = %d", persisted)
+	}
+	fmt.Printf("queue capacity rejection verified: scope=%s limit=%d\n", rejected.CapacityScope, rejected.CapacityLimit)
+	return nil
+}
+
 type terminalEventCollector struct {
 	consumer *nsq.Consumer
 	messages chan []byte
@@ -1311,6 +1379,17 @@ func checkMetrics(ctx context.Context, cfg config) error {
 	if cfg.CheckReconnectRetry {
 		if err := checkReconnectRetryMetrics(string(body), cfg); err != nil {
 			return err
+		}
+	}
+	if cfg.CheckQueueCapacity {
+		value, found, err := sumMetricSamples(string(body), "z_courier_downlink_queue_capacity_rejected_total", map[string]string{
+			"scope": downlink.QueueCapacityScopeDevice,
+		})
+		if err != nil {
+			return err
+		}
+		if !found || value < 1 {
+			return fmt.Errorf("queue capacity rejection metric = %.4f, found = %t, want >= 1", value, found)
 		}
 	}
 	if cfg.CheckAdminStorage {

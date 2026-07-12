@@ -228,6 +228,26 @@ The batch response contains one result per message. A partially failed batch
 returns HTTP `207` with `code = partial_failure`; request-level errors such as
 invalid JSON still return `400`.
 
+When reliable queue admission is full, a new item returns HTTP `429`:
+
+```json
+{
+  "code": "queue_capacity_exceeded",
+  "reason": "downlink: queue capacity exceeded: scope=device pending=1000 limit=1000",
+  "capacity_scope": "device",
+  "capacity_limit": 1000,
+  "capacity_pending": 1000,
+  "client_id": "dev-client",
+  "device_id": "device-1",
+  "message_id": "message-1"
+}
+```
+
+`capacity_scope` is `global` or `device`. The request is retryable later, but
+the backend must reuse the same `message_id`. The rejected message was not
+accepted or persisted. Compatible idempotent replay is evaluated before this
+limit and continues to return the existing state.
+
 Backends can query a stored downlink message by `message_id`:
 
 ```text

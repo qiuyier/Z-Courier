@@ -2,6 +2,7 @@ package downlink
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -230,6 +231,148 @@ SELECT COUNT(*) FROM z_courier_downlink_terminal_events WHERE message_id = $1
 	if eventCount != 1 {
 		t.Fatalf("terminal event count = %d, want 1", eventCount)
 	}
+}
+
+func TestPostgresStoreQueueCapacityIntegration(t *testing.T) {
+	dsn := os.Getenv("ZCOURIER_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("set ZCOURIER_TEST_POSTGRES_DSN to run PostgreSQL downlink store integration test")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	store, err := NewPostgresStore(ctx, PostgresStoreConfig{
+		DSN:          dsn,
+		AutoMigrate:  true,
+		MaxOpenConns: 20,
+	})
+	if err != nil {
+		t.Fatalf("NewPostgresStore() error = %v", err)
+	}
+	defer store.Close()
+
+	runID := time.Now().UnixNano()
+	clientID := fmt.Sprintf("capacity-client-%d", runID)
+	globalClientID := fmt.Sprintf("capacity-global-client-%d", runID)
+	deviceID := "device-1"
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cleanupCancel()
+		_, _ = store.db.ExecContext(
+			cleanupCtx,
+			"DELETE FROM z_courier_downlink_messages WHERE client_id IN ($1, $2)",
+			clientID,
+			globalClientID,
+		)
+	})
+
+	capacity := QueueCapacity{MaxPendingPerDevice: 2}
+	const workers = 20
+	created := runPostgresCapacityAdmissions(
+		t,
+		ctx,
+		store,
+		capacity,
+		clientID,
+		workers,
+		capacity.MaxPendingPerDevice,
+		QueueCapacityScopeDevice,
+		func(int) string { return deviceID },
+	)
+
+	replayed, err := store.SaveWithCapacity(ctx, created[0], capacity)
+	if err != nil || replayed.Outcome != SaveOutcomeExisting {
+		t.Fatalf("SaveWithCapacity(replay) = %+v, error = %v", replayed, err)
+	}
+	conflicting := created[0]
+	conflicting.Body = []byte("different")
+	conflict, err := store.SaveWithCapacity(ctx, conflicting, capacity)
+	if err != nil || conflict.Outcome != SaveOutcomeConflict {
+		t.Fatalf("SaveWithCapacity(conflict) = %+v, error = %v", conflict, err)
+	}
+
+	var existingPending int
+	if err := store.db.QueryRowContext(ctx, `
+SELECT COUNT(*)
+FROM z_courier_downlink_messages
+WHERE status = $1
+`, string(MessageStatusPending)).Scan(&existingPending); err != nil {
+		t.Fatalf("count existing pending messages: %v", err)
+	}
+	globalCapacity := QueueCapacity{MaxPendingGlobal: existingPending + 2}
+	runPostgresCapacityAdmissions(
+		t,
+		ctx,
+		store,
+		globalCapacity,
+		globalClientID,
+		workers,
+		2,
+		QueueCapacityScopeGlobal,
+		func(index int) string { return fmt.Sprintf("device-%d", index) },
+	)
+}
+
+type postgresCapacityOutcome struct {
+	message Message
+	result  SaveResult
+	err     error
+}
+
+func runPostgresCapacityAdmissions(
+	t *testing.T,
+	ctx context.Context,
+	store *PostgresStore,
+	capacity QueueCapacity,
+	clientID string,
+	workers int,
+	expectedCreated int,
+	expectedScope string,
+	deviceID func(int) string,
+) []Message {
+	t.Helper()
+	outcomes := make(chan postgresCapacityOutcome, workers)
+	var wait sync.WaitGroup
+	for index := 0; index < workers; index++ {
+		wait.Add(1)
+		go func(index int) {
+			defer wait.Done()
+			messageID := fmt.Sprintf("%s-message-%d", clientID, index)
+			message := Message{
+				MessageID:   messageID,
+				ClientID:    clientID,
+				DeviceID:    deviceID(index),
+				MsgID:       2001,
+				AckRequired: true,
+				Body:        []byte(messageID),
+			}
+			result, err := store.SaveWithCapacity(ctx, message, capacity)
+			outcomes <- postgresCapacityOutcome{message: message, result: result, err: err}
+		}(index)
+	}
+	wait.Wait()
+	close(outcomes)
+
+	created := make([]Message, 0, expectedCreated)
+	rejected := 0
+	for outcome := range outcomes {
+		switch {
+		case outcome.err == nil && outcome.result.Outcome == SaveOutcomeCreated:
+			created = append(created, outcome.message)
+		case errors.Is(outcome.err, ErrQueueCapacityExceeded):
+			var capacityErr *QueueCapacityError
+			if !errors.As(outcome.err, &capacityErr) || capacityErr.Scope != expectedScope {
+				t.Fatalf("SaveWithCapacity() capacity error = %v, want scope %q", outcome.err, expectedScope)
+			}
+			rejected++
+		default:
+			t.Fatalf("SaveWithCapacity() result = %+v, error = %v", outcome.result, outcome.err)
+		}
+	}
+	if len(created) != expectedCreated || rejected != workers-expectedCreated {
+		t.Fatalf("created/rejected = %d/%d, want %d/%d", len(created), rejected, expectedCreated, workers-expectedCreated)
+	}
+	return created
 }
 
 func containsMessageID(messages []Message, messageID string) bool {

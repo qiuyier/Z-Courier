@@ -132,6 +132,7 @@ and Slack live under `deploy/monitoring/alertmanager/examples/`.
 | `ZCourierUpstreamOverloadRejects` | Upstream capacity limit reached | Check backend latency, route `max_in_flight`, and load-test traffic |
 | `ZCourierInternalHTTPOverloadRejects` | Backend push/admin pressure exceeds gateway limit | Check internal push rate and `internal_http.max_in_flight` |
 | `ZCourierDownlinkPushFailures` | Missing route, peer push issue, storage/retry problem | Run `cmd/admin route` for affected client/device |
+| `ZCourierDownlinkQueueCapacityRejects` | Global or per-device pending queue limit reached | Inspect the rejection scope and offline-device backlog before changing limits |
 | `ZCourierDownlinkACKLatencyHigh` | Slow clients, network trouble, retry pressure | Check client connection stability and peer push latency |
 | `ZCourierRetryWorkerFailures` | PostgreSQL or retry claim problem | Check Postgres health and gateway retry worker logs |
 | `ZCourierAdminAuditWriteFailures` | Admin audit store configuration or PostgreSQL problem | Check `cmd/admin check`, audit storage config, and Postgres health |
@@ -505,6 +506,7 @@ peer push.
 Symptoms:
 
 - requests return `429`
+- downlink responses return `code="queue_capacity_exceeded"` with a global or device scope
 - in-flight metrics stay high
 - client ingress is rejected during bursts
 - client ACKs have `code="rejected"` with `reason="rate_limited"` or
@@ -518,12 +520,14 @@ sum by (path) (rate(z_courier_internal_http_overload_rejected_total[1m]))
 sum by (route, target_type) (z_courier_upstream_inflight)
 sum by (route, target_type) (rate(z_courier_upstream_overload_rejected_total[1m]))
 sum(rate(z_courier_rate_limit_rejected_total[1m]))
+sum by (scope) (rate(z_courier_downlink_queue_capacity_rejected_total[1m]))
 ```
 
 Check whether the bottleneck is:
 
 - client ingress policy
 - internal downlink push capacity
+- reliable downlink pending queue capacity (`downlink.capacity`)
 - upstream route capacity
 - backend/MQ latency
 - retry worker competing with live traffic

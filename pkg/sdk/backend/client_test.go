@@ -297,7 +297,13 @@ func TestMessageActionsSendExpectedBodies(t *testing.T) {
 
 func TestAPIErrorPreservesGatewayStatus(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		writeTestJSON(t, w, http.StatusTooManyRequests, PushResponse{Code: "overloaded", Reason: "try later"})
+		writeTestJSON(t, w, http.StatusTooManyRequests, PushResponse{
+			Code:            "queue_capacity_exceeded",
+			Reason:          "try later",
+			CapacityScope:   "device",
+			CapacityLimit:   10,
+			CapacityPending: 10,
+		})
 	}))
 	defer server.Close()
 
@@ -310,7 +316,9 @@ func TestAPIErrorPreservesGatewayStatus(t *testing.T) {
 	if !errors.As(err, &apiError) {
 		t.Fatalf("Push() error type = %T, want *APIError", err)
 	}
-	if apiError.StatusCode != http.StatusTooManyRequests || apiError.Code != "overloaded" || !apiError.Retryable() {
+	if apiError.StatusCode != http.StatusTooManyRequests || apiError.Code != "queue_capacity_exceeded" ||
+		apiError.CapacityScope != "device" || apiError.CapacityLimit != 10 || apiError.CapacityPending != 10 ||
+		!apiError.Retryable() {
 		t.Fatalf("APIError = %+v", apiError)
 	}
 }

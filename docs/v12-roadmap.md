@@ -239,6 +239,26 @@ Candidate work:
 - Document capacity sizing in terms of active devices, offline duration,
   message rate, retention, and PostgreSQL storage.
 
+Current implementation (V12.4.1):
+
+- Adds backward-compatible global and per-`client_id + device_id` pending
+  admission limits; zero keeps the corresponding limit disabled.
+- Compatible `MessageID` replay and immutable-identity conflict detection run
+  before capacity checks. New over-capacity messages return HTTP `429` with an
+  explicit scope, limit, and observed pending count and are not persisted.
+- Memory admission is atomic within one process. PostgreSQL uses stable
+  transaction advisory locks plus indexed pending counts, so gateway nodes
+  sharing the same database cannot intentionally consume the last slot
+  together.
+- Manual requeue obeys the same limits. Capacity rejection never evicts an
+  existing message and never creates a terminal event.
+- The Go backend SDK preserves capacity metadata on retryable `APIError`s.
+  Diagnostics, the admin console, Prometheus, Grafana, alerts, and the
+  production runbook expose the configured limits and rejection scope.
+- Unit tests cover global/device limits, idempotency, requeue, and concurrent
+  memory admission. Real PostgreSQL integration and two-node cluster E2E cover
+  the shared-store path. Fair retry scheduling remains V12.4.2 work.
+
 Acceptance criteria:
 
 - One device cannot consume the configured shared queue budget alone.

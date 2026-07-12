@@ -231,6 +231,14 @@ var (
 		[]string{"msg_id", "result"},
 	)
 
+	downlinkQueueCapacityRejected = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "z_courier_downlink_queue_capacity_rejected_total",
+			Help: "Total number of reliable downlink admissions rejected by queue capacity limits.",
+		},
+		[]string{"scope"},
+	)
+
 	internalHTTPInFlight = promauto.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "z_courier_internal_http_inflight",
@@ -530,6 +538,10 @@ func SetClientsOnline(count int) {
 
 func RecordDownlinkPush(msgID uint32, result string) {
 	downlinkPush.WithLabelValues(formatMsgID(msgID), nonEmpty(result, "unknown")).Inc()
+}
+
+func RecordDownlinkQueueCapacityRejected(scope string) {
+	downlinkQueueCapacityRejected.WithLabelValues(nonEmpty(scope, "unknown")).Inc()
 }
 
 func AddInternalHTTPInFlight(path string, delta float64) {

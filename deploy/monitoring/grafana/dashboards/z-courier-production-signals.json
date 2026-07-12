@@ -505,6 +505,17 @@
           "legendFormat": "ack {{result}}",
           "range": true,
           "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (scope) (rate(z_courier_downlink_queue_capacity_rejected_total[5m]))",
+          "legendFormat": "capacity {{scope}}",
+          "range": true,
+          "refId": "C"
         }
       ],
       "title": "Downlink Push And ACK Problems / sec",

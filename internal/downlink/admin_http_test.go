@@ -175,6 +175,45 @@ func TestRequeueHandlerOK(t *testing.T) {
 	}
 }
 
+func TestRequeueHandlerRejectsQueueCapacity(t *testing.T) {
+	store := NewMemoryStore()
+	now := time.Now()
+	for _, message := range []Message{
+		{
+			MessageID: "pending-1", ClientID: "client-1", DeviceID: "device-1", MsgID: 2001,
+			Status: MessageStatusPending, CreatedAt: now, UpdatedAt: now,
+		},
+		{
+			MessageID: "failed-1", ClientID: "client-1", DeviceID: "device-1", MsgID: 2001,
+			Status: MessageStatusFailed, CreatedAt: now, UpdatedAt: now,
+		},
+	} {
+		if _, err := store.Save(context.Background(), message); err != nil {
+			t.Fatalf("Save() error = %v", err)
+		}
+	}
+	service := NewService(fakeSessions{}, fakeConnections{},
+		WithStore(store),
+		WithQueueCapacity(QueueCapacity{MaxPendingPerDevice: 1}),
+	)
+	handler := NewRequeueHandler(HandlerConfig{Service: service})
+	req := httptest.NewRequest(http.MethodPost, "/internal/message/requeue", strings.NewReader(`{"message_id":"failed-1"}`))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var response MessageStatusResponse
+	if err := sonic.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if response.Code != "queue_capacity_exceeded" || response.CapacityScope != QueueCapacityScopeDevice ||
+		response.CapacityLimit != 1 || response.CapacityPending != 1 {
+		t.Fatalf("response = %+v", response)
+	}
+}
+
 func TestDiscardHandlerOK(t *testing.T) {
 	store := NewMemoryStore()
 	if _, err := store.Save(context.Background(), Message{

@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -43,6 +44,28 @@ message_created_at, terminal_at, gateway_node, publish_status,
 publish_attempts, next_attempt_at, publish_last_error, published_at,
 claim_owner, claim_until
 `
+
+const postgresInsertMessage = `
+INSERT INTO z_courier_downlink_messages (
+  message_id, client_id, device_id, msg_id, body, identity_fingerprint,
+  ack_required, trace_id, policy_name, policy_max_attempts, policy_max_age_ns,
+  policy_ack_timeout_ns, policy_retry_delay_ns, policy_backoff_multiplier,
+  policy_max_retry_delay_ns, policy_retry_jitter_ns, session_id, status,
+  attempts, next_retry_at, last_error, terminal_reason, terminal_at,
+  terminal_publish_status, terminal_publish_attempts, terminal_next_publish_at,
+  terminal_publish_error, terminal_published_at, created_at, updated_at,
+  sent_at, delivered_at, claim_owner, claim_until
+) VALUES (
+  $1, $2, $3, $4, $5, $6,
+  $7, $8, $9, $10, $11,
+  $12, $13, $14,
+  $15, $16, $17, $18,
+  $19, $20, $21, $22, $23,
+  $24, $25, $26, $27, $28,
+  $29, $30, $31, $32, $33, $34
+)
+ON CONFLICT (message_id) DO NOTHING
+RETURNING ` + postgresMessageColumns
 
 func NewPostgresStore(ctx context.Context, config PostgresStoreConfig) (*PostgresStore, error) {
 	if config.DSN == "" {
@@ -196,6 +219,8 @@ CREATE INDEX IF NOT EXISTS z_courier_downlink_terminal_events_due_idx
   WHERE publish_status IN ('pending', 'failed');
 CREATE INDEX IF NOT EXISTS z_courier_downlink_messages_client_device_status_idx
   ON z_courier_downlink_messages (client_id, device_id, status);
+CREATE INDEX IF NOT EXISTS z_courier_downlink_messages_status_idx
+  ON z_courier_downlink_messages (status);
 CREATE INDEX IF NOT EXISTS z_courier_downlink_messages_next_retry_at_idx
   ON z_courier_downlink_messages (next_retry_at)
   WHERE next_retry_at IS NOT NULL;
@@ -221,10 +246,102 @@ func (s *PostgresStore) Ping(ctx context.Context) error {
 }
 
 func (s *PostgresStore) Save(ctx context.Context, message Message) (SaveResult, error) {
+	message = prepareMessageForSave(message, time.Now())
+
+	inserted, err := insertPostgresMessage(ctx, s.db, message)
+	if err == nil {
+		return SaveResult{Message: inserted, Outcome: SaveOutcomeCreated}, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return SaveResult{}, err
+	}
+
+	stored, ok, err := s.Get(ctx, message.MessageID)
+	if err != nil {
+		return SaveResult{}, err
+	}
+	if !ok {
+		return SaveResult{}, ErrMessageNotFound
+	}
+	if len(stored.IdentityFingerprint) != len(message.IdentityFingerprint) {
+		stored.IdentityFingerprint = messageIdentityFingerprint(stored)
+		if _, err := s.db.ExecContext(ctx, `
+UPDATE z_courier_downlink_messages
+SET identity_fingerprint = $2
+WHERE message_id = $1 AND octet_length(identity_fingerprint) = 0
+`, stored.MessageID, bytes.Clone(stored.IdentityFingerprint)); err != nil {
+			return SaveResult{}, err
+		}
+	}
+
+	return saveResultForExisting(stored, message), nil
+}
+
+func (s *PostgresStore) SaveWithCapacity(
+	ctx context.Context,
+	message Message,
+	capacity QueueCapacity,
+) (SaveResult, error) {
+	if !capacity.Enabled() {
+		return s.Save(ctx, message)
+	}
+	message = prepareMessageForSave(message, time.Now())
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return SaveResult{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if err := lockPostgresCapacityKey(ctx, tx, "message:"+message.MessageID); err != nil {
+		return SaveResult{}, err
+	}
+	stored, err := scanMessage(tx.QueryRowContext(ctx, `
+SELECT `+postgresMessageColumns+`
+FROM z_courier_downlink_messages
+WHERE message_id = $1
+FOR UPDATE
+`, message.MessageID))
+	if err == nil {
+		if len(stored.IdentityFingerprint) != len(message.IdentityFingerprint) {
+			stored.IdentityFingerprint = messageIdentityFingerprint(stored)
+			if _, err := tx.ExecContext(ctx, `
+UPDATE z_courier_downlink_messages
+SET identity_fingerprint = $2
+WHERE message_id = $1 AND octet_length(identity_fingerprint) = 0
+`, stored.MessageID, bytes.Clone(stored.IdentityFingerprint)); err != nil {
+				return SaveResult{}, err
+			}
+		}
+		result := saveResultForExisting(stored, message)
+		if err := tx.Commit(); err != nil {
+			return SaveResult{}, err
+		}
+		return result, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return SaveResult{}, err
+	}
+
+	if message.Status == MessageStatusPending {
+		if err := checkPostgresQueueCapacity(ctx, tx, message.ClientID, message.DeviceID, capacity); err != nil {
+			return SaveResult{}, err
+		}
+	}
+	inserted, err := insertPostgresMessage(ctx, tx, message)
+	if err != nil {
+		return SaveResult{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return SaveResult{}, err
+	}
+	return SaveResult{Message: inserted, Outcome: SaveOutcomeCreated}, nil
+}
+
+func prepareMessageForSave(message Message, now time.Time) Message {
 	if message.MessageID == "" {
 		message.MessageID = NewMessageID()
 	}
-	now := time.Now()
 	if message.Status == "" {
 		message.Status = MessageStatusPending
 	}
@@ -235,29 +352,15 @@ func (s *PostgresStore) Save(ctx context.Context, message Message) (SaveResult, 
 		message.UpdatedAt = now
 	}
 	message.IdentityFingerprint = messageIdentityFingerprint(message)
+	return message
+}
 
-	inserted, err := scanMessage(s.db.QueryRowContext(ctx, `
-INSERT INTO z_courier_downlink_messages (
-  message_id, client_id, device_id, msg_id, body, identity_fingerprint,
-  ack_required, trace_id, policy_name, policy_max_attempts, policy_max_age_ns,
-  policy_ack_timeout_ns, policy_retry_delay_ns, policy_backoff_multiplier,
-  policy_max_retry_delay_ns, policy_retry_jitter_ns, session_id, status,
-  attempts, next_retry_at, last_error, terminal_reason, terminal_at,
-  terminal_publish_status, terminal_publish_attempts, terminal_next_publish_at,
-  terminal_publish_error, terminal_published_at, created_at, updated_at,
-  sent_at, delivered_at, claim_owner, claim_until
-) VALUES (
-  $1, $2, $3, $4, $5, $6,
-  $7, $8, $9, $10, $11,
-  $12, $13, $14,
-  $15, $16, $17, $18,
-  $19, $20, $21, $22, $23,
-  $24, $25, $26, $27, $28,
-  $29, $30, $31, $32, $33, $34
-)
-ON CONFLICT (message_id) DO NOTHING
-RETURNING `+postgresMessageColumns+`
-`,
+type postgresMessageQueryer interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func insertPostgresMessage(ctx context.Context, queryer postgresMessageQueryer, message Message) (Message, error) {
+	return scanMessage(queryer.QueryRowContext(ctx, postgresInsertMessage,
 		message.MessageID,
 		message.ClientID,
 		message.DeviceID,
@@ -293,36 +396,74 @@ RETURNING `+postgresMessageColumns+`
 		message.ClaimOwner,
 		nullTime(message.ClaimUntil),
 	))
-	if err == nil {
-		return SaveResult{Message: inserted, Outcome: SaveOutcomeCreated}, nil
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return SaveResult{}, err
-	}
+}
 
-	stored, ok, err := s.Get(ctx, message.MessageID)
-	if err != nil {
-		return SaveResult{}, err
-	}
-	if !ok {
-		return SaveResult{}, ErrMessageNotFound
-	}
-	if len(stored.IdentityFingerprint) != len(message.IdentityFingerprint) {
-		stored.IdentityFingerprint = messageIdentityFingerprint(stored)
-		if _, err := s.db.ExecContext(ctx, `
-UPDATE z_courier_downlink_messages
-SET identity_fingerprint = $2
-WHERE message_id = $1 AND octet_length(identity_fingerprint) = 0
-`, stored.MessageID, bytes.Clone(stored.IdentityFingerprint)); err != nil {
-			return SaveResult{}, err
-		}
-	}
-
+func saveResultForExisting(stored, incoming Message) SaveResult {
 	outcome := SaveOutcomeExisting
-	if !messagesHaveSameIdentity(stored, message) {
+	if !messagesHaveSameIdentity(stored, incoming) {
 		outcome = SaveOutcomeConflict
 	}
-	return SaveResult{Message: stored, Outcome: outcome}, nil
+	return SaveResult{Message: stored, Outcome: outcome}
+}
+
+func checkPostgresQueueCapacity(
+	ctx context.Context,
+	tx *sql.Tx,
+	clientID string,
+	deviceID string,
+	capacity QueueCapacity,
+) error {
+	if capacity.MaxPendingGlobal > 0 {
+		if err := lockPostgresCapacityKey(ctx, tx, "global"); err != nil {
+			return err
+		}
+		pending, err := countPostgresPending(ctx, tx, "", "")
+		if err != nil {
+			return err
+		}
+		if pending >= capacity.MaxPendingGlobal {
+			return newQueueCapacityError(QueueCapacityScopeGlobal, pending, capacity.MaxPendingGlobal)
+		}
+	}
+	if capacity.MaxPendingPerDevice > 0 {
+		if err := lockPostgresCapacityKey(ctx, tx, "device:"+clientID+"\x00"+deviceID); err != nil {
+			return err
+		}
+		pending, err := countPostgresPending(ctx, tx, clientID, deviceID)
+		if err != nil {
+			return err
+		}
+		if pending >= capacity.MaxPendingPerDevice {
+			return newQueueCapacityError(QueueCapacityScopeDevice, pending, capacity.MaxPendingPerDevice)
+		}
+	}
+	return nil
+}
+
+func countPostgresPending(ctx context.Context, tx *sql.Tx, clientID, deviceID string) (int, error) {
+	var pending int
+	if clientID == "" && deviceID == "" {
+		err := tx.QueryRowContext(ctx, `
+SELECT COUNT(*)
+FROM z_courier_downlink_messages
+WHERE status = $1
+`, string(MessageStatusPending)).Scan(&pending)
+		return pending, err
+	}
+	err := tx.QueryRowContext(ctx, `
+SELECT COUNT(*)
+FROM z_courier_downlink_messages
+WHERE status = $1 AND client_id = $2 AND device_id = $3
+`, string(MessageStatusPending), clientID, deviceID).Scan(&pending)
+	return pending, err
+}
+
+func lockPostgresCapacityKey(ctx context.Context, tx *sql.Tx, value string) error {
+	digest := fnv.New64a()
+	_, _ = digest.Write([]byte("z-courier-downlink-capacity-v1:"))
+	_, _ = digest.Write([]byte(value))
+	_, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, int64(digest.Sum64()))
+	return err
 }
 
 func (s *PostgresStore) Get(ctx context.Context, messageID string) (Message, bool, error) {
@@ -605,11 +746,71 @@ func (s *PostgresStore) MarkFailed(ctx context.Context, messageID string, transi
 }
 
 func (s *PostgresStore) Requeue(ctx context.Context, messageID string, requeuedAt time.Time) error {
+	return requeuePostgresMessage(ctx, s.db, messageID, requeuedAt)
+}
+
+func (s *PostgresStore) RequeueWithCapacity(
+	ctx context.Context,
+	messageID string,
+	requeuedAt time.Time,
+	capacity QueueCapacity,
+) error {
+	if !capacity.Enabled() {
+		return s.Requeue(ctx, messageID, requeuedAt)
+	}
 	if requeuedAt.IsZero() {
 		requeuedAt = time.Now()
 	}
 
-	result, err := s.db.ExecContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := lockPostgresCapacityKey(ctx, tx, "message:"+messageID); err != nil {
+		return err
+	}
+	message, err := scanMessage(tx.QueryRowContext(ctx, `
+SELECT `+postgresMessageColumns+`
+FROM z_courier_downlink_messages
+WHERE message_id = $1
+FOR UPDATE
+`, messageID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrMessageNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if message.Status == MessageStatusDelivered || message.Status == MessageStatusDiscarded {
+		return ErrInvalidTransition
+	}
+	if message.Status != MessageStatusPending {
+		if err := checkPostgresQueueCapacity(ctx, tx, message.ClientID, message.DeviceID, capacity); err != nil {
+			return err
+		}
+	}
+	if err := requeuePostgresMessage(ctx, tx, messageID, requeuedAt); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+type postgresMessageExecer interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
+func requeuePostgresMessage(
+	ctx context.Context,
+	execer postgresMessageExecer,
+	messageID string,
+	requeuedAt time.Time,
+) error {
+	if requeuedAt.IsZero() {
+		requeuedAt = time.Now()
+	}
+
+	result, err := execer.ExecContext(ctx, `
 UPDATE z_courier_downlink_messages
 SET status = $2,
     attempts = 0,

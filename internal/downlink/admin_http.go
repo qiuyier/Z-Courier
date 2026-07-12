@@ -286,9 +286,12 @@ func (h *messageActionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		h.record(result)
 		h.audit(r, result, statusCode, req, Message{}, err)
 		writeJSON(w, statusCode, MessageStatusResponse{
-			Code:      result,
-			Reason:    err.Error(),
-			MessageID: req.MessageID,
+			Code:            result,
+			Reason:          err.Error(),
+			MessageID:       req.MessageID,
+			CapacityScope:   queueCapacityScope(err),
+			CapacityLimit:   queueCapacityLimit(err),
+			CapacityPending: queueCapacityPending(err),
 		})
 		return
 	}
@@ -494,6 +497,8 @@ func statusFromAdminError(err error) int {
 		return http.StatusNotFound
 	case errors.Is(err, ErrStoreNotConfigured):
 		return http.StatusServiceUnavailable
+	case errors.Is(err, ErrQueueCapacityExceeded):
+		return http.StatusTooManyRequests
 	default:
 		return http.StatusBadGateway
 	}
@@ -510,6 +515,30 @@ func retryScanCodeFromError(err error, status int) string {
 	}
 }
 
+func queueCapacityScope(err error) string {
+	var capacityErr *QueueCapacityError
+	if errors.As(err, &capacityErr) && capacityErr != nil {
+		return capacityErr.Scope
+	}
+	return ""
+}
+
+func queueCapacityLimit(err error) int {
+	var capacityErr *QueueCapacityError
+	if errors.As(err, &capacityErr) && capacityErr != nil {
+		return capacityErr.Limit
+	}
+	return 0
+}
+
+func queueCapacityPending(err error) int {
+	var capacityErr *QueueCapacityError
+	if errors.As(err, &capacityErr) && capacityErr != nil {
+		return capacityErr.Pending
+	}
+	return 0
+}
+
 func codeFromAdminError(err error, status int) string {
 	switch {
 	case errors.Is(err, ErrInvalidTransition):
@@ -520,6 +549,8 @@ func codeFromAdminError(err error, status int) string {
 		return "message_not_found"
 	case errors.Is(err, ErrStoreNotConfigured), status == http.StatusServiceUnavailable:
 		return "store_not_configured"
+	case errors.Is(err, ErrQueueCapacityExceeded), status == http.StatusTooManyRequests:
+		return "queue_capacity_exceeded"
 	default:
 		return "message_action_failed"
 	}

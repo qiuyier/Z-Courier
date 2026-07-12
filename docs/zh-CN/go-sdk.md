@@ -237,6 +237,11 @@ if errors.As(err, &apiErr) && apiErr.Retryable() {
 }
 ```
 
+队列容量拒绝会返回可重试的 `*backend.APIError`，HTTP 状态为 `429`，`Code` 为
+`queue_capacity_exceeded`。可以读取 `CapacityScope`、`CapacityLimit` 和
+`CapacityPending`，判断是全局积压还是某个设备达到上限。退避后应复用原来的
+`MessageID`；被拒绝的请求没有持久化。
+
 ## 什么时候用哪个包
 
 - 自己写客户端 SDK：用 `protocol`，必要时实现 Zinx 外层帧。

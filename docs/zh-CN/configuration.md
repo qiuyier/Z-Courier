@@ -407,6 +407,40 @@ min(retry_delay * backoff_multiplier^(N-1), max_retry_delay)
 retry worker 会把消息标记为 `failed`，并写入 `max_attempts_exceeded` 或
 `max_age_exceeded`。状态/列表接口和管理控制台都会显示持久化的 `policy_name`。
 
+### 下行队列容量（V12.4）
+
+容量准入可以防止长期离线积压无限占用 PostgreSQL 和 retry worker：
+
+```yaml
+downlink:
+  capacity:
+    max_pending_global: 1000000
+    max_pending_per_device: 1000
+```
+
+- `max_pending_global`：共享下行存储允许的 pending 消息总数，`0` 表示不限。
+- `max_pending_per_device`：单个 `client_id + device_id` 允许的 pending 消息数，
+  `0` 表示不限。
+
+两个限制同时开启时，单设备限制不能大于全局限制。启用容量保护必须配置可靠
+下行存储；共享同一个 PostgreSQL 的所有 gateway 节点必须使用相同容量配置。
+
+存储会先判断幂等，再检查容量。因此队列已满时，相同 `message_id` 的兼容重放仍
+返回 existing；不可变身份冲突仍返回 HTTP `409`。真正的新消息超过容量时返回
+HTTP `429`、`code = queue_capacity_exceeded`，并带上 `capacity_scope`、
+`capacity_limit` 和 `capacity_pending`。被拒绝的消息不会写入存储，也不会产生
+终态事件。人工 requeue 使用相同准入规则。
+
+PostgreSQL 使用事务级 advisory lock 把容量计数与插入串成原子操作，因此两个
+gateway 不能同时抢到最后一个名额。memory store 在单进程内保持相同语义。容量
+限制不会淘汰旧消息，只会拒绝新的准入。
+
+可靠下行必须先持久化再尝试在线 socket 投递，所以全局 pending 已满时，新在线
+消息也需要先通过准入。生产上应优先设置合理的单设备限制隔离异常离线设备；全局
+值应结合离线设备数、消息速率、离线时长、平均 Body 大小、PostgreSQL 余量和重试
+吞吐量估算。非零全局限制会让所有准入请求竞争同一把数据库锁，启用前应使用预期
+负载压测；因此生产示例默认只开启单设备限制。
+
 ### 下行终态事件
 
 可靠下行消息进入 `failed`，或管理员把它标记为 `discarded` 时，网关可以异步

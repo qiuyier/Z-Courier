@@ -131,6 +131,9 @@ downlink:
       backoff_multiplier: 1
       max_retry_delay: 1s
       retry_jitter: 0s
+  capacity:
+    max_pending_global: 0
+    max_pending_per_device: 2
   terminal:
     publisher:
       type: nsq

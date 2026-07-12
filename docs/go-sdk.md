@@ -241,6 +241,12 @@ their cause, so `errors.Is(err, context.DeadlineExceeded)` and
 Redirects are rejected to prevent forwarding `X-ZCourier-Internal-Token` to a
 different address or changing the signed request target.
 
+Queue-capacity rejection is returned as a retryable `*backend.APIError` with
+HTTP `429` and `Code == "queue_capacity_exceeded"`. Inspect
+`CapacityScope`, `CapacityLimit`, and `CapacityPending` to distinguish a shared
+global backlog from one saturated device. Reuse the original `MessageID` after
+bounded backoff; the rejected request was not persisted.
+
 The public backend request and response types are canonical. Gateway handlers
 reuse them through internal aliases, which keeps SDK JSON fields synchronized
 with the server contract.

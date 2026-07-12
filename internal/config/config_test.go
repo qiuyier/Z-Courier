@@ -891,6 +891,60 @@ func TestLoadServerConfigDownlinkTerminalDefaults(t *testing.T) {
 	}
 }
 
+func TestLoadServerConfigDownlinkQueueCapacity(t *testing.T) {
+	config, err := LoadServerConfig(writeConfig(t, `
+downlink:
+  storage:
+    type: memory
+  capacity:
+    max_pending_global: 5000
+    max_pending_per_device: 50
+`))
+	if err != nil {
+		t.Fatalf("LoadServerConfig() error = %v", err)
+	}
+	if config.DownlinkCapacity.MaxPendingGlobal != 5000 || config.DownlinkCapacity.MaxPendingPerDevice != 50 {
+		t.Fatalf("DownlinkCapacity = %+v", config.DownlinkCapacity)
+	}
+}
+
+func TestLoadServerConfigRejectsInvalidDownlinkQueueCapacity(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  string
+		message string
+	}{
+		{
+			name:    "negative global",
+			config:  "downlink:\n  capacity:\n    max_pending_global: -1\n",
+			message: "max_pending_global must be greater than or equal to 0",
+		},
+		{
+			name:    "negative device",
+			config:  "downlink:\n  capacity:\n    max_pending_per_device: -1\n",
+			message: "max_pending_per_device must be greater than or equal to 0",
+		},
+		{
+			name:    "device exceeds global",
+			config:  "downlink:\n  capacity:\n    max_pending_global: 10\n    max_pending_per_device: 11\n",
+			message: "max_pending_per_device must not exceed max_pending_global",
+		},
+		{
+			name:    "capacity without storage",
+			config:  "downlink:\n  storage:\n    type: none\n  capacity:\n    max_pending_global: 10\n",
+			message: "capacity requires downlink storage",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := LoadServerConfig(writeConfig(t, test.config))
+			if err == nil || !strings.Contains(err.Error(), test.message) {
+				t.Fatalf("LoadServerConfig() error = %v, want substring %q", err, test.message)
+			}
+		})
+	}
+}
+
 func TestLoadServerConfigRejectsInvalidDownlinkTerminal(t *testing.T) {
 	tests := []struct {
 		name    string

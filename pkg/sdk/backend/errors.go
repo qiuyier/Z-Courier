@@ -24,9 +24,12 @@ var (
 
 // APIError describes a non-2xx gateway response.
 type APIError struct {
-	StatusCode int
-	Code       string
-	Reason     string
+	StatusCode      int
+	Code            string
+	Reason          string
+	CapacityScope   string
+	CapacityLimit   int
+	CapacityPending int
 }
 
 func (e *APIError) Error() string {

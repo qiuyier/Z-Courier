@@ -199,6 +199,7 @@ func (h *handler) pushOne(r *http.Request, req PushRequest) (PushResponse, int) 
 			TraceID:   req.TraceID,
 		}
 		annotatePushResponseFailure(&failureResp, err)
+		annotateQueueCapacityResponse(&failureResp, err)
 		return failureResp, status
 	}
 
@@ -244,6 +245,8 @@ func statusFromError(err error) int {
 		return http.StatusNotFound
 	case errors.Is(err, ErrConnectionNotFound), errors.Is(err, ErrMessageIDConflict):
 		return http.StatusConflict
+	case errors.Is(err, ErrQueueCapacityExceeded):
+		return http.StatusTooManyRequests
 	default:
 		return http.StatusBadGateway
 	}
@@ -252,6 +255,9 @@ func statusFromError(err error) int {
 func pushFailureCode(err error, status int) string {
 	if errors.Is(err, ErrMessageIDConflict) {
 		return "message_id_conflict"
+	}
+	if errors.Is(err, ErrQueueCapacityExceeded) {
+		return "queue_capacity_exceeded"
 	}
 	failure := deliveryFailureFromError(err)
 	if failure.Code != "" && failure.Code != "error" {
@@ -268,6 +274,8 @@ func codeFromStatus(status int) string {
 		return "session_not_found"
 	case http.StatusConflict:
 		return "connection_not_found"
+	case http.StatusTooManyRequests:
+		return "queue_capacity_exceeded"
 	default:
 		return "push_failed"
 	}

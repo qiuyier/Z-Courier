@@ -288,14 +288,20 @@ func (c *Client) doJSON(ctx context.Context, method, path string, query url.Valu
 
 func apiErrorFromResponse(statusCode int, body []byte) error {
 	var response struct {
-		Code   string `json:"code"`
-		Reason string `json:"reason"`
+		Code            string `json:"code"`
+		Reason          string `json:"reason"`
+		CapacityScope   string `json:"capacity_scope"`
+		CapacityLimit   int    `json:"capacity_limit"`
+		CapacityPending int    `json:"capacity_pending"`
 	}
 	_ = sonic.Unmarshal(body, &response)
 	return &APIError{
-		StatusCode: statusCode,
-		Code:       response.Code,
-		Reason:     response.Reason,
+		StatusCode:      statusCode,
+		Code:            response.Code,
+		Reason:          response.Reason,
+		CapacityScope:   response.CapacityScope,
+		CapacityLimit:   response.CapacityLimit,
+		CapacityPending: response.CapacityPending,
 	}
 }
 

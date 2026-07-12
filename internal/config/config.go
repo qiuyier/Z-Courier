@@ -209,6 +209,7 @@ type DownlinkConfig struct {
 	Storage   DownlinkStorageConfig   `yaml:"storage"`
 	Delivery  DownlinkDeliveryConfig  `yaml:"delivery"`
 	Policies  []DownlinkPolicyConfig  `yaml:"policies"`
+	Capacity  DownlinkCapacityConfig  `yaml:"capacity"`
 	Terminal  DownlinkTerminalConfig  `yaml:"terminal"`
 	Retention DownlinkRetentionConfig `yaml:"retention"`
 }
@@ -249,6 +250,11 @@ type DownlinkPolicyConfig struct {
 	BackoffMultiplier *float64 `yaml:"backoff_multiplier"`
 	MaxRetryDelay     string   `yaml:"max_retry_delay"`
 	RetryJitter       string   `yaml:"retry_jitter"`
+}
+
+type DownlinkCapacityConfig struct {
+	MaxPendingGlobal    int `yaml:"max_pending_global"`
+	MaxPendingPerDevice int `yaml:"max_pending_per_device"`
 }
 
 type DownlinkTerminalConfig struct {
@@ -1331,6 +1337,13 @@ func applyDownlinkConfig(out *server.Config, config DownlinkConfig) error {
 		return err
 	}
 	out.DownlinkPolicies = policies
+	if err := applyDownlinkCapacityConfig(out, config.Capacity); err != nil {
+		return err
+	}
+	if out.DownlinkCapacity.Enabled() &&
+		(out.DownlinkStorage.Type == "none" || out.DownlinkStorage.Type == "disabled") {
+		return fmt.Errorf("config: downlink capacity requires downlink storage")
+	}
 
 	if err := applyDownlinkTerminalConfig(out, config.Terminal); err != nil {
 		return err
@@ -1376,6 +1389,23 @@ func applyDownlinkConfig(out *server.Config, config DownlinkConfig) error {
 		out.DownlinkRetention.CleanupLimit = retention.CleanupLimit
 	}
 
+	return nil
+}
+
+func applyDownlinkCapacityConfig(out *server.Config, config DownlinkCapacityConfig) error {
+	if config.MaxPendingGlobal < 0 {
+		return fmt.Errorf("config: downlink capacity max_pending_global must be greater than or equal to 0")
+	}
+	if config.MaxPendingPerDevice < 0 {
+		return fmt.Errorf("config: downlink capacity max_pending_per_device must be greater than or equal to 0")
+	}
+	if config.MaxPendingGlobal > 0 && config.MaxPendingPerDevice > config.MaxPendingGlobal {
+		return fmt.Errorf("config: downlink capacity max_pending_per_device must not exceed max_pending_global")
+	}
+	out.DownlinkCapacity = downlink.QueueCapacity{
+		MaxPendingGlobal:    config.MaxPendingGlobal,
+		MaxPendingPerDevice: config.MaxPendingPerDevice,
+	}
 	return nil
 }
 

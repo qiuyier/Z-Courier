@@ -24,6 +24,11 @@ semantic versioning after the first public MVP tag.
   independent bounded publication retries and cluster claims, body-free
   versioned envelopes, status/SDK/diagnostics/console visibility, and
   single-node plus cluster E2E consumption checks.
+- V12.4.1 reliable-downlink queue admission limits with global and per-device
+  pending budgets, idempotency-first HTTP `429` rejection semantics, atomic
+  memory and shared-PostgreSQL decisions, capacity-aware requeue, SDK metadata,
+  diagnostics, Grafana/alert coverage, real PostgreSQL concurrency tests, and
+  two-node cluster E2E.
 
 ## [v0.11.0] - 2026-07-10
 

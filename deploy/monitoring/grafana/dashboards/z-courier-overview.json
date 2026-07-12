@@ -3395,6 +3395,57 @@
       ],
       "title": "Admin Session Store Latency",
       "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 160
+      },
+      "id": 39,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (scope) (rate(z_courier_downlink_queue_capacity_rejected_total[1m]))",
+          "legendFormat": "{{scope}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Downlink Queue Capacity Rejects / sec",
+      "type": "timeseries"
     }
   ],
   "refresh": "5s",
@@ -3414,6 +3465,6 @@
   "timezone": "browser",
   "title": "Z-Courier Overview",
   "uid": "z-courier-overview",
-  "version": 9,
+  "version": 10,
   "weekStart": ""
 }

@@ -53,6 +53,9 @@ type PushResponse struct {
 	TargetInternalAddr string        `json:"target_internal_addr,omitempty"`
 	FailureStage       string        `json:"failure_stage,omitempty"`
 	FailureCode        string        `json:"failure_code,omitempty"`
+	CapacityScope      string        `json:"capacity_scope,omitempty"`
+	CapacityLimit      int           `json:"capacity_limit,omitempty"`
+	CapacityPending    int           `json:"capacity_pending,omitempty"`
 	ClientID           string        `json:"client_id,omitempty"`
 	DeviceID           string        `json:"device_id,omitempty"`
 	SessionID          string        `json:"session_id,omitempty"`
@@ -126,6 +129,9 @@ type MessageStatusResponse struct {
 	TerminalNextPublishAt   *time.Time    `json:"terminal_next_publish_at,omitempty"`
 	TerminalPublishError    string        `json:"terminal_publish_error,omitempty"`
 	TerminalPublishedAt     *time.Time    `json:"terminal_published_at,omitempty"`
+	CapacityScope           string        `json:"capacity_scope,omitempty"`
+	CapacityLimit           int           `json:"capacity_limit,omitempty"`
+	CapacityPending         int           `json:"capacity_pending,omitempty"`
 	NextRetryAt             *time.Time    `json:"next_retry_at,omitempty"`
 	ClaimOwner              string        `json:"claim_owner,omitempty"`
 	ClaimUntil              *time.Time    `json:"claim_until,omitempty"`

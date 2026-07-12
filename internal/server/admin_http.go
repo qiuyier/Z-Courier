@@ -105,6 +105,8 @@ type adminDownlinkSummary struct {
 	StoreConfigured       bool     `json:"store_configured"`
 	PolicyCount           int      `json:"policy_count"`
 	PolicyNames           []string `json:"policy_names"`
+	MaxPendingGlobal      int      `json:"max_pending_global"`
+	MaxPendingPerDevice   int      `json:"max_pending_per_device"`
 	TerminalPublisher     string   `json:"terminal_publisher"`
 	TerminalTopic         string   `json:"terminal_topic,omitempty"`
 	TerminalRetryInterval string   `json:"terminal_retry_interval,omitempty"`
@@ -459,6 +461,8 @@ func adminDownlinkFromConfig(config Config) adminDownlinkSummary {
 		StoreConfigured:       config.DownlinkStore != nil,
 		PolicyCount:           len(policyNames),
 		PolicyNames:           policyNames,
+		MaxPendingGlobal:      config.DownlinkCapacity.MaxPendingGlobal,
+		MaxPendingPerDevice:   config.DownlinkCapacity.MaxPendingPerDevice,
 		TerminalPublisher:     config.DownlinkTerminal.PublisherType,
 		TerminalTopic:         config.DownlinkTerminal.NSQ.Topic,
 		TerminalRetryInterval: durationString(config.DownlinkTerminal.RetryInterval),

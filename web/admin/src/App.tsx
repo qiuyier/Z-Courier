@@ -4179,6 +4179,10 @@ function DiagnosticsPage({
           ["Count", (diagnostics.downlink.policy_count ?? 1).toLocaleString()],
           ["Names", (diagnostics.downlink.policy_names ?? ["default"]).join(", ")],
         ]} />
+        <DiagnosticsConfigPanel title="Queue Capacity" rows={[
+          ["Global Pending", diagnostics.downlink.max_pending_global ? diagnostics.downlink.max_pending_global.toLocaleString() : "unlimited"],
+          ["Per Device", diagnostics.downlink.max_pending_per_device ? diagnostics.downlink.max_pending_per_device.toLocaleString() : "unlimited"],
+        ]} />
         <DiagnosticsConfigPanel title="Terminal Events" rows={[
           ["Publisher", diagnostics.downlink.terminal_publisher || "none"],
           ["Topic", diagnostics.downlink.terminal_topic || "--"],

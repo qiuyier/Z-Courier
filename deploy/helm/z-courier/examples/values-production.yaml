@@ -56,6 +56,10 @@ downlink:
       autoMigrate: true
   delivery:
     retryJitter: 5s
+  capacity:
+    # Benchmark before enabling the globally serialized admission limit.
+    maxPendingGlobal: 0
+    maxPendingPerDevice: 1000
 
 upstream:
   routes:

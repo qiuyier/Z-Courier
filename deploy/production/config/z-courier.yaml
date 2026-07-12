@@ -113,6 +113,10 @@ downlink:
     max_attempts: 10
     scan_limit: 500
     bind_flush_limit: 500
+  capacity:
+    # Benchmark before enabling the globally serialized admission limit.
+    max_pending_global: 0
+    max_pending_per_device: 1000
   retention:
     delivered_ttl: 24h
     failed_ttl: 168h

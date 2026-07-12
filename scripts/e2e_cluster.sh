@@ -39,6 +39,14 @@ check_gateways_alive() {
   fi
 }
 
+require_port_free() {
+  local port="$1"
+  if (echo >/dev/tcp/127.0.0.1/"$port") >/dev/null 2>&1; then
+    echo "gateway test port $port is already in use" >&2
+    exit 1
+  fi
+}
+
 wait_http() {
   local name="$1"
   local url="$2"
@@ -91,6 +99,10 @@ done
 
 wait_http "nsqd" "http://127.0.0.1:14151/ping"
 
+for port in 9901 9902 18182 18183; do
+  require_port_free "$port"
+done
+
 echo "building gateway..."
 go build -o "$GATEWAY_BIN" ./cmd/gateway
 
@@ -120,6 +132,8 @@ go run ./cmd/e2e \
   -check-admin-storage \
   -admin-session-peer-url http://127.0.0.1:18183 \
   -expect-policy-name integration-reliable \
+  -check-queue-capacity \
+  -expect-per-device-limit 2 \
   -check-terminal-event \
   -expect-terminal-policy integration-terminal \
   -timeout 45s \

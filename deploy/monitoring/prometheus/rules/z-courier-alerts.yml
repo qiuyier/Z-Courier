@@ -146,6 +146,17 @@ groups:
           description: "Downlink push results other than sent or queued are above 0.1/sec."
           runbook_url: "https://github.com/qiuyier/Z-Courier/blob/main/docs/v5-production-runbook.md#client-not-receiving-downlink"
 
+      - alert: ZCourierDownlinkQueueCapacityRejects
+        expr: sum(rate(z_courier_downlink_queue_capacity_rejected_total[5m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+          component: downlink
+        annotations:
+          summary: "Z-Courier downlink queue capacity is rejecting messages"
+          description: "The global or per-device pending queue limit has been reached. Inspect rejection scope and offline backlog before changing limits."
+          runbook_url: "https://github.com/qiuyier/Z-Courier/blob/main/docs/v5-production-runbook.md#capacity-or-rate-limit-rejection"
+
       - alert: ZCourierDownlinkACKLatencyHigh
         expr: histogram_quantile(0.99, sum by (le) (rate(z_courier_downlink_ack_latency_seconds_bucket[5m]))) > 10
         for: 10m
