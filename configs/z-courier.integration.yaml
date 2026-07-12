@@ -70,6 +70,36 @@ downlink:
       backoff_multiplier: 2
       max_retry_delay: 4s
       retry_jitter: 0s
+    - name: integration-terminal
+      enabled: true
+      msg_id_min: 2999
+      msg_id_max: 2999
+      max_attempts: 1
+      max_age: 1h
+      ack_timeout: 1s
+      retry_delay: 1s
+      backoff_multiplier: 1
+      max_retry_delay: 1s
+      retry_jitter: 0s
+  terminal:
+    publisher:
+      type: nsq
+      nsq:
+        nsqd_addrs:
+          - 127.0.0.1:14150
+        topic: downlink_terminal_events
+        dial_timeout: 1s
+        read_timeout: 60s
+        write_timeout: 1s
+        publish_mode: round_robin
+        retry_attempts: 1
+    retry_interval: 1s
+    retry_delay: 1s
+    retry_jitter: 0s
+    backoff_multiplier: 2
+    max_retry_delay: 4s
+    retry_lease: 5s
+    scan_limit: 100
   retention:
     delivered_ttl: 24h
     failed_ttl: 168h

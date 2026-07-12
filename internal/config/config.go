@@ -209,6 +209,7 @@ type DownlinkConfig struct {
 	Storage   DownlinkStorageConfig   `yaml:"storage"`
 	Delivery  DownlinkDeliveryConfig  `yaml:"delivery"`
 	Policies  []DownlinkPolicyConfig  `yaml:"policies"`
+	Terminal  DownlinkTerminalConfig  `yaml:"terminal"`
 	Retention DownlinkRetentionConfig `yaml:"retention"`
 }
 
@@ -248,6 +249,22 @@ type DownlinkPolicyConfig struct {
 	BackoffMultiplier *float64 `yaml:"backoff_multiplier"`
 	MaxRetryDelay     string   `yaml:"max_retry_delay"`
 	RetryJitter       string   `yaml:"retry_jitter"`
+}
+
+type DownlinkTerminalConfig struct {
+	Publisher         DownlinkTerminalPublisherConfig `yaml:"publisher"`
+	RetryInterval     string                          `yaml:"retry_interval"`
+	RetryDelay        string                          `yaml:"retry_delay"`
+	RetryJitter       string                          `yaml:"retry_jitter"`
+	BackoffMultiplier float64                         `yaml:"backoff_multiplier"`
+	MaxRetryDelay     string                          `yaml:"max_retry_delay"`
+	RetryLease        string                          `yaml:"retry_lease"`
+	ScanLimit         int                             `yaml:"scan_limit"`
+}
+
+type DownlinkTerminalPublisherConfig struct {
+	Type string       `yaml:"type"`
+	NSQ  TargetConfig `yaml:"nsq"`
 }
 
 type DownlinkRetentionConfig struct {
@@ -1315,6 +1332,14 @@ func applyDownlinkConfig(out *server.Config, config DownlinkConfig) error {
 	}
 	out.DownlinkPolicies = policies
 
+	if err := applyDownlinkTerminalConfig(out, config.Terminal); err != nil {
+		return err
+	}
+	if out.DownlinkTerminal.PublisherType != downlink.TerminalPublisherNone &&
+		(out.DownlinkStorage.Type == "none" || out.DownlinkStorage.Type == "disabled") {
+		return fmt.Errorf("config: downlink terminal publisher requires downlink storage")
+	}
+
 	retention := config.Retention
 	deliveredTTL, err := parseOptionalPositiveDuration(retention.DeliveredTTL)
 	if err != nil {
@@ -1351,6 +1376,83 @@ func applyDownlinkConfig(out *server.Config, config DownlinkConfig) error {
 		out.DownlinkRetention.CleanupLimit = retention.CleanupLimit
 	}
 
+	return nil
+}
+
+func applyDownlinkTerminalConfig(out *server.Config, config DownlinkTerminalConfig) error {
+	publisherType := strings.ToLower(strings.TrimSpace(config.Publisher.Type))
+	if publisherType == "" {
+		publisherType = out.DownlinkTerminal.PublisherType
+	}
+	switch publisherType {
+	case downlink.TerminalPublisherNone:
+		out.DownlinkTerminal.PublisherType = publisherType
+	case downlink.TerminalPublisherNSQ:
+		nsqConfig, err := toNSQUpstreamConfig(UpstreamRouteConfig{
+			Name:   "downlink-terminal",
+			Target: config.Publisher.NSQ,
+		})
+		if err != nil {
+			return fmt.Errorf("config: downlink terminal publisher: %w", err)
+		}
+		out.DownlinkTerminal.PublisherType = publisherType
+		out.DownlinkTerminal.NSQ = *nsqConfig
+	default:
+		return fmt.Errorf("config: unsupported downlink terminal publisher type %q", config.Publisher.Type)
+	}
+
+	retryInterval, err := parseOptionalPositiveDuration(config.RetryInterval)
+	if err != nil {
+		return fmt.Errorf("config: downlink terminal retry_interval: %w", err)
+	}
+	retryDelay, err := parseOptionalPositiveDuration(config.RetryDelay)
+	if err != nil {
+		return fmt.Errorf("config: downlink terminal retry_delay: %w", err)
+	}
+	retryJitter, err := parseOptionalDuration(config.RetryJitter)
+	if err != nil {
+		return fmt.Errorf("config: downlink terminal retry_jitter: %w", err)
+	}
+	if retryJitter < 0 {
+		return fmt.Errorf("config: downlink terminal retry_jitter must be greater than or equal to 0")
+	}
+	maxRetryDelay, err := parseOptionalPositiveDuration(config.MaxRetryDelay)
+	if err != nil {
+		return fmt.Errorf("config: downlink terminal max_retry_delay: %w", err)
+	}
+	retryLease, err := parseOptionalPositiveDuration(config.RetryLease)
+	if err != nil {
+		return fmt.Errorf("config: downlink terminal retry_lease: %w", err)
+	}
+
+	if retryInterval > 0 {
+		out.DownlinkTerminal.RetryInterval = retryInterval
+	}
+	if retryDelay > 0 {
+		out.DownlinkTerminal.RetryDelay = retryDelay
+	}
+	out.DownlinkTerminal.RetryJitter = retryJitter
+	if config.BackoffMultiplier != 0 {
+		if config.BackoffMultiplier < 1 {
+			return fmt.Errorf("config: downlink terminal backoff_multiplier must be greater than or equal to 1")
+		}
+		out.DownlinkTerminal.BackoffMultiplier = config.BackoffMultiplier
+	}
+	if maxRetryDelay > 0 {
+		out.DownlinkTerminal.MaxRetryDelay = maxRetryDelay
+	}
+	if out.DownlinkTerminal.MaxRetryDelay < out.DownlinkTerminal.RetryDelay {
+		return fmt.Errorf("config: downlink terminal max_retry_delay must be greater than or equal to retry_delay")
+	}
+	if retryLease > 0 {
+		out.DownlinkTerminal.RetryLease = retryLease
+	}
+	if config.ScanLimit < 0 {
+		return fmt.Errorf("config: downlink terminal scan_limit must be greater than or equal to 0")
+	}
+	if config.ScanLimit > 0 {
+		out.DownlinkTerminal.ScanLimit = config.ScanLimit
+	}
 	return nil
 }
 

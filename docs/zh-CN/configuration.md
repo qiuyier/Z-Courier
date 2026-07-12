@@ -407,6 +407,51 @@ min(retry_delay * backoff_multiplier^(N-1), max_retry_delay)
 retry worker 会把消息标记为 `failed`，并写入 `max_attempts_exceeded` 或
 `max_age_exceeded`。状态/列表接口和管理控制台都会显示持久化的 `policy_name`。
 
+### 下行终态事件
+
+可靠下行消息进入 `failed`，或管理员把它标记为 `discarded` 时，网关可以异步
+发布一条只包含元数据的终态事件。默认不开启：
+
+```yaml
+downlink:
+  terminal:
+    publisher:
+      type: nsq
+      nsq:
+        nsqd_addrs:
+          - nsqd:4150
+        topic: downlink_terminal_events
+        dial_timeout: 1s
+        read_timeout: 60s
+        write_timeout: 1s
+        publish_mode: round_robin
+        retry_attempts: 1
+    retry_interval: 5s
+    retry_delay: 30s
+    retry_jitter: 0s
+    backoff_multiplier: 2
+    max_retry_delay: 5m
+    retry_lease: 30s
+    scan_limit: 100
+```
+
+- `publisher.type` 支持 `none` 和 `nsq`；`none` 保持 V12.3 之前的行为。
+- `publisher.nsq` 是有界 NSQ producer 配置，发布端直连 `nsqd`，不通过
+  `nsqlookupd`。
+- `retry_interval` 是扫描待发布终态事件的周期。
+- `retry_delay`、`retry_jitter`、`backoff_multiplier`、`max_retry_delay`
+  共同控制独立的发布重试，不会重新触发客户端投递。
+- `retry_lease` 是多网关共享存储时的事件认领租约。
+- `scan_limit` 限制一次扫描认领的 outbox 事件数量。
+
+启用 publisher 必须同时启用下行存储。PostgreSQL 会在同一个事务里写入消息终态
+和 outbox 事件；集群节点通过独立 claim 竞争发布任务。事件投递语义是 at-least-once，
+消费者应使用 `message_id + terminal_status` 去重。事件不包含原始消息 Body、内部
+token、HMAC 密钥或 DSN。V12.3.1 暂不提供 HTTP publisher。
+
+升级前已经处于终态的旧数据不会补发事件。当前终态事件仍为 `pending` 或 `failed`
+时，retention 不会提前删除对应消息。
+
 ## Upstream Routes
 
 ```yaml

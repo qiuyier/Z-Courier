@@ -194,6 +194,27 @@ Candidate work:
 - Persist publication state so failed dead-letter publication can be retried
   without repeatedly changing the delivery message state.
 
+Current implementation (V12.3.1):
+
+- `failed` and operator-`discarded` transitions persist a stable reason and a
+  versioned terminal event in the same store operation. PostgreSQL performs
+  the message transition and outbox insert in one transaction.
+- The initial adapters are `none` and direct-to-`nsqd` NSQ publication. HTTP
+  webhook publication remains future work.
+- The envelope contains bounded identity, policy, attempt, timestamp, reason,
+  and gateway metadata and deliberately has no message Body or credentials.
+- Publication claims, attempts, error, next-attempt time, and success time are
+  independent from delivery retry state. Shared PostgreSQL claims allow
+  multiple gateway workers without intentionally publishing the same due row.
+- Status/list APIs, the Go backend SDK, diagnostics, and console message views
+  expose terminal reason and publication state.
+- Unit tests cover envelope safety and independent retry, the PostgreSQL test
+  covers transactional outbox persistence, and single/cluster E2E consume the
+  NSQ event and assert that the original Body is absent.
+- Delivery remains at least once. Receivers de-duplicate by `MessageID` plus
+  terminal state; old rows that were terminal before this migration are not
+  exported retroactively.
+
 Acceptance criteria:
 
 - A terminal message has one stable terminal reason.

@@ -42,6 +42,7 @@ type Config struct {
 	DownlinkStorage            DownlinkStorageConfig
 	DownlinkDelivery           DownlinkDeliveryConfig
 	DownlinkPolicies           []downlink.DeliveryPolicyRule
+	DownlinkTerminal           DownlinkTerminalConfig
 	DownlinkRetention          DownlinkRetentionConfig
 }
 
@@ -164,6 +165,18 @@ type DownlinkDeliveryConfig struct {
 	MaxAttempts    int
 	ScanLimit      int
 	BindFlushLimit int
+}
+
+type DownlinkTerminalConfig struct {
+	PublisherType     string
+	NSQ               NSQUpstreamConfig
+	RetryInterval     time.Duration
+	RetryDelay        time.Duration
+	RetryJitter       time.Duration
+	BackoffMultiplier float64
+	MaxRetryDelay     time.Duration
+	RetryLease        time.Duration
+	ScanLimit         int
 }
 
 type DownlinkRetentionConfig struct {
@@ -293,6 +306,16 @@ func DefaultConfig() Config {
 			MaxAttempts:    5,
 			ScanLimit:      100,
 			BindFlushLimit: 100,
+		},
+		DownlinkTerminal: DownlinkTerminalConfig{
+			PublisherType:     downlink.TerminalPublisherNone,
+			RetryInterval:     5 * time.Second,
+			RetryDelay:        30 * time.Second,
+			RetryJitter:       0,
+			BackoffMultiplier: 2,
+			MaxRetryDelay:     5 * time.Minute,
+			RetryLease:        30 * time.Second,
+			ScanLimit:         100,
 		},
 		DownlinkRetention: DownlinkRetentionConfig{
 			DeliveredTTL:    24 * time.Hour,
@@ -490,6 +513,30 @@ func normalizeConfig(config Config) Config {
 	}
 	if config.DownlinkDelivery.BindFlushLimit <= 0 {
 		config.DownlinkDelivery.BindFlushLimit = defaults.DownlinkDelivery.BindFlushLimit
+	}
+	if config.DownlinkTerminal.PublisherType == "" {
+		config.DownlinkTerminal.PublisherType = defaults.DownlinkTerminal.PublisherType
+	}
+	if config.DownlinkTerminal.RetryInterval <= 0 {
+		config.DownlinkTerminal.RetryInterval = defaults.DownlinkTerminal.RetryInterval
+	}
+	if config.DownlinkTerminal.RetryDelay <= 0 {
+		config.DownlinkTerminal.RetryDelay = defaults.DownlinkTerminal.RetryDelay
+	}
+	if config.DownlinkTerminal.RetryJitter < 0 {
+		config.DownlinkTerminal.RetryJitter = 0
+	}
+	if config.DownlinkTerminal.BackoffMultiplier < 1 {
+		config.DownlinkTerminal.BackoffMultiplier = defaults.DownlinkTerminal.BackoffMultiplier
+	}
+	if config.DownlinkTerminal.MaxRetryDelay <= 0 {
+		config.DownlinkTerminal.MaxRetryDelay = defaults.DownlinkTerminal.MaxRetryDelay
+	}
+	if config.DownlinkTerminal.RetryLease <= 0 {
+		config.DownlinkTerminal.RetryLease = defaults.DownlinkTerminal.RetryLease
+	}
+	if config.DownlinkTerminal.ScanLimit <= 0 {
+		config.DownlinkTerminal.ScanLimit = defaults.DownlinkTerminal.ScanLimit
 	}
 	if config.DownlinkRetention.DeliveredTTL <= 0 {
 		config.DownlinkRetention.DeliveredTTL = defaults.DownlinkRetention.DeliveredTTL

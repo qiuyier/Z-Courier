@@ -106,27 +106,41 @@ func codeFromMessageStatus(status int) string {
 
 func responseFromMessage(message Message) MessageStatusResponse {
 	return MessageStatusResponse{
-		Code:          "ok",
-		MessageID:     message.MessageID,
-		ClientID:      message.ClientID,
-		DeviceID:      message.DeviceID,
-		MsgID:         message.MsgID,
-		TraceID:       message.TraceID,
-		SessionID:     message.SessionID,
-		PolicyName:    message.Policy.Name,
-		Status:        message.Status,
-		Attempts:      message.Attempts,
-		LastError:     message.LastError,
-		NextRetryAt:   optionalTime(message.NextRetryAt),
-		ClaimOwner:    message.ClaimOwner,
-		ClaimUntil:    optionalTime(message.ClaimUntil),
-		CreatedAt:     optionalTime(message.CreatedAt),
-		UpdatedAt:     optionalTime(message.UpdatedAt),
-		SentAt:        optionalTime(message.SentAt),
-		DeliveredAt:   optionalTime(message.DeliveredAt),
-		AckRequired:   message.AckRequired,
-		BodySizeBytes: len(message.Body),
+		Code:                    "ok",
+		MessageID:               message.MessageID,
+		ClientID:                message.ClientID,
+		DeviceID:                message.DeviceID,
+		MsgID:                   message.MsgID,
+		TraceID:                 message.TraceID,
+		SessionID:               message.SessionID,
+		PolicyName:              message.Policy.Name,
+		Status:                  message.Status,
+		Attempts:                message.Attempts,
+		LastError:               message.LastError,
+		TerminalReason:          message.TerminalReason,
+		TerminalAt:              optionalTime(message.TerminalAt),
+		TerminalPublishStatus:   terminalPublicationStatusForResponse(message),
+		TerminalPublishAttempts: message.TerminalPublishAttempts,
+		TerminalNextPublishAt:   optionalTime(message.TerminalNextPublishAt),
+		TerminalPublishError:    message.TerminalPublishError,
+		TerminalPublishedAt:     optionalTime(message.TerminalPublishedAt),
+		NextRetryAt:             optionalTime(message.NextRetryAt),
+		ClaimOwner:              message.ClaimOwner,
+		ClaimUntil:              optionalTime(message.ClaimUntil),
+		CreatedAt:               optionalTime(message.CreatedAt),
+		UpdatedAt:               optionalTime(message.UpdatedAt),
+		SentAt:                  optionalTime(message.SentAt),
+		DeliveredAt:             optionalTime(message.DeliveredAt),
+		AckRequired:             message.AckRequired,
+		BodySizeBytes:           len(message.Body),
 	}
+}
+
+func terminalPublicationStatusForResponse(message Message) string {
+	if message.TerminalReason == "" && message.TerminalPublishStatus == "" {
+		return ""
+	}
+	return terminalPublicationStatusValue(message.TerminalPublishStatus)
 }
 
 func optionalTime(value time.Time) *time.Time {

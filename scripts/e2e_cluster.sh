@@ -120,5 +120,7 @@ go run ./cmd/e2e \
   -check-admin-storage \
   -admin-session-peer-url http://127.0.0.1:18183 \
   -expect-policy-name integration-reliable \
+  -check-terminal-event \
+  -expect-terminal-policy integration-terminal \
   -timeout 45s \
   "$@"

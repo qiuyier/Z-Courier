@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -49,6 +50,24 @@ func newDownlinkService(
 	if err != nil {
 		return nil, nil, err
 	}
+	publisher, publisherCloser, err := newTerminalPublisher(config)
+	if err != nil {
+		if closer != nil {
+			_ = closer.Close()
+		}
+		return nil, nil, err
+	}
+	if publisher != nil {
+		if _, ok := store.(downlink.TerminalStore); !ok {
+			if publisherCloser != nil {
+				_ = publisherCloser.Close()
+			}
+			if closer != nil {
+				_ = closer.Close()
+			}
+			return nil, nil, fmt.Errorf("downlink terminal publisher requires a terminal-capable store")
+		}
+	}
 
 	options := make([]downlink.ServiceOption, 0, 3)
 	if store != nil {
@@ -61,6 +80,16 @@ func newDownlinkService(
 		downlink.WithRetryClaim(config.GatewayNode, config.DownlinkDelivery.RetryLease),
 		downlink.WithMaxAttempts(config.DownlinkDelivery.MaxAttempts),
 		downlink.WithDeliveryPolicies(policies),
+		downlink.WithTerminalPublishing(downlink.TerminalPublishingConfig{
+			Publisher:         publisher,
+			GatewayNode:       config.GatewayNode,
+			RetryDelay:        config.DownlinkTerminal.RetryDelay,
+			RetryJitter:       config.DownlinkTerminal.RetryJitter,
+			BackoffMultiplier: config.DownlinkTerminal.BackoffMultiplier,
+			MaxRetryDelay:     config.DownlinkTerminal.MaxRetryDelay,
+			ClaimOwner:        config.GatewayNode,
+			ClaimLease:        config.DownlinkTerminal.RetryLease,
+		}),
 	)
 	if registry != nil {
 		options = append(options, downlink.WithClusterDelivery(downlink.ClusterDeliveryConfig{
@@ -70,7 +99,23 @@ func newDownlinkService(
 		}))
 	}
 
-	return downlink.NewService(config.Sessions, zinxConnectionFinder{connManager: connManager}, options...), closer, nil
+	return downlink.NewService(config.Sessions, zinxConnectionFinder{connManager: connManager}, options...), downlinkResourceGroup{
+		publisherCloser,
+		closer,
+	}, nil
+}
+
+type downlinkResourceGroup []io.Closer
+
+func (group downlinkResourceGroup) Close() error {
+	var joined error
+	for _, closer := range group {
+		if closer == nil {
+			continue
+		}
+		joined = errors.Join(joined, closer.Close())
+	}
+	return joined
 }
 
 func newDownlinkPolicySet(config Config) (*downlink.DeliveryPolicySet, error) {

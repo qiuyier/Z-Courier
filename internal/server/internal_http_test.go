@@ -386,6 +386,15 @@ func TestInternalHTTPAdminDiagnostics(t *testing.T) {
 			MsgIDMin: 2001,
 			MsgIDMax: 2001,
 		}},
+		DownlinkTerminal: DownlinkTerminalConfig{
+			PublisherType: "nsq",
+			NSQ: NSQUpstreamConfig{
+				Topic:      "terminal_events",
+				AuthSecret: "terminal-secret",
+			},
+			RetryInterval: 5 * time.Second,
+			RetryDelay:    30 * time.Second,
+		},
 		Cluster: ClusterConfig{
 			Enabled:      true,
 			InternalAddr: "http://gateway-a:18080",
@@ -430,7 +439,7 @@ func TestInternalHTTPAdminDiagnostics(t *testing.T) {
 		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusOK, rec.Body.String())
 	}
 	body := rec.Body.String()
-	for _, secret := range []string{"upstream-token", "nsq-secret", "user:password", "token=secret"} {
+	for _, secret := range []string{"upstream-token", "nsq-secret", "terminal-secret", "user:password", "token=secret"} {
 		if strings.Contains(body, secret) {
 			t.Fatalf("diagnostics leaked secret %q in body %s", secret, body)
 		}
@@ -463,6 +472,10 @@ func TestInternalHTTPAdminDiagnostics(t *testing.T) {
 	}
 	if resp.Downlink.PolicyCount != 2 || strings.Join(resp.Downlink.PolicyNames, ",") != "default,critical" {
 		t.Fatalf("downlink diagnostics policies = %d/%v, want 2/[default critical]", resp.Downlink.PolicyCount, resp.Downlink.PolicyNames)
+	}
+	if resp.Downlink.TerminalPublisher != "nsq" || resp.Downlink.TerminalTopic != "terminal_events" ||
+		resp.Downlink.TerminalRetryInterval != "5s" || resp.Downlink.TerminalRetryDelay != "30s" {
+		t.Fatalf("downlink terminal diagnostics = %+v", resp.Downlink)
 	}
 	if len(resp.Dependencies) == 0 || len(resp.Warnings) == 0 {
 		t.Fatalf("dependencies/warnings = %+v/%+v, want non-empty", resp.Dependencies, resp.Warnings)

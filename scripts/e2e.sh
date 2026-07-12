@@ -10,6 +10,8 @@ e2e_start_gateway
 go run ./cmd/e2e \
   -device-id "e2e-device-$RUN_ID" \
   -expect-policy-name integration-reliable \
+  -check-terminal-event \
+  -expect-terminal-policy integration-terminal \
   "$@"
 
 echo "running public Go SDK integration verifier..."

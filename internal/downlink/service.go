@@ -16,11 +16,6 @@ import (
 	"github.com/qiuyier/Z-Courier/internal/session"
 )
 
-const (
-	failureReasonMaxAttempts = "max_attempts_exceeded"
-	failureReasonMaxAge      = "max_age_exceeded"
-)
-
 type SessionFinder interface {
 	GetByClientDevice(clientID, deviceID string) (*session.Session, bool)
 }
@@ -34,18 +29,26 @@ type ConnectionFinder interface {
 }
 
 type Service struct {
-	sessions         SessionFinder
-	connections      ConnectionFinder
-	store            Store
-	now              func() time.Time
-	retryDelay       time.Duration
-	retryJitter      time.Duration
-	retryJitterFunc  func(time.Duration) time.Duration
-	ackTimeout       time.Duration
-	retryClaimOwner  string
-	retryClaimLease  time.Duration
-	maxAttempts      int
-	deliveryPolicies *DeliveryPolicySet
+	sessions                  SessionFinder
+	connections               ConnectionFinder
+	store                     Store
+	now                       func() time.Time
+	retryDelay                time.Duration
+	retryJitter               time.Duration
+	retryJitterFunc           func(time.Duration) time.Duration
+	ackTimeout                time.Duration
+	retryClaimOwner           string
+	retryClaimLease           time.Duration
+	maxAttempts               int
+	deliveryPolicies          *DeliveryPolicySet
+	terminalPublisher         TerminalPublisher
+	terminalGatewayNode       string
+	terminalRetryDelay        time.Duration
+	terminalRetryJitter       time.Duration
+	terminalBackoffMultiplier float64
+	terminalMaxRetryDelay     time.Duration
+	terminalClaimOwner        string
+	terminalClaimLease        time.Duration
 
 	gatewayNode    string
 	onlineRegistry cluster.OnlineRegistry
@@ -106,6 +109,29 @@ func WithDeliveryPolicies(policies *DeliveryPolicySet) ServiceOption {
 	}
 }
 
+func WithTerminalPublishing(config TerminalPublishingConfig) ServiceOption {
+	return func(s *Service) {
+		s.terminalPublisher = config.Publisher
+		s.terminalGatewayNode = config.GatewayNode
+		if config.RetryDelay > 0 {
+			s.terminalRetryDelay = config.RetryDelay
+		}
+		if config.RetryJitter >= 0 {
+			s.terminalRetryJitter = config.RetryJitter
+		}
+		if config.BackoffMultiplier >= 1 {
+			s.terminalBackoffMultiplier = config.BackoffMultiplier
+		}
+		if config.MaxRetryDelay > 0 {
+			s.terminalMaxRetryDelay = config.MaxRetryDelay
+		}
+		s.terminalClaimOwner = config.ClaimOwner
+		if config.ClaimLease > 0 {
+			s.terminalClaimLease = config.ClaimLease
+		}
+	}
+}
+
 func WithRetryClaim(owner string, lease time.Duration) ServiceOption {
 	return func(s *Service) {
 		s.retryClaimOwner = owner
@@ -125,14 +151,18 @@ func WithClusterDelivery(config ClusterDeliveryConfig) ServiceOption {
 
 func NewService(sessions SessionFinder, connections ConnectionFinder, options ...ServiceOption) *Service {
 	service := &Service{
-		sessions:        sessions,
-		connections:     connections,
-		now:             time.Now,
-		retryDelay:      30 * time.Second,
-		retryJitterFunc: randomRetryJitter,
-		ackTimeout:      30 * time.Second,
-		retryClaimLease: 30 * time.Second,
-		maxAttempts:     5,
+		sessions:                  sessions,
+		connections:               connections,
+		now:                       time.Now,
+		retryDelay:                30 * time.Second,
+		retryJitterFunc:           randomRetryJitter,
+		ackTimeout:                30 * time.Second,
+		retryClaimLease:           30 * time.Second,
+		maxAttempts:               5,
+		terminalRetryDelay:        30 * time.Second,
+		terminalBackoffMultiplier: 2,
+		terminalMaxRetryDelay:     5 * time.Minute,
+		terminalClaimLease:        30 * time.Second,
 	}
 	for _, option := range options {
 		option(service)
@@ -143,6 +173,14 @@ func NewService(sessions SessionFinder, connections ConnectionFinder, options ..
 
 func (s *Service) HasStore() bool {
 	return s.store != nil
+}
+
+func (s *Service) HasTerminalPublisher() bool {
+	if s == nil || s.terminalPublisher == nil || s.store == nil {
+		return false
+	}
+	_, ok := s.store.(TerminalStore)
+	return ok
 }
 
 func (s *Service) Store() Store {
@@ -159,8 +197,7 @@ func (s *Service) ConnectionFinder() ConnectionFinder {
 	return s.connections
 }
 
-// DeliveryPolicy resolves the configured policy contract for a MsgID. Policy
-// execution and persistence are integrated in the next V12 delivery slice.
+// DeliveryPolicy resolves the configured delivery contract for a MsgID.
 func (s *Service) DeliveryPolicy(msgID uint32) DeliveryPolicy {
 	if s != nil && s.deliveryPolicies != nil {
 		return s.deliveryPolicies.Resolve(msgID)
@@ -289,7 +326,8 @@ func (s *Service) Discard(ctx context.Context, messageID, reason string) (Messag
 		return Message{}, ErrInvalidTransition
 	}
 
-	if err := s.store.Discard(ctx, messageID, reason, s.now()); err != nil {
+	transition := s.terminalTransition(TerminalReasonOperatorDiscard, s.now(), false)
+	if err := s.store.Discard(ctx, messageID, reason, transition); err != nil {
 		return Message{}, fmt.Errorf("%w: %v", ErrStore, err)
 	}
 	message, ok, err = s.store.Get(ctx, messageID)
@@ -457,6 +495,86 @@ func (s *Service) RetryDue(ctx context.Context, limit int) (RetryResult, error) 
 	return result, nil
 }
 
+func (s *Service) PublishTerminalDue(ctx context.Context, limit int) (TerminalPublishResult, error) {
+	if !s.HasTerminalPublisher() {
+		return TerminalPublishResult{}, nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+
+	store := s.store.(TerminalStore)
+	now := s.now()
+	owner := s.terminalClaimOwner
+	if owner == "" {
+		owner = s.terminalGatewayNode
+	}
+	records, err := store.ClaimDueTerminal(ctx, now, limit, owner, s.terminalClaimLease)
+	if err != nil {
+		return TerminalPublishResult{}, fmt.Errorf("%w: %v", ErrStore, err)
+	}
+
+	result := TerminalPublishResult{Scanned: len(records)}
+	for _, record := range records {
+		if err := ctx.Err(); err != nil {
+			return result, err
+		}
+		if err := s.terminalPublisher.Publish(ctx, record.Event); err != nil {
+			failedAt := s.now()
+			nextAttemptAt := failedAt.Add(s.terminalRetryDelayForAttempt(record.PublishAttempts) + s.nextRetryJitter(s.terminalRetryJitter))
+			if storeErr := store.MarkTerminalPublishFailed(
+				ctx,
+				record.Event.MessageID,
+				record.Event.TerminalStatus,
+				err.Error(),
+				nextAttemptAt,
+			); storeErr != nil {
+				return result, fmt.Errorf("%w: %v", ErrStore, storeErr)
+			}
+			result.Failed++
+			continue
+		}
+
+		if err := store.MarkTerminalPublished(
+			ctx,
+			record.Event.MessageID,
+			record.Event.TerminalStatus,
+			s.now(),
+		); err != nil {
+			return result, fmt.Errorf("%w: %v", ErrStore, err)
+		}
+		result.Published++
+	}
+	return result, nil
+}
+
+func (s *Service) terminalTransition(reason string, at time.Time, attempted bool) TerminalTransition {
+	return TerminalTransition{
+		Reason:      reason,
+		GatewayNode: s.terminalGatewayNode,
+		At:          at,
+		Attempted:   attempted,
+		Publish:     s.HasTerminalPublisher(),
+	}
+}
+
+func (s *Service) terminalRetryDelayForAttempt(attempts int) time.Duration {
+	if attempts < 0 {
+		attempts = 0
+	}
+	delay := float64(s.terminalRetryDelay) * math.Pow(s.terminalBackoffMultiplier, float64(attempts))
+	if math.IsInf(delay, 0) || math.IsNaN(delay) || delay >= float64(s.terminalMaxRetryDelay) {
+		return s.terminalMaxRetryDelay
+	}
+	if delay <= 0 {
+		return s.terminalRetryDelay
+	}
+	return time.Duration(delay)
+}
+
 func (s *Service) CleanupExpired(ctx context.Context, policy RetentionPolicy) (CleanupResult, error) {
 	if s.store == nil {
 		return CleanupResult{}, nil
@@ -612,13 +730,13 @@ func (s *Service) retryMessage(ctx context.Context, message Message) (MessageSta
 	policy := s.policyForMessage(message)
 	now := s.now()
 	if policyMaxAgeExceeded(message, policy, now) {
-		if err := s.store.MarkFailed(ctx, message.MessageID, failureReasonMaxAge, now, false); err != nil {
+		if err := s.store.MarkFailed(ctx, message.MessageID, s.terminalTransition(TerminalReasonMaxAge, now, false)); err != nil {
 			return "", fmt.Errorf("%w: %v", ErrStore, err)
 		}
 		return MessageStatusFailed, nil
 	}
 	if message.Attempts >= policy.MaxAttempts {
-		if err := s.store.MarkFailed(ctx, message.MessageID, failureReasonMaxAttempts, now, false); err != nil {
+		if err := s.store.MarkFailed(ctx, message.MessageID, s.terminalTransition(TerminalReasonMaxAttempts, now, false)); err != nil {
 			return "", fmt.Errorf("%w: %v", ErrStore, err)
 		}
 		return MessageStatusFailed, nil
@@ -631,13 +749,13 @@ func (s *Service) retryMessage(ctx context.Context, message Message) (MessageSta
 	if err != nil {
 		failedAt := s.now()
 		if policyMaxAgeExceeded(message, policy, failedAt) {
-			if err := s.store.MarkFailed(ctx, message.MessageID, failureReasonMaxAge, failedAt, true); err != nil {
+			if err := s.store.MarkFailed(ctx, message.MessageID, s.terminalTransition(TerminalReasonMaxAge, failedAt, true)); err != nil {
 				return "", fmt.Errorf("%w: %v", ErrStore, err)
 			}
 			return MessageStatusFailed, nil
 		}
 		if message.Attempts+1 >= policy.MaxAttempts {
-			if err := s.store.MarkFailed(ctx, message.MessageID, failureReasonMaxAttempts, failedAt, true); err != nil {
+			if err := s.store.MarkFailed(ctx, message.MessageID, s.terminalTransition(TerminalReasonMaxAttempts, failedAt, true)); err != nil {
 				return "", fmt.Errorf("%w: %v", ErrStore, err)
 			}
 			return MessageStatusFailed, nil

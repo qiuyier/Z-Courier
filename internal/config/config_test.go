@@ -213,6 +213,27 @@ downlink:
       retry_jitter: 500ms
     - name: bulk
       msg_id_min: 5000
+  terminal:
+    publisher:
+      type: nsq
+      nsq:
+        nsqd_addrs:
+          - 127.0.0.1:4250
+          - 127.0.0.1:4251
+        topic: downlink_terminal_events
+        auth_secret: terminal-secret
+        dial_timeout: 2s
+        read_timeout: 50s
+        write_timeout: 3s
+        publish_mode: round_robin
+        retry_attempts: 1
+    retry_interval: 8s
+    retry_delay: 14s
+    retry_jitter: 4s
+    backoff_multiplier: 3
+    max_retry_delay: 2m
+    retry_lease: 16s
+    scan_limit: 66
   retention:
     delivered_ttl: 24h
     failed_ttl: 48h
@@ -443,6 +464,23 @@ upstream:
 		bulk.Policy.MaxRetryDelay != 11*time.Second ||
 		bulk.Policy.RetryJitter != 3*time.Second {
 		t.Fatalf("bulk inherited DownlinkPolicy settings = %+v", bulk.Policy)
+	}
+	if config.DownlinkTerminal.PublisherType != "nsq" ||
+		len(config.DownlinkTerminal.NSQ.Addresses) != 2 ||
+		config.DownlinkTerminal.NSQ.Topic != "downlink_terminal_events" ||
+		config.DownlinkTerminal.NSQ.AuthSecret != "terminal-secret" ||
+		config.DownlinkTerminal.NSQ.DialTimeout != 2*time.Second ||
+		config.DownlinkTerminal.NSQ.ReadTimeout != 50*time.Second ||
+		config.DownlinkTerminal.NSQ.WriteTimeout != 3*time.Second ||
+		config.DownlinkTerminal.NSQ.RetryAttempts != 1 ||
+		config.DownlinkTerminal.RetryInterval != 8*time.Second ||
+		config.DownlinkTerminal.RetryDelay != 14*time.Second ||
+		config.DownlinkTerminal.RetryJitter != 4*time.Second ||
+		config.DownlinkTerminal.BackoffMultiplier != 3 ||
+		config.DownlinkTerminal.MaxRetryDelay != 2*time.Minute ||
+		config.DownlinkTerminal.RetryLease != 16*time.Second ||
+		config.DownlinkTerminal.ScanLimit != 66 {
+		t.Fatalf("DownlinkTerminal = %+v", config.DownlinkTerminal)
 	}
 	if config.DownlinkRetention.DeliveredTTL != 24*time.Hour {
 		t.Fatalf("DownlinkRetention DeliveredTTL = %v, want 24h", config.DownlinkRetention.DeliveredTTL)
@@ -836,6 +874,57 @@ func TestLoadServerConfigDownlinkRetentionDefaults(t *testing.T) {
 	}
 	if config.DownlinkRetention.CleanupLimit != 1000 {
 		t.Fatalf("DownlinkRetention CleanupLimit = %d, want 1000", config.DownlinkRetention.CleanupLimit)
+	}
+}
+
+func TestLoadServerConfigDownlinkTerminalDefaults(t *testing.T) {
+	config, err := LoadServerConfig(writeConfig(t, `{}`))
+	if err != nil {
+		t.Fatalf("LoadServerConfig() error = %v", err)
+	}
+	terminal := config.DownlinkTerminal
+	if terminal.PublisherType != "none" || terminal.RetryInterval != 5*time.Second ||
+		terminal.RetryDelay != 30*time.Second || terminal.RetryJitter != 0 ||
+		terminal.BackoffMultiplier != 2 || terminal.MaxRetryDelay != 5*time.Minute ||
+		terminal.RetryLease != 30*time.Second || terminal.ScanLimit != 100 {
+		t.Fatalf("DownlinkTerminal defaults = %+v", terminal)
+	}
+}
+
+func TestLoadServerConfigRejectsInvalidDownlinkTerminal(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  string
+		message string
+	}{
+		{
+			name:    "unsupported publisher",
+			config:  "downlink:\n  terminal:\n    publisher:\n      type: kafka\n",
+			message: "unsupported downlink terminal publisher type",
+		},
+		{
+			name:    "nsq without address",
+			config:  "downlink:\n  terminal:\n    publisher:\n      type: nsq\n      nsq:\n        topic: terminal_events\n",
+			message: "addr or nsqd_addrs is required",
+		},
+		{
+			name:    "publisher without storage",
+			config:  "downlink:\n  storage:\n    type: none\n  terminal:\n    publisher:\n      type: nsq\n      nsq:\n        addr: 127.0.0.1:4150\n        topic: terminal_events\n",
+			message: "requires downlink storage",
+		},
+		{
+			name:    "max delay below initial delay",
+			config:  "downlink:\n  terminal:\n    retry_delay: 10s\n    max_retry_delay: 5s\n",
+			message: "max_retry_delay must be greater than or equal to retry_delay",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := LoadServerConfig(writeConfig(t, test.config))
+			if err == nil || !strings.Contains(err.Error(), test.message) {
+				t.Fatalf("LoadServerConfig() error = %v, want substring %q", err, test.message)
+			}
+		})
 	}
 }
 

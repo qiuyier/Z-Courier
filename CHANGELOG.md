@@ -19,6 +19,11 @@ semantic versioning after the first public MVP tag.
   deadlines, bounded exponential backoff and jitter, attempt/age exhaustion,
   PostgreSQL migration compatibility, and policy visibility across status APIs,
   the Go backend SDK, diagnostics, console views, and single/cluster E2E.
+- V12.3.1 terminal failure and dead-letter events with atomic PostgreSQL outbox
+  persistence, stable terminal reasons, optional direct NSQ publication,
+  independent bounded publication retries and cluster claims, body-free
+  versioned envelopes, status/SDK/diagnostics/console visibility, and
+  single-node plus cluster E2E consumption checks.
 
 ## [v0.11.0] - 2026-07-10
 

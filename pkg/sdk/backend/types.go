@@ -107,27 +107,34 @@ type MessageStatusRequest struct {
 
 // MessageStatusResponse describes persisted delivery and retry metadata.
 type MessageStatusResponse struct {
-	Code          string        `json:"code"`
-	Reason        string        `json:"reason,omitempty"`
-	MessageID     string        `json:"message_id,omitempty"`
-	ClientID      string        `json:"client_id,omitempty"`
-	DeviceID      string        `json:"device_id,omitempty"`
-	MsgID         uint32        `json:"msg_id,omitempty"`
-	TraceID       string        `json:"trace_id,omitempty"`
-	SessionID     string        `json:"session_id,omitempty"`
-	PolicyName    string        `json:"policy_name,omitempty"`
-	Status        MessageStatus `json:"status,omitempty"`
-	Attempts      int           `json:"attempts,omitempty"`
-	LastError     string        `json:"last_error,omitempty"`
-	NextRetryAt   *time.Time    `json:"next_retry_at,omitempty"`
-	ClaimOwner    string        `json:"claim_owner,omitempty"`
-	ClaimUntil    *time.Time    `json:"claim_until,omitempty"`
-	CreatedAt     *time.Time    `json:"created_at,omitempty"`
-	UpdatedAt     *time.Time    `json:"updated_at,omitempty"`
-	SentAt        *time.Time    `json:"sent_at,omitempty"`
-	DeliveredAt   *time.Time    `json:"delivered_at,omitempty"`
-	AckRequired   bool          `json:"ack_required,omitempty"`
-	BodySizeBytes int           `json:"body_size_bytes,omitempty"`
+	Code                    string        `json:"code"`
+	Reason                  string        `json:"reason,omitempty"`
+	MessageID               string        `json:"message_id,omitempty"`
+	ClientID                string        `json:"client_id,omitempty"`
+	DeviceID                string        `json:"device_id,omitempty"`
+	MsgID                   uint32        `json:"msg_id,omitempty"`
+	TraceID                 string        `json:"trace_id,omitempty"`
+	SessionID               string        `json:"session_id,omitempty"`
+	PolicyName              string        `json:"policy_name,omitempty"`
+	Status                  MessageStatus `json:"status,omitempty"`
+	Attempts                int           `json:"attempts,omitempty"`
+	LastError               string        `json:"last_error,omitempty"`
+	TerminalReason          string        `json:"terminal_reason,omitempty"`
+	TerminalAt              *time.Time    `json:"terminal_at,omitempty"`
+	TerminalPublishStatus   string        `json:"terminal_publish_status,omitempty"`
+	TerminalPublishAttempts int           `json:"terminal_publish_attempts,omitempty"`
+	TerminalNextPublishAt   *time.Time    `json:"terminal_next_publish_at,omitempty"`
+	TerminalPublishError    string        `json:"terminal_publish_error,omitempty"`
+	TerminalPublishedAt     *time.Time    `json:"terminal_published_at,omitempty"`
+	NextRetryAt             *time.Time    `json:"next_retry_at,omitempty"`
+	ClaimOwner              string        `json:"claim_owner,omitempty"`
+	ClaimUntil              *time.Time    `json:"claim_until,omitempty"`
+	CreatedAt               *time.Time    `json:"created_at,omitempty"`
+	UpdatedAt               *time.Time    `json:"updated_at,omitempty"`
+	SentAt                  *time.Time    `json:"sent_at,omitempty"`
+	DeliveredAt             *time.Time    `json:"delivered_at,omitempty"`
+	AckRequired             bool          `json:"ack_required,omitempty"`
+	BodySizeBytes           int           `json:"body_size_bytes,omitempty"`
 }
 
 // ListMessagesRequest filters persisted messages. An empty Status asks the

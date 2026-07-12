@@ -30,8 +30,18 @@ message_id, client_id, device_id, msg_id, body, identity_fingerprint,
 ack_required, trace_id, policy_name, policy_max_attempts, policy_max_age_ns,
 policy_ack_timeout_ns, policy_retry_delay_ns, policy_backoff_multiplier,
 policy_max_retry_delay_ns, policy_retry_jitter_ns,
-session_id, status, attempts, next_retry_at, last_error, created_at,
-updated_at, sent_at, delivered_at, claim_owner, claim_until
+session_id, status, attempts, next_retry_at, last_error, terminal_reason,
+terminal_at, terminal_publish_status, terminal_publish_attempts,
+terminal_next_publish_at, terminal_publish_error, terminal_published_at,
+created_at, updated_at, sent_at, delivered_at, claim_owner, claim_until
+`
+
+const postgresTerminalColumns = `
+event_id, message_id, client_id, device_id, msg_id, trace_id,
+terminal_status, terminal_reason, policy_name, attempts,
+message_created_at, terminal_at, gateway_node, publish_status,
+publish_attempts, next_attempt_at, publish_last_error, published_at,
+claim_owner, claim_until
 `
 
 func NewPostgresStore(ctx context.Context, config PostgresStoreConfig) (*PostgresStore, error) {
@@ -106,6 +116,13 @@ CREATE TABLE IF NOT EXISTS z_courier_downlink_messages (
   attempts INTEGER NOT NULL DEFAULT 0,
   next_retry_at TIMESTAMPTZ,
   last_error TEXT NOT NULL DEFAULT '',
+  terminal_reason TEXT NOT NULL DEFAULT '',
+  terminal_at TIMESTAMPTZ,
+  terminal_publish_status TEXT NOT NULL DEFAULT 'disabled',
+  terminal_publish_attempts INTEGER NOT NULL DEFAULT 0,
+  terminal_next_publish_at TIMESTAMPTZ,
+  terminal_publish_error TEXT NOT NULL DEFAULT '',
+  terminal_published_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL,
   updated_at TIMESTAMPTZ NOT NULL,
   sent_at TIMESTAMPTZ,
@@ -135,6 +152,48 @@ ALTER TABLE z_courier_downlink_messages
   ADD COLUMN IF NOT EXISTS policy_max_retry_delay_ns BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE z_courier_downlink_messages
   ADD COLUMN IF NOT EXISTS policy_retry_jitter_ns BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE z_courier_downlink_messages
+  ADD COLUMN IF NOT EXISTS terminal_reason TEXT NOT NULL DEFAULT '';
+ALTER TABLE z_courier_downlink_messages
+  ADD COLUMN IF NOT EXISTS terminal_at TIMESTAMPTZ;
+ALTER TABLE z_courier_downlink_messages
+  ADD COLUMN IF NOT EXISTS terminal_publish_status TEXT NOT NULL DEFAULT 'disabled';
+ALTER TABLE z_courier_downlink_messages
+  ADD COLUMN IF NOT EXISTS terminal_publish_attempts INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE z_courier_downlink_messages
+  ADD COLUMN IF NOT EXISTS terminal_next_publish_at TIMESTAMPTZ;
+ALTER TABLE z_courier_downlink_messages
+  ADD COLUMN IF NOT EXISTS terminal_publish_error TEXT NOT NULL DEFAULT '';
+ALTER TABLE z_courier_downlink_messages
+  ADD COLUMN IF NOT EXISTS terminal_published_at TIMESTAMPTZ;
+CREATE TABLE IF NOT EXISTS z_courier_downlink_terminal_events (
+  event_id TEXT PRIMARY KEY,
+  message_id TEXT NOT NULL REFERENCES z_courier_downlink_messages(message_id) ON DELETE CASCADE,
+  client_id TEXT NOT NULL,
+  device_id TEXT NOT NULL,
+  msg_id INTEGER NOT NULL,
+  trace_id TEXT NOT NULL DEFAULT '',
+  terminal_status TEXT NOT NULL,
+  terminal_reason TEXT NOT NULL,
+  policy_name TEXT NOT NULL,
+  attempts INTEGER NOT NULL,
+  message_created_at TIMESTAMPTZ NOT NULL,
+  terminal_at TIMESTAMPTZ NOT NULL,
+  gateway_node TEXT NOT NULL DEFAULT '',
+  publish_status TEXT NOT NULL DEFAULT 'pending',
+  publish_attempts INTEGER NOT NULL DEFAULT 0,
+  next_attempt_at TIMESTAMPTZ,
+  publish_last_error TEXT NOT NULL DEFAULT '',
+  published_at TIMESTAMPTZ,
+  claim_owner TEXT NOT NULL DEFAULT '',
+  claim_until TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS z_courier_downlink_terminal_events_message_status_idx
+  ON z_courier_downlink_terminal_events (message_id, terminal_status);
+CREATE INDEX IF NOT EXISTS z_courier_downlink_terminal_events_due_idx
+  ON z_courier_downlink_terminal_events (publish_status, next_attempt_at, terminal_at)
+  WHERE publish_status IN ('pending', 'failed');
 CREATE INDEX IF NOT EXISTS z_courier_downlink_messages_client_device_status_idx
   ON z_courier_downlink_messages (client_id, device_id, status);
 CREATE INDEX IF NOT EXISTS z_courier_downlink_messages_next_retry_at_idx
@@ -183,15 +242,18 @@ INSERT INTO z_courier_downlink_messages (
   ack_required, trace_id, policy_name, policy_max_attempts, policy_max_age_ns,
   policy_ack_timeout_ns, policy_retry_delay_ns, policy_backoff_multiplier,
   policy_max_retry_delay_ns, policy_retry_jitter_ns, session_id, status,
-  attempts, next_retry_at, last_error, created_at, updated_at, sent_at,
-  delivered_at, claim_owner, claim_until
+  attempts, next_retry_at, last_error, terminal_reason, terminal_at,
+  terminal_publish_status, terminal_publish_attempts, terminal_next_publish_at,
+  terminal_publish_error, terminal_published_at, created_at, updated_at,
+  sent_at, delivered_at, claim_owner, claim_until
 ) VALUES (
   $1, $2, $3, $4, $5, $6,
   $7, $8, $9, $10, $11,
   $12, $13, $14,
   $15, $16, $17, $18,
-  $19, $20, $21, $22, $23, $24,
-  $25, $26, $27
+  $19, $20, $21, $22, $23,
+  $24, $25, $26, $27, $28,
+  $29, $30, $31, $32, $33, $34
 )
 ON CONFLICT (message_id) DO NOTHING
 RETURNING `+postgresMessageColumns+`
@@ -217,6 +279,13 @@ RETURNING `+postgresMessageColumns+`
 		message.Attempts,
 		nullTime(message.NextRetryAt),
 		message.LastError,
+		message.TerminalReason,
+		nullTime(message.TerminalAt),
+		terminalPublicationStatusValue(message.TerminalPublishStatus),
+		message.TerminalPublishAttempts,
+		nullTime(message.TerminalNextPublishAt),
+		message.TerminalPublishError,
+		nullTime(message.TerminalPublishedAt),
 		message.CreatedAt,
 		message.UpdatedAt,
 		nullTime(message.SentAt),
@@ -424,7 +493,10 @@ RETURNING m.message_id, m.client_id, m.device_id, m.msg_id, m.body,
           m.policy_max_attempts, m.policy_max_age_ns, m.policy_ack_timeout_ns,
           m.policy_retry_delay_ns, m.policy_backoff_multiplier,
           m.policy_max_retry_delay_ns, m.policy_retry_jitter_ns, m.session_id,
-          m.status, m.attempts, m.next_retry_at, m.last_error, m.created_at,
+          m.status, m.attempts, m.next_retry_at, m.last_error,
+          m.terminal_reason, m.terminal_at, m.terminal_publish_status,
+          m.terminal_publish_attempts, m.terminal_next_publish_at,
+          m.terminal_publish_error, m.terminal_published_at, m.created_at,
           m.updated_at, m.sent_at, m.delivered_at, m.claim_owner, m.claim_until
 `, string(MessageStatusPending), now, limit, owner, now.Add(lease), includeAckTimeout, string(MessageStatusSent), ackDeadline)
 	if err != nil {
@@ -528,27 +600,8 @@ WHERE message_id = $1
 	return requireAffected(result)
 }
 
-func (s *PostgresStore) MarkFailed(ctx context.Context, messageID, reason string, failedAt time.Time, attempted bool) error {
-	if failedAt.IsZero() {
-		failedAt = time.Now()
-	}
-
-	result, err := s.db.ExecContext(ctx, `
-UPDATE z_courier_downlink_messages
-SET status = CASE WHEN status IN ($6, $7) THEN status ELSE $2 END,
-    attempts = CASE WHEN status IN ($6, $7) THEN attempts ELSE attempts + CASE WHEN $5 THEN 1 ELSE 0 END END,
-    last_error = CASE WHEN status IN ($6, $7) THEN last_error ELSE $3 END,
-    next_retry_at = CASE WHEN status IN ($6, $7) THEN next_retry_at ELSE NULL END,
-    claim_owner = CASE WHEN status IN ($6, $7) THEN claim_owner ELSE '' END,
-    claim_until = CASE WHEN status IN ($6, $7) THEN claim_until ELSE NULL END,
-    updated_at = CASE WHEN status IN ($6, $7) THEN updated_at ELSE $4 END
-WHERE message_id = $1
-`, messageID, string(MessageStatusFailed), reason, failedAt, attempted, string(MessageStatusDelivered), string(MessageStatusDiscarded))
-	if err != nil {
-		return err
-	}
-
-	return requireAffected(result)
+func (s *PostgresStore) MarkFailed(ctx context.Context, messageID string, transition TerminalTransition) error {
+	return s.transitionTerminal(ctx, messageID, MessageStatusFailed, transition.Reason, transition, true)
 }
 
 func (s *PostgresStore) Requeue(ctx context.Context, messageID string, requeuedAt time.Time) error {
@@ -567,6 +620,13 @@ SET status = $2,
     session_id = '',
     sent_at = NULL,
     delivered_at = NULL,
+    terminal_reason = '',
+    terminal_at = NULL,
+    terminal_publish_status = 'disabled',
+    terminal_publish_attempts = 0,
+    terminal_next_publish_at = NULL,
+    terminal_publish_error = '',
+    terminal_published_at = NULL,
     updated_at = $3
 WHERE message_id = $1
 `, messageID, string(MessageStatusPending), requeuedAt)
@@ -577,26 +637,342 @@ WHERE message_id = $1
 	return requireAffected(result)
 }
 
-func (s *PostgresStore) Discard(ctx context.Context, messageID, reason string, discardedAt time.Time) error {
-	if discardedAt.IsZero() {
-		discardedAt = time.Now()
+func (s *PostgresStore) Discard(ctx context.Context, messageID, reason string, transition TerminalTransition) error {
+	if transition.Reason == "" {
+		transition.Reason = TerminalReasonOperatorDiscard
+	}
+	return s.transitionTerminal(ctx, messageID, MessageStatusDiscarded, reason, transition, false)
+}
+
+func (s *PostgresStore) transitionTerminal(
+	ctx context.Context,
+	messageID string,
+	status MessageStatus,
+	lastError string,
+	transition TerminalTransition,
+	protectExistingTerminal bool,
+) error {
+	if transition.At.IsZero() {
+		transition.At = time.Now()
 	}
 
-	result, err := s.db.ExecContext(ctx, `
-UPDATE z_courier_downlink_messages
-SET status = $2,
-    last_error = $3,
-    next_retry_at = NULL,
-    claim_owner = '',
-    claim_until = NULL,
-    updated_at = $4
-WHERE message_id = $1
-`, messageID, string(MessageStatusDiscarded), reason, discardedAt)
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
+	defer func() { _ = tx.Rollback() }()
 
-	return requireAffected(result)
+	message, err := scanMessage(tx.QueryRowContext(ctx, `
+SELECT `+postgresMessageColumns+`
+FROM z_courier_downlink_messages
+WHERE message_id = $1
+FOR UPDATE
+`, messageID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrMessageNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if protectExistingTerminal && (message.Status == MessageStatusDelivered || message.Status == MessageStatusDiscarded) {
+		return tx.Commit()
+	}
+
+	firstTransition := message.Status != status || message.TerminalReason == ""
+	message.Status = status
+	if transition.Attempted {
+		message.Attempts++
+	}
+	message.LastError = lastError
+	message.NextRetryAt = time.Time{}
+	message.ClaimOwner = ""
+	message.ClaimUntil = time.Time{}
+	message.UpdatedAt = transition.At
+	if firstTransition {
+		message.TerminalReason = transition.Reason
+		message.TerminalAt = transition.At
+		message.TerminalPublishStatus = terminalPublicationStatus(transition.Publish)
+		message.TerminalPublishAttempts = 0
+		message.TerminalNextPublishAt = time.Time{}
+		message.TerminalPublishError = ""
+		message.TerminalPublishedAt = time.Time{}
+	}
+	if firstTransition && transition.Publish {
+		event := newTerminalEvent(message, status, transition)
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO z_courier_downlink_terminal_events (
+  event_id, message_id, client_id, device_id, msg_id, trace_id,
+  terminal_status, terminal_reason, policy_name, attempts,
+  message_created_at, terminal_at, gateway_node, publish_status, updated_at
+) VALUES (
+  $1, $2, $3, $4, $5, $6,
+  $7, $8, $9, $10,
+  $11, $12, $13, $14, $15
+)
+ON CONFLICT (event_id) DO NOTHING
+`,
+			event.EventID,
+			event.MessageID,
+			event.ClientID,
+			event.DeviceID,
+			int64(event.MsgID),
+			event.TraceID,
+			string(event.TerminalStatus),
+			event.TerminalReason,
+			event.PolicyName,
+			event.Attempts,
+			event.MessageCreated,
+			event.TerminalAt,
+			event.GatewayNode,
+			string(TerminalPublicationPending),
+			event.TerminalAt,
+		); err != nil {
+			return err
+		}
+		record, err := scanTerminalRecord(tx.QueryRowContext(ctx, `
+SELECT `+postgresTerminalColumns+`
+FROM z_courier_downlink_terminal_events
+WHERE event_id = $1
+`, event.EventID))
+		if err != nil {
+			return err
+		}
+		applyTerminalRecord(&message, record)
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+UPDATE z_courier_downlink_messages
+SET status = $2,
+    attempts = $3,
+    last_error = $4,
+    next_retry_at = NULL,
+    claim_owner = '',
+    claim_until = NULL,
+    terminal_reason = $5,
+    terminal_at = $6,
+    terminal_publish_status = $7,
+    terminal_publish_attempts = $8,
+    terminal_next_publish_at = $9,
+    terminal_publish_error = $10,
+    terminal_published_at = $11,
+    updated_at = $12
+WHERE message_id = $1
+`,
+		messageID,
+		string(message.Status),
+		message.Attempts,
+		message.LastError,
+		message.TerminalReason,
+		nullTime(message.TerminalAt),
+		terminalPublicationStatusValue(message.TerminalPublishStatus),
+		message.TerminalPublishAttempts,
+		nullTime(message.TerminalNextPublishAt),
+		message.TerminalPublishError,
+		nullTime(message.TerminalPublishedAt),
+		message.UpdatedAt,
+	); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+func (s *PostgresStore) ClaimDueTerminal(
+	ctx context.Context,
+	now time.Time,
+	limit int,
+	owner string,
+	lease time.Duration,
+) ([]TerminalRecord, error) {
+	if now.IsZero() {
+		now = time.Now()
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+	if lease <= 0 {
+		lease = 30 * time.Second
+	}
+
+	rows, err := s.db.QueryContext(ctx, `
+WITH claimed AS (
+  SELECT event_id
+  FROM z_courier_downlink_terminal_events
+  WHERE publish_status IN ($1, $2)
+    AND (next_attempt_at IS NULL OR next_attempt_at <= $3)
+    AND (claim_until IS NULL OR claim_until <= $3)
+  ORDER BY terminal_at ASC, event_id ASC
+  FOR UPDATE SKIP LOCKED
+  LIMIT $4
+)
+UPDATE z_courier_downlink_terminal_events AS event
+SET claim_owner = $5,
+    claim_until = $6,
+    updated_at = $3
+FROM claimed
+WHERE event.event_id = claimed.event_id
+RETURNING
+  event.event_id, event.message_id, event.client_id, event.device_id,
+  event.msg_id, event.trace_id, event.terminal_status, event.terminal_reason,
+  event.policy_name, event.attempts, event.message_created_at,
+  event.terminal_at, event.gateway_node, event.publish_status,
+  event.publish_attempts, event.next_attempt_at, event.publish_last_error,
+  event.published_at, event.claim_owner, event.claim_until
+`,
+		string(TerminalPublicationPending),
+		string(TerminalPublicationFailed),
+		now,
+		limit,
+		owner,
+		now.Add(lease),
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	records := make([]TerminalRecord, 0)
+	for rows.Next() {
+		record, err := scanTerminalRecord(rows)
+		if err != nil {
+			return nil, err
+		}
+		records = append(records, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return records, nil
+}
+
+func (s *PostgresStore) MarkTerminalPublished(
+	ctx context.Context,
+	messageID string,
+	status MessageStatus,
+	publishedAt time.Time,
+) error {
+	if publishedAt.IsZero() {
+		publishedAt = time.Now()
+	}
+	tx, err := s.beginTerminalEventUpdate(ctx, messageID)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var found bool
+	err = tx.QueryRowContext(ctx, `
+WITH published AS (
+  UPDATE z_courier_downlink_terminal_events
+  SET publish_status = $3,
+      publish_attempts = publish_attempts + 1,
+      next_attempt_at = NULL,
+      publish_last_error = '',
+      published_at = $4,
+      claim_owner = '',
+      claim_until = NULL,
+      updated_at = $4
+  WHERE message_id = $1
+    AND terminal_status = $2
+    AND publish_status <> $3
+  RETURNING publish_attempts, published_at
+), message_updated AS (
+  UPDATE z_courier_downlink_messages AS message
+  SET terminal_publish_status = $3,
+      terminal_publish_attempts = published.publish_attempts,
+      terminal_next_publish_at = NULL,
+      terminal_publish_error = '',
+      terminal_published_at = published.published_at
+  FROM published
+  WHERE message.message_id = $1 AND message.status = $2
+)
+SELECT EXISTS(
+  SELECT 1
+  FROM z_courier_downlink_terminal_events
+  WHERE message_id = $1 AND terminal_status = $2
+)
+`, messageID, string(status), string(TerminalPublicationPublished), publishedAt).Scan(&found)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return ErrMessageNotFound
+	}
+	return tx.Commit()
+}
+
+func (s *PostgresStore) MarkTerminalPublishFailed(
+	ctx context.Context,
+	messageID string,
+	status MessageStatus,
+	reason string,
+	nextAttemptAt time.Time,
+) error {
+	now := time.Now()
+	tx, err := s.beginTerminalEventUpdate(ctx, messageID)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var found bool
+	err = tx.QueryRowContext(ctx, `
+WITH failed AS (
+  UPDATE z_courier_downlink_terminal_events
+  SET publish_status = $3,
+      publish_attempts = publish_attempts + 1,
+      next_attempt_at = $4,
+      publish_last_error = $5,
+      claim_owner = '',
+      claim_until = NULL,
+      updated_at = $6
+  WHERE message_id = $1
+    AND terminal_status = $2
+    AND publish_status <> $7
+  RETURNING publish_attempts, next_attempt_at, publish_last_error
+), message_updated AS (
+  UPDATE z_courier_downlink_messages AS message
+  SET terminal_publish_status = $3,
+      terminal_publish_attempts = failed.publish_attempts,
+      terminal_next_publish_at = failed.next_attempt_at,
+      terminal_publish_error = failed.publish_last_error
+  FROM failed
+  WHERE message.message_id = $1 AND message.status = $2
+)
+SELECT EXISTS(
+  SELECT 1
+  FROM z_courier_downlink_terminal_events
+  WHERE message_id = $1 AND terminal_status = $2
+)
+`, messageID, string(status), string(TerminalPublicationFailed), nullTime(nextAttemptAt), reason, now, string(TerminalPublicationPublished)).Scan(&found)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return ErrMessageNotFound
+	}
+	return tx.Commit()
+}
+
+func (s *PostgresStore) beginTerminalEventUpdate(ctx context.Context, messageID string) (*sql.Tx, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	var status string
+	if err := tx.QueryRowContext(ctx, `
+SELECT status
+FROM z_courier_downlink_messages
+WHERE message_id = $1
+FOR UPDATE
+`, messageID).Scan(&status); err != nil {
+		_ = tx.Rollback()
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrMessageNotFound
+		}
+		return nil, err
+	}
+	return tx, nil
 }
 
 func (s *PostgresStore) DeleteExpired(ctx context.Context, status MessageStatus, before time.Time, limit int) (int, error) {
@@ -613,6 +989,12 @@ WITH expired AS (
   FROM z_courier_downlink_messages
   WHERE status = $1
     AND updated_at < $2
+    AND NOT EXISTS (
+      SELECT 1
+      FROM z_courier_downlink_terminal_events AS event
+      WHERE event.message_id = z_courier_downlink_messages.message_id
+        AND event.publish_status IN ('pending', 'failed')
+    )
   ORDER BY updated_at ASC, message_id ASC
   LIMIT $3
 )
@@ -639,6 +1021,57 @@ type rowScanner interface {
 	Scan(...any) error
 }
 
+func scanTerminalRecord(row rowScanner) (TerminalRecord, error) {
+	var record TerminalRecord
+	var msgID int64
+	var terminalStatus string
+	var publishStatus string
+	var nextAttemptAt sql.NullTime
+	var publishedAt sql.NullTime
+	var claimUntil sql.NullTime
+
+	if err := row.Scan(
+		&record.Event.EventID,
+		&record.Event.MessageID,
+		&record.Event.ClientID,
+		&record.Event.DeviceID,
+		&msgID,
+		&record.Event.TraceID,
+		&terminalStatus,
+		&record.Event.TerminalReason,
+		&record.Event.PolicyName,
+		&record.Event.Attempts,
+		&record.Event.MessageCreated,
+		&record.Event.TerminalAt,
+		&record.Event.GatewayNode,
+		&publishStatus,
+		&record.PublishAttempts,
+		&nextAttemptAt,
+		&record.LastError,
+		&publishedAt,
+		&record.ClaimOwner,
+		&claimUntil,
+	); err != nil {
+		return TerminalRecord{}, err
+	}
+
+	record.Event.Version = TerminalEventVersion
+	record.Event.Type = TerminalEventType
+	record.Event.MsgID = uint32(msgID)
+	record.Event.TerminalStatus = MessageStatus(terminalStatus)
+	record.Status = TerminalPublicationStatus(publishStatus)
+	if nextAttemptAt.Valid {
+		record.NextAttemptAt = nextAttemptAt.Time
+	}
+	if publishedAt.Valid {
+		record.PublishedAt = publishedAt.Time
+	}
+	if claimUntil.Valid {
+		record.ClaimUntil = claimUntil.Time
+	}
+	return record, nil
+}
+
 func scanMessage(row rowScanner) (Message, error) {
 	var message Message
 	var msgID int64
@@ -647,6 +1080,10 @@ func scanMessage(row rowScanner) (Message, error) {
 	var sentAt sql.NullTime
 	var deliveredAt sql.NullTime
 	var claimUntil sql.NullTime
+	var terminalAt sql.NullTime
+	var terminalNextPublishAt sql.NullTime
+	var terminalPublishedAt sql.NullTime
+	var terminalPublishStatus string
 	var policyMaxAge int64
 	var policyAckTimeout int64
 	var policyRetryDelay int64
@@ -675,6 +1112,13 @@ func scanMessage(row rowScanner) (Message, error) {
 		&message.Attempts,
 		&nextRetryAt,
 		&message.LastError,
+		&message.TerminalReason,
+		&terminalAt,
+		&terminalPublishStatus,
+		&message.TerminalPublishAttempts,
+		&terminalNextPublishAt,
+		&message.TerminalPublishError,
+		&terminalPublishedAt,
 		&message.CreatedAt,
 		&message.UpdatedAt,
 		&sentAt,
@@ -687,6 +1131,7 @@ func scanMessage(row rowScanner) (Message, error) {
 
 	message.MsgID = uint32(msgID)
 	message.Status = MessageStatus(status)
+	message.TerminalPublishStatus = TerminalPublicationStatus(terminalPublishStatus)
 	message.Policy.MaxAge = time.Duration(policyMaxAge)
 	message.Policy.AckTimeout = time.Duration(policyAckTimeout)
 	message.Policy.InitialRetryDelay = time.Duration(policyRetryDelay)
@@ -694,6 +1139,15 @@ func scanMessage(row rowScanner) (Message, error) {
 	message.Policy.RetryJitter = time.Duration(policyRetryJitter)
 	if nextRetryAt.Valid {
 		message.NextRetryAt = nextRetryAt.Time
+	}
+	if terminalAt.Valid {
+		message.TerminalAt = terminalAt.Time
+	}
+	if terminalNextPublishAt.Valid {
+		message.TerminalNextPublishAt = terminalNextPublishAt.Time
+	}
+	if terminalPublishedAt.Valid {
+		message.TerminalPublishedAt = terminalPublishedAt.Time
 	}
 	if sentAt.Valid {
 		message.SentAt = sentAt.Time
@@ -732,6 +1186,13 @@ func nullTime(value time.Time) any {
 	}
 
 	return value
+}
+
+func terminalPublicationStatusValue(status TerminalPublicationStatus) string {
+	if status == "" {
+		return string(TerminalPublicationDisabled)
+	}
+	return string(status)
 }
 
 func requireAffected(result sql.Result) error {

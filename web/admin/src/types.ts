@@ -81,6 +81,10 @@ export type DownlinkSummary = {
   store_configured: boolean;
   policy_count?: number;
   policy_names?: string[];
+  terminal_publisher?: string;
+  terminal_topic?: string;
+  terminal_retry_interval?: string;
+  terminal_retry_delay?: string;
   retry_interval?: string;
   retry_delay?: string;
   retry_jitter?: string;
@@ -360,6 +364,13 @@ export type MessageStatusResponse = {
   status?: MessageStatus;
   attempts?: number;
   last_error?: string;
+  terminal_reason?: string;
+  terminal_at?: string | null;
+  terminal_publish_status?: string;
+  terminal_publish_attempts?: number;
+  terminal_next_publish_at?: string | null;
+  terminal_publish_error?: string;
+  terminal_published_at?: string | null;
   next_retry_at?: string | null;
   claim_owner?: string;
   claim_until?: string | null;

@@ -222,6 +222,12 @@ client.Discard(ctx, "message-id", "operator decision")
 策略。管理员之后修改新消息的策略配置，不会改变这个存量消息返回的策略名称和
 执行参数；升级前没有快照的旧行会按当前 MsgID 策略回退解析。
 
+终态消息还会通过 `MessageStatusResponse` 暴露 `TerminalReason`、
+`TerminalAt`、`TerminalPublishStatus`、`TerminalPublishAttempts`、
+`TerminalNextPublishAt`、`TerminalPublishError` 和 `TerminalPublishedAt`。
+这些字段描述的是网关异步终态事件 outbox，并不表示再次向客户端投递。backend
+SDK 本身不会消费 NSQ 终态事件。
+
 非 2xx 响应会返回 `*backend.APIError`。不要解析错误字符串，使用 `errors.As`：
 
 ```go

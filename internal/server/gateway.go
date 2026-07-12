@@ -35,28 +35,32 @@ type Gateway struct {
 	runtime  *gatewayRuntime
 	started  atomic.Bool
 
-	clusterRegistry          cluster.OnlineRegistry
-	clusterRegistryCloser    io.Closer
-	adminSessionCloser       io.Closer
-	adminAuditCloser         io.Closer
-	authVerifierCloser       io.Closer
-	internalHTTP             *http.Server
-	upstream                 *router.Engine
-	downlink                 *downlink.Service
-	downlinkCloser           io.Closer
-	downlinkRetryInterval    time.Duration
-	downlinkRetryScanLimit   int
-	downlinkWorkerCancel     context.CancelFunc
-	downlinkWorkerCompleted  chan struct{}
-	downlinkRetention        downlink.RetentionPolicy
-	downlinkCleanupInterval  time.Duration
-	downlinkCleanupCancel    context.CancelFunc
-	downlinkCleanupCompleted chan struct{}
-	clusterRouteRefresher    *clusterRouteRefresher
-	clusterRefreshCancel     context.CancelFunc
-	clusterRefreshCompleted  chan struct{}
-	shutdownOnce             sync.Once
-	shutdownErr              error
+	clusterRegistry           cluster.OnlineRegistry
+	clusterRegistryCloser     io.Closer
+	adminSessionCloser        io.Closer
+	adminAuditCloser          io.Closer
+	authVerifierCloser        io.Closer
+	internalHTTP              *http.Server
+	upstream                  *router.Engine
+	downlink                  *downlink.Service
+	downlinkCloser            io.Closer
+	downlinkRetryInterval     time.Duration
+	downlinkRetryScanLimit    int
+	downlinkWorkerCancel      context.CancelFunc
+	downlinkWorkerCompleted   chan struct{}
+	downlinkTerminalInterval  time.Duration
+	downlinkTerminalScanLimit int
+	downlinkTerminalCancel    context.CancelFunc
+	downlinkTerminalCompleted chan struct{}
+	downlinkRetention         downlink.RetentionPolicy
+	downlinkCleanupInterval   time.Duration
+	downlinkCleanupCancel     context.CancelFunc
+	downlinkCleanupCompleted  chan struct{}
+	clusterRouteRefresher     *clusterRouteRefresher
+	clusterRefreshCancel      context.CancelFunc
+	clusterRefreshCompleted   chan struct{}
+	shutdownOnce              sync.Once
+	shutdownErr               error
 }
 
 func New(config Config, logger *zap.Logger) (*Gateway, error) {
@@ -151,22 +155,24 @@ func New(config Config, logger *zap.Logger) (*Gateway, error) {
 	}
 
 	gateway := &Gateway{
-		server:                 zServer,
-		sessions:               config.Sessions,
-		logger:                 logger,
-		health:                 health,
-		runtime:                runtime,
-		clusterRegistry:        clusterRegistry,
-		clusterRegistryCloser:  clusterRegistryCloser,
-		adminSessionCloser:     adminSessionCloser,
-		adminAuditCloser:       adminAuditCloser,
-		authVerifierCloser:     authVerifierCloser,
-		internalHTTP:           internalHTTP,
-		upstream:               upstream,
-		downlink:               downlinkService,
-		downlinkCloser:         downlinkCloser,
-		downlinkRetryInterval:  config.DownlinkDelivery.RetryInterval,
-		downlinkRetryScanLimit: config.DownlinkDelivery.ScanLimit,
+		server:                    zServer,
+		sessions:                  config.Sessions,
+		logger:                    logger,
+		health:                    health,
+		runtime:                   runtime,
+		clusterRegistry:           clusterRegistry,
+		clusterRegistryCloser:     clusterRegistryCloser,
+		adminSessionCloser:        adminSessionCloser,
+		adminAuditCloser:          adminAuditCloser,
+		authVerifierCloser:        authVerifierCloser,
+		internalHTTP:              internalHTTP,
+		upstream:                  upstream,
+		downlink:                  downlinkService,
+		downlinkCloser:            downlinkCloser,
+		downlinkRetryInterval:     config.DownlinkDelivery.RetryInterval,
+		downlinkRetryScanLimit:    config.DownlinkDelivery.ScanLimit,
+		downlinkTerminalInterval:  config.DownlinkTerminal.RetryInterval,
+		downlinkTerminalScanLimit: config.DownlinkTerminal.ScanLimit,
 		downlinkRetention: downlink.RetentionPolicy{
 			DeliveredTTL: config.DownlinkRetention.DeliveredTTL,
 			FailedTTL:    config.DownlinkRetention.FailedTTL,
@@ -236,6 +242,7 @@ func (g *Gateway) Start() {
 	metrics.SetGatewayReadiness("ready")
 	g.startInternalHTTP()
 	g.startDownlinkRetryWorker()
+	g.startDownlinkTerminalWorker()
 	g.startDownlinkCleanupWorker()
 	g.startClusterRouteRefresher()
 
@@ -259,6 +266,7 @@ func (g *Gateway) Shutdown(ctx context.Context) error {
 		g.shutdownAdminSessions()
 		g.shutdownAdminAudit()
 		g.shutdownDownlinkCleanupWorker()
+		g.shutdownDownlinkTerminalWorker()
 		g.shutdownDownlinkRetryWorker()
 		g.shutdownUpstream()
 		g.shutdownDownlink()
@@ -492,6 +500,66 @@ func (g *Gateway) shutdownDownlinkRetryWorker() {
 	g.downlinkWorkerCancel()
 	if g.downlinkWorkerCompleted != nil {
 		<-g.downlinkWorkerCompleted
+	}
+}
+
+func (g *Gateway) startDownlinkTerminalWorker() {
+	if g.downlink == nil || !g.downlink.HasTerminalPublisher() {
+		return
+	}
+	interval := g.downlinkTerminalInterval
+	if interval <= 0 {
+		interval = 5 * time.Second
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	g.downlinkTerminalCancel = cancel
+	g.downlinkTerminalCompleted = make(chan struct{})
+	g.logger.Info(
+		"starting downlink terminal publisher worker",
+		zap.Duration("interval", interval),
+		zap.Int("scan_limit", g.downlinkTerminalScanLimit),
+	)
+
+	go func() {
+		defer close(g.downlinkTerminalCompleted)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				g.publishDownlinkTerminalDue(ctx)
+			}
+		}
+	}()
+}
+
+func (g *Gateway) publishDownlinkTerminalDue(ctx context.Context) {
+	result, err := g.downlink.PublishTerminalDue(ctx, g.downlinkTerminalScanLimit)
+	if err != nil {
+		g.logger.Warn("downlink terminal publisher worker failed", zap.Error(err))
+		return
+	}
+	if result.Scanned == 0 {
+		return
+	}
+	g.logger.Info(
+		"downlink terminal publisher worker completed",
+		zap.Int("scanned", result.Scanned),
+		zap.Int("published", result.Published),
+		zap.Int("failed", result.Failed),
+	)
+}
+
+func (g *Gateway) shutdownDownlinkTerminalWorker() {
+	if g.downlinkTerminalCancel == nil {
+		return
+	}
+	g.downlinkTerminalCancel()
+	if g.downlinkTerminalCompleted != nil {
+		<-g.downlinkTerminalCompleted
 	}
 }
 

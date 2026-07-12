@@ -262,6 +262,12 @@ accepted. It explains which retry and ACK limits govern that message even
 after gateway configuration changes. Older rows without a snapshot resolve
 against the current MsgID policy as a compatibility fallback.
 
+For `failed` and `discarded` messages, the same response can also include
+`terminal_reason`, `terminal_at`, `terminal_publish_status`,
+`terminal_publish_attempts`, `terminal_next_publish_at`,
+`terminal_publish_error`, and `terminal_published_at`. Publication status is
+one of `disabled`, `pending`, `failed`, or `published`.
+
 Backends and operators can list stored messages by delivery status:
 
 ```text
@@ -306,6 +312,42 @@ Terminal messages are eventually removed by the downlink retention worker.
 `delivered`, `failed`, and `discarded` each have independent TTL settings in
 `downlink.retention`. The cleanup worker does not delete `pending` or `sent`
 messages, because those are still part of the delivery/retry lifecycle.
+
+## Terminal Event Envelope
+
+When `downlink.terminal.publisher.type` is `nsq`, the gateway publishes this
+versioned JSON envelope to the configured topic:
+
+```json
+{
+  "version": 1,
+  "type": "z_courier.downlink.terminal",
+  "event_id": "message-1:failed",
+  "message_id": "message-1",
+  "client_id": "dev-client",
+  "device_id": "device-1",
+  "msg_id": 2001,
+  "trace_id": "trace-1",
+  "terminal_status": "failed",
+  "terminal_reason": "max_attempts_exceeded",
+  "policy_name": "critical",
+  "attempts": 10,
+  "message_created_at": "2026-07-12T08:00:00Z",
+  "terminal_at": "2026-07-12T08:01:00Z",
+  "gateway_node": "gateway-a"
+}
+```
+
+The envelope intentionally has no `body` field. It also excludes internal
+tokens, HMAC material, and storage credentials. Publication is at least once:
+consumers must de-duplicate using `message_id + terminal_status` (or the
+equivalent deterministic `event_id`). A message can produce a `failed` event
+and, after an operator action, a distinct `discarded` event.
+
+Publisher retries use their own persisted outbox state and do not retry client
+delivery. A failed publication is visible through the message status fields
+and can later become `published` without changing the message's terminal
+status or reason.
 
 ## Downlink Delivery ACK
 

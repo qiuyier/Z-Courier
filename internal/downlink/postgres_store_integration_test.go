@@ -126,6 +126,13 @@ func TestPostgresStoreIdempotentSaveIntegration(t *testing.T) {
 	if !containsMessageID(due, messageID) {
 		t.Fatalf("message %s was not due at stored ACK deadline", messageID)
 	}
+	claimed, err := store.ClaimDueRetry(ctx, ackDeadline, time.Hour, 100, "gateway-a", time.Minute)
+	if err != nil {
+		t.Fatalf("ClaimDueRetry(at deadline) error = %v", err)
+	}
+	if !containsMessageID(claimed, messageID) {
+		t.Fatalf("message %s was not claimed at stored ACK deadline", messageID)
+	}
 
 	legacySentAt := sentAt.Add(-2 * time.Second)
 	if _, err := store.db.ExecContext(ctx, `
@@ -145,26 +152,83 @@ INSERT INTO z_courier_downlink_messages (
 	}
 
 	failedAt := sentAt.Add(time.Second)
-	if err := store.MarkFailed(ctx, messageID, failureReasonMaxAge, failedAt, false); err != nil {
+	if err := store.MarkFailed(ctx, messageID, TerminalTransition{
+		Reason:      failureReasonMaxAge,
+		GatewayNode: "gateway-a",
+		At:          failedAt,
+		Publish:     true,
+	}); err != nil {
 		t.Fatalf("MarkFailed(not attempted) error = %v", err)
 	}
 	failed, ok, err := store.Get(ctx, messageID)
 	if err != nil || !ok {
 		t.Fatalf("Get(failed) = ok:%v err:%v", ok, err)
 	}
-	if failed.Status != MessageStatusFailed || failed.Attempts != 1 || failed.LastError != failureReasonMaxAge {
+	if failed.Status != MessageStatusFailed || failed.Attempts != 1 || failed.LastError != failureReasonMaxAge ||
+		failed.TerminalReason != failureReasonMaxAge || failed.TerminalPublishStatus != TerminalPublicationPending {
 		t.Fatalf("failed message = status:%q attempts:%d last_error:%q", failed.Status, failed.Attempts, failed.LastError)
 	}
 
-	if err := store.MarkFailed(ctx, messageID, failureReasonMaxAttempts, failedAt.Add(time.Second), true); err != nil {
+	records, err := store.ClaimDueTerminal(ctx, failedAt, 10, "gateway-a", time.Minute)
+	if err != nil {
+		t.Fatalf("ClaimDueTerminal() error = %v", err)
+	}
+	if len(records) != 1 || records[0].Event.MessageID != messageID ||
+		records[0].Event.TerminalReason != failureReasonMaxAge || records[0].Event.GatewayNode != "gateway-a" {
+		t.Fatalf("terminal records = %+v", records)
+	}
+	nextPublishAt := failedAt.Add(5 * time.Second)
+	if err := store.MarkTerminalPublishFailed(ctx, messageID, MessageStatusFailed, "nsq unavailable", nextPublishAt); err != nil {
+		t.Fatalf("MarkTerminalPublishFailed() error = %v", err)
+	}
+	beforePublish, err := store.ClaimDueTerminal(ctx, nextPublishAt.Add(-time.Millisecond), 10, "gateway-b", time.Minute)
+	if err != nil {
+		t.Fatalf("ClaimDueTerminal(before retry) error = %v", err)
+	}
+	if len(beforePublish) != 0 {
+		t.Fatalf("terminal records before retry = %+v, want empty", beforePublish)
+	}
+	records, err = store.ClaimDueTerminal(ctx, nextPublishAt, 10, "gateway-b", time.Minute)
+	if err != nil || len(records) != 1 {
+		t.Fatalf("ClaimDueTerminal(retry) = %+v, err:%v", records, err)
+	}
+	if err := store.MarkTerminalPublished(ctx, messageID, MessageStatusFailed, nextPublishAt.Add(time.Second)); err != nil {
+		t.Fatalf("MarkTerminalPublished() error = %v", err)
+	}
+	if err := store.MarkTerminalPublishFailed(
+		ctx,
+		messageID,
+		MessageStatusFailed,
+		"stale worker failure",
+		nextPublishAt.Add(time.Minute),
+	); err != nil {
+		t.Fatalf("MarkTerminalPublishFailed(after published) error = %v", err)
+	}
+
+	if err := store.MarkFailed(ctx, messageID, TerminalTransition{
+		Reason:    failureReasonMaxAttempts,
+		At:        failedAt.Add(time.Second),
+		Attempted: true,
+	}); err != nil {
 		t.Fatalf("MarkFailed(attempted) error = %v", err)
 	}
 	failed, ok, err = store.Get(ctx, messageID)
 	if err != nil || !ok {
 		t.Fatalf("Get(failed after attempt) = ok:%v err:%v", ok, err)
 	}
-	if failed.Attempts != 2 || failed.LastError != failureReasonMaxAttempts {
-		t.Fatalf("failed after attempt = attempts:%d last_error:%q", failed.Attempts, failed.LastError)
+	if failed.Attempts != 2 || failed.LastError != failureReasonMaxAttempts ||
+		failed.TerminalReason != failureReasonMaxAge || failed.TerminalPublishStatus != TerminalPublicationPublished ||
+		failed.TerminalPublishAttempts != 2 {
+		t.Fatalf("failed after attempt = %+v", failed)
+	}
+	var eventCount int
+	if err := store.db.QueryRowContext(ctx, `
+SELECT COUNT(*) FROM z_courier_downlink_terminal_events WHERE message_id = $1
+`, messageID).Scan(&eventCount); err != nil {
+		t.Fatalf("count terminal events: %v", err)
+	}
+	if eventCount != 1 {
+		t.Fatalf("terminal event count = %d, want 1", eventCount)
 	}
 }
 

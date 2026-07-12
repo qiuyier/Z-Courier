@@ -200,6 +200,18 @@ func (f *Forwarder) Forward(ctx context.Context, packet *protocol.Packet) (*rout
 	}, nil
 }
 
+// Publish sends an already encoded payload through the same bounded producer
+// selection and retry behavior used by upstream forwarding.
+func (f *Forwarder) Publish(ctx context.Context, body []byte) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return f.publish(ctx, body)
+}
+
 func (f *Forwarder) publish(ctx context.Context, body []byte) error {
 	if len(f.endpoints) == 0 {
 		return fmt.Errorf("nsq forwarder: no producers")

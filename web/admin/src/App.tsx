@@ -3520,6 +3520,10 @@ function MessageLookupPanel({
             <DarkLineItem label="MsgID" value={lookupState.data.msg_id?.toLocaleString() ?? "--"} />
             <DarkLineItem label="Policy" value={lookupState.data.policy_name || "default"} />
             <DarkLineItem label="Attempts" value={lookupState.data.attempts?.toLocaleString() ?? "0"} />
+            {lookupState.data.terminal_reason && <DarkLineItem label="Terminal Reason" value={lookupState.data.terminal_reason} />}
+            {lookupState.data.terminal_publish_status && (
+              <DarkLineItem label="Dead Letter" value={lookupState.data.terminal_publish_status} />
+            )}
           </div>
           <div className="mt-4 border-t border-white/10 pt-4">
             <MessageActionButtons canRepairMessages={canRepairMessages} message={lookupState.data} onAction={onMessageAction} variant="dark" />
@@ -3577,6 +3581,14 @@ function MessageCard({
           <MessageField label="Sent" value={formatOptionalDate(message.sent_at)} />
           <MessageField label="Delivered" value={formatOptionalDate(message.delivered_at)} />
           <MessageField label="Last Error" value={message.last_error || "--"} wide />
+          {message.terminal_reason && <MessageField label="Terminal Reason" value={message.terminal_reason} />}
+          {message.terminal_publish_status && <MessageField label="Dead Letter" value={message.terminal_publish_status} />}
+          {message.terminal_publish_status && (
+            <MessageField label="DL Attempts" value={message.terminal_publish_attempts?.toLocaleString() ?? "0"} />
+          )}
+          {message.terminal_next_publish_at && <MessageField label="DL Next" value={formatOptionalDate(message.terminal_next_publish_at)} />}
+          {message.terminal_published_at && <MessageField label="DL Published" value={formatOptionalDate(message.terminal_published_at)} />}
+          {message.terminal_publish_error && <MessageField label="DL Error" value={message.terminal_publish_error} wide />}
         </div>
       </div>
     </article>
@@ -4150,7 +4162,7 @@ function DiagnosticsPage({
         </section>
       )}
 
-      <section className="grid gap-5 xl:grid-cols-3">
+      <section className="grid gap-5 xl:grid-cols-2">
         <DiagnosticsConfigPanel title="Internal HTTP" rows={[
           ["Enabled", diagnostics.internal_http.enabled ? "enabled" : "disabled"],
           ["Address", diagnostics.internal_http.addr || "--"],
@@ -4166,6 +4178,12 @@ function DiagnosticsPage({
         <DiagnosticsConfigPanel title="Downlink Policies" rows={[
           ["Count", (diagnostics.downlink.policy_count ?? 1).toLocaleString()],
           ["Names", (diagnostics.downlink.policy_names ?? ["default"]).join(", ")],
+        ]} />
+        <DiagnosticsConfigPanel title="Terminal Events" rows={[
+          ["Publisher", diagnostics.downlink.terminal_publisher || "none"],
+          ["Topic", diagnostics.downlink.terminal_topic || "--"],
+          ["Scan Interval", diagnostics.downlink.terminal_retry_interval || "--"],
+          ["Retry Delay", diagnostics.downlink.terminal_retry_delay || "--"],
         ]} />
       </section>
     </div>

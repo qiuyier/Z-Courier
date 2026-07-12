@@ -212,6 +212,13 @@ by a V12.2.2-or-later message. The value remains stable when operators change
 policy rules for newly accepted messages. Pre-V12.2.2 rows without a snapshot
 use the current MsgID policy as a compatibility fallback.
 
+For terminal messages, `MessageStatusResponse` also exposes
+`TerminalReason`, `TerminalAt`, `TerminalPublishStatus`,
+`TerminalPublishAttempts`, `TerminalNextPublishAt`,
+`TerminalPublishError`, and `TerminalPublishedAt`. These fields describe the
+gateway's asynchronous terminal-event outbox; they do not indicate another
+client delivery attempt. The backend SDK does not consume NSQ events itself.
+
 `PushBatch` treats HTTP `207 Multi-Status` as a decoded result, not as a method
 error. Check `batch.Failed` and each item in `batch.Results` for partial or total
 item failure.

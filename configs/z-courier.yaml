@@ -98,6 +98,16 @@ downlink:
     scan_limit: 100
     bind_flush_limit: 100
   policies: []
+  terminal:
+    publisher:
+      type: none
+    retry_interval: 5s
+    retry_delay: 30s
+    retry_jitter: 0s
+    backoff_multiplier: 2
+    max_retry_delay: 5m
+    retry_lease: 30s
+    scan_limit: 100
   retention:
     delivered_ttl: 24h
     failed_ttl: 168h

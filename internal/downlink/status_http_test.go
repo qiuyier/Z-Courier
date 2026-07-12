@@ -67,6 +67,26 @@ func TestStatusHandlerGetOK(t *testing.T) {
 	}
 }
 
+func TestResponseFromMessageIncludesTerminalPublicationState(t *testing.T) {
+	now := time.Unix(1780000000, 0).UTC()
+	response := responseFromMessage(Message{
+		MessageID:               "message-1",
+		Status:                  MessageStatusFailed,
+		TerminalReason:          TerminalReasonMaxAttempts,
+		TerminalAt:              now,
+		TerminalPublishStatus:   TerminalPublicationFailed,
+		TerminalPublishAttempts: 2,
+		TerminalNextPublishAt:   now.Add(time.Minute),
+		TerminalPublishError:    "nsq unavailable",
+	})
+	if response.TerminalReason != TerminalReasonMaxAttempts ||
+		response.TerminalPublishStatus != string(TerminalPublicationFailed) ||
+		response.TerminalPublishAttempts != 2 || response.TerminalAt == nil ||
+		response.TerminalNextPublishAt == nil || response.TerminalPublishError != "nsq unavailable" {
+		t.Fatalf("terminal response = %+v", response)
+	}
+}
+
 func TestStatusHandlerPostOK(t *testing.T) {
 	store := NewMemoryStore()
 	if _, err := store.Save(context.Background(), Message{

@@ -637,6 +637,56 @@ The retry worker marks a message `failed` with `max_attempts_exceeded` or
 `max_age_exceeded` before another delivery can violate the selected policy.
 The status/list APIs and admin console expose the persisted `policy_name`.
 
+## Downlink Terminal Events
+
+Terminal events export bounded metadata when a reliable message becomes
+`failed` or is manually `discarded`. Publication is disabled by default:
+
+```yaml
+downlink:
+  terminal:
+    publisher:
+      type: nsq
+      nsq:
+        nsqd_addrs:
+          - nsqd:4150
+        topic: downlink_terminal_events
+        dial_timeout: 1s
+        read_timeout: 60s
+        write_timeout: 1s
+        publish_mode: round_robin
+        retry_attempts: 1
+    retry_interval: 5s
+    retry_delay: 30s
+    retry_jitter: 0s
+    backoff_multiplier: 2
+    max_retry_delay: 5m
+    retry_lease: 30s
+    scan_limit: 100
+```
+
+- `publisher.type`: `none` or `nsq`. `none` preserves the pre-V12.3 behavior.
+- `publisher.nsq`: standard bounded NSQ producer settings. Producers publish
+  directly to `nsqd`; `nsqlookupd` is not used for publication.
+- `retry_interval`: how often a gateway claims due terminal events.
+- `retry_delay`, `retry_jitter`, `backoff_multiplier`, `max_retry_delay`:
+  independent publication retry schedule. It never causes another client
+  delivery attempt.
+- `retry_lease`: claim lease shared by gateway nodes using the same store.
+- `scan_limit`: maximum outbox events claimed by one worker scan.
+
+The publisher requires downlink storage. PostgreSQL persists the message
+terminal transition and its outbox event atomically; cluster nodes then use
+independent claims so only one node publishes a due event at a time. Delivery
+is at least once, so consumers must de-duplicate by `message_id` plus
+`terminal_status`. The event never contains the original message Body or
+gateway credentials. HTTP publication is not implemented in V12.3.1.
+
+Rows that were already terminal before upgrading are not exported
+retroactively. Retention keeps a terminal message while its current event is
+`pending` or `failed`, so a publication retry is not deleted underneath the
+worker.
+
 ## Downlink Retention
 
 ```yaml

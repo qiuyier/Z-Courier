@@ -9,15 +9,17 @@ import (
 )
 
 type MemoryStore struct {
-	mu       sync.RWMutex
-	messages map[string]Message
-	now      func() time.Time
+	mu             sync.RWMutex
+	messages       map[string]Message
+	terminalEvents map[string]TerminalRecord
+	now            func() time.Time
 }
 
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
-		messages: make(map[string]Message),
-		now:      time.Now,
+		messages:       make(map[string]Message),
+		terminalEvents: make(map[string]TerminalRecord),
+		now:            time.Now,
 	}
 }
 
@@ -291,12 +293,12 @@ func (s *MemoryStore) MarkAttemptFailed(ctx context.Context, messageID, reason s
 	return nil
 }
 
-func (s *MemoryStore) MarkFailed(ctx context.Context, messageID, reason string, failedAt time.Time, attempted bool) error {
+func (s *MemoryStore) MarkFailed(ctx context.Context, messageID string, transition TerminalTransition) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if failedAt.IsZero() {
-		failedAt = s.now()
+	if transition.At.IsZero() {
+		transition.At = s.now()
 	}
 
 	s.mu.Lock()
@@ -309,15 +311,37 @@ func (s *MemoryStore) MarkFailed(ctx context.Context, messageID, reason string, 
 	if message.Status == MessageStatusDelivered || message.Status == MessageStatusDiscarded {
 		return nil
 	}
+	firstTransition := message.Status != MessageStatusFailed || message.TerminalReason == ""
 	message.Status = MessageStatusFailed
-	if attempted {
+	if transition.Attempted {
 		message.Attempts++
 	}
-	message.LastError = reason
+	message.LastError = transition.Reason
 	message.NextRetryAt = time.Time{}
 	message.ClaimOwner = ""
 	message.ClaimUntil = time.Time{}
-	message.UpdatedAt = failedAt
+	message.UpdatedAt = transition.At
+	if firstTransition {
+		message.TerminalReason = transition.Reason
+		message.TerminalAt = transition.At
+		message.TerminalPublishStatus = terminalPublicationStatus(transition.Publish)
+		message.TerminalPublishAttempts = 0
+		message.TerminalNextPublishAt = time.Time{}
+		message.TerminalPublishError = ""
+		message.TerminalPublishedAt = time.Time{}
+		if transition.Publish {
+			event := newTerminalEvent(message, MessageStatusFailed, transition)
+			record, exists := s.terminalEvents[event.EventID]
+			if !exists {
+				record = TerminalRecord{
+					Event:  event,
+					Status: TerminalPublicationPending,
+				}
+				s.terminalEvents[event.EventID] = record
+			}
+			applyTerminalRecord(&message, record)
+		}
+	}
 	s.messages[messageID] = message
 	return nil
 }
@@ -346,17 +370,27 @@ func (s *MemoryStore) Requeue(ctx context.Context, messageID string, requeuedAt 
 	message.SessionID = ""
 	message.SentAt = time.Time{}
 	message.DeliveredAt = time.Time{}
+	message.TerminalReason = ""
+	message.TerminalAt = time.Time{}
+	message.TerminalPublishStatus = ""
+	message.TerminalPublishAttempts = 0
+	message.TerminalNextPublishAt = time.Time{}
+	message.TerminalPublishError = ""
+	message.TerminalPublishedAt = time.Time{}
 	message.UpdatedAt = requeuedAt
 	s.messages[messageID] = message
 	return nil
 }
 
-func (s *MemoryStore) Discard(ctx context.Context, messageID, reason string, discardedAt time.Time) error {
+func (s *MemoryStore) Discard(ctx context.Context, messageID, reason string, transition TerminalTransition) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if discardedAt.IsZero() {
-		discardedAt = s.now()
+	if transition.At.IsZero() {
+		transition.At = s.now()
+	}
+	if transition.Reason == "" {
+		transition.Reason = TerminalReasonOperatorDiscard
 	}
 
 	s.mu.Lock()
@@ -366,13 +400,172 @@ func (s *MemoryStore) Discard(ctx context.Context, messageID, reason string, dis
 	if !ok {
 		return ErrMessageNotFound
 	}
+	firstTransition := message.Status != MessageStatusDiscarded || message.TerminalReason == ""
 	message.Status = MessageStatusDiscarded
 	message.LastError = reason
 	message.NextRetryAt = time.Time{}
 	message.ClaimOwner = ""
 	message.ClaimUntil = time.Time{}
-	message.UpdatedAt = discardedAt
+	message.UpdatedAt = transition.At
+	if firstTransition {
+		message.TerminalReason = transition.Reason
+		message.TerminalAt = transition.At
+		message.TerminalPublishStatus = terminalPublicationStatus(transition.Publish)
+		message.TerminalPublishAttempts = 0
+		message.TerminalNextPublishAt = time.Time{}
+		message.TerminalPublishError = ""
+		message.TerminalPublishedAt = time.Time{}
+		if transition.Publish {
+			event := newTerminalEvent(message, MessageStatusDiscarded, transition)
+			record, exists := s.terminalEvents[event.EventID]
+			if !exists {
+				record = TerminalRecord{
+					Event:  event,
+					Status: TerminalPublicationPending,
+				}
+				s.terminalEvents[event.EventID] = record
+			}
+			applyTerminalRecord(&message, record)
+		}
+	}
 	s.messages[messageID] = message
+	return nil
+}
+
+func (s *MemoryStore) ClaimDueTerminal(
+	ctx context.Context,
+	now time.Time,
+	limit int,
+	owner string,
+	lease time.Duration,
+) ([]TerminalRecord, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if now.IsZero() {
+		now = s.now()
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+	if lease <= 0 {
+		lease = 30 * time.Second
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	records := make([]TerminalRecord, 0)
+	for _, record := range s.terminalEvents {
+		if record.Status != TerminalPublicationPending && record.Status != TerminalPublicationFailed {
+			continue
+		}
+		if !record.NextAttemptAt.IsZero() && record.NextAttemptAt.After(now) {
+			continue
+		}
+		if !record.ClaimUntil.IsZero() && record.ClaimUntil.After(now) {
+			continue
+		}
+		records = append(records, record)
+	}
+	sort.Slice(records, func(left, right int) bool {
+		if records[left].Event.TerminalAt.Equal(records[right].Event.TerminalAt) {
+			return records[left].Event.EventID < records[right].Event.EventID
+		}
+		return records[left].Event.TerminalAt.Before(records[right].Event.TerminalAt)
+	})
+	if len(records) > limit {
+		records = records[:limit]
+	}
+	for index := range records {
+		records[index].ClaimOwner = owner
+		records[index].ClaimUntil = now.Add(lease)
+		s.terminalEvents[records[index].Event.EventID] = records[index]
+	}
+	return records, nil
+}
+
+func (s *MemoryStore) MarkTerminalPublished(
+	ctx context.Context,
+	messageID string,
+	status MessageStatus,
+	publishedAt time.Time,
+) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if publishedAt.IsZero() {
+		publishedAt = s.now()
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	key := terminalEventID(messageID, status)
+	record, ok := s.terminalEvents[key]
+	if !ok {
+		return ErrMessageNotFound
+	}
+	if record.Status == TerminalPublicationPublished {
+		return nil
+	}
+	record.Status = TerminalPublicationPublished
+	record.PublishAttempts++
+	record.NextAttemptAt = time.Time{}
+	record.LastError = ""
+	record.PublishedAt = publishedAt
+	record.ClaimOwner = ""
+	record.ClaimUntil = time.Time{}
+	s.terminalEvents[key] = record
+
+	if message, ok := s.messages[messageID]; ok && message.Status == status {
+		message.TerminalPublishStatus = TerminalPublicationPublished
+		message.TerminalPublishAttempts = record.PublishAttempts
+		message.TerminalNextPublishAt = time.Time{}
+		message.TerminalPublishError = ""
+		message.TerminalPublishedAt = publishedAt
+		s.messages[messageID] = message
+	}
+	return nil
+}
+
+func (s *MemoryStore) MarkTerminalPublishFailed(
+	ctx context.Context,
+	messageID string,
+	status MessageStatus,
+	reason string,
+	nextAttemptAt time.Time,
+) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	key := terminalEventID(messageID, status)
+	record, ok := s.terminalEvents[key]
+	if !ok {
+		return ErrMessageNotFound
+	}
+	if record.Status == TerminalPublicationPublished {
+		return nil
+	}
+	record.Status = TerminalPublicationFailed
+	record.PublishAttempts++
+	record.NextAttemptAt = nextAttemptAt
+	record.LastError = reason
+	record.ClaimOwner = ""
+	record.ClaimUntil = time.Time{}
+	s.terminalEvents[key] = record
+
+	if message, ok := s.messages[messageID]; ok && message.Status == status {
+		message.TerminalPublishStatus = TerminalPublicationFailed
+		message.TerminalPublishAttempts = record.PublishAttempts
+		message.TerminalNextPublishAt = nextAttemptAt
+		message.TerminalPublishError = reason
+		s.messages[messageID] = message
+	}
 	return nil
 }
 
@@ -393,6 +586,9 @@ func (s *MemoryStore) DeleteExpired(ctx context.Context, status MessageStatus, b
 	messages := make([]Message, 0)
 	for _, message := range s.messages {
 		if message.Status != status {
+			continue
+		}
+		if s.hasUnpublishedTerminalEvent(message.MessageID) {
 			continue
 		}
 		updatedAt := retentionTime(message)
@@ -416,9 +612,23 @@ func (s *MemoryStore) DeleteExpired(ctx context.Context, status MessageStatus, b
 
 	for _, message := range messages {
 		delete(s.messages, message.MessageID)
+		delete(s.terminalEvents, terminalEventID(message.MessageID, MessageStatusFailed))
+		delete(s.terminalEvents, terminalEventID(message.MessageID, MessageStatusDiscarded))
 	}
 
 	return len(messages), nil
+}
+
+func (s *MemoryStore) hasUnpublishedTerminalEvent(messageID string) bool {
+	for _, record := range s.terminalEvents {
+		if record.Event.MessageID != messageID {
+			continue
+		}
+		if record.Status == TerminalPublicationPending || record.Status == TerminalPublicationFailed {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *MemoryStore) Close() error {

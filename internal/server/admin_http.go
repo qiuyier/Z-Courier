@@ -101,18 +101,22 @@ type adminConsoleAuditSummary struct {
 }
 
 type adminDownlinkSummary struct {
-	StorageType     string   `json:"storage_type"`
-	StoreConfigured bool     `json:"store_configured"`
-	PolicyCount     int      `json:"policy_count"`
-	PolicyNames     []string `json:"policy_names"`
-	RetryInterval   string   `json:"retry_interval,omitempty"`
-	RetryDelay      string   `json:"retry_delay,omitempty"`
-	RetryJitter     string   `json:"retry_jitter,omitempty"`
-	AckTimeout      string   `json:"ack_timeout,omitempty"`
-	RetryLease      string   `json:"retry_lease,omitempty"`
-	MaxAttempts     int      `json:"max_attempts,omitempty"`
-	ScanLimit       int      `json:"scan_limit,omitempty"`
-	BindFlushLimit  int      `json:"bind_flush_limit,omitempty"`
+	StorageType           string   `json:"storage_type"`
+	StoreConfigured       bool     `json:"store_configured"`
+	PolicyCount           int      `json:"policy_count"`
+	PolicyNames           []string `json:"policy_names"`
+	TerminalPublisher     string   `json:"terminal_publisher"`
+	TerminalTopic         string   `json:"terminal_topic,omitempty"`
+	TerminalRetryInterval string   `json:"terminal_retry_interval,omitempty"`
+	TerminalRetryDelay    string   `json:"terminal_retry_delay,omitempty"`
+	RetryInterval         string   `json:"retry_interval,omitempty"`
+	RetryDelay            string   `json:"retry_delay,omitempty"`
+	RetryJitter           string   `json:"retry_jitter,omitempty"`
+	AckTimeout            string   `json:"ack_timeout,omitempty"`
+	RetryLease            string   `json:"retry_lease,omitempty"`
+	MaxAttempts           int      `json:"max_attempts,omitempty"`
+	ScanLimit             int      `json:"scan_limit,omitempty"`
+	BindFlushLimit        int      `json:"bind_flush_limit,omitempty"`
 }
 
 type adminUpstreamSummary struct {
@@ -451,18 +455,22 @@ func adminDownlinkFromConfig(config Config) adminDownlinkSummary {
 		policyNames = append(policyNames, rule.Policy.Name)
 	}
 	return adminDownlinkSummary{
-		StorageType:     config.DownlinkStorage.Type,
-		StoreConfigured: config.DownlinkStore != nil,
-		PolicyCount:     len(policyNames),
-		PolicyNames:     policyNames,
-		RetryInterval:   durationString(config.DownlinkDelivery.RetryInterval),
-		RetryDelay:      durationString(config.DownlinkDelivery.RetryDelay),
-		RetryJitter:     durationString(config.DownlinkDelivery.RetryJitter),
-		AckTimeout:      durationString(config.DownlinkDelivery.AckTimeout),
-		RetryLease:      durationString(config.DownlinkDelivery.RetryLease),
-		MaxAttempts:     config.DownlinkDelivery.MaxAttempts,
-		ScanLimit:       config.DownlinkDelivery.ScanLimit,
-		BindFlushLimit:  config.DownlinkDelivery.BindFlushLimit,
+		StorageType:           config.DownlinkStorage.Type,
+		StoreConfigured:       config.DownlinkStore != nil,
+		PolicyCount:           len(policyNames),
+		PolicyNames:           policyNames,
+		TerminalPublisher:     config.DownlinkTerminal.PublisherType,
+		TerminalTopic:         config.DownlinkTerminal.NSQ.Topic,
+		TerminalRetryInterval: durationString(config.DownlinkTerminal.RetryInterval),
+		TerminalRetryDelay:    durationString(config.DownlinkTerminal.RetryDelay),
+		RetryInterval:         durationString(config.DownlinkDelivery.RetryInterval),
+		RetryDelay:            durationString(config.DownlinkDelivery.RetryDelay),
+		RetryJitter:           durationString(config.DownlinkDelivery.RetryJitter),
+		AckTimeout:            durationString(config.DownlinkDelivery.AckTimeout),
+		RetryLease:            durationString(config.DownlinkDelivery.RetryLease),
+		MaxAttempts:           config.DownlinkDelivery.MaxAttempts,
+		ScanLimit:             config.DownlinkDelivery.ScanLimit,
+		BindFlushLimit:        config.DownlinkDelivery.BindFlushLimit,
 	}
 }
 

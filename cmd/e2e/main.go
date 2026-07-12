@@ -21,6 +21,7 @@ import (
 	"github.com/aceld/zinx/znet"
 	"github.com/bytedance/sonic"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	nsq "github.com/nsqio/go-nsq"
 	"github.com/qiuyier/Z-Courier/internal/downlink"
 	"github.com/qiuyier/Z-Courier/internal/protocol"
 	"github.com/qiuyier/Z-Courier/pkg/sdk/signing"
@@ -62,6 +63,9 @@ type config struct {
 	CheckAdminStorage      bool
 	AdminSessionPeerURL    string
 	ExpectPolicyName       string
+	CheckTerminalEvent     bool
+	TerminalNSQDAddress    string
+	ExpectTerminalPolicy   string
 }
 
 func main() {
@@ -103,6 +107,9 @@ func parseFlags() config {
 	flag.BoolVar(&cfg.CheckAdminStorage, "check-admin-storage", false, "verify Redis-backed admin sessions and PostgreSQL admin audit storage")
 	flag.StringVar(&cfg.AdminSessionPeerURL, "admin-session-peer-url", "", "peer gateway internal HTTP base URL used for Redis-backed admin session lookup; defaults to expect-session-url or internal-url")
 	flag.StringVar(&cfg.ExpectPolicyName, "expect-policy-name", "", "expected persisted delivery policy for MsgID 2001; empty disables the check")
+	flag.BoolVar(&cfg.CheckTerminalEvent, "check-terminal-event", false, "force a message to terminal failure and verify its NSQ event")
+	flag.StringVar(&cfg.TerminalNSQDAddress, "terminal-nsqd-address", "127.0.0.1:14150", "NSQ TCP address used to consume terminal events")
+	flag.StringVar(&cfg.ExpectTerminalPolicy, "expect-terminal-policy", "integration-terminal", "expected policy for the terminal-event E2E message")
 	flag.Parse()
 
 	cfg.InternalURL = strings.TrimRight(cfg.InternalURL, "/")
@@ -203,9 +210,19 @@ func run(ctx context.Context, cfg config) error {
 	offlineMessageID := fmt.Sprintf("e2e-%d-offline", runID)
 	onlineMessageID := fmt.Sprintf("e2e-%d-online", runID)
 	reconnectMessageID := fmt.Sprintf("e2e-%d-reconnect", runID)
+	terminalMessageID := fmt.Sprintf("e2e-%d-terminal", runID)
 	upstreamMessageID := fmt.Sprintf("e2e-%d-upstream", runID)
 	offlineBody := []byte("offline-before-client")
 	onlineBody := []byte("online-after-client")
+
+	var terminalCollector *terminalEventCollector
+	if cfg.CheckTerminalEvent {
+		terminalCollector, err = newTerminalEventCollector(ctx, cfg.TerminalNSQDAddress, runID)
+		if err != nil {
+			return fmt.Errorf("start terminal event collector: %w", err)
+		}
+		defer terminalCollector.Close()
+	}
 
 	fmt.Println("checking offline queue and idempotency path")
 	offlineCreated, err := pushDownlink(ctx, cfg, offlineMessageID, offlineBody, http.StatusAccepted)
@@ -339,6 +356,12 @@ func run(ctx context.Context, cfg config) error {
 			return err
 		}
 		client = reconnected
+	}
+
+	if cfg.CheckTerminalEvent {
+		if err := checkTerminalEvent(ctx, cfg, db, terminalCollector, terminalMessageID); err != nil {
+			return err
+		}
 	}
 
 	fmt.Println("checking NSQ upstream publish path")
@@ -934,14 +957,26 @@ func waitPostgres(ctx context.Context, db *sql.DB) error {
 }
 
 func pushDownlink(ctx context.Context, cfg config, messageID string, body []byte, wantStatus int) (downlink.PushResponse, error) {
+	return pushDownlinkTarget(ctx, cfg, cfg.DeviceID, 2001, messageID, body, wantStatus)
+}
+
+func pushDownlinkTarget(
+	ctx context.Context,
+	cfg config,
+	deviceID string,
+	msgID uint32,
+	messageID string,
+	body []byte,
+	wantStatus int,
+) (downlink.PushResponse, error) {
 	var zero downlink.PushResponse
 	requestCtx, cancel := context.WithTimeout(ctx, downlinkPushTimeout)
 	defer cancel()
 
 	reqBody, err := sonic.Marshal(downlink.PushRequest{
 		ClientID:    cfg.ClientID,
-		DeviceID:    cfg.DeviceID,
-		MsgID:       2001,
+		DeviceID:    deviceID,
+		MsgID:       msgID,
 		MessageID:   messageID,
 		TraceID:     messageID,
 		AckRequired: true,
@@ -1005,6 +1040,124 @@ func validatePushConflict(response downlink.PushResponse, messageID string) erro
 	if response.MessageID != messageID {
 		return fmt.Errorf("message_id = %q, want %q", response.MessageID, messageID)
 	}
+	return nil
+}
+
+type terminalEventCollector struct {
+	consumer *nsq.Consumer
+	messages chan []byte
+}
+
+func newTerminalEventCollector(ctx context.Context, address string, runID int64) (*terminalEventCollector, error) {
+	consumer, err := nsq.NewConsumer(
+		"downlink_terminal_events",
+		fmt.Sprintf("z-courier-e2e-%d#ephemeral", runID),
+		nsq.NewConfig(),
+	)
+	if err != nil {
+		return nil, err
+	}
+	collector := &terminalEventCollector{
+		consumer: consumer,
+		messages: make(chan []byte, 64),
+	}
+	consumer.AddHandler(nsq.HandlerFunc(func(message *nsq.Message) error {
+		body := bytes.Clone(message.Body)
+		select {
+		case collector.messages <- body:
+		default:
+		}
+		return nil
+	}))
+	if err := consumer.ConnectToNSQD(address); err != nil {
+		consumer.Stop()
+		return nil, err
+	}
+	if err := waitUntil(ctx, func() (bool, error) {
+		return consumer.Stats().Connections > 0, nil
+	}); err != nil {
+		consumer.Stop()
+		return nil, err
+	}
+	return collector, nil
+}
+
+func (c *terminalEventCollector) Close() {
+	if c == nil || c.consumer == nil {
+		return
+	}
+	c.consumer.Stop()
+	<-c.consumer.StopChan
+}
+
+func (c *terminalEventCollector) Wait(ctx context.Context, messageID string) (downlink.TerminalEvent, []byte, error) {
+	for {
+		select {
+		case body := <-c.messages:
+			var event downlink.TerminalEvent
+			if err := sonic.Unmarshal(body, &event); err != nil {
+				return downlink.TerminalEvent{}, nil, err
+			}
+			if event.MessageID == messageID {
+				return event, body, nil
+			}
+		case <-ctx.Done():
+			return downlink.TerminalEvent{}, nil, ctx.Err()
+		}
+	}
+}
+
+func checkTerminalEvent(
+	ctx context.Context,
+	cfg config,
+	db *sql.DB,
+	collector *terminalEventCollector,
+	messageID string,
+) error {
+	fmt.Println("checking terminal failure event path")
+	response, err := pushDownlinkTarget(
+		ctx,
+		cfg,
+		cfg.DeviceID+"-terminal-offline",
+		2999,
+		messageID,
+		[]byte("terminal-body-must-not-be-exported"),
+		http.StatusAccepted,
+	)
+	if err != nil {
+		return fmt.Errorf("push terminal test message: %w", err)
+	}
+	if err := validatePushOutcome(response, messageID, downlink.SubmissionStateCreated, downlink.MessageStatusPending); err != nil {
+		return fmt.Errorf("validate terminal test message: %w", err)
+	}
+	if err := waitMessageStatus(ctx, db, messageID, string(downlink.MessageStatusFailed)); err != nil {
+		return fmt.Errorf("wait terminal test message failed: %w", err)
+	}
+
+	event, raw, err := collector.Wait(ctx, messageID)
+	if err != nil {
+		return fmt.Errorf("wait terminal NSQ event: %w", err)
+	}
+	if bytes.Contains(raw, []byte(`"body"`)) || bytes.Contains(raw, []byte("terminal-body-must-not-be-exported")) {
+		return fmt.Errorf("terminal event leaked message body: %s", raw)
+	}
+	if event.TerminalStatus != downlink.MessageStatusFailed ||
+		event.TerminalReason != downlink.TerminalReasonMaxAttempts ||
+		event.PolicyName != cfg.ExpectTerminalPolicy ||
+		event.MessageID != messageID {
+		return fmt.Errorf("terminal event = %+v", event)
+	}
+	if err := waitUntil(ctx, func() (bool, error) {
+		status, err := getMessageStatus(ctx, cfg, messageID)
+		if err != nil {
+			return false, err
+		}
+		return status.TerminalReason == downlink.TerminalReasonMaxAttempts &&
+			status.TerminalPublishStatus == string(downlink.TerminalPublicationPublished), nil
+	}); err != nil {
+		return fmt.Errorf("wait terminal publication status: %w", err)
+	}
+	fmt.Printf("terminal event published: message_id=%s policy=%s\n", messageID, event.PolicyName)
 	return nil
 }
 

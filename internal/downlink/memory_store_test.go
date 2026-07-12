@@ -404,7 +404,10 @@ func TestMemoryStoreDiscard(t *testing.T) {
 	}
 
 	discardedAt := now.Add(time.Second)
-	if err := store.Discard(context.Background(), "message-1", "manual discard", discardedAt); err != nil {
+	if err := store.Discard(context.Background(), "message-1", "manual discard", TerminalTransition{
+		Reason: TerminalReasonOperatorDiscard,
+		At:     discardedAt,
+	}); err != nil {
 		t.Fatalf("Discard() error = %v", err)
 	}
 
@@ -504,7 +507,11 @@ func TestMemoryStoreMarkFailed(t *testing.T) {
 		t.Fatalf("Save error = %v", err)
 	}
 
-	if err := store.MarkFailed(context.Background(), "message-1", "offline", now.Add(time.Second), true); err != nil {
+	if err := store.MarkFailed(context.Background(), "message-1", TerminalTransition{
+		Reason:    "offline",
+		At:        now.Add(time.Second),
+		Attempted: true,
+	}); err != nil {
 		t.Fatalf("MarkFailed() error = %v", err)
 	}
 

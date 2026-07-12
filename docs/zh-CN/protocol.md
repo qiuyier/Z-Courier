@@ -215,6 +215,45 @@ GET /internal/message/status?message_id=message-1
 字段可以帮助排查它为什么采用当前的 ACK、重试和终止限制。升级前没有快照的旧行会
 按当前 MsgID 策略回退解析。
 
+`failed` 和 `discarded` 消息还可能返回 `terminal_reason`、`terminal_at`、
+`terminal_publish_status`、`terminal_publish_attempts`、
+`terminal_next_publish_at`、`terminal_publish_error` 与
+`terminal_published_at`。发布状态为 `disabled`、`pending`、`failed` 或
+`published`。
+
+## 终态事件协议
+
+当 `downlink.terminal.publisher.type` 配置为 `nsq` 时，网关向指定 topic 发布
+如下版本化 JSON：
+
+```json
+{
+  "version": 1,
+  "type": "z_courier.downlink.terminal",
+  "event_id": "message-1:failed",
+  "message_id": "message-1",
+  "client_id": "dev-client",
+  "device_id": "device-1",
+  "msg_id": 2001,
+  "trace_id": "trace-1",
+  "terminal_status": "failed",
+  "terminal_reason": "max_attempts_exceeded",
+  "policy_name": "critical",
+  "attempts": 10,
+  "message_created_at": "2026-07-12T08:00:00Z",
+  "terminal_at": "2026-07-12T08:01:00Z",
+  "gateway_node": "gateway-a"
+}
+```
+
+这个事件故意不包含 `body`，也不会输出内部 token、HMAC 材料或存储凭据。
+发布语义是 at-least-once，消费者必须使用 `message_id + terminal_status`
+（等价于确定性的 `event_id`）去重。一条消息可以先产生 `failed` 事件，之后被
+管理员 discard 时再产生一条独立的 `discarded` 事件。
+
+终态事件使用独立的持久化 outbox 和重试状态，发布失败不会重新触发客户端投递，
+也不会反复改变消息终态。状态接口会显示发布失败及后续成功的结果。
+
 ## 下行 ACK
 
 如果下行消息要求 ACK，客户端收到后应该发送：

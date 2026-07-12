@@ -68,26 +68,33 @@ const (
 )
 
 type Message struct {
-	MessageID           string
-	ClientID            string
-	DeviceID            string
-	MsgID               uint32
-	Body                []byte
-	IdentityFingerprint []byte
-	AckRequired         bool
-	TraceID             string
-	SessionID           string
-	Policy              DeliveryPolicy
-	Status              MessageStatus
-	Attempts            int
-	NextRetryAt         time.Time
-	LastError           string
-	ClaimOwner          string
-	ClaimUntil          time.Time
-	CreatedAt           time.Time
-	UpdatedAt           time.Time
-	SentAt              time.Time
-	DeliveredAt         time.Time
+	MessageID               string
+	ClientID                string
+	DeviceID                string
+	MsgID                   uint32
+	Body                    []byte
+	IdentityFingerprint     []byte
+	AckRequired             bool
+	TraceID                 string
+	SessionID               string
+	Policy                  DeliveryPolicy
+	Status                  MessageStatus
+	Attempts                int
+	NextRetryAt             time.Time
+	LastError               string
+	TerminalReason          string
+	TerminalAt              time.Time
+	TerminalPublishStatus   TerminalPublicationStatus
+	TerminalPublishAttempts int
+	TerminalNextPublishAt   time.Time
+	TerminalPublishError    string
+	TerminalPublishedAt     time.Time
+	ClaimOwner              string
+	ClaimUntil              time.Time
+	CreatedAt               time.Time
+	UpdatedAt               time.Time
+	SentAt                  time.Time
+	DeliveredAt             time.Time
 }
 
 type MessageListCursor struct {
@@ -127,9 +134,9 @@ type Store interface {
 	MarkSent(context.Context, string, string, time.Time, time.Time) error
 	MarkDelivered(context.Context, string, string, string, time.Time) error
 	MarkAttemptFailed(context.Context, string, string, time.Time) error
-	MarkFailed(context.Context, string, string, time.Time, bool) error
+	MarkFailed(context.Context, string, TerminalTransition) error
 	Requeue(context.Context, string, time.Time) error
-	Discard(context.Context, string, string, time.Time) error
+	Discard(context.Context, string, string, TerminalTransition) error
 	DeleteExpired(context.Context, MessageStatus, time.Time, int) (int, error)
 }
 
