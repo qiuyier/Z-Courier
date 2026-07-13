@@ -6,6 +6,7 @@ import (
 )
 
 const InternalTokenHeader = sdkbackend.InternalTokenHeader
+const MaxBulkRequeueMessages = sdkbackend.MaxBulkRequeueMessages
 
 type PushRequest = sdkbackend.PushRequest
 
@@ -28,6 +29,8 @@ type MessageStatusRequest = sdkbackend.MessageStatusRequest
 type MessageStatusResponse = sdkbackend.MessageStatusResponse
 type ListMessagesResponse = sdkbackend.ListMessagesResponse
 type MessageActionRequest = sdkbackend.MessageActionRequest
+type BulkRequeueRequest = sdkbackend.BulkRequeueRequest
+type BulkRequeueResponse = sdkbackend.BulkRequeueResponse
 type RetryScanRequest = sdkbackend.RetryScanRequest
 type RetryScanResponse = sdkbackend.RetryScanResponse
 

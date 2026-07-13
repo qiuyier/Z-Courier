@@ -12,6 +12,7 @@ import type {
   AdminSessionDisconnectRequest,
   AdminSessionDisconnectResponse,
   AdminSessions,
+  BulkRequeueResponse,
   DownlinkTestPushResponse,
   MessageStatus,
   MessageStatusResponse,
@@ -298,6 +299,10 @@ export async function fetchMessage(messageID: string, signal?: AbortSignal): Pro
 
 export async function requeueMessage(messageID: string, signal?: AbortSignal): Promise<MessageStatusResponse> {
   return postAdminJSON<MessageStatusResponse>("/internal/message/requeue", { message_id: messageID }, signal);
+}
+
+export async function requeueMessages(messageIDs: string[], signal?: AbortSignal): Promise<BulkRequeueResponse> {
+  return postAdminJSON<BulkRequeueResponse>("/internal/messages/requeue", { message_ids: messageIDs }, signal);
 }
 
 export async function discardMessage(

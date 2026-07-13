@@ -239,6 +239,23 @@ GET /internal/message/status?message_id=message-1
 `terminal_published_at`。发布状态为 `disabled`、`pending`、`failed` 或
 `published`。
 
+管理员可以一次选择最多 100 条 `failed` 消息重新入队：
+
+```text
+POST /internal/messages/requeue
+```
+
+```json
+{
+  "message_ids": ["message-1", "message-2"]
+}
+```
+
+网关按请求顺序逐条独立处理，每条消息仍使用自己持久化时记录的投递策略，并执行
+当前队列容量检查。部分或全部条目失败时返回 HTTP `207 Multi-Status`，调用方需要
+检查 `success`、`failed` 和 `results`；前面已经成功的条目不会因为后续失败而回滚。
+空 ID、重复 ID、非 `failed` 状态或超过 100 条的请求会被拒绝。
+
 ## 终态事件协议
 
 当 `downlink.terminal.publisher.type` 配置为 `nsq` 时，网关向指定 topic 发布

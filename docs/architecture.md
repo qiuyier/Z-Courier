@@ -255,6 +255,7 @@ POST /internal/push/batch
 GET /internal/message/status
 GET /internal/messages
 POST /internal/message/requeue
+POST /internal/messages/requeue
 POST /internal/message/discard
 POST /internal/debug/push
 GET /internal/debug/route
@@ -409,6 +410,7 @@ z_courier_downlink_push_total
 z_courier_downlink_ack_total
 z_courier_downlink_ack_latency_seconds
 z_courier_downlink_requeue_total
+z_courier_downlink_bulk_requeue_total
 z_courier_downlink_discard_total
 z_courier_downlink_cleanup_total
 z_courier_downlink_cleanup_deleted_total

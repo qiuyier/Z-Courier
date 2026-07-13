@@ -199,6 +199,27 @@ go run ./cmd/admin discard \
 
 `requeue` 和 `discard` 都需要显式 `-confirm`。`discard` 还需要原因。这样是为了避免误操作。
 
+控制台、内部 HTTP API 和 Go backend SDK 还支持一次选择最多 100 条 `failed`
+消息重新入队：
+
+```text
+POST /internal/messages/requeue
+```
+
+```json
+{"message_ids":["message-1","message-2"]}
+```
+
+请求 ID 必须非空且不能重复，并需要 `message:repair` 权限。网关按请求顺序逐条
+独立执行，继续使用消息记录的投递策略和当前队列容量规则。部分或全部条目失败时
+返回 HTTP `207`，需要查看 `results`；已经成功的条目不会回滚。控制台提供多选、
+确认和逐条结果展示，readonly session 无法勾选或提交。`cmd/admin requeue` 仍然只
+操作单条消息。
+
+批量请求会写一条 `downlink_message_bulk_requeue` 汇总审计，并为每个条目写一条
+`downlink_message_action` 审计；对应批次指标是
+`z_courier_downlink_bulk_requeue_total`，审计数据不包含消息 body。
+
 手动触发一轮 retry scan：
 
 ```bash
@@ -263,7 +284,7 @@ role、admin session id、目标 client/session、message id、trace id、reason
 SIEM 里。
 
 当前会进入审计列表的动作包括：admin session 登录/退出、权限拒绝、本机
-session 断开、下行测试推送、retry scan、requeue 和 discard。所有审计事件
+session 断开、下行测试推送、retry scan、单条/批量 requeue 和 discard。所有审计事件
 也会记录统一指标：
 
 ```text

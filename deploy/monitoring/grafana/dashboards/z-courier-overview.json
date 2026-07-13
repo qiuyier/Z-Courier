@@ -3125,6 +3125,17 @@
           "legendFormat": "discard {{result}}",
           "range": true,
           "refId": "H"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (result) (rate(z_courier_downlink_bulk_requeue_total[1m]))",
+          "legendFormat": "bulk requeue {{result}}",
+          "range": true,
+          "refId": "I"
         }
       ],
       "title": "Admin Actions / sec",

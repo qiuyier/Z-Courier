@@ -83,6 +83,67 @@ test("operator mutation actions are guarded by confirmation dialogs", async ({ p
   await expect(page.getByText(/queued|sent|delivered|accepted/i).first()).toBeVisible();
 });
 
+test("bulk requeue confirms selection and reports partial results", async ({ page }) => {
+  test.skip(expectedRole === "readonly", "readonly role has a dedicated disabled-actions smoke test");
+
+  await login(page);
+  await page.route("**/internal/messages?**", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      json: {
+        code: "ok",
+        status: "failed",
+        limit: 100,
+        has_more: false,
+        total: 2,
+        messages: [
+          { code: "ok", message_id: "failed-console-1", client_id: "client-1", device_id: "device-1", status: "failed" },
+          { code: "ok", message_id: "failed-console-2", client_id: "client-2", device_id: "device-2", status: "failed" },
+        ],
+      },
+      status: 200,
+    });
+  });
+  await page.route("**/internal/messages/requeue", async (route) => {
+    expect(route.request().postDataJSON()).toEqual({ message_ids: ["failed-console-1", "failed-console-2"] });
+    await route.fulfill({
+      contentType: "application/json",
+      json: {
+        code: "partial_failure",
+        total: 2,
+        success: 1,
+        failed: 1,
+        results: [
+          { code: "ok", message_id: "failed-console-1", status: "pending" },
+          {
+            code: "queue_capacity_exceeded",
+            message_id: "failed-console-2",
+            status: "failed",
+            reason: "downlink queue capacity exceeded",
+          },
+        ],
+      },
+      status: 207,
+    });
+  });
+
+  await gotoNav(page, "Messages");
+  await expect(page.getByLabel("Select message failed-console-1")).toBeVisible();
+  await page.getByLabel("Select eligible failed messages").check();
+  await expect(page.getByText("2 / 100")).toBeVisible();
+  await page.getByRole("button", { name: "Requeue selected" }).click();
+
+  const confirmation = page.getByRole("dialog", { name: "2 failed messages" });
+  await expect(confirmation).toBeVisible();
+  await confirmation.getByRole("button", { name: "Requeue selected" }).click();
+
+  const result = page.getByRole("dialog", { name: "1 of 2 requeued" });
+  await expect(result).toBeVisible();
+  await expect(result.getByText("queue_capacity_exceeded")).toBeVisible();
+  await result.getByRole("button", { name: "Done" }).click();
+  await expect(result).toHaveCount(0);
+});
+
 test("readonly sessions keep mutation actions disabled", async ({ page }) => {
   test.skip(expectedRole !== "readonly", "operator/admin role has a dedicated mutation-dialog smoke test");
 
@@ -92,4 +153,6 @@ test("readonly sessions keep mutation actions disabled", async ({ page }) => {
   await expect(page.getByText(/read-only for one or more message operations/i)).toBeVisible();
   await expect(page.getByRole("button", { name: "Run Retry Scan" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Send Test Push" })).toBeDisabled();
+  await expect(page.getByLabel("Select eligible failed messages")).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Requeue selected" })).toBeDisabled();
 });

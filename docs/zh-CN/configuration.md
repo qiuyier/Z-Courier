@@ -197,6 +197,7 @@ internal_http:
 - `/internal/push/batch`
 - `/internal/messages`
 - `/internal/message/requeue`
+- `/internal/messages/requeue`
 - `/internal/message/discard`
 - `/internal/admin/*`
 - `/internal/debug/*`

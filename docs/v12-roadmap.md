@@ -294,6 +294,21 @@ Candidate work:
 - Add load and E2E cases for duplicate submission, hot-device backlog, policy
   exhaustion, terminal event publication, and cluster operation.
 
+Current implementation (V12.5.1):
+
+- Adds `POST /internal/messages/requeue` and `Client.RequeueBatch` for up to 100
+  unique selected `failed` messages. Items run independently in request order,
+  retain recorded-policy semantics, obey queue capacity, and return per-item
+  results with HTTP `207 Multi-Status` for partial or total item failure.
+- Reuses the `message:repair` permission, records one bounded batch summary plus
+  one audit event per item, and exposes
+  `z_courier_downlink_bulk_requeue_total` alongside existing per-item requeue
+  metrics.
+- Adds failed-list selection, a confirmation checkpoint, and persistent
+  per-item outcome feedback to the admin console. Readonly sessions cannot
+  select or submit the operation, and the server independently enforces the
+  same permission.
+
 Acceptance criteria:
 
 - Operators can answer why a message failed and whether it was exported.

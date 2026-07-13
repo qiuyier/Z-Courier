@@ -98,6 +98,14 @@ func newInternalHTTPServer(config Config, logger *zap.Logger, service *downlink.
 		Logger:             logger,
 		Audit:              adminAudit,
 	}), adminPermissionMessageRepair))
+	mux.Handle("/internal/messages/requeue", withConsolePermission(downlink.NewBulkRequeueHandler(downlink.HandlerConfig{
+		Service:            service,
+		InternalToken:      handlerConfig.InternalToken,
+		MaxRequestBodySize: config.InternalMaxRequestBodySize,
+		GatewayNode:        config.GatewayNode,
+		Logger:             logger,
+		Audit:              adminAudit,
+	}), adminPermissionMessageRepair))
 	mux.Handle("/internal/message/discard", withConsolePermission(downlink.NewDiscardHandler(downlink.HandlerConfig{
 		Service:            service,
 		InternalToken:      handlerConfig.InternalToken,

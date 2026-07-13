@@ -312,6 +312,25 @@ POST /internal/message/requeue
 Requeue resets `attempts` to `0`, clears retry metadata, and changes the
 message back to `pending`. Delivered and discarded messages cannot be requeued.
 
+Operators can requeue up to 100 selected `failed` messages in one guarded
+request:
+
+```text
+POST /internal/messages/requeue
+```
+
+```json
+{
+  "message_ids": ["message-1", "message-2"]
+}
+```
+
+The gateway processes items independently in request order and applies each
+message's recorded policy plus the current queue-capacity rules. A partial or
+total item failure returns HTTP `207 Multi-Status`; inspect `success`, `failed`,
+and every entry in `results`. Successful items are not rolled back when a later
+item fails. Empty, duplicate, or non-`failed` selections are rejected.
+
 Messages that should no longer be processed can be discarded:
 
 ```text

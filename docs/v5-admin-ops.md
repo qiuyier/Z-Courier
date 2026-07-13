@@ -396,6 +396,25 @@ When `limit` is omitted or zero, the gateway uses the configured
 `message:retry_scan` console permission, increments
 `z_courier_admin_retry_scan_total`, and emits an `admin_retry_scan` audit log.
 
+Selected terminal failures can be requeued in one guarded request:
+
+```text
+POST /internal/messages/requeue
+```
+
+```json
+{"message_ids":["message-1","message-2"]}
+```
+
+The operation accepts 1 to 100 unique `failed` message IDs and requires the
+`message:repair` permission. Items execute independently in request order using
+their recorded delivery policies and current queue-capacity rules. HTTP `207`
+means at least one item failed; inspect the response `results`. The console
+provides selection, confirmation, and per-item outcome views. The batch emits a
+`downlink_message_bulk_requeue` summary audit event, one
+`downlink_message_action` event per item, and
+`z_courier_downlink_bulk_requeue_total`. No message body enters the audit data.
+
 ### Audit Trail
 
 The console exposes a bounded in-memory audit view for recent admin actions on
@@ -590,8 +609,9 @@ message status, list, requeue, discard, route, and sessions endpoints.
 - single-message requeue with `-confirm`
 - single-message discard with `-reason` and `-confirm`
 
-`requeue` and `discard` intentionally operate on one `message_id` at a time.
-Batch repair is not provided by the operator CLI yet.
+The CLI `requeue` and `discard` commands intentionally operate on one
+`message_id` at a time. Guarded bulk requeue is available through the admin
+console, internal HTTP API, and Go backend SDK; it is not a `cmd/admin` command.
 
 ## Mutation Audit Logs
 

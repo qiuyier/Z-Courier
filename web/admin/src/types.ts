@@ -419,6 +419,15 @@ export type AdminMessages = {
   messages?: MessageStatusResponse[];
 };
 
+export type BulkRequeueResponse = {
+  code: string;
+  reason?: string;
+  total: number;
+  success: number;
+  failed: number;
+  results: MessageStatusResponse[];
+};
+
 export type RetryScanResponse = {
   code: string;
   reason?: string;

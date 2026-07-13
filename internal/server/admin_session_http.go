@@ -532,6 +532,7 @@ func adminSessionProtectedPath(path string) bool {
 		"/internal/message/status",
 		"/internal/messages",
 		"/internal/message/requeue",
+		"/internal/messages/requeue",
 		"/internal/message/discard":
 		return true
 	case "/internal/messages/retry/scan":

@@ -215,6 +215,7 @@ client.PushBatch(ctx, batchRequest)
 client.GetMessage(ctx, "message-id")
 client.ListMessages(ctx, backend.ListMessagesRequest{Status: backend.MessageStatusFailed})
 client.Requeue(ctx, "message-id")
+client.RequeueBatch(ctx, []string{"message-1", "message-2"})
 client.Discard(ctx, "message-id", "operator decision")
 ```
 
@@ -227,6 +228,11 @@ client.Discard(ctx, "message-id", "operator decision")
 `TerminalNextPublishAt`、`TerminalPublishError` 和 `TerminalPublishedAt`。
 这些字段描述的是网关异步终态事件 outbox，并不表示再次向客户端投递。backend
 SDK 本身不会消费 NSQ 终态事件。
+
+`RequeueBatch` 最多接受 `backend.MaxBulkRequeueMessages` 个非空且不重复的 ID。
+gateway 只批量处理当前为 `failed` 的消息，并按每条消息已经记录的投递策略和当前
+队列容量独立执行。HTTP `207 Multi-Status` 会被正常解码，不会作为 SDK 方法错误；
+需要检查返回值里的 `Failed` 和每个 `Results` 条目。
 
 非 2xx 响应会返回 `*backend.APIError`。不要解析错误字符串，使用 `errors.As`：
 

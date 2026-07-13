@@ -116,6 +116,7 @@ func TestInternalHTTPRegistersMessageAdminRoutes(t *testing.T) {
 	}{
 		{name: "list", method: http.MethodGet, path: "/internal/messages?status=failed", body: ""},
 		{name: "requeue", method: http.MethodPost, path: "/internal/message/requeue", body: `{"message_id":"missing"}`},
+		{name: "bulk requeue", method: http.MethodPost, path: "/internal/messages/requeue", body: `{"message_ids":["missing"]}`},
 		{name: "discard", method: http.MethodPost, path: "/internal/message/discard", body: `{"message_id":"missing"}`},
 	}
 
@@ -1115,6 +1116,21 @@ func TestInternalHTTPAdminSessionReadonlyDeniesMessageRepair(t *testing.T) {
 	}
 	if denied.Code != "permission_denied" || denied.Role != adminSessionRoleReadonly || denied.Permission != adminPermissionMessageRepair {
 		t.Fatalf("denied response = %+v, want readonly message repair denial", denied)
+	}
+
+	bulkReq := httptest.NewRequest(http.MethodPost, "/internal/messages/requeue", strings.NewReader(`{"message_ids":["missing"]}`))
+	addAdminSessionMutationHeaders(bulkReq, cookie, loginResp.Session.CSRFToken)
+	bulkRec := httptest.NewRecorder()
+	server.Handler.ServeHTTP(bulkRec, bulkReq)
+	if bulkRec.Code != http.StatusForbidden {
+		t.Fatalf("readonly bulk requeue status = %d, want %d, body = %s", bulkRec.Code, http.StatusForbidden, bulkRec.Body.String())
+	}
+	var bulkDenied adminPermissionDeniedResponse
+	if err := sonic.Unmarshal(bulkRec.Body.Bytes(), &bulkDenied); err != nil {
+		t.Fatalf("Unmarshal(bulk denied) error = %v", err)
+	}
+	if bulkDenied.Code != "permission_denied" || bulkDenied.Permission != adminPermissionMessageRepair {
+		t.Fatalf("bulk denied response = %+v, want message repair denial", bulkDenied)
 	}
 
 	directReq := httptest.NewRequest(http.MethodPost, "/internal/message/requeue", strings.NewReader(`{"message_id":"missing"}`))

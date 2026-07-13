@@ -29,6 +29,10 @@ semantic versioning after the first public MVP tag.
   memory and shared-PostgreSQL decisions, capacity-aware requeue, SDK metadata,
   diagnostics, Grafana/alert coverage, real PostgreSQL concurrency tests, and
   two-node cluster E2E.
+- V12.5.1 guarded bulk requeue for up to 100 selected terminal failed messages,
+  with independent capacity-aware execution, per-item HTTP `207` results,
+  operator/admin permission enforcement, summary plus item audit events, Go
+  backend SDK support, and a confirmation/result workflow in the admin console.
 
 ## [v0.11.0] - 2026-07-10
 

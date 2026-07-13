@@ -288,6 +288,14 @@ var (
 		[]string{"result"},
 	)
 
+	downlinkBulkRequeue = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "z_courier_downlink_bulk_requeue_total",
+			Help: "Total number of guarded bulk downlink requeue requests.",
+		},
+		[]string{"result"},
+	)
+
 	downlinkDiscard = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "z_courier_downlink_discard_total",
@@ -588,6 +596,10 @@ func ObserveDownlinkAckLatency(msgID uint32, duration time.Duration) {
 
 func RecordDownlinkRequeue(result string) {
 	downlinkRequeue.WithLabelValues(nonEmpty(result, "unknown")).Inc()
+}
+
+func RecordDownlinkBulkRequeue(result string) {
+	downlinkBulkRequeue.WithLabelValues(nonEmpty(result, "unknown")).Inc()
 }
 
 func RecordDownlinkDiscard(result string) {

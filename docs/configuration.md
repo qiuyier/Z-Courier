@@ -403,8 +403,8 @@ audited as `admin_session_mutation_rejected`, and CSRF rejections increment
 `z_courier_admin_csrf_rejected_total`.
 
 Admin audit events are produced by console and internal admin APIs such as
-login, permission denial, session disconnect, downlink test push, message
-requeue/discard, retry scans, and diagnostics actions. Use `audit.type=postgres`
+login, permission denial, session disconnect, downlink test push, single or bulk
+message requeue, discard, retry scans, and diagnostics actions. Use `audit.type=postgres`
 in production if those events need to remain available after gateway restarts.
 
 When `internal_http.auth.mode` is `hmac`, browser JavaScript cannot create a

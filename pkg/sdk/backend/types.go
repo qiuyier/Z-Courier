@@ -27,6 +27,10 @@ const (
 	SubmissionStateCreated = "created"
 	// SubmissionStateExisting means this request matched an existing durable message.
 	SubmissionStateExisting = "existing"
+
+	// MaxBulkRequeueMessages is the maximum number of failed messages accepted
+	// by one bulk requeue request.
+	MaxBulkRequeueMessages = 100
 )
 
 // PushRequest describes one opaque downlink message.
@@ -170,6 +174,22 @@ type ListMessagesResponse struct {
 type MessageActionRequest struct {
 	MessageID string `json:"message_id"`
 	Reason    string `json:"reason,omitempty"`
+}
+
+// BulkRequeueRequest selects failed messages for independent requeue attempts.
+type BulkRequeueRequest struct {
+	MessageIDs []string `json:"message_ids"`
+}
+
+// BulkRequeueResponse contains one result for every selected message. HTTP 207
+// represents a fully or partially failed batch; inspect Results for details.
+type BulkRequeueResponse struct {
+	Code    string                  `json:"code"`
+	Reason  string                  `json:"reason,omitempty"`
+	Total   int                     `json:"total"`
+	Success int                     `json:"success"`
+	Failed  int                     `json:"failed"`
+	Results []MessageStatusResponse `json:"results"`
 }
 
 // RetryScanRequest triggers one bounded reliable-downlink retry scan.

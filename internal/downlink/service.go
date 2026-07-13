@@ -336,6 +336,28 @@ func (s *Service) Requeue(ctx context.Context, messageID string) (Message, error
 	return s.attachResolvedPolicy(message), nil
 }
 
+// RequeueFailed is the guarded variant used by bulk operator actions. It only
+// accepts terminal failed messages and preserves the original message in error
+// results so callers can report useful per-item context.
+func (s *Service) RequeueFailed(ctx context.Context, messageID string) (Message, error) {
+	message, ok, err := s.MessageStatus(ctx, messageID)
+	if err != nil {
+		return Message{}, err
+	}
+	if !ok {
+		return Message{}, ErrMessageNotFound
+	}
+	if message.Status != MessageStatusFailed {
+		return message, ErrInvalidTransition
+	}
+
+	requeued, err := s.Requeue(ctx, messageID)
+	if err != nil {
+		return message, err
+	}
+	return requeued, nil
+}
+
 func (s *Service) Discard(ctx context.Context, messageID, reason string) (Message, error) {
 	if s.store == nil {
 		return Message{}, ErrStoreNotConfigured

@@ -20,12 +20,13 @@ const (
 	defaultTimeout             = 10 * time.Second
 	defaultMaxResponseBodySize = 1 << 20
 
-	pushPath      = "/internal/push"
-	batchPushPath = "/internal/push/batch"
-	statusPath    = "/internal/message/status"
-	listPath      = "/internal/messages"
-	requeuePath   = "/internal/message/requeue"
-	discardPath   = "/internal/message/discard"
+	pushPath        = "/internal/push"
+	batchPushPath   = "/internal/push/batch"
+	statusPath      = "/internal/message/status"
+	listPath        = "/internal/messages"
+	requeuePath     = "/internal/message/requeue"
+	bulkRequeuePath = "/internal/messages/requeue"
+	discardPath     = "/internal/message/discard"
 )
 
 // Config controls the gateway backend client.
@@ -191,6 +192,22 @@ func (c *Client) Requeue(ctx context.Context, messageID string) (*MessageStatusR
 	return c.messageAction(ctx, requeuePath, messageID, "")
 }
 
+// RequeueBatch independently moves up to MaxBulkRequeueMessages failed
+// messages back to pending. HTTP 207 is decoded as a normal response because
+// individual results carry failures.
+func (c *Client) RequeueBatch(ctx context.Context, messageIDs []string) (*BulkRequeueResponse, error) {
+	request, err := normalizeBulkRequeueRequest(messageIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	var response BulkRequeueResponse
+	if err := c.doJSON(ctx, http.MethodPost, bulkRequeuePath, nil, request, &response); err != nil {
+		return nil, err
+	}
+	return &response, nil
+}
+
 // Discard stops future delivery attempts for a message.
 func (c *Client) Discard(ctx context.Context, messageID, reason string) (*MessageStatusResponse, error) {
 	return c.messageAction(ctx, discardPath, messageID, strings.TrimSpace(reason))
@@ -208,6 +225,30 @@ func (c *Client) messageAction(ctx context.Context, path, messageID, reason stri
 		return nil, err
 	}
 	return &response, nil
+}
+
+func normalizeBulkRequeueRequest(messageIDs []string) (BulkRequeueRequest, error) {
+	if len(messageIDs) == 0 {
+		return BulkRequeueRequest{}, fmt.Errorf("%w: message_ids is required", ErrInvalidArgument)
+	}
+	if len(messageIDs) > MaxBulkRequeueMessages {
+		return BulkRequeueRequest{}, fmt.Errorf("%w: message_ids exceeds limit %d", ErrInvalidArgument, MaxBulkRequeueMessages)
+	}
+
+	normalized := make([]string, 0, len(messageIDs))
+	seen := make(map[string]struct{}, len(messageIDs))
+	for index, messageID := range messageIDs {
+		messageID = strings.TrimSpace(messageID)
+		if messageID == "" {
+			return BulkRequeueRequest{}, fmt.Errorf("%w: message_ids[%d] is required", ErrInvalidArgument, index)
+		}
+		if _, exists := seen[messageID]; exists {
+			return BulkRequeueRequest{}, fmt.Errorf("%w: duplicate message_id %q", ErrInvalidArgument, messageID)
+		}
+		seen[messageID] = struct{}{}
+		normalized = append(normalized, messageID)
+	}
+	return BulkRequeueRequest{MessageIDs: normalized}, nil
 }
 
 func (c *Client) doJSON(ctx context.Context, method, path string, query url.Values, input, output any) error {

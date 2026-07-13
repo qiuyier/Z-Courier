@@ -195,6 +195,41 @@ func TestPushBatchDecodesMultiStatusWithoutReturningError(t *testing.T) {
 	}
 }
 
+func TestRequeueBatchDecodesMultiStatusAndNormalizesIDs(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != bulkRequeuePath {
+			t.Errorf("request = %s %s, want POST %s", r.Method, r.URL.Path, bulkRequeuePath)
+		}
+		var request BulkRequeueRequest
+		if err := sonic.ConfigDefault.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		if len(request.MessageIDs) != 2 || request.MessageIDs[0] != "message-1" || request.MessageIDs[1] != "message-2" {
+			t.Errorf("request = %+v", request)
+		}
+		writeTestJSON(t, w, http.StatusMultiStatus, BulkRequeueResponse{
+			Code:    "partial_failure",
+			Total:   2,
+			Success: 1,
+			Failed:  1,
+			Results: []MessageStatusResponse{
+				{Code: "ok", MessageID: "message-1", Status: MessageStatusPending},
+				{Code: "queue_capacity_exceeded", MessageID: "message-2", Status: MessageStatusFailed},
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := newTestClient(t, server.URL, "")
+	response, err := client.RequeueBatch(context.Background(), []string{" message-1 ", "message-2"})
+	if err != nil {
+		t.Fatalf("RequeueBatch() error = %v", err)
+	}
+	if response.Code != "partial_failure" || response.Success != 1 || response.Failed != 1 || len(response.Results) != 2 {
+		t.Fatalf("response = %+v", response)
+	}
+}
+
 func TestMessageQueriesEncodeParameters(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -435,6 +470,19 @@ func TestClientValidatesArgumentsBeforeSending(t *testing.T) {
 			return err
 		},
 		func() error { _, err := client.Requeue(context.Background(), ""); return err },
+		func() error { _, err := client.RequeueBatch(context.Background(), nil); return err },
+		func() error {
+			_, err := client.RequeueBatch(context.Background(), []string{"message-1", " message-1 "})
+			return err
+		},
+		func() error {
+			_, err := client.RequeueBatch(context.Background(), []string{"message-1", " "})
+			return err
+		},
+		func() error {
+			_, err := client.RequeueBatch(context.Background(), make([]string, MaxBulkRequeueMessages+1))
+			return err
+		},
 	}
 	for index, call := range tests {
 		if err := call(); !errors.Is(err, ErrInvalidArgument) {

@@ -2,6 +2,7 @@ package downlink
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/bytedance/sonic"
+	"github.com/qiuyier/Z-Courier/internal/adminaudit"
 	"github.com/qiuyier/Z-Courier/internal/httpauth"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
@@ -211,6 +213,181 @@ func TestRequeueHandlerRejectsQueueCapacity(t *testing.T) {
 	if response.Code != "queue_capacity_exceeded" || response.CapacityScope != QueueCapacityScopeDevice ||
 		response.CapacityLimit != 1 || response.CapacityPending != 1 {
 		t.Fatalf("response = %+v", response)
+	}
+}
+
+func TestBulkRequeueHandlerOKAndAuditsEachItem(t *testing.T) {
+	store := NewMemoryStore()
+	for _, messageID := range []string{"failed-1", "failed-2"} {
+		if _, err := store.Save(context.Background(), Message{
+			MessageID: messageID,
+			ClientID:  "client-1",
+			DeviceID:  "device-1",
+			MsgID:     2001,
+			Status:    MessageStatusFailed,
+			Attempts:  5,
+		}); err != nil {
+			t.Fatalf("Save(%s) error = %v", messageID, err)
+		}
+	}
+
+	core, logs := observer.New(zap.InfoLevel)
+	audit := adminaudit.NewStore(adminaudit.StoreConfig{Capacity: 10})
+	handler := NewBulkRequeueHandler(HandlerConfig{
+		Service:       NewService(fakeSessions{}, fakeConnections{}, WithStore(store)),
+		InternalToken: "secret",
+		GatewayNode:   "gateway-a",
+		Logger:        zap.New(core),
+		Audit:         audit,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/internal/messages/requeue", strings.NewReader(`{"message_ids":["failed-1","failed-2"]}`))
+	req.Header.Set(InternalTokenHeader, "secret")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var response BulkRequeueResponse
+	if err := sonic.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if response.Code != "ok" || response.Total != 2 || response.Success != 2 || response.Failed != 0 || len(response.Results) != 2 {
+		t.Fatalf("response = %+v", response)
+	}
+	for index, result := range response.Results {
+		if result.Code != "ok" || result.Status != MessageStatusPending || result.Attempts != 0 {
+			t.Fatalf("results[%d] = %+v, want pending success", index, result)
+		}
+	}
+	if got := logs.FilterMessage("admin message action audit").Len(); got != 2 {
+		t.Fatalf("item audit logs = %d, want 2", got)
+	}
+	summaries := logs.FilterMessage("admin bulk requeue audit").All()
+	if len(summaries) != 1 {
+		t.Fatalf("summary audit logs = %d, want 1", len(summaries))
+	}
+	fields := summaries[0].ContextMap()
+	if fields["audit_event"] != "downlink_message_bulk_requeue" || fields["result"] != "success" ||
+		fields["total"] != int64(2) || fields["success"] != int64(2) || fields["failed"] != int64(0) {
+		t.Fatalf("summary fields = %#v", fields)
+	}
+	auditResult := audit.List(adminaudit.Query{Limit: 10})
+	if auditResult.Total != 3 || len(auditResult.Entries) != 3 {
+		t.Fatalf("audit entries = %+v, want summary plus two items", auditResult)
+	}
+	if summary := auditResult.Entries[0]; summary.Action != "downlink_message_bulk_requeue" || summary.Result != "success" ||
+		summary.Details["total"] != "2" || summary.Details["success"] != "2" || summary.Details["failed"] != "0" {
+		t.Fatalf("summary audit = %+v", summary)
+	}
+	for _, entry := range auditResult.Entries[1:] {
+		if entry.Action != "downlink_message_action" || entry.Details["batch"] != "true" {
+			t.Fatalf("item audit = %+v", entry)
+		}
+	}
+}
+
+func TestBulkRequeueHandlerReportsCapacityPartialFailure(t *testing.T) {
+	store := NewMemoryStore()
+	for _, messageID := range []string{"failed-1", "failed-2"} {
+		if _, err := store.Save(context.Background(), Message{
+			MessageID: messageID,
+			ClientID:  "client-1",
+			DeviceID:  "device-1",
+			MsgID:     2001,
+			Status:    MessageStatusFailed,
+		}); err != nil {
+			t.Fatalf("Save(%s) error = %v", messageID, err)
+		}
+	}
+	handler := NewBulkRequeueHandler(HandlerConfig{Service: NewService(
+		fakeSessions{},
+		fakeConnections{},
+		WithStore(store),
+		WithQueueCapacity(QueueCapacity{MaxPendingPerDevice: 1}),
+	)})
+	req := httptest.NewRequest(http.MethodPost, "/internal/messages/requeue", strings.NewReader(`{"message_ids":["failed-1","failed-2"]}`))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusMultiStatus {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusMultiStatus, rec.Body.String())
+	}
+	var response BulkRequeueResponse
+	if err := sonic.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if response.Code != "partial_failure" || response.Success != 1 || response.Failed != 1 || len(response.Results) != 2 {
+		t.Fatalf("response = %+v", response)
+	}
+	if response.Results[0].Code != "ok" || response.Results[0].Status != MessageStatusPending {
+		t.Fatalf("results[0] = %+v, want success", response.Results[0])
+	}
+	failed := response.Results[1]
+	if failed.Code != "queue_capacity_exceeded" || failed.Status != MessageStatusFailed ||
+		failed.CapacityScope != QueueCapacityScopeDevice || failed.CapacityLimit != 1 || failed.CapacityPending != 1 {
+		t.Fatalf("results[1] = %+v, want capacity failure", failed)
+	}
+}
+
+func TestBulkRequeueHandlerOnlyAcceptsFailedMessages(t *testing.T) {
+	store := NewMemoryStore()
+	if _, err := store.Save(context.Background(), Message{
+		MessageID: "pending-1",
+		ClientID:  "client-1",
+		DeviceID:  "device-1",
+		MsgID:     2001,
+		Status:    MessageStatusPending,
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	handler := NewBulkRequeueHandler(HandlerConfig{Service: NewService(fakeSessions{}, fakeConnections{}, WithStore(store))})
+	req := httptest.NewRequest(http.MethodPost, "/internal/messages/requeue", strings.NewReader(`{"message_ids":["pending-1"]}`))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusMultiStatus {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusMultiStatus, rec.Body.String())
+	}
+	var response BulkRequeueResponse
+	if err := sonic.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if response.Code != "failed" || response.Success != 0 || response.Failed != 1 ||
+		len(response.Results) != 1 || response.Results[0].Code != "invalid_transition" || response.Results[0].Status != MessageStatusPending {
+		t.Fatalf("response = %+v", response)
+	}
+}
+
+func TestBulkRequeueHandlerValidatesSelection(t *testing.T) {
+	handler := NewBulkRequeueHandler(HandlerConfig{Service: NewService(fakeSessions{}, fakeConnections{}, WithStore(NewMemoryStore()))})
+	tooMany := make([]string, MaxBulkRequeueMessages+1)
+	for index := range tooMany {
+		tooMany[index] = fmt.Sprintf("message-%d", index)
+	}
+	tooManyBody, err := sonic.Marshal(BulkRequeueRequest{MessageIDs: tooMany})
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "empty", body: `{"message_ids":[]}`},
+		{name: "blank", body: `{"message_ids":[" "]}`},
+		{name: "duplicate", body: `{"message_ids":["message-1"," message-1 "]}`},
+		{name: "too many", body: string(tooManyBody)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/internal/messages/requeue", strings.NewReader(tt.body))
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+			}
+		})
 	}
 }
 

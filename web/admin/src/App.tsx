@@ -43,6 +43,7 @@ import {
   loginAdminSession,
   logoutAdminSession,
   requeueMessage,
+  requeueMessages,
   runRetryScan,
   sendDownlinkTestPush,
   setAdminCSRFToken,
@@ -65,6 +66,7 @@ import type {
   AdminRoutes,
   AdminSession,
   AdminSessions,
+  BulkRequeueResponse,
   Dependency,
   DownlinkTestPushResponse,
   MessageStatus,
@@ -77,6 +79,7 @@ const messageRepairPermission = "message:repair";
 const retryScanPermission = "message:retry_scan";
 const sessionDisconnectPermission = "session:disconnect";
 const downlinkTestPushPermission = "downlink:test_push";
+const maxBulkRequeueMessages = 100;
 
 type MetricContext = {
   label: string;
@@ -192,6 +195,11 @@ type MessageActionDialogState = {
   reason: string;
   error?: string;
 } | null;
+type BulkRequeueDialogState = {
+  messageIDs: string[];
+  result?: BulkRequeueResponse;
+  error?: string;
+} | null;
 type SessionDisconnectDialogState = {
   session: AdminSession;
   error?: string;
@@ -270,6 +278,9 @@ export default function App() {
   const [downlinkTestPushForm, setDownlinkTestPushForm] = useState<DownlinkTestPushForm>(() => defaultDownlinkTestPushForm());
   const [messageActionDialog, setMessageActionDialog] = useState<MessageActionDialogState>(null);
   const [messageActionPending, setMessageActionPending] = useState(false);
+  const [selectedMessageIDs, setSelectedMessageIDs] = useState<string[]>([]);
+  const [bulkRequeueDialog, setBulkRequeueDialog] = useState<BulkRequeueDialogState>(null);
+  const [bulkRequeuePending, setBulkRequeuePending] = useState(false);
   const [sessionDisconnectDialog, setSessionDisconnectDialog] = useState<SessionDisconnectDialogState>(null);
   const [sessionDisconnectPending, setSessionDisconnectPending] = useState(false);
   const [retryScanDialog, setRetryScanDialog] = useState<RetryScanDialogState>(null);
@@ -306,6 +317,9 @@ export default function App() {
     setDownlinkTestPushForm(defaultDownlinkTestPushForm());
     setMessageActionDialog(null);
     setMessageActionPending(false);
+    setSelectedMessageIDs([]);
+    setBulkRequeueDialog(null);
+    setBulkRequeuePending(false);
     setSessionDisconnectDialog(null);
     setSessionDisconnectPending(false);
     setRetryScanDialog(null);
@@ -648,11 +662,13 @@ export default function App() {
 
   const updateMessageStatus = useCallback((status: MessageStatus) => {
     resetMessagePagination();
+    setSelectedMessageIDs([]);
     setMessageStatus(status);
   }, [resetMessagePagination]);
 
   const updateMessageLimit = useCallback((limit: number) => {
     resetMessagePagination();
+    setSelectedMessageIDs([]);
     setMessageLimit(limit);
   }, [resetMessagePagination]);
 
@@ -667,6 +683,7 @@ export default function App() {
     }
     setMessageCursorStack((current) => [...current, messageCursor]);
     setMessageCursor(nextCursor);
+    setSelectedMessageIDs([]);
   }, [messageCursor, messagesState.data?.next_cursor, messagesState.status, refreshMessages]);
 
   const previousMessagePage = useCallback(async () => {
@@ -680,6 +697,7 @@ export default function App() {
     }
     setMessageCursorStack((current) => current.slice(0, -1));
     setMessageCursor(previousCursor);
+    setSelectedMessageIDs([]);
   }, [messageCursorStack, messagesState.status, refreshMessages]);
 
   const refreshAudit = useCallback(
@@ -1081,6 +1099,94 @@ export default function App() {
       setMessageActionPending(false);
     }
   }, [authenticated, canRepairMessages, expireSession, messageActionDialog, messageLookupID, refreshMessages]);
+
+  const updateMessageSelection = useCallback((messageID: string, selected: boolean) => {
+    if (!canRepairMessages) {
+      return;
+    }
+    messageID = messageID.trim();
+    if (messageID === "") {
+      return;
+    }
+    setSelectedMessageIDs((current) => {
+      const next = new Set(current);
+      if (!selected) {
+        next.delete(messageID);
+        return [...next];
+      }
+      if (next.size >= maxBulkRequeueMessages) {
+        return current;
+      }
+      next.add(messageID);
+      return [...next];
+    });
+  }, [canRepairMessages]);
+
+  const replaceMessageSelection = useCallback((messageIDs: string[]) => {
+    if (!canRepairMessages) {
+      return;
+    }
+    const unique = [...new Set(messageIDs.map((messageID) => messageID.trim()).filter(Boolean))];
+    setSelectedMessageIDs(unique.slice(0, maxBulkRequeueMessages));
+  }, [canRepairMessages]);
+
+  const clearMessageSelection = useCallback(() => {
+    setSelectedMessageIDs([]);
+  }, []);
+
+  const openBulkRequeue = useCallback(() => {
+    if (!canRepairMessages || selectedMessageIDs.length === 0) {
+      return;
+    }
+    setBulkRequeueDialog({ messageIDs: selectedMessageIDs.slice(0, maxBulkRequeueMessages) });
+  }, [canRepairMessages, selectedMessageIDs]);
+
+  const closeBulkRequeue = useCallback(() => {
+    if (bulkRequeuePending) {
+      return;
+    }
+    setBulkRequeueDialog(null);
+  }, [bulkRequeuePending]);
+
+  const confirmBulkRequeue = useCallback(async () => {
+    if (!bulkRequeueDialog || bulkRequeueDialog.result || !authenticated || !canRepairMessages) {
+      return;
+    }
+
+    setBulkRequeuePending(true);
+    try {
+      const result = await requeueMessages(bulkRequeueDialog.messageIDs);
+      setBulkRequeueDialog((current) => current ? { ...current, result, error: undefined } : current);
+      setSelectedMessageIDs(
+        result.results
+          .filter((item) => item.code !== "ok" && item.message_id)
+          .map((item) => item.message_id as string),
+      );
+      await refreshMessages();
+    } catch (error) {
+      if (isUnauthorized(error)) {
+        expireSession();
+        return;
+      }
+      const message = requestErrorMessage(error);
+      setBulkRequeueDialog((current) => current ? { ...current, error: message } : current);
+    } finally {
+      setBulkRequeuePending(false);
+    }
+  }, [authenticated, bulkRequeueDialog, canRepairMessages, expireSession, refreshMessages]);
+
+  useEffect(() => {
+    if (!messagesState.data?.messages || messageStatus !== "failed") {
+      setSelectedMessageIDs([]);
+      return;
+    }
+    const visible = new Set(
+      messagesState.data.messages
+        .filter((message) => message.status === "failed" && message.message_id)
+        .map((message) => message.message_id as string),
+    );
+    setSelectedMessageIDs((current) => current.filter((messageID) => visible.has(messageID)));
+  }, [messageStatus, messagesState.data]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -1497,6 +1603,8 @@ export default function App() {
               lookupState={messageLookupState}
               onDownlinkTestPushFormChange={updateDownlinkTestPushForm}
               onDownlinkTestPushSubmit={openDownlinkTestPush}
+              onBulkRequeue={openBulkRequeue}
+              onClearMessageSelection={clearMessageSelection}
               onLimitChange={updateMessageLimit}
               onMessageAction={openMessageAction}
               onLookupIDChange={setMessageLookupID}
@@ -1504,9 +1612,12 @@ export default function App() {
               onNextPage={nextMessagePage}
               onPreviousPage={previousMessagePage}
               onRetryScan={openRetryScan}
+              onMessageSelectionChange={updateMessageSelection}
+              onReplaceMessageSelection={replaceMessageSelection}
               onStatusChange={updateMessageStatus}
               retryScanState={retryScanState}
               selectedStatus={messageStatus}
+              selectedMessageIDs={selectedMessageIDs}
               state={messagesState}
             />
           ) : activePage === "audit" && authenticated && (auditState.status !== "error" || auditState.data) ? (
@@ -1566,6 +1677,14 @@ export default function App() {
           onConfirm={confirmMessageAction}
           onReasonChange={updateMessageActionReason}
           pending={messageActionPending}
+        />
+      )}
+      {bulkRequeueDialog && (
+        <BulkRequeueDialog
+          dialog={bulkRequeueDialog}
+          onClose={closeBulkRequeue}
+          onConfirm={confirmBulkRequeue}
+          pending={bulkRequeuePending}
         />
       )}
       {sessionDisconnectDialog && (
@@ -2652,6 +2771,8 @@ function MessagesPage({
   limit,
   lookupID,
   lookupState,
+  onBulkRequeue,
+  onClearMessageSelection,
   onDownlinkTestPushFormChange,
   onDownlinkTestPushSubmit,
   onLimitChange,
@@ -2661,9 +2782,12 @@ function MessagesPage({
   onNextPage,
   onPreviousPage,
   onRetryScan,
+  onMessageSelectionChange,
+  onReplaceMessageSelection,
   onStatusChange,
   retryScanState,
   selectedStatus,
+  selectedMessageIDs,
   state,
 }: {
   canRepairMessages: boolean;
@@ -2677,6 +2801,8 @@ function MessagesPage({
   limit: number;
   lookupID: string;
   lookupState: RemoteState<MessageStatusResponse>;
+  onBulkRequeue: () => void;
+  onClearMessageSelection: () => void;
   onDownlinkTestPushFormChange: (patch: Partial<DownlinkTestPushForm>) => void;
   onDownlinkTestPushSubmit: () => void | Promise<void>;
   onLimitChange: (limit: number) => void;
@@ -2686,9 +2812,12 @@ function MessagesPage({
   onNextPage: () => void | Promise<void>;
   onPreviousPage: () => void | Promise<void>;
   onRetryScan: () => void | Promise<void>;
+  onMessageSelectionChange: (messageID: string, selected: boolean) => void;
+  onReplaceMessageSelection: (messageIDs: string[]) => void;
   onStatusChange: (status: MessageStatus) => void;
   retryScanState: RemoteState<RetryScanResponse>;
   selectedStatus: MessageStatus;
+  selectedMessageIDs: string[];
   state: RemoteState<AdminMessages>;
 }) {
   const messages = state.data?.messages ?? [];
@@ -2698,6 +2827,14 @@ function MessagesPage({
   const loading = state.status === "loading";
   const hasMore = state.data?.has_more ?? false;
   const nextCursor = state.data?.next_cursor ?? "";
+  const selectableMessageIDs = messages
+    .filter((message) => message.status === "failed" && Boolean(message.message_id))
+    .map((message) => message.message_id as string);
+  const selectionWindow = selectableMessageIDs.slice(0, maxBulkRequeueMessages);
+  const selectedMessageIDSet = new Set(selectedMessageIDs);
+  const allSelectionWindowSelected =
+    selectionWindow.length > 0 && selectionWindow.every((messageID) => selectedMessageIDSet.has(messageID));
+  const selectionAtLimit = selectedMessageIDs.length >= maxBulkRequeueMessages;
 
   if (state.status === "loading" && !state.data) {
     return <MessagesSkeleton />;
@@ -2793,6 +2930,18 @@ function MessagesPage({
         />
 	      </section>
 
+      {selectedStatus === "failed" && (
+        <BulkRequeueToolbar
+          allSelected={allSelectionWindowSelected}
+          canRepairMessages={canRepairMessages}
+          eligibleCount={selectableMessageIDs.length}
+          onClear={onClearMessageSelection}
+          onRequeue={onBulkRequeue}
+          onSelectAll={() => onReplaceMessageSelection(allSelectionWindowSelected ? [] : selectionWindow)}
+          selectedCount={selectedMessageIDs.length}
+        />
+      )}
+
 	      <section className="rounded-lg border border-line bg-white p-4 shadow-diffusion">
 	        <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-center">
 	          <div className="min-w-0">
@@ -2841,12 +2990,87 @@ function MessagesPage({
               message={message}
               index={index}
               canRepairMessages={canRepairMessages}
+              selectable={selectedStatus === "failed" && message.status === "failed" && Boolean(message.message_id)}
+              selected={Boolean(message.message_id && selectedMessageIDSet.has(message.message_id))}
+              selectionDisabled={selectionAtLimit && !Boolean(message.message_id && selectedMessageIDSet.has(message.message_id))}
+              onSelectionChange={onMessageSelectionChange}
               onAction={onMessageAction}
             />
           ))}
         </section>
       )}
     </div>
+  );
+}
+
+function BulkRequeueToolbar({
+  allSelected,
+  canRepairMessages,
+  eligibleCount,
+  onClear,
+  onRequeue,
+  onSelectAll,
+  selectedCount,
+}: {
+  allSelected: boolean;
+  canRepairMessages: boolean;
+  eligibleCount: number;
+  onClear: () => void;
+  onRequeue: () => void;
+  onSelectAll: () => void;
+  selectedCount: number;
+}) {
+  return (
+    <section className="overflow-hidden rounded-lg border border-line bg-white shadow-diffusion">
+      <div className="grid gap-4 p-4 sm:grid-cols-[1fr_auto] sm:items-center">
+        <div className="flex min-w-0 items-center gap-3">
+          <label className="grid size-9 shrink-0 place-items-center rounded-lg border border-line bg-zinc-50" title="Select eligible messages">
+            <input
+              aria-label="Select eligible failed messages"
+              checked={allSelected}
+              className="size-4 accent-zinc-950"
+              disabled={!canRepairMessages || eligibleCount === 0}
+              onChange={onSelectAll}
+              type="checkbox"
+            />
+          </label>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-sm font-semibold text-ink">Failed selection</p>
+              <span className="rounded-md border border-line bg-zinc-50 px-2 py-0.5 font-mono text-xs text-zinc-600">
+                {selectedCount.toLocaleString()} / {maxBulkRequeueMessages}
+              </span>
+            </div>
+            <p className="mt-1 text-xs text-zinc-500">
+              {Math.min(eligibleCount, maxBulkRequeueMessages).toLocaleString()} eligible in selection window
+              {eligibleCount > maxBulkRequeueMessages ? ` · ${eligibleCount.toLocaleString()} loaded` : ""}
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2 sm:flex sm:justify-end">
+          <button
+            className="inline-flex items-center justify-center gap-2 rounded-lg border border-line bg-white px-3 py-2 text-sm font-medium text-ink transition duration-300 hover:bg-zinc-50 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-45"
+            disabled={selectedCount === 0}
+            onClick={onClear}
+            type="button"
+          >
+            <XCircle size={16} weight="bold" />
+            Clear
+          </button>
+          <button
+            className="inline-flex items-center justify-center gap-2 rounded-lg bg-zinc-950 px-3 py-2 text-sm font-medium text-white transition duration-300 hover:bg-zinc-800 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-45"
+            disabled={!canRepairMessages || selectedCount === 0}
+            onClick={onRequeue}
+            title={canRepairMessages ? "Requeue selected failed messages" : "Requires operator role"}
+            type="button"
+          >
+            <ArrowClockwise size={16} weight="bold" />
+            Requeue selected
+          </button>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -2858,6 +3082,7 @@ const auditActionOptions = [
   "admin_session_disconnect",
   "admin_downlink_test_push",
   "downlink_message_action",
+  "downlink_message_bulk_requeue",
   "admin_retry_scan",
 ];
 
@@ -3539,20 +3764,46 @@ function MessageCard({
   message,
   index,
   onAction,
+  onSelectionChange,
+  selectable,
+  selected,
+  selectionDisabled,
 }: {
   canRepairMessages: boolean;
   message: MessageStatusResponse;
   index: number;
   onAction: (action: MessageAction, message: MessageStatusResponse) => void;
+  onSelectionChange: (messageID: string, selected: boolean) => void;
+  selectable: boolean;
+  selected: boolean;
+  selectionDisabled: boolean;
 }) {
   return (
     <article
-      className="animate-rise overflow-hidden rounded-lg border border-line bg-white shadow-diffusion"
+      className={[
+        "animate-rise overflow-hidden rounded-lg border bg-white shadow-diffusion transition-colors duration-300",
+        selected ? "border-emerald-400" : "border-line",
+      ].join(" ")}
       style={{ animationDelay: `${index * 45}ms` }}
     >
       <div className="grid gap-4 p-4 lg:grid-cols-[0.75fr_1.25fr] lg:p-5">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
+            {selectable && (
+              <label
+                className="grid size-8 place-items-center rounded-lg border border-line bg-zinc-50"
+                title={selectionDisabled ? `Selection is limited to ${maxBulkRequeueMessages} messages` : "Select message"}
+              >
+                <input
+                  aria-label={`Select message ${message.message_id}`}
+                  checked={selected}
+                  className="size-4 accent-zinc-950"
+                  disabled={!canRepairMessages || selectionDisabled}
+                  onChange={(event) => onSelectionChange(message.message_id ?? "", event.target.checked)}
+                  type="checkbox"
+                />
+              </label>
+            )}
             <MessageStatusBadge status={message.status} />
             <span className="rounded-md border border-line bg-zinc-50 px-2.5 py-1 font-mono text-xs text-zinc-600">
               MsgID {message.msg_id?.toLocaleString() ?? "--"}
@@ -3661,6 +3912,7 @@ function MessageActionButtons({
 }
 
 function ConfirmActionDialog({
+  cancelLabel = "Cancel",
   children,
   confirmDisabled = false,
   confirmLabel,
@@ -3672,10 +3924,12 @@ function ConfirmActionDialog({
   onConfirm,
   pending,
   pendingLabel,
+  hideCancel = false,
   size = "md",
   title,
   tone = "default",
 }: {
+  cancelLabel?: string;
   children: ReactNode;
   confirmDisabled?: boolean;
   confirmLabel: string;
@@ -3687,6 +3941,7 @@ function ConfirmActionDialog({
   onConfirm: () => void | Promise<void>;
   pending: boolean;
   pendingLabel: string;
+  hideCancel?: boolean;
   size?: "md" | "lg";
   title: string;
   tone?: "default" | "danger";
@@ -3735,14 +3990,16 @@ function ConfirmActionDialog({
         </div>
 
         <div className="flex flex-col-reverse gap-2 border-t border-line bg-zinc-50 px-5 py-4 sm:flex-row sm:justify-end">
-          <button
-            className="inline-flex items-center justify-center rounded-lg border border-line bg-white px-4 py-2 text-sm font-medium text-ink transition duration-300 hover:bg-zinc-50 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={pending}
-            onClick={onClose}
-            type="button"
-          >
-            Cancel
-          </button>
+          {!hideCancel && (
+            <button
+              className="inline-flex items-center justify-center rounded-lg border border-line bg-white px-4 py-2 text-sm font-medium text-ink transition duration-300 hover:bg-zinc-50 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={pending}
+              onClick={onClose}
+              type="button"
+            >
+              {cancelLabel}
+            </button>
+          )}
           <button
             className={[
               "inline-flex items-center justify-center rounded-lg px-4 py-2 text-sm font-medium text-white transition duration-300 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50",
@@ -3815,6 +4072,86 @@ function MessageActionDialog({
             value={dialog.reason}
           />
           <p className="text-xs text-zinc-500">Required. This will be visible in the message last_error field.</p>
+        </div>
+      )}
+    </ConfirmActionDialog>
+  );
+}
+
+function BulkRequeueDialog({
+  dialog,
+  onClose,
+  onConfirm,
+  pending,
+}: {
+  dialog: NonNullable<BulkRequeueDialogState>;
+  onClose: () => void;
+  onConfirm: () => void | Promise<void>;
+  pending: boolean;
+}) {
+  const result = dialog.result;
+  const preview = dialog.messageIDs.slice(0, 6);
+  const remaining = Math.max(0, dialog.messageIDs.length - preview.length);
+
+  return (
+    <ConfirmActionDialog
+      confirmLabel={result ? "Done" : "Requeue selected"}
+      description={
+        result
+          ? "Every selected message was processed independently. Failed items remain eligible for another review."
+          : "Each failed message is requeued independently under its recorded delivery policy and current queue capacity."
+      }
+      error={dialog.error}
+      errorTitle="Bulk requeue failed"
+      eyebrow={result ? "Operation Result" : "Bulk Requeue"}
+      hideCancel={Boolean(result)}
+      onClose={onClose}
+      onConfirm={result ? onClose : onConfirm}
+      pending={pending}
+      pendingLabel="Requeueing..."
+      size="lg"
+      title={result ? `${result.success} of ${result.total} requeued` : `${dialog.messageIDs.length} failed messages`}
+    >
+      {result ? (
+        <div className="grid gap-4">
+          <div className="grid gap-3 sm:grid-cols-3">
+            <MessageField label="Selected" value={result.total.toLocaleString()} />
+            <MessageField label="Requeued" value={result.success.toLocaleString()} />
+            <MessageField label="Failed" value={result.failed.toLocaleString()} />
+          </div>
+          <div className="max-h-72 overflow-y-auto rounded-lg border border-line bg-white">
+            {result.results.map((item, index) => {
+              const success = item.code === "ok";
+              return (
+                <div
+                  className="grid gap-2 border-b border-line px-4 py-3 last:border-b-0 sm:grid-cols-[1fr_auto] sm:items-start"
+                  key={`${item.message_id || "message"}-${index}`}
+                >
+                  <div className="min-w-0">
+                    <p className="truncate font-mono text-xs font-semibold text-ink">{item.message_id || "--"}</p>
+                    {item.reason && <p className="mt-1 break-words text-xs leading-relaxed text-zinc-500">{item.reason}</p>}
+                  </div>
+                  <StatusBadge label={item.code || "unknown"} tone={success ? "ok" : "warn"} />
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+        <div className="grid gap-4">
+          <div className="rounded-lg border border-line bg-white px-4 py-3">
+            <LineItem label="Selected" value={dialog.messageIDs.length.toLocaleString()} />
+            <LineItem label="Maximum" value={maxBulkRequeueMessages.toLocaleString()} />
+            <LineItem label="Execution" value="independent" />
+          </div>
+          <div className="grid gap-2">
+            {preview.map((messageID) => (
+              <div className="truncate rounded-md border border-line bg-zinc-50 px-3 py-2 font-mono text-xs text-zinc-700" key={messageID}>
+                {messageID}
+              </div>
+            ))}
+            {remaining > 0 && <p className="px-1 text-xs text-zinc-500">+ {remaining.toLocaleString()} more</p>}
+          </div>
         </div>
       )}
     </ConfirmActionDialog>

@@ -2,6 +2,7 @@ package downlink
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -29,6 +30,10 @@ func NewMessageListHandler(config HandlerConfig) http.Handler {
 
 func NewRequeueHandler(config HandlerConfig) http.Handler {
 	return &messageActionHandler{config: normalizeHandlerConfig(config), action: messageActionRequeue}
+}
+
+func NewBulkRequeueHandler(config HandlerConfig) http.Handler {
+	return &bulkRequeueHandler{config: normalizeHandlerConfig(config)}
 }
 
 func NewDiscardHandler(config HandlerConfig) http.Handler {
@@ -105,6 +110,10 @@ func (h *messageListHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 type messageActionHandler struct {
 	config HandlerConfig
 	action string
+}
+
+type bulkRequeueHandler struct {
+	config HandlerConfig
 }
 
 type retryScanHandler struct {
@@ -356,10 +365,29 @@ func (h *messageActionHandler) record(result string) {
 }
 
 func (h *messageActionHandler) audit(r *http.Request, result string, statusCode int, req MessageActionRequest, message Message, err error) {
+	h.auditWithDetails(r, result, statusCode, req, message, err, nil)
+}
+
+func (h *messageActionHandler) auditWithDetails(
+	r *http.Request,
+	result string,
+	statusCode int,
+	req MessageActionRequest,
+	message Message,
+	err error,
+	extraDetails map[string]string,
+) {
 	identity := h.authIdentity(r)
 	messageID := strings.TrimSpace(req.MessageID)
 	if messageID == "" {
 		messageID = message.MessageID
+	}
+	details := map[string]string{
+		"action":         h.action,
+		"message_status": string(message.Status),
+	}
+	for key, value := range extraDetails {
+		details[key] = value
 	}
 	adminaudit.Record(h.config.Audit, adminaudit.Entry{
 		Action:          "downlink_message_action",
@@ -380,10 +408,7 @@ func (h *messageActionHandler) audit(r *http.Request, result string, statusCode 
 		MessageID:       messageID,
 		TraceID:         message.TraceID,
 		Reason:          nonEmpty(req.Reason, errorReason(err)),
-		Details: map[string]string{
-			"action":         h.action,
-			"message_status": string(message.Status),
-		},
+		Details:         details,
 	})
 
 	if h.config.Logger == nil {
@@ -430,6 +455,179 @@ func (h *messageActionHandler) audit(r *http.Request, result string, statusCode 
 		return
 	}
 	h.config.Logger.Info("admin message action audit", fields...)
+}
+
+func (h *bulkRequeueHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		h.finish(r, "method_not_allowed", http.StatusMethodNotAllowed, 0, 0, 0, nil)
+		writeJSON(w, http.StatusMethodNotAllowed, BulkRequeueResponse{Code: "method_not_allowed"})
+		return
+	}
+	if h.config.InternalToken != "" && r.Header.Get(InternalTokenHeader) != h.config.InternalToken {
+		h.finish(r, "unauthorized", http.StatusUnauthorized, 0, 0, 0, nil)
+		writeJSON(w, http.StatusUnauthorized, BulkRequeueResponse{Code: "unauthorized"})
+		return
+	}
+
+	req, err := h.request(w, r)
+	if err != nil {
+		statusCode := http.StatusBadRequest
+		code := "bad_request"
+		if errors.Is(err, errBulkRequeueRequestTooLarge) {
+			statusCode = http.StatusRequestEntityTooLarge
+			code = "request_too_large"
+		}
+		h.finish(r, code, statusCode, len(req.MessageIDs), 0, 0, err)
+		writeJSON(w, statusCode, BulkRequeueResponse{Code: code, Reason: err.Error()})
+		return
+	}
+
+	response := BulkRequeueResponse{
+		Code:    "ok",
+		Total:   len(req.MessageIDs),
+		Results: make([]MessageStatusResponse, 0, len(req.MessageIDs)),
+	}
+	itemHandler := &messageActionHandler{config: h.config, action: messageActionRequeue}
+	for index, messageID := range req.MessageIDs {
+		message, itemErr := h.config.Service.RequeueFailed(r.Context(), messageID)
+		itemStatus := http.StatusOK
+		itemResult := "success"
+		itemResponse := responseFromMessage(message)
+		if itemErr != nil {
+			itemStatus = statusFromAdminError(itemErr)
+			itemResult = codeFromAdminError(itemErr, itemStatus)
+			itemResponse.Code = itemResult
+			itemResponse.Reason = itemErr.Error()
+			itemResponse.CapacityScope = queueCapacityScope(itemErr)
+			itemResponse.CapacityLimit = queueCapacityLimit(itemErr)
+			itemResponse.CapacityPending = queueCapacityPending(itemErr)
+			response.Failed++
+		} else {
+			response.Success++
+		}
+		if itemResponse.MessageID == "" {
+			itemResponse.MessageID = messageID
+		}
+		response.Results = append(response.Results, itemResponse)
+		itemHandler.record(itemResult)
+		itemHandler.auditWithDetails(
+			r,
+			itemResult,
+			itemStatus,
+			MessageActionRequest{MessageID: messageID},
+			message,
+			itemErr,
+			map[string]string{"batch": "true", "batch_index": strconv.Itoa(index)},
+		)
+	}
+
+	statusCode := http.StatusOK
+	result := "success"
+	switch {
+	case response.Failed == 0:
+		response.Code = "ok"
+	case response.Success == 0:
+		response.Code = "failed"
+		result = "failed"
+		statusCode = http.StatusMultiStatus
+	default:
+		response.Code = "partial_failure"
+		result = "partial_failure"
+		statusCode = http.StatusMultiStatus
+	}
+	h.finish(r, result, statusCode, response.Total, response.Success, response.Failed, nil)
+	writeJSON(w, statusCode, response)
+}
+
+var errBulkRequeueRequestTooLarge = errors.New("bulk requeue request too large")
+
+func (h *bulkRequeueHandler) request(w http.ResponseWriter, r *http.Request) (BulkRequeueRequest, error) {
+	defer r.Body.Close()
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, h.config.MaxRequestBodySize))
+	if err != nil {
+		return BulkRequeueRequest{}, fmt.Errorf("%w: %v", errBulkRequeueRequestTooLarge, err)
+	}
+
+	var req BulkRequeueRequest
+	if err := sonic.Unmarshal(body, &req); err != nil {
+		return BulkRequeueRequest{}, err
+	}
+	if len(req.MessageIDs) == 0 {
+		return req, errors.New("message_ids is required")
+	}
+	if len(req.MessageIDs) > MaxBulkRequeueMessages {
+		return req, fmt.Errorf("message_ids exceeds limit %d", MaxBulkRequeueMessages)
+	}
+
+	seen := make(map[string]struct{}, len(req.MessageIDs))
+	for index, messageID := range req.MessageIDs {
+		messageID = strings.TrimSpace(messageID)
+		if messageID == "" {
+			return req, fmt.Errorf("message_ids[%d] is required", index)
+		}
+		if _, exists := seen[messageID]; exists {
+			return req, fmt.Errorf("duplicate message_id %q", messageID)
+		}
+		seen[messageID] = struct{}{}
+		req.MessageIDs[index] = messageID
+	}
+	return req, nil
+}
+
+func (h *bulkRequeueHandler) finish(
+	r *http.Request,
+	result string,
+	statusCode int,
+	total int,
+	success int,
+	failed int,
+	err error,
+) {
+	metrics.RecordDownlinkBulkRequeue(result)
+	identity := adminAuthIdentity(r, h.config.InternalToken)
+	adminaudit.Record(h.config.Audit, adminaudit.Entry{
+		Action:         "downlink_message_bulk_requeue",
+		Result:         result,
+		HTTPStatus:     statusCode,
+		GatewayNode:    h.config.GatewayNode,
+		AuthMode:       identity.Mode,
+		Principal:      identity.Principal,
+		Role:           identity.Role,
+		AdminSessionID: identity.SessionID,
+		AuthKeyID:      identity.KeyID,
+		Method:         r.Method,
+		Path:           r.URL.Path,
+		RemoteAddr:     r.RemoteAddr,
+		Reason:         errorReason(err),
+		Details: map[string]string{
+			"total":   strconv.Itoa(total),
+			"success": strconv.Itoa(success),
+			"failed":  strconv.Itoa(failed),
+		},
+	})
+
+	fields := []zap.Field{
+		zap.String("audit_event", "downlink_message_bulk_requeue"),
+		zap.String("result", result),
+		zap.Int("http_status", statusCode),
+		zap.String("auth_mode", identity.Mode),
+		zap.String("principal", identity.Principal),
+		zap.String("role", identity.Role),
+		zap.String("method", r.Method),
+		zap.String("path", r.URL.Path),
+		zap.String("remote_addr", r.RemoteAddr),
+		zap.Int("total", total),
+		zap.Int("success", success),
+		zap.Int("failed", failed),
+	}
+	if err != nil {
+		fields = append(fields, zap.Error(err))
+	}
+	if failed > 0 || statusCode >= http.StatusBadRequest {
+		h.config.Logger.Warn("admin bulk requeue audit", fields...)
+		return
+	}
+	h.config.Logger.Info("admin bulk requeue audit", fields...)
 }
 
 func (h *messageActionHandler) authIdentity(r *http.Request) httpauth.Identity {

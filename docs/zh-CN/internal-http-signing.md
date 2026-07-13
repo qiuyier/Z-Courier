@@ -101,6 +101,7 @@ backend HMAC 保护后端调用的 `/internal/*` API，例如：
 - `/internal/push/batch`
 - `/internal/messages`
 - `/internal/message/requeue`
+- `/internal/messages/requeue`
 - `/internal/message/discard`
 - `/internal/admin/*`
 - `/internal/debug/*`

@@ -204,6 +204,7 @@ failed, err := client.ListMessages(ctx, backend.ListMessagesRequest{
     Limit:  100,
 })
 message, err := client.Requeue(ctx, "order-event-42")
+bulkRequeue, err := client.RequeueBatch(ctx, []string{"order-event-42", "order-event-43"})
 message, err := client.Discard(ctx, "order-event-42", "operator decision")
 ```
 
@@ -222,6 +223,11 @@ client delivery attempt. The backend SDK does not consume NSQ events itself.
 `PushBatch` treats HTTP `207 Multi-Status` as a decoded result, not as a method
 error. Check `batch.Failed` and each item in `batch.Results` for partial or total
 item failure.
+
+`RequeueBatch` has the same HTTP `207` decoding rule. It accepts at most
+`backend.MaxBulkRequeueMessages` unique non-empty IDs. The gateway only accepts
+messages currently in `failed` state and processes each item independently
+under its recorded delivery policy and the current queue-capacity limits.
 
 Non-2xx responses return `*backend.APIError`. Use `errors.Is(err,
 backend.ErrAPI)`, `errors.As`, and `APIError.Retryable` instead of parsing error

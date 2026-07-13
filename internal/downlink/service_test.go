@@ -1543,6 +1543,28 @@ func TestServiceRequeueRejectsDeliveredOrDiscarded(t *testing.T) {
 	}
 }
 
+func TestServiceRequeueFailedRejectsNonFailedMessage(t *testing.T) {
+	store := NewMemoryStore()
+	if _, err := store.Save(context.Background(), Message{
+		MessageID: "pending",
+		ClientID:  "client-1",
+		DeviceID:  "device-1",
+		MsgID:     2001,
+		Status:    MessageStatusPending,
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	service := NewService(fakeSessions{}, fakeConnections{}, WithStore(store))
+
+	message, err := service.RequeueFailed(context.Background(), "pending")
+	if !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("RequeueFailed() error = %v, want %v", err, ErrInvalidTransition)
+	}
+	if message.MessageID != "pending" || message.Status != MessageStatusPending {
+		t.Fatalf("RequeueFailed() message = %+v, want original pending message", message)
+	}
+}
+
 func TestServiceDiscard(t *testing.T) {
 	store := NewMemoryStore()
 	if _, err := store.Save(context.Background(), Message{
