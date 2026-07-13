@@ -66,6 +66,7 @@ type config struct {
 	ExpectSessionNode      string
 	CheckReconnectRetry    bool
 	CheckAdminStorage      bool
+	CheckBulkRequeue       bool
 	AdminSessionPeerURL    string
 	ExpectPolicyName       string
 	CheckQueueCapacity     bool
@@ -114,6 +115,7 @@ func parseFlags() config {
 	flag.StringVar(&cfg.ExpectSessionNode, "expect-session-node", "", "expected gateway node from expect-session-url")
 	flag.BoolVar(&cfg.CheckReconnectRetry, "check-reconnect-retry", false, "disconnect the client, queue a downlink, then verify reconnect flushes it")
 	flag.BoolVar(&cfg.CheckAdminStorage, "check-admin-storage", false, "verify Redis-backed admin sessions and PostgreSQL admin audit storage")
+	flag.BoolVar(&cfg.CheckBulkRequeue, "check-bulk-requeue", false, "verify cross-node guarded bulk requeue, shared capacity, and persistent audit state")
 	flag.StringVar(&cfg.AdminSessionPeerURL, "admin-session-peer-url", "", "peer gateway internal HTTP base URL used for Redis-backed admin session lookup; defaults to expect-session-url or internal-url")
 	flag.StringVar(&cfg.ExpectPolicyName, "expect-policy-name", "", "expected persisted delivery policy for MsgID 2001; empty disables the check")
 	flag.BoolVar(&cfg.CheckQueueCapacity, "check-queue-capacity", false, "fill one offline device queue and verify explicit capacity rejection")
@@ -167,6 +169,23 @@ func validateInternalAuthConfig(cfg config) error {
 				"expect-per-device-limit must be at least %d when check-retry-fairness is enabled",
 				retryFairnessHotMessages,
 			)
+		}
+	}
+	if cfg.CheckBulkRequeue {
+		if !cfg.CheckAdminStorage {
+			return fmt.Errorf("check-bulk-requeue requires check-admin-storage")
+		}
+		if !cfg.CheckQueueCapacity {
+			return fmt.Errorf("check-bulk-requeue requires check-queue-capacity")
+		}
+		if cfg.ExpectPerDeviceLimit < 2 {
+			return fmt.Errorf("expect-per-device-limit must be at least 2 when check-bulk-requeue is enabled")
+		}
+		if cfg.AdminSessionPeerURL == "" && cfg.ExpectSessionURL == "" {
+			return fmt.Errorf("check-bulk-requeue requires admin-session-peer-url or expect-session-url")
+		}
+		if strings.TrimSpace(cfg.ExpectTerminalPolicy) == "" {
+			return fmt.Errorf("expect-terminal-policy is required when check-bulk-requeue is enabled")
 		}
 	}
 	switch cfg.InternalAuthMode {
@@ -260,6 +279,19 @@ func run(ctx context.Context, cfg config) error {
 			return err
 		}
 	}
+	var adminStorage adminStorageFixture
+	if cfg.CheckAdminStorage {
+		adminStorage, err = checkAdminStorage(ctx, cfg, db)
+		if err != nil {
+			return err
+		}
+		fmt.Println("admin storage verified")
+	}
+	if cfg.CheckBulkRequeue {
+		if err := checkBulkRequeue(ctx, cfg, db, runID, adminStorage); err != nil {
+			return err
+		}
+	}
 
 	fmt.Println("checking offline queue and idempotency path")
 	offlineCreated, err := pushDownlink(ctx, cfg, offlineMessageID, offlineBody, http.StatusAccepted)
@@ -317,13 +349,6 @@ func run(ctx context.Context, cfg config) error {
 
 	if err := checkDebugCluster(ctx, cfg); err != nil {
 		return err
-	}
-
-	if cfg.CheckAdminStorage {
-		if err := checkAdminStorage(ctx, cfg, db); err != nil {
-			return err
-		}
-		fmt.Println("admin storage verified")
 	}
 
 	offlinePacket, err := client.WaitDownlinkPacket(ctx, offlineMessageID)
@@ -499,7 +524,15 @@ type adminSessionLoginResult struct {
 	Cookie   *http.Cookie
 }
 
-func checkAdminStorage(ctx context.Context, cfg config, db *sql.DB) error {
+type adminStorageFixture struct {
+	PeerURL            string
+	PrimaryDiagnostics adminDiagnosticsResponse
+	PeerDiagnostics    adminDiagnosticsResponse
+	Login              adminSessionLoginResult
+	PeerCookie         *http.Cookie
+}
+
+func checkAdminStorage(ctx context.Context, cfg config, db *sql.DB) (adminStorageFixture, error) {
 	peerURL := cfg.AdminSessionPeerURL
 	if peerURL == "" {
 		peerURL = cfg.ExpectSessionURL
@@ -510,40 +543,46 @@ func checkAdminStorage(ctx context.Context, cfg config, db *sql.DB) error {
 
 	primaryDiagnostics, err := fetchAdminDiagnostics(ctx, cfg, cfg.InternalURL)
 	if err != nil {
-		return fmt.Errorf("fetch primary admin diagnostics: %w", err)
+		return adminStorageFixture{}, fmt.Errorf("fetch primary admin diagnostics: %w", err)
 	}
 	if err := validateAdminStorageDiagnostics(primaryDiagnostics, true); err != nil {
-		return fmt.Errorf("primary admin diagnostics: %w", err)
+		return adminStorageFixture{}, fmt.Errorf("primary admin diagnostics: %w", err)
 	}
 
 	peerDiagnostics, err := fetchAdminDiagnostics(ctx, cfg, peerURL)
 	if err != nil {
-		return fmt.Errorf("fetch peer admin diagnostics: %w", err)
+		return adminStorageFixture{}, fmt.Errorf("fetch peer admin diagnostics: %w", err)
 	}
 	if err := validateAdminStorageDiagnostics(peerDiagnostics, true); err != nil {
-		return fmt.Errorf("peer admin diagnostics: %w", err)
+		return adminStorageFixture{}, fmt.Errorf("peer admin diagnostics: %w", err)
 	}
 
 	login, err := loginAdminSession(ctx, cfg, cfg.InternalURL, primaryDiagnostics.AdminConsole.Session.CookieName)
 	if err != nil {
-		return fmt.Errorf("login admin session: %w", err)
+		return adminStorageFixture{}, fmt.Errorf("login admin session: %w", err)
 	}
 	sessionID := login.Response.Session.SessionID
 	if err := waitAdminAuditEvent(ctx, db, "admin_session_login", "success", sessionID, primaryDiagnostics.GatewayNode); err != nil {
-		return fmt.Errorf("wait admin audit login event: %w", err)
+		return adminStorageFixture{}, fmt.Errorf("wait admin audit login event: %w", err)
 	}
 
 	if err := verifyAdminSessionMe(ctx, cfg, cfg.InternalURL, login.Cookie, sessionID, primaryDiagnostics.GatewayNode); err != nil {
-		return fmt.Errorf("verify primary admin session: %w", err)
+		return adminStorageFixture{}, fmt.Errorf("verify primary admin session: %w", err)
 	}
 
 	peerCookie := *login.Cookie
 	peerCookie.Name = peerDiagnostics.AdminConsole.Session.CookieName
 	if err := verifyAdminSessionMe(ctx, cfg, peerURL, &peerCookie, sessionID, peerDiagnostics.GatewayNode); err != nil {
-		return fmt.Errorf("verify peer admin session via redis: %w", err)
+		return adminStorageFixture{}, fmt.Errorf("verify peer admin session via redis: %w", err)
 	}
 
-	return nil
+	return adminStorageFixture{
+		PeerURL:            peerURL,
+		PrimaryDiagnostics: primaryDiagnostics,
+		PeerDiagnostics:    peerDiagnostics,
+		Login:              login,
+		PeerCookie:         &peerCookie,
+	}, nil
 }
 
 func fetchAdminDiagnostics(ctx context.Context, cfg config, baseURL string) (adminDiagnosticsResponse, error) {
@@ -692,6 +731,258 @@ WHERE action = $1
 			return false, err
 		}
 		return count > 0, nil
+	})
+}
+
+func checkBulkRequeue(ctx context.Context, cfg config, db *sql.DB, runID int64, admin adminStorageFixture) error {
+	fmt.Println("checking cross-node bulk requeue path")
+	if admin.Login.Response.Session == nil || admin.PeerCookie == nil {
+		return fmt.Errorf("bulk requeue admin session fixture is incomplete")
+	}
+	messagePrefix := fmt.Sprintf("e2e-%d-bulk-requeue-", runID)
+	defer cleanupMessagesByPrefix(db, messagePrefix)
+
+	deviceID := fmt.Sprintf("%s-bulk-requeue-offline-%d", cfg.DeviceID, runID)
+	failedIDs := []string{messagePrefix + "failed-1", messagePrefix + "failed-2"}
+	for _, messageID := range failedIDs {
+		response, err := pushDownlinkTarget(
+			ctx,
+			cfg,
+			deviceID,
+			2999,
+			messageID,
+			[]byte("bulk-requeue-terminal"),
+			http.StatusAccepted,
+		)
+		if err != nil {
+			return fmt.Errorf("push bulk requeue terminal message %s: %w", messageID, err)
+		}
+		if err := validatePushOutcome(response, messageID, downlink.SubmissionStateCreated, downlink.MessageStatusPending); err != nil {
+			return fmt.Errorf("validate bulk requeue terminal message %s: %w", messageID, err)
+		}
+	}
+
+	store, err := downlink.NewPostgresStore(ctx, downlink.PostgresStoreConfig{DSN: cfg.PostgresDSN})
+	if err != nil {
+		return fmt.Errorf("open bulk requeue fixture store: %w", err)
+	}
+	defer store.Close()
+	for _, messageID := range failedIDs {
+		if err := store.MarkFailed(ctx, messageID, downlink.TerminalTransition{
+			Reason:      downlink.TerminalReasonMaxAttempts,
+			GatewayNode: "e2e-bulk-requeue-fixture",
+			At:          time.Now().UTC(),
+			Attempted:   true,
+			Publish:     true,
+		}); err != nil {
+			return fmt.Errorf("mark bulk requeue message %s failed: %w", messageID, err)
+		}
+		if err := waitMessageStatus(ctx, db, messageID, string(downlink.MessageStatusFailed)); err != nil {
+			return fmt.Errorf("wait bulk requeue message %s failed: %w", messageID, err)
+		}
+	}
+
+	fillerCount := cfg.ExpectPerDeviceLimit - 1
+	for index := 0; index < fillerCount; index++ {
+		messageID := fmt.Sprintf("%sfiller-%02d", messagePrefix, index+1)
+		response, err := pushDownlinkTarget(
+			ctx,
+			cfg,
+			deviceID,
+			2001,
+			messageID,
+			[]byte("bulk-requeue-capacity-filler"),
+			http.StatusAccepted,
+		)
+		if err != nil {
+			return fmt.Errorf("push bulk requeue capacity filler %s: %w", messageID, err)
+		}
+		if err := validatePushOutcome(response, messageID, downlink.SubmissionStateCreated, downlink.MessageStatusPending); err != nil {
+			return fmt.Errorf("validate bulk requeue capacity filler %s: %w", messageID, err)
+		}
+	}
+
+	response, err := bulkRequeueWithAdminSession(ctx, admin, failedIDs)
+	if err != nil {
+		return err
+	}
+	if err := validateBulkRequeueResponse(response, failedIDs, cfg.ExpectTerminalPolicy, cfg.ExpectPerDeviceLimit); err != nil {
+		return err
+	}
+
+	for _, node := range []struct {
+		name string
+		url  string
+	}{
+		{name: admin.PrimaryDiagnostics.GatewayNode, url: cfg.InternalURL},
+		{name: admin.PeerDiagnostics.GatewayNode, url: admin.PeerURL},
+	} {
+		requeued, err := getMessageStatusAt(ctx, cfg, node.url, failedIDs[0])
+		if err != nil {
+			return fmt.Errorf("query requeued message from %s: %w", node.name, err)
+		}
+		if requeued.Status != downlink.MessageStatusPending || requeued.Attempts != 0 ||
+			requeued.PolicyName != cfg.ExpectTerminalPolicy || requeued.TerminalReason != "" {
+			return fmt.Errorf("requeued message from %s = %+v", node.name, requeued)
+		}
+
+		rejected, err := getMessageStatusAt(ctx, cfg, node.url, failedIDs[1])
+		if err != nil {
+			return fmt.Errorf("query capacity-rejected message from %s: %w", node.name, err)
+		}
+		if rejected.Status != downlink.MessageStatusFailed || rejected.PolicyName != cfg.ExpectTerminalPolicy ||
+			rejected.TerminalReason != downlink.TerminalReasonMaxAttempts {
+			return fmt.Errorf("capacity-rejected message from %s = %+v", node.name, rejected)
+		}
+	}
+
+	var pending int
+	if err := db.QueryRowContext(ctx, `
+SELECT COUNT(*)
+FROM z_courier_downlink_messages
+WHERE client_id = $1
+  AND device_id = $2
+  AND status = $3
+`, cfg.ClientID, deviceID, string(downlink.MessageStatusPending)).Scan(&pending); err != nil {
+		return fmt.Errorf("count bulk requeue pending messages: %w", err)
+	}
+	if pending != cfg.ExpectPerDeviceLimit {
+		return fmt.Errorf("bulk requeue pending messages = %d, want %d", pending, cfg.ExpectPerDeviceLimit)
+	}
+
+	sessionID := admin.Login.Response.Session.SessionID
+	if err := waitBulkRequeueAudit(
+		ctx,
+		db,
+		sessionID,
+		admin.PeerDiagnostics.GatewayNode,
+		failedIDs[0],
+		failedIDs[1],
+	); err != nil {
+		return fmt.Errorf("wait bulk requeue audit: %w", err)
+	}
+
+	fmt.Printf(
+		"bulk requeue verified: origin=%s executor=%s success=%d failed=%d pending=%d\n",
+		admin.PrimaryDiagnostics.GatewayNode,
+		admin.PeerDiagnostics.GatewayNode,
+		response.Success,
+		response.Failed,
+		pending,
+	)
+	return nil
+}
+
+func bulkRequeueWithAdminSession(
+	ctx context.Context,
+	admin adminStorageFixture,
+	messageIDs []string,
+) (downlink.BulkRequeueResponse, error) {
+	var response downlink.BulkRequeueResponse
+	body, err := sonic.Marshal(downlink.BulkRequeueRequest{MessageIDs: messageIDs})
+	if err != nil {
+		return response, err
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, downlinkPushTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(
+		requestCtx,
+		http.MethodPost,
+		admin.PeerURL+"/internal/messages/requeue",
+		bytes.NewReader(body),
+	)
+	if err != nil {
+		return response, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-ZCourier-CSRF-Token", admin.Login.Response.Session.CSRFToken)
+	req.AddCookie(admin.PeerCookie)
+	if _, err := doAdminSessionRequest(req, http.StatusMultiStatus, &response); err != nil {
+		return downlink.BulkRequeueResponse{}, fmt.Errorf("bulk requeue request: %w", err)
+	}
+	return response, nil
+}
+
+func validateBulkRequeueResponse(
+	response downlink.BulkRequeueResponse,
+	messageIDs []string,
+	policyName string,
+	capacityLimit int,
+) error {
+	if len(messageIDs) != 2 {
+		return fmt.Errorf("bulk requeue message IDs = %d, want 2", len(messageIDs))
+	}
+	if response.Code != "partial_failure" || response.Total != 2 || response.Success != 1 || response.Failed != 1 ||
+		len(response.Results) != 2 {
+		return fmt.Errorf("bulk requeue response = %+v, want one success and one failure", response)
+	}
+	success := response.Results[0]
+	if success.Code != "ok" || success.MessageID != messageIDs[0] || success.Status != downlink.MessageStatusPending ||
+		success.Attempts != 0 || success.PolicyName != policyName || success.TerminalReason != "" {
+		return fmt.Errorf("bulk requeue success = %+v", success)
+	}
+	rejected := response.Results[1]
+	if rejected.Code != "queue_capacity_exceeded" || rejected.MessageID != messageIDs[1] ||
+		rejected.Status != downlink.MessageStatusFailed || rejected.PolicyName != policyName ||
+		rejected.TerminalReason != downlink.TerminalReasonMaxAttempts ||
+		rejected.CapacityScope != downlink.QueueCapacityScopeDevice || rejected.CapacityLimit != capacityLimit ||
+		rejected.CapacityPending != capacityLimit {
+		return fmt.Errorf("bulk requeue capacity failure = %+v", rejected)
+	}
+	return nil
+}
+
+func waitBulkRequeueAudit(
+	ctx context.Context,
+	db *sql.DB,
+	sessionID string,
+	gatewayNode string,
+	successMessageID string,
+	failedMessageID string,
+) error {
+	return waitUntil(ctx, func() (bool, error) {
+		var summaryCount int
+		var successCount int
+		var failedCount int
+		err := db.QueryRowContext(ctx, `
+SELECT
+  COUNT(*) FILTER (
+    WHERE action = 'downlink_message_bulk_requeue'
+      AND result = 'partial_failure'
+      AND http_status = 207
+      AND details->>'total' = '2'
+      AND details->>'success' = '1'
+      AND details->>'failed' = '1'
+  ),
+  COUNT(*) FILTER (
+    WHERE action = 'downlink_message_action'
+      AND result = 'success'
+      AND http_status = 200
+      AND message_id = $3
+      AND details->>'action' = 'requeue'
+      AND details->>'batch' = 'true'
+      AND details->>'batch_index' = '0'
+      AND details->>'message_status' = 'pending'
+  ),
+  COUNT(*) FILTER (
+    WHERE action = 'downlink_message_action'
+      AND result = 'queue_capacity_exceeded'
+      AND http_status = 429
+      AND message_id = $4
+      AND details->>'action' = 'requeue'
+      AND details->>'batch' = 'true'
+      AND details->>'batch_index' = '1'
+      AND details->>'message_status' = 'failed'
+  )
+FROM z_courier_admin_audit_events
+WHERE admin_session_id = $1
+  AND gateway_node = $2
+  AND path = '/internal/messages/requeue'
+`, sessionID, gatewayNode, successMessageID, failedMessageID).Scan(&summaryCount, &successCount, &failedCount)
+		if err != nil {
+			return false, err
+		}
+		return summaryCount == 1 && successCount == 1 && failedCount == 1, nil
 	})
 }
 
@@ -1482,32 +1773,16 @@ WHERE message_id = $1
 }
 
 func getMessageStatus(ctx context.Context, cfg config, messageID string) (downlink.MessageStatusResponse, error) {
-	var zero downlink.MessageStatusResponse
-	query := url.Values{"message_id": []string{messageID}}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, cfg.InternalURL+"/internal/message/status?"+query.Encode(), nil)
-	if err != nil {
-		return zero, err
-	}
-	if err := applyInternalAuth(req, nil, cfg); err != nil {
-		return zero, err
-	}
+	return getMessageStatusAt(ctx, cfg, cfg.InternalURL, messageID)
+}
 
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return zero, err
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return zero, err
-	}
-	if resp.StatusCode != http.StatusOK {
-		return zero, fmt.Errorf("status = %d, body = %s", resp.StatusCode, string(body))
-	}
-	if err := sonic.Unmarshal(body, &zero); err != nil {
+func getMessageStatusAt(ctx context.Context, cfg config, baseURL string, messageID string) (downlink.MessageStatusResponse, error) {
+	var response downlink.MessageStatusResponse
+	query := url.Values{"message_id": []string{messageID}}
+	if err := getInternalJSON(ctx, cfg, baseURL, "/internal/message/status?"+query.Encode(), &response); err != nil {
 		return downlink.MessageStatusResponse{}, err
 	}
-	return zero, nil
+	return response, nil
 }
 
 func waitMessagePendingAttempt(ctx context.Context, db *sql.DB, messageID string) error {
@@ -1612,6 +1887,11 @@ func checkMetrics(ctx context.Context, cfg config) error {
 	}
 	if cfg.CheckAdminStorage {
 		if err := checkAdminStorageMetrics(string(body)); err != nil {
+			return err
+		}
+	}
+	if cfg.CheckBulkRequeue {
+		if err := checkBulkRequeueMetrics(string(body)); err != nil {
 			return err
 		}
 	}
@@ -1791,6 +2071,51 @@ func checkAdminStorageMetrics(metricsText string) error {
 		}
 	}
 
+	return nil
+}
+
+func checkBulkRequeueMetrics(metricsText string) error {
+	expectations := []metricExpectation{
+		{
+			Name:   "z_courier_downlink_bulk_requeue_total",
+			Labels: map[string]string{"result": "partial_failure"},
+			Min:    1,
+		},
+		{
+			Name:   "z_courier_downlink_requeue_total",
+			Labels: map[string]string{"result": "success"},
+			Min:    1,
+		},
+		{
+			Name:   "z_courier_downlink_requeue_total",
+			Labels: map[string]string{"result": "queue_capacity_exceeded"},
+			Min:    1,
+		},
+		{
+			Name:   "z_courier_admin_action_total",
+			Labels: map[string]string{"action": "downlink_message_bulk_requeue", "result": "partial_failure"},
+			Min:    1,
+		},
+	}
+
+	for _, expectation := range expectations {
+		value, found, err := sumMetricSamples(metricsText, expectation.Name, expectation.Labels)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return fmt.Errorf("bulk requeue metric %s%s not found", expectation.Name, formatMetricLabels(expectation.Labels))
+		}
+		if value < expectation.Min {
+			return fmt.Errorf(
+				"bulk requeue metric %s%s = %.4f, want >= %.4f",
+				expectation.Name,
+				formatMetricLabels(expectation.Labels),
+				value,
+				expectation.Min,
+			)
+		}
+	}
 	return nil
 }
 

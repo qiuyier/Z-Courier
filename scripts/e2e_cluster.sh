@@ -162,6 +162,7 @@ go run ./cmd/e2e \
   -check-reconnect-retry \
   -check-admin-storage \
   -admin-session-peer-url http://127.0.0.1:18183 \
+  -check-bulk-requeue \
   -expect-policy-name integration-reliable \
   -check-queue-capacity \
   -expect-per-device-limit 8 \
@@ -169,5 +170,5 @@ go run ./cmd/e2e \
   -retry-fairness-scan-limit 3 \
   -check-terminal-event \
   -expect-terminal-policy integration-terminal \
-  -timeout 60s \
+  -timeout 75s \
   "$@"

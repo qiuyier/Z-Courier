@@ -309,6 +309,21 @@ Current implementation (V12.5.1):
   select or submit the operation, and the server independently enforces the
   same permission.
 
+Current implementation (V12.5.2):
+
+- Extends the authoritative two-node cluster verifier with a deterministic
+  PostgreSQL fixture. Gateway-a persists two policy-backed messages, the
+  production terminal-store transition marks them failed, and the fixture adds
+  seven pending fillers for the same device under a limit of eight.
+- Reuses the Redis-backed admin session created on gateway-a to submit the
+  guarded batch through gateway-b. The first item fills the last shared slot;
+  the second returns `queue_capacity_exceeded`, producing a real HTTP `207`
+  partial result without rolling back the success.
+- Queries both gateway nodes for the resulting states and immutable policy,
+  checks the exact shared pending count, reads the batch summary plus both item
+  audits from PostgreSQL, and requires the corresponding batch, item, capacity,
+  and admin-action Prometheus samples.
+
 Acceptance criteria:
 
 - Operators can answer why a message failed and whether it was exported.

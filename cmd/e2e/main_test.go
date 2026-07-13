@@ -170,6 +170,65 @@ func TestValidateAdminStorageDiagnosticsRejectsMemorySession(t *testing.T) {
 	}
 }
 
+func TestValidateInternalAuthConfigAcceptsBulkRequeueFixture(t *testing.T) {
+	cfg := config{
+		InternalAuthMode:     internalAuthModeToken,
+		CheckAdminStorage:    true,
+		CheckBulkRequeue:     true,
+		CheckQueueCapacity:   true,
+		ExpectPerDeviceLimit: 8,
+		AdminSessionPeerURL:  "http://127.0.0.1:18183",
+		ExpectTerminalPolicy: "integration-terminal",
+	}
+	if err := validateInternalAuthConfig(cfg); err != nil {
+		t.Fatalf("validateInternalAuthConfig() error = %v", err)
+	}
+}
+
+func TestValidateInternalAuthConfigRejectsBulkRequeueWithoutAdminStorage(t *testing.T) {
+	cfg := config{
+		InternalAuthMode:     internalAuthModeToken,
+		CheckBulkRequeue:     true,
+		CheckQueueCapacity:   true,
+		ExpectPerDeviceLimit: 8,
+		AdminSessionPeerURL:  "http://127.0.0.1:18183",
+		ExpectTerminalPolicy: "integration-terminal",
+	}
+	if err := validateInternalAuthConfig(cfg); err == nil {
+		t.Fatal("validateInternalAuthConfig() error = nil, want missing admin storage rejection")
+	}
+}
+
+func TestValidateBulkRequeueResponse(t *testing.T) {
+	response := downlink.BulkRequeueResponse{
+		Code:    "partial_failure",
+		Total:   2,
+		Success: 1,
+		Failed:  1,
+		Results: []downlink.MessageStatusResponse{
+			{
+				Code:       "ok",
+				MessageID:  "message-1",
+				Status:     downlink.MessageStatusPending,
+				PolicyName: "integration-terminal",
+			},
+			{
+				Code:            "queue_capacity_exceeded",
+				MessageID:       "message-2",
+				Status:          downlink.MessageStatusFailed,
+				PolicyName:      "integration-terminal",
+				TerminalReason:  downlink.TerminalReasonMaxAttempts,
+				CapacityScope:   downlink.QueueCapacityScopeDevice,
+				CapacityLimit:   8,
+				CapacityPending: 8,
+			},
+		},
+	}
+	if err := validateBulkRequeueResponse(response, []string{"message-1", "message-2"}, "integration-terminal", 8); err != nil {
+		t.Fatalf("validateBulkRequeueResponse() error = %v", err)
+	}
+}
+
 func TestSumMetricSamplesMatchesLabelsInAnyOrder(t *testing.T) {
 	metricsText := `
 # HELP z_courier_cluster_peer_push_total Total number of cluster peer push attempts.
@@ -304,5 +363,28 @@ z_courier_admin_audit_write_total{store="postgres",result="success"} 1
 
 	if err := checkAdminStorageMetrics(metricsText); err == nil {
 		t.Fatal("checkAdminStorageMetrics() error = nil, want missing metric rejection")
+	}
+}
+
+func TestCheckBulkRequeueMetrics(t *testing.T) {
+	metricsText := `
+z_courier_downlink_bulk_requeue_total{result="partial_failure"} 1
+z_courier_downlink_requeue_total{result="success"} 1
+z_courier_downlink_requeue_total{result="queue_capacity_exceeded"} 1
+z_courier_admin_action_total{action="downlink_message_bulk_requeue",result="partial_failure"} 1
+`
+	if err := checkBulkRequeueMetrics(metricsText); err != nil {
+		t.Fatalf("checkBulkRequeueMetrics() error = %v", err)
+	}
+}
+
+func TestCheckBulkRequeueMetricsRejectsMissingBatchOutcome(t *testing.T) {
+	metricsText := `
+z_courier_downlink_requeue_total{result="success"} 1
+z_courier_downlink_requeue_total{result="queue_capacity_exceeded"} 1
+z_courier_admin_action_total{action="downlink_message_bulk_requeue",result="partial_failure"} 1
+`
+	if err := checkBulkRequeueMetrics(metricsText); err == nil {
+		t.Fatal("checkBulkRequeueMetrics() error = nil, want missing batch outcome rejection")
 	}
 }

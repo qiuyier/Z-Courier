@@ -503,6 +503,11 @@ Run the local cluster integration verifier:
 bash scripts/e2e_cluster.sh
 ```
 
+The cluster verifier includes shared PostgreSQL capacity and retry fairness,
+Redis-backed admin sessions, persistent admin audit, terminal NSQ publication,
+and a cross-node guarded bulk requeue that must return one success plus one
+capacity failure without losing the successful item.
+
 Start the gateway:
 
 ```bash

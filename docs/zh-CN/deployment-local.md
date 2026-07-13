@@ -49,6 +49,11 @@ bash scripts/e2e_cluster.sh
 脚本还会验证断线后消息排队、重连后补发，以及 Redis route refresher 能让长时间安静的
 连接继续可发现。
 
+集群验证还会创建 gateway-a 的 Redis admin session，并用它在 gateway-b 发起真实
+批量重入队。夹具在共享 PostgreSQL 中为同一设备准备 7 条 pending 和 2 条 failed；
+第一条重入队占满第 8 个容量槽位，第二条返回容量拒绝。脚本随后从两个 gateway 查询
+一致的消息状态和策略，并验证 PostgreSQL 中的批次/逐项审计以及 Prometheus 指标。
+
 ## 手动启动依赖
 
 ```bash

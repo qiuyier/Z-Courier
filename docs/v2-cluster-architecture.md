@@ -526,12 +526,19 @@ offline push before bind -> pending -> bind flush -> delivered
 online push through gateway-a to client connected on gateway-b -> delivered
 debug route from gateway-a -> cluster route points to gateway-b
 debug sessions from gateway-b -> local session exists
+Redis admin session created on gateway-a -> accepted by gateway-b
+PostgreSQL admin login audit -> visible from the shared store
+two terminal failed messages plus seven fillers under device limit eight
+bulk requeue on gateway-b -> one pending success plus one capacity failure
+message status from both gateways -> identical shared PostgreSQL state/policy
+bulk summary and per-item audits -> persisted in PostgreSQL
 client disconnect -> local session gone
 push while disconnected -> pending with failed attempt metadata
 client reconnect -> pending flush -> delivered
 NSQ upstream publish path
 base gateway and cluster/retry metrics exposure
 reconnect/retry metrics have non-zero samples
+bulk requeue and admin-action metrics have non-zero samples
 ```
 
 The reconnect path intentionally uses a client disconnect instead of killing a

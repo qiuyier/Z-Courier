@@ -33,6 +33,11 @@ semantic versioning after the first public MVP tag.
   with independent capacity-aware execution, per-item HTTP `207` results,
   operator/admin permission enforcement, summary plus item audit events, Go
   backend SDK support, and a confirmation/result workflow in the admin console.
+- V12.5.2 deterministic two-node PostgreSQL E2E for guarded bulk requeue. A
+  Redis-backed admin session created on gateway-a executes on gateway-b, one
+  item succeeds while the shared per-device budget rejects the next, both
+  gateways observe the same persisted states and recorded policy, and
+  PostgreSQL audit rows plus Prometheus outcomes are verified.
 
 ## [v0.11.0] - 2026-07-10
 
