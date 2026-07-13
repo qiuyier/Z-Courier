@@ -239,7 +239,7 @@ Candidate work:
 - Document capacity sizing in terms of active devices, offline duration,
   message rate, retention, and PostgreSQL storage.
 
-Current implementation (V12.4.1):
+Current implementation (V12.4.1 through V12.4.3):
 
 - Adds backward-compatible global and per-`client_id + device_id` pending
   admission limits; zero keeps the corresponding limit disabled.
@@ -257,7 +257,18 @@ Current implementation (V12.4.1):
   production runbook expose the configured limits and rejection scope.
 - Unit tests cover global/device limits, idempotency, requeue, and concurrent
   memory admission. Real PostgreSQL integration and two-node cluster E2E cover
-  the shared-store path. Fair retry scheduling remains V12.4.2 work.
+  the shared-store path.
+- V12.4.2 adds bounded FIFO oversampling followed by round-robin selection by
+  `client_id + device_id`. Memory and PostgreSQL stores share the same result
+  contract, while PostgreSQL retains leased claims and `SKIP LOCKED` cluster
+  safety. Selection mode, selected-device count, and maximum selected work per
+  device are exposed in logs, metrics, diagnostics, and the admin retry-scan
+  response.
+- V12.4.3 adds a deterministic two-node E2E fixture with an `8:2:2` offline
+  backlog. A real admin retry scan limited to three messages must select one
+  message from each device, persist one retry attempt per device, and expose
+  the fairness and claim metrics. The verifier also keeps capacity,
+  reconnect, terminal-event, NSQ, and cluster routing checks in the same run.
 
 Acceptance criteria:
 

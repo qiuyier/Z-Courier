@@ -35,6 +35,11 @@ const (
 	downlinkPushTimeout = 10 * time.Second
 	duplicateCheckDelay = 500 * time.Millisecond
 
+	retryFairnessMsgID            = 2998
+	retryFairnessHotMessages      = 8
+	retryFairnessColdMessages     = 2
+	defaultRetryFairnessScanLimit = 3
+
 	internalAuthModeToken = "token"
 	internalAuthModeHMAC  = "hmac"
 )
@@ -65,6 +70,8 @@ type config struct {
 	ExpectPolicyName       string
 	CheckQueueCapacity     bool
 	ExpectPerDeviceLimit   int
+	CheckRetryFairness     bool
+	RetryFairnessScanLimit int
 	CheckTerminalEvent     bool
 	TerminalNSQDAddress    string
 	ExpectTerminalPolicy   string
@@ -111,6 +118,8 @@ func parseFlags() config {
 	flag.StringVar(&cfg.ExpectPolicyName, "expect-policy-name", "", "expected persisted delivery policy for MsgID 2001; empty disables the check")
 	flag.BoolVar(&cfg.CheckQueueCapacity, "check-queue-capacity", false, "fill one offline device queue and verify explicit capacity rejection")
 	flag.IntVar(&cfg.ExpectPerDeviceLimit, "expect-per-device-limit", 2, "expected pending-message capacity for the E2E device")
+	flag.BoolVar(&cfg.CheckRetryFairness, "check-retry-fairness", false, "verify a bounded retry scan makes progress across hot and cold offline devices")
+	flag.IntVar(&cfg.RetryFairnessScanLimit, "retry-fairness-scan-limit", defaultRetryFairnessScanLimit, "retry scan limit used by the fairness E2E check")
 	flag.BoolVar(&cfg.CheckTerminalEvent, "check-terminal-event", false, "force a message to terminal failure and verify its NSQ event")
 	flag.StringVar(&cfg.TerminalNSQDAddress, "terminal-nsqd-address", "127.0.0.1:14150", "NSQ TCP address used to consume terminal events")
 	flag.StringVar(&cfg.ExpectTerminalPolicy, "expect-terminal-policy", "integration-terminal", "expected policy for the terminal-event E2E message")
@@ -148,6 +157,17 @@ func parseMetricsURLs(raw, fallback string) []string {
 func validateInternalAuthConfig(cfg config) error {
 	if cfg.CheckQueueCapacity && cfg.ExpectPerDeviceLimit <= 0 {
 		return fmt.Errorf("expect-per-device-limit must be greater than 0 when check-queue-capacity is enabled")
+	}
+	if cfg.CheckRetryFairness {
+		if cfg.RetryFairnessScanLimit != defaultRetryFairnessScanLimit {
+			return fmt.Errorf("retry-fairness-scan-limit must be %d for the deterministic fairness fixture", defaultRetryFairnessScanLimit)
+		}
+		if cfg.ExpectPerDeviceLimit < retryFairnessHotMessages {
+			return fmt.Errorf(
+				"expect-per-device-limit must be at least %d when check-retry-fairness is enabled",
+				retryFairnessHotMessages,
+			)
+		}
 	}
 	switch cfg.InternalAuthMode {
 	case internalAuthModeToken:
@@ -232,6 +252,11 @@ func run(ctx context.Context, cfg config) error {
 	}
 	if cfg.CheckQueueCapacity {
 		if err := checkQueueCapacity(ctx, cfg, db, runID); err != nil {
+			return err
+		}
+	}
+	if cfg.CheckRetryFairness {
+		if err := checkRetryFairness(ctx, cfg, db, runID); err != nil {
 			return err
 		}
 	}
@@ -1057,6 +1082,8 @@ func validatePushConflict(response downlink.PushResponse, messageID string) erro
 
 func checkQueueCapacity(ctx context.Context, cfg config, db *sql.DB, runID int64) error {
 	fmt.Println("checking per-device queue capacity path")
+	messagePrefix := fmt.Sprintf("e2e-%d-capacity-", runID)
+	defer cleanupMessagesByPrefix(db, messagePrefix)
 	deviceID := fmt.Sprintf("%s-capacity-offline-%d", cfg.DeviceID, runID)
 	acceptedIDs := make([]string, 0, cfg.ExpectPerDeviceLimit)
 	for index := 0; index < cfg.ExpectPerDeviceLimit; index++ {
@@ -1109,6 +1136,162 @@ WHERE message_id = $1
 	}
 	fmt.Printf("queue capacity rejection verified: scope=%s limit=%d\n", rejected.CapacityScope, rejected.CapacityLimit)
 	return nil
+}
+
+func checkRetryFairness(ctx context.Context, cfg config, db *sql.DB, runID int64) error {
+	fmt.Println("checking hot-device retry fairness path")
+	messagePrefix := fmt.Sprintf("e2e-%d-fair-", runID)
+	defer cleanupMessagesByPrefix(db, messagePrefix)
+
+	fixtures := []struct {
+		name     string
+		deviceID string
+		count    int
+	}{
+		{name: "hot", deviceID: fmt.Sprintf("%s-fair-hot-%d", cfg.DeviceID, runID), count: retryFairnessHotMessages},
+		{name: "cold-a", deviceID: fmt.Sprintf("%s-fair-cold-a-%d", cfg.DeviceID, runID), count: retryFairnessColdMessages},
+		{name: "cold-b", deviceID: fmt.Sprintf("%s-fair-cold-b-%d", cfg.DeviceID, runID), count: retryFairnessColdMessages},
+	}
+
+	totalMessages := 0
+	for round := 0; round < retryFairnessHotMessages; round++ {
+		for _, fixture := range fixtures {
+			if round >= fixture.count {
+				continue
+			}
+			messageID := fmt.Sprintf("%s%s-%02d", messagePrefix, fixture.name, round+1)
+			response, err := pushDownlinkTarget(
+				ctx,
+				cfg,
+				fixture.deviceID,
+				retryFairnessMsgID,
+				messageID,
+				[]byte("retry-fairness"),
+				http.StatusAccepted,
+			)
+			if err != nil {
+				return fmt.Errorf("push retry fairness message %s: %w", messageID, err)
+			}
+			if err := validatePushOutcome(response, messageID, downlink.SubmissionStateCreated, downlink.MessageStatusPending); err != nil {
+				return fmt.Errorf("validate retry fairness message %s: %w", messageID, err)
+			}
+			totalMessages++
+		}
+	}
+
+	result, err := db.ExecContext(ctx, `
+UPDATE z_courier_downlink_messages
+SET created_at = TIMESTAMPTZ '1900-01-01 00:00:00+00',
+    next_retry_at = NOW() - INTERVAL '1 second',
+    claim_owner = '',
+    claim_until = NULL,
+    updated_at = NOW()
+WHERE message_id LIKE $1
+  AND status = $2
+`, messagePrefix+"%", string(downlink.MessageStatusPending))
+	if err != nil {
+		return fmt.Errorf("make retry fairness messages due: %w", err)
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("count due retry fairness messages: %w", err)
+	}
+	if updated != int64(totalMessages) {
+		return fmt.Errorf("due retry fairness messages = %d, want %d", updated, totalMessages)
+	}
+
+	scan, err := triggerRetryScan(ctx, cfg, cfg.RetryFairnessScanLimit)
+	if err != nil {
+		return fmt.Errorf("trigger retry fairness scan: %w", err)
+	}
+	if err := validateRetryFairnessScan(scan, cfg.RetryFairnessScanLimit); err != nil {
+		return err
+	}
+
+	for _, fixture := range fixtures {
+		var progressed int
+		if err := db.QueryRowContext(ctx, `
+SELECT COUNT(*)
+FROM z_courier_downlink_messages
+WHERE message_id LIKE $1
+  AND device_id = $2
+  AND attempts >= 2
+`, messagePrefix+"%", fixture.deviceID).Scan(&progressed); err != nil {
+			return fmt.Errorf("query retry fairness progress for %s: %w", fixture.name, err)
+		}
+		if progressed != 1 {
+			return fmt.Errorf("retry fairness device %s progressed messages = %d, want 1", fixture.name, progressed)
+		}
+	}
+
+	fmt.Printf(
+		"retry fairness verified: backlog=%d:%d:%d scanned=%d selected_devices=%d max_per_device=%d\n",
+		retryFairnessHotMessages,
+		retryFairnessColdMessages,
+		retryFairnessColdMessages,
+		scan.Scanned,
+		scan.SelectedDevices,
+		scan.MaxPerDevice,
+	)
+	return nil
+}
+
+func triggerRetryScan(ctx context.Context, cfg config, limit int) (downlink.RetryScanResponse, error) {
+	var zero downlink.RetryScanResponse
+	body, err := sonic.Marshal(downlink.RetryScanRequest{Limit: limit})
+	if err != nil {
+		return zero, err
+	}
+	request, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		cfg.InternalURL+"/internal/messages/retry/scan",
+		bytes.NewReader(body),
+	)
+	if err != nil {
+		return zero, err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	if err := applyInternalAuth(request, body, cfg); err != nil {
+		return zero, err
+	}
+
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		return zero, err
+	}
+	defer response.Body.Close()
+	responseBody, err := io.ReadAll(response.Body)
+	if err != nil {
+		return zero, err
+	}
+	if response.StatusCode != http.StatusOK {
+		return zero, fmt.Errorf("retry scan status = %d, body = %s", response.StatusCode, string(responseBody))
+	}
+	if err := sonic.Unmarshal(responseBody, &zero); err != nil {
+		return downlink.RetryScanResponse{}, err
+	}
+	return zero, nil
+}
+
+func validateRetryFairnessScan(scan downlink.RetryScanResponse, limit int) error {
+	if scan.Code != "ok" || scan.Limit != limit || scan.Scanned != limit || scan.Sent != 0 ||
+		scan.Queued != limit || scan.Failed != 0 || scan.SelectionMode != downlink.RetrySelectionModeFair ||
+		scan.SelectedDevices != limit || scan.MaxPerDevice != 1 {
+		return fmt.Errorf(
+			"retry fairness scan = %+v, want limit/scanned/queued/devices=%d mode=%s max_per_device=1",
+			scan,
+			limit,
+			downlink.RetrySelectionModeFair,
+		)
+	}
+	return nil
+}
+
+func cleanupMessagesByPrefix(db *sql.DB, prefix string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, _ = db.ExecContext(ctx, "DELETE FROM z_courier_downlink_messages WHERE message_id LIKE $1", prefix+"%")
 }
 
 type terminalEventCollector struct {
@@ -1197,6 +1380,36 @@ func checkTerminalEvent(
 	}
 	if err := validatePushOutcome(response, messageID, downlink.SubmissionStateCreated, downlink.MessageStatusPending); err != nil {
 		return fmt.Errorf("validate terminal test message: %w", err)
+	}
+	if cfg.CheckRetryFairness {
+		result, err := db.ExecContext(ctx, `
+UPDATE z_courier_downlink_messages
+SET created_at = TIMESTAMPTZ '1900-01-02 00:00:00+00',
+    next_retry_at = NOW() - INTERVAL '1 second',
+    claim_owner = '',
+    claim_until = NULL,
+    updated_at = NOW()
+WHERE message_id = $1
+  AND status = $2
+`, messageID, string(downlink.MessageStatusPending))
+		if err != nil {
+			return fmt.Errorf("make terminal test message due: %w", err)
+		}
+		updated, err := result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("count due terminal test message: %w", err)
+		}
+		if updated != 1 {
+			return fmt.Errorf("due terminal test messages = %d, want 1", updated)
+		}
+		scan, err := triggerRetryScan(ctx, cfg, 1)
+		if err != nil {
+			return fmt.Errorf("trigger terminal test retry scan: %w", err)
+		}
+		if scan.Code != "ok" || scan.Scanned != 1 || scan.Failed != 1 ||
+			scan.SelectionMode != downlink.RetrySelectionModeFair || scan.SelectedDevices != 1 || scan.MaxPerDevice != 1 {
+			return fmt.Errorf("terminal retry scan = %+v, want one fair terminal failure", scan)
+		}
 	}
 	if err := waitMessageStatus(ctx, db, messageID, string(downlink.MessageStatusFailed)); err != nil {
 		return fmt.Errorf("wait terminal test message failed: %w", err)
@@ -1392,6 +1605,11 @@ func checkMetrics(ctx context.Context, cfg config) error {
 			return fmt.Errorf("queue capacity rejection metric = %.4f, found = %t, want >= 1", value, found)
 		}
 	}
+	if cfg.CheckRetryFairness {
+		if err := checkRetryFairnessMetrics(string(body)); err != nil {
+			return err
+		}
+	}
 	if cfg.CheckAdminStorage {
 		if err := checkAdminStorageMetrics(string(body)); err != nil {
 			return err
@@ -1490,6 +1708,46 @@ func checkReconnectRetryMetrics(metricsText string, cfg config) error {
 		}
 	}
 
+	return nil
+}
+
+func checkRetryFairnessMetrics(metricsText string) error {
+	expectations := []metricExpectation{
+		{
+			Name:   "z_courier_downlink_retry_selected_devices_sum",
+			Labels: map[string]string{"mode": downlink.RetrySelectionModeFair},
+			Min:    defaultRetryFairnessScanLimit,
+		},
+		{
+			Name:   "z_courier_downlink_retry_max_per_device_sum",
+			Labels: map[string]string{"mode": downlink.RetrySelectionModeFair},
+			Min:    1,
+		},
+		{
+			Name:   "z_courier_downlink_retry_claim_messages_total",
+			Labels: map[string]string{"result": "success"},
+			Min:    defaultRetryFairnessScanLimit,
+		},
+	}
+
+	for _, expectation := range expectations {
+		value, found, err := sumMetricSamples(metricsText, expectation.Name, expectation.Labels)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return fmt.Errorf("retry fairness metric %s%s not found", expectation.Name, formatMetricLabels(expectation.Labels))
+		}
+		if value < expectation.Min {
+			return fmt.Errorf(
+				"retry fairness metric %s%s = %.4f, want >= %.4f",
+				expectation.Name,
+				formatMetricLabels(expectation.Labels),
+				value,
+				expectation.Min,
+			)
+		}
+	}
 	return nil
 }
 

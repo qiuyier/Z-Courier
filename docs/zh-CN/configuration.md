@@ -353,10 +353,26 @@ downlink:
     max_attempts: 10
     scan_limit: 500
     bind_flush_limit: 500
+    retry_fairness:
+      enabled: true
+      candidate_multiplier: 4
   policies: []
 ```
 
 没有可靠存储时，离线消息无法长期保存。生产环境建议使用 PostgreSQL。
+
+- `retry_fairness.enabled`：按 `client_id + device_id` 轮转选择到期消息，避免
+  一个热点离线设备独占有界扫描；关闭时保持 FIFO。
+- `retry_fairness.candidate_multiplier`：公平选择前的有界候选窗口倍数。`0`
+  使用默认值 `4`，大于 `16` 的配置会被拒绝。只有当最老的到期窗口经常被
+  单设备积压占满时才需要提高。
+
+开启后，每次扫描先读取一个有界候选窗口，再按设备轮次选出最多
+`scan_limit` 条消息。PostgreSQL 仍使用 claim lease 和
+`FOR UPDATE SKIP LOCKED`，共享存储的多个 gateway 不会领取同一条消息。
+`z_courier_downlink_retry_selected_devices` 和
+`z_courier_downlink_retry_max_per_device` 指标分别展示每次扫描覆盖的设备数和
+单设备最多入选数。
 
 ### 命名下行策略（V12.2）
 

@@ -122,11 +122,20 @@ downlink:
       msg_id_min: 2999
       msg_id_max: 2999
       max_attempts: 1
-      max_age: 1h
       ack_timeout: 1s
       retry_delay: 1s
       backoff_multiplier: 1
       max_retry_delay: 1s
+      retry_jitter: 0s
+    - name: integration-fairness
+      enabled: true
+      msg_id_min: 2998
+      msg_id_max: 2998
+      max_attempts: 5
+      ack_timeout: 1s
+      retry_delay: 1h
+      backoff_multiplier: 1
+      max_retry_delay: 1h
       retry_jitter: 0s
   capacity:
     max_pending_global: 0

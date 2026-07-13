@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/qiuyier/Z-Courier/internal/downlink"
+)
 
 func TestValidateDebugRoute(t *testing.T) {
 	cfg := config{
@@ -226,6 +230,56 @@ z_courier_downlink_push_total{msg_id="2001",result="queued"} 1
 	err := checkReconnectRetryMetrics(metricsText, config{ExpectRouteNode: "gateway-b"})
 	if err == nil {
 		t.Fatal("checkReconnectRetryMetrics() error = nil, want missing metric rejection")
+	}
+}
+
+func TestValidateRetryFairnessScan(t *testing.T) {
+	scan := downlink.RetryScanResponse{
+		Code:            "ok",
+		Limit:           3,
+		Scanned:         3,
+		Queued:          3,
+		SelectionMode:   downlink.RetrySelectionModeFair,
+		SelectedDevices: 3,
+		MaxPerDevice:    1,
+	}
+	if err := validateRetryFairnessScan(scan, 3); err != nil {
+		t.Fatalf("validateRetryFairnessScan() error = %v", err)
+	}
+}
+
+func TestValidateRetryFairnessScanRejectsHotDeviceDominance(t *testing.T) {
+	scan := downlink.RetryScanResponse{
+		Code:            "ok",
+		Limit:           3,
+		Scanned:         3,
+		Queued:          3,
+		SelectionMode:   downlink.RetrySelectionModeFair,
+		SelectedDevices: 1,
+		MaxPerDevice:    3,
+	}
+	if err := validateRetryFairnessScan(scan, 3); err == nil {
+		t.Fatal("validateRetryFairnessScan() error = nil, want hot-device dominance rejection")
+	}
+}
+
+func TestCheckRetryFairnessMetrics(t *testing.T) {
+	metricsText := `
+z_courier_downlink_retry_selected_devices_sum{mode="fair"} 3
+z_courier_downlink_retry_max_per_device_sum{mode="fair"} 1
+z_courier_downlink_retry_claim_messages_total{owner="gateway-a",result="success"} 3
+`
+	if err := checkRetryFairnessMetrics(metricsText); err != nil {
+		t.Fatalf("checkRetryFairnessMetrics() error = %v", err)
+	}
+}
+
+func TestCheckRetryFairnessMetricsRejectsMissingSelection(t *testing.T) {
+	metricsText := `
+z_courier_downlink_retry_claim_messages_total{owner="gateway-a",result="success"} 3
+`
+	if err := checkRetryFairnessMetrics(metricsText); err == nil {
+		t.Fatal("checkRetryFairnessMetrics() error = nil, want missing selection rejection")
 	}
 }
 

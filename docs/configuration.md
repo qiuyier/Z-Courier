@@ -568,6 +568,9 @@ downlink:
     max_attempts: 5
     scan_limit: 100
     bind_flush_limit: 100
+    retry_fairness:
+      enabled: true
+      candidate_multiplier: 4
 ```
 
 - `retry_interval`: how often the retry worker scans due messages.
@@ -581,6 +584,21 @@ downlink:
 - `max_attempts`: attempts before a message is marked `failed`.
 - `scan_limit`: maximum due messages scanned per retry tick.
 - `bind_flush_limit`: maximum pending messages flushed when a client binds.
+- `retry_fairness.enabled`: select due messages round-robin by
+  `client_id + device_id` so one hot offline device cannot monopolize a bounded
+  scan. Disabled preserves FIFO selection.
+- `retry_fairness.candidate_multiplier`: bounded oversampling window used
+  before fair selection. `0` uses the default `4`; values above `16` are
+  rejected. Increase it only when the oldest due window can contain a much
+  larger single-device backlog than `scan_limit`.
+
+When fairness is enabled, one scan first reads a bounded candidate window and
+then selects up to `scan_limit` messages by device round. PostgreSQL keeps the
+same claim lease and `FOR UPDATE SKIP LOCKED` behavior, so multiple gateway
+nodes can share the store without claiming the same message. The metrics
+`z_courier_downlink_retry_selected_devices` and
+`z_courier_downlink_retry_max_per_device` expose the distribution selected by
+each scan.
 
 ### Named Delivery Policies (V12.2)
 

@@ -588,6 +588,9 @@ downlink:
     max_attempts: 5
     scan_limit: 100
     bind_flush_limit: 100
+    retry_fairness:
+      enabled: true
+      candidate_multiplier: 4
   retention:
     delivered_ttl: 24h
     failed_ttl: 168h
@@ -610,6 +613,9 @@ Stored messages are retried in three ways:
   messages for that `client_id` + `device_id`, up to `bind_flush_limit`.
 - Sent messages that require client ACK are retried after `ack_timeout` if the
   ACK does not arrive.
+- With `retry_fairness.enabled`, bounded scans select due work round-robin by
+  `client_id + device_id`, preventing one hot offline device from monopolizing
+  the retry batch.
 
 Failed retry attempts update `attempts`, `last_error`, and `next_retry_at`.
 After `max_attempts`, the message is marked `failed`.

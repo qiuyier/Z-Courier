@@ -3,13 +3,15 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE_FILE="$ROOT_DIR/deploy/local/docker-compose.yml"
-CONFIG_A="$ROOT_DIR/configs/z-courier.cluster-a.yaml"
-CONFIG_B="$ROOT_DIR/configs/z-courier.cluster-b.yaml"
+CONFIG_A_SOURCE="$ROOT_DIR/configs/z-courier.cluster-a.yaml"
+CONFIG_B_SOURCE="$ROOT_DIR/configs/z-courier.cluster-b.yaml"
 ZINX_CONFIG_A="$ROOT_DIR/conf/zinx.cluster-a.json"
 ZINX_CONFIG_B="$ROOT_DIR/conf/zinx.cluster-b.json"
 LOG_DIR="$ROOT_DIR/log"
 RUN_ID="$(date +%s)-$$"
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/z-courier-e2e-cluster.XXXXXX")"
+CONFIG_A="$TMP_DIR/z-courier.cluster-a.yaml"
+CONFIG_B="$TMP_DIR/z-courier.cluster-b.yaml"
 GATEWAY_BIN="$TMP_DIR/gateway"
 
 GATEWAY_A_PID=""
@@ -66,10 +68,39 @@ wait_http() {
   done
 }
 
+prepare_e2e_config() {
+  local source="$1"
+  local destination="$2"
+
+  awk '
+    BEGIN { in_delivery = 0; interval_changed = 0; capacity_changed = 0 }
+    /^  delivery:$/ && interval_changed == 0 { in_delivery = 1 }
+    in_delivery && /^    retry_interval:/ {
+      print "    retry_interval: 1h"
+      interval_changed = 1
+      in_delivery = 0
+      next
+    }
+    /^    max_pending_per_device:/ {
+      print "    max_pending_per_device: 8"
+      capacity_changed = 1
+      next
+    }
+    { print }
+    END {
+      if (interval_changed == 0 || capacity_changed == 0) {
+        exit 1
+      }
+    }
+  ' "$source" >"$destination"
+}
+
 cd "$ROOT_DIR"
 mkdir -p "$LOG_DIR"
 : >"$LOG_DIR/e2e-cluster-gateway-a.log"
 : >"$LOG_DIR/e2e-cluster-gateway-b.log"
+prepare_e2e_config "$CONFIG_A_SOURCE" "$CONFIG_A"
+prepare_e2e_config "$CONFIG_B_SOURCE" "$CONFIG_B"
 
 docker compose -f "$COMPOSE_FILE" up -d postgres redis nsqlookupd nsqd
 
@@ -133,8 +164,10 @@ go run ./cmd/e2e \
   -admin-session-peer-url http://127.0.0.1:18183 \
   -expect-policy-name integration-reliable \
   -check-queue-capacity \
-  -expect-per-device-limit 2 \
+  -expect-per-device-limit 8 \
+  -check-retry-fairness \
+  -retry-fairness-scan-limit 3 \
   -check-terminal-event \
   -expect-terminal-policy integration-terminal \
-  -timeout 45s \
+  -timeout 60s \
   "$@"
