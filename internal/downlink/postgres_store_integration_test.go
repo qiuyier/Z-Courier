@@ -2,8 +2,10 @@ package downlink
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"sync"
 	"testing"
@@ -15,6 +17,7 @@ func TestPostgresStoreIdempotentSaveIntegration(t *testing.T) {
 	if dsn == "" {
 		t.Skip("set ZCOURIER_TEST_POSTGRES_DSN to run PostgreSQL downlink store integration test")
 	}
+	dsn = isolatedPostgresTestDSN(t, dsn)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -238,6 +241,7 @@ func TestPostgresStoreQueueCapacityIntegration(t *testing.T) {
 	if dsn == "" {
 		t.Skip("set ZCOURIER_TEST_POSTGRES_DSN to run PostgreSQL downlink store integration test")
 	}
+	dsn = isolatedPostgresTestDSN(t, dsn)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -318,6 +322,7 @@ func TestPostgresStoreRetryFairnessIntegration(t *testing.T) {
 	if dsn == "" {
 		t.Skip("set ZCOURIER_TEST_POSTGRES_DSN to run PostgreSQL downlink store integration test")
 	}
+	dsn = isolatedPostgresTestDSN(t, dsn)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -478,6 +483,56 @@ func assertFairDeviceCounts(t *testing.T, selection RetrySelection, expected map
 			t.Fatalf("device %s selected %d messages, want %d; all counts = %v", deviceID, counts[deviceID], count, counts)
 		}
 	}
+}
+
+func isolatedPostgresTestDSN(t *testing.T, dsn string) string {
+	t.Helper()
+	schema := fmt.Sprintf("z_courier_test_%d", time.Now().UnixNano())
+
+	admin, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatalf("open PostgreSQL test admin connection: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := admin.ExecContext(ctx, "CREATE SCHEMA "+schema); err != nil {
+		_ = admin.Close()
+		t.Fatalf("create PostgreSQL test schema: %v", err)
+	}
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		_, _ = admin.ExecContext(cleanupCtx, "DROP SCHEMA IF EXISTS "+schema+" CASCADE")
+		_ = admin.Close()
+	})
+
+	isolatedDSN := postgresDSNWithSearchPath(t, dsn, schema)
+	check, err := sql.Open("pgx", isolatedDSN)
+	if err != nil {
+		t.Fatalf("open isolated PostgreSQL test connection: %v", err)
+	}
+	defer check.Close()
+
+	var currentSchema string
+	if err := check.QueryRowContext(ctx, "SELECT current_schema()").Scan(&currentSchema); err != nil {
+		t.Fatalf("verify isolated PostgreSQL test schema: %v", err)
+	}
+	if currentSchema != schema {
+		t.Fatalf("isolated PostgreSQL test schema = %q, want %q", currentSchema, schema)
+	}
+	return isolatedDSN
+}
+
+func postgresDSNWithSearchPath(t *testing.T, dsn string, schema string) string {
+	t.Helper()
+	parsed, err := url.Parse(dsn)
+	if err == nil && (parsed.Scheme == "postgres" || parsed.Scheme == "postgresql") {
+		query := parsed.Query()
+		query.Set("search_path", schema)
+		parsed.RawQuery = query.Encode()
+		return parsed.String()
+	}
+	return dsn + " search_path=" + schema
 }
 
 type postgresCapacityOutcome struct {
