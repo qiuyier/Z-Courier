@@ -344,6 +344,20 @@ Candidate work:
 - Keep CI, Docker image checks, Helm chart checks, browser smoke, E2E, and
   manual load-test summaries aligned with the new outcomes.
 
+Current implementation (V12.6.1):
+
+- Extracts the authoritative PostgreSQL downlink schema into the versioned
+  `internal/downlink/migrations/v0.12.0.sql` file and embeds that same file in
+  the gateway migration path, so manual and automatic migration cannot drift.
+- Adds an isolated V11-to-V12 PostgreSQL integration fixture that preserves a
+  legacy row, reruns the migration idempotently, verifies all V12 columns and
+  terminal-outbox objects, exercises lazy identity fingerprinting, and proves
+  that a V11-style insert remains valid after binary rollback. The two-node
+  E2E runs this check before starting either gateway.
+- Adds English and Chinese release-readiness guidance covering migration
+  ownership, mixed-version limitations, non-destructive rollback, direct
+  verification commands, and an evidence-oriented release acceptance matrix.
+
 Acceptance criteria:
 
 - Upgrade and rollback are documented and tested where schema changes occur.

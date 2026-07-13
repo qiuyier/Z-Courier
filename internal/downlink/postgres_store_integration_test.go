@@ -2,6 +2,7 @@ package downlink
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -11,6 +12,151 @@ import (
 	"testing"
 	"time"
 )
+
+func TestPostgresStoreV11SchemaUpgradeAndRollbackCompatibilityIntegration(t *testing.T) {
+	dsn := os.Getenv("ZCOURIER_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("set ZCOURIER_TEST_POSTGRES_DSN to run PostgreSQL downlink migration integration test")
+	}
+	dsn = isolatedPostgresTestDSN(t, dsn)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	legacyDB, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatalf("open V11 PostgreSQL schema: %v", err)
+	}
+	defer legacyDB.Close()
+
+	if _, err := legacyDB.ExecContext(ctx, `
+CREATE TABLE z_courier_downlink_messages (
+  message_id TEXT PRIMARY KEY,
+  client_id TEXT NOT NULL,
+  device_id TEXT NOT NULL,
+  msg_id INTEGER NOT NULL,
+  body BYTEA NOT NULL DEFAULT ''::bytea,
+  ack_required BOOLEAN NOT NULL DEFAULT false,
+  trace_id TEXT NOT NULL DEFAULT '',
+  session_id TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  next_retry_at TIMESTAMPTZ,
+  last_error TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL,
+  sent_at TIMESTAMPTZ,
+  delivered_at TIMESTAMPTZ,
+  claim_owner TEXT NOT NULL DEFAULT '',
+  claim_until TIMESTAMPTZ
+)
+`); err != nil {
+		t.Fatalf("create V11 PostgreSQL schema: %v", err)
+	}
+
+	legacyMessageID := fmt.Sprintf("v11-before-upgrade-%d", time.Now().UnixNano())
+	createdAt := time.Now().UTC().Truncate(time.Microsecond)
+	if _, err := legacyDB.ExecContext(ctx, `
+INSERT INTO z_courier_downlink_messages (
+  message_id, client_id, device_id, msg_id, body, ack_required, trace_id,
+  session_id, status, attempts, created_at, updated_at
+) VALUES ($1, $2, $3, $4, $5, true, $6, $7, $8, 0, $9, $9)
+`,
+		legacyMessageID,
+		"legacy-client",
+		"legacy-device",
+		2001,
+		[]byte("legacy-body"),
+		"legacy-trace",
+		"legacy-session",
+		string(MessageStatusPending),
+		createdAt,
+	); err != nil {
+		t.Fatalf("insert V11 message before upgrade: %v", err)
+	}
+
+	store, err := NewPostgresStore(ctx, PostgresStoreConfig{
+		DSN:          dsn,
+		AutoMigrate:  true,
+		MaxOpenConns: 5,
+	})
+	if err != nil {
+		t.Fatalf("upgrade V11 PostgreSQL schema: %v", err)
+	}
+	defer store.Close()
+	if err := store.Migrate(ctx); err != nil {
+		t.Fatalf("repeat V12 PostgreSQL migration: %v", err)
+	}
+
+	for _, column := range []string{
+		"identity_fingerprint",
+		"policy_name",
+		"policy_max_attempts",
+		"policy_max_age_ns",
+		"policy_ack_timeout_ns",
+		"policy_retry_delay_ns",
+		"policy_backoff_multiplier",
+		"policy_max_retry_delay_ns",
+		"policy_retry_jitter_ns",
+		"terminal_reason",
+		"terminal_at",
+		"terminal_publish_status",
+		"terminal_publish_attempts",
+		"terminal_next_publish_at",
+		"terminal_publish_error",
+		"terminal_published_at",
+	} {
+		assertPostgresColumnExists(t, ctx, store.db, "z_courier_downlink_messages", column)
+	}
+	assertPostgresRelationExists(t, ctx, store.db, "z_courier_downlink_terminal_events")
+	assertPostgresRelationExists(t, ctx, store.db, "z_courier_downlink_terminal_events_message_status_idx")
+	assertPostgresRelationExists(t, ctx, store.db, "z_courier_downlink_terminal_events_due_idx")
+
+	legacy, ok, err := store.Get(ctx, legacyMessageID)
+	if err != nil || !ok {
+		t.Fatalf("read V11 message after upgrade = ok:%v err:%v", ok, err)
+	}
+	if legacy.ClientID != "legacy-client" || legacy.DeviceID != "legacy-device" ||
+		legacy.MsgID != 2001 || string(legacy.Body) != "legacy-body" ||
+		legacy.TraceID != "legacy-trace" || legacy.SessionID != "legacy-session" ||
+		legacy.Status != MessageStatusPending || legacy.Policy.Name != "" ||
+		legacy.TerminalPublishStatus != TerminalPublicationDisabled ||
+		len(legacy.IdentityFingerprint) != 0 {
+		t.Fatalf("V11 message changed during migration: %+v", legacy)
+	}
+
+	replayed, err := store.Save(ctx, Message{
+		MessageID:   legacyMessageID,
+		ClientID:    "legacy-client",
+		DeviceID:    "legacy-device",
+		MsgID:       2001,
+		Body:        []byte("legacy-body"),
+		AckRequired: true,
+		TraceID:     "new-trace-is-not-identity",
+	})
+	if err != nil || replayed.Outcome != SaveOutcomeExisting {
+		t.Fatalf("replay migrated V11 message = %+v, err:%v", replayed, err)
+	}
+	if len(replayed.Message.IdentityFingerprint) != sha256.Size {
+		t.Fatalf("lazy identity fingerprint size = %d, want %d", len(replayed.Message.IdentityFingerprint), sha256.Size)
+	}
+
+	// A V11 binary writes only the original columns. Keeping defaults on every
+	// additive V12 column lets that writer continue after a binary rollback.
+	rollbackMessageID := fmt.Sprintf("v11-after-rollback-%d", time.Now().UnixNano())
+	if _, err := legacyDB.ExecContext(ctx, `
+INSERT INTO z_courier_downlink_messages (
+  message_id, client_id, device_id, msg_id, body, ack_required, trace_id,
+  session_id, status, attempts, created_at, updated_at
+) VALUES ($1, $2, $3, $4, $5, false, '', '', $6, 0, $7, $7)
+`, rollbackMessageID, "rollback-client", "rollback-device", 2002, []byte("rollback-body"), string(MessageStatusPending), createdAt); err != nil {
+		t.Fatalf("simulate V11 write after rollback: %v", err)
+	}
+	rollbackMessage, ok, err := store.Get(ctx, rollbackMessageID)
+	if err != nil || !ok || rollbackMessage.ClientID != "rollback-client" ||
+		rollbackMessage.TerminalPublishStatus != TerminalPublicationDisabled {
+		t.Fatalf("read simulated V11 rollback write = %+v, ok:%v err:%v", rollbackMessage, ok, err)
+	}
+}
 
 func TestPostgresStoreIdempotentSaveIntegration(t *testing.T) {
 	dsn := os.Getenv("ZCOURIER_TEST_POSTGRES_DSN")
@@ -533,6 +679,38 @@ func postgresDSNWithSearchPath(t *testing.T, dsn string, schema string) string {
 		return parsed.String()
 	}
 	return dsn + " search_path=" + schema
+}
+
+func assertPostgresColumnExists(t *testing.T, ctx context.Context, db *sql.DB, table string, column string) {
+	t.Helper()
+	var exists bool
+	if err := db.QueryRowContext(ctx, `
+SELECT EXISTS (
+  SELECT 1
+  FROM information_schema.columns
+  WHERE table_schema = current_schema()
+    AND table_name = $1
+    AND column_name = $2
+)
+`, table, column).Scan(&exists); err != nil {
+		t.Fatalf("check PostgreSQL column %s.%s: %v", table, column, err)
+	}
+	if !exists {
+		t.Fatalf("PostgreSQL column %s.%s does not exist", table, column)
+	}
+}
+
+func assertPostgresRelationExists(t *testing.T, ctx context.Context, db *sql.DB, relation string) {
+	t.Helper()
+	var exists bool
+	if err := db.QueryRowContext(ctx, `
+SELECT to_regclass(current_schema() || '.' || $1) IS NOT NULL
+`, relation).Scan(&exists); err != nil {
+		t.Fatalf("check PostgreSQL relation %s: %v", relation, err)
+	}
+	if !exists {
+		t.Fatalf("PostgreSQL relation %s does not exist", relation)
+	}
 }
 
 type postgresCapacityOutcome struct {

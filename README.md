@@ -104,7 +104,10 @@ rollback.
 V12 reliable delivery planning is tracked in
 [docs/v12-roadmap.md](docs/v12-roadmap.md). It focuses on idempotent downlink
 submission, metadata-driven delivery policies, terminal failure handling,
-dead-letter events, and bounded fair retry behavior.
+dead-letter events, and bounded fair retry behavior. PostgreSQL upgrade,
+rollback, and release acceptance guidance is in
+[docs/v12-release.md](docs/v12-release.md), with a Chinese version in
+[docs/zh-CN/v12-release.md](docs/zh-CN/v12-release.md).
 
 ## Quick Start
 

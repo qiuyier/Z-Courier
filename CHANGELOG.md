@@ -38,6 +38,10 @@ semantic versioning after the first public MVP tag.
   item succeeds while the shared per-device budget rejects the next, both
   gateways observe the same persisted states and recorded policy, and
   PostgreSQL audit rows plus Prometheus outcomes are verified.
+- V12.6.1 release-readiness foundation with one embedded, versioned PostgreSQL
+  migration shared by automatic and manual upgrade paths; V11 upgrade and
+  rollback-write compatibility integration coverage in cluster E2E; and
+  English/Chinese schema, mixed-version, rollback, and release-matrix guidance.
 
 ## [v0.11.0] - 2026-07-10
 

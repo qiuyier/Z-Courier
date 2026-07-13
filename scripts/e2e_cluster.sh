@@ -128,6 +128,12 @@ for attempt in $(seq 1 60); do
   sleep 1
 done
 
+echo "checking V11 to V12 PostgreSQL migration compatibility..."
+ZCOURIER_TEST_POSTGRES_DSN="postgres://zcourier:zcourier@127.0.0.1:15432/zcourier?sslmode=disable" \
+  go test ./internal/downlink \
+    -run '^TestPostgresStoreV11SchemaUpgradeAndRollbackCompatibilityIntegration$' \
+    -count=1
+
 wait_http "nsqd" "http://127.0.0.1:14151/ping"
 
 for port in 9901 9902 18182 18183; do
