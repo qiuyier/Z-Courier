@@ -79,6 +79,17 @@ func newDownlinkService(
 			return nil, nil, fmt.Errorf("downlink queue capacity requires a capacity-capable store")
 		}
 	}
+	if config.DownlinkDelivery.RetryFairness.Enabled {
+		if _, ok := store.(downlink.FairRetryStore); !ok {
+			if publisherCloser != nil {
+				_ = publisherCloser.Close()
+			}
+			if closer != nil {
+				_ = closer.Close()
+			}
+			return nil, nil, fmt.Errorf("downlink retry fairness requires a fairness-capable store")
+		}
+	}
 
 	options := make([]downlink.ServiceOption, 0, 3)
 	if store != nil {
@@ -89,6 +100,7 @@ func newDownlinkService(
 		downlink.WithRetryJitter(config.DownlinkDelivery.RetryJitter),
 		downlink.WithAckTimeout(config.DownlinkDelivery.AckTimeout),
 		downlink.WithRetryClaim(config.GatewayNode, config.DownlinkDelivery.RetryLease),
+		downlink.WithRetryFairness(config.DownlinkDelivery.RetryFairness),
 		downlink.WithMaxAttempts(config.DownlinkDelivery.MaxAttempts),
 		downlink.WithDeliveryPolicies(policies),
 		downlink.WithQueueCapacity(config.DownlinkCapacity),

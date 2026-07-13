@@ -313,6 +313,173 @@ WHERE status = $1
 	)
 }
 
+func TestPostgresStoreRetryFairnessIntegration(t *testing.T) {
+	dsn := os.Getenv("ZCOURIER_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("set ZCOURIER_TEST_POSTGRES_DSN to run PostgreSQL downlink store integration test")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	store, err := NewPostgresStore(ctx, PostgresStoreConfig{
+		DSN:          dsn,
+		AutoMigrate:  true,
+		MaxOpenConns: 20,
+	})
+	if err != nil {
+		t.Fatalf("NewPostgresStore() error = %v", err)
+	}
+	defer store.Close()
+	peer, err := NewPostgresStore(ctx, PostgresStoreConfig{
+		DSN:          dsn,
+		AutoMigrate:  false,
+		MaxOpenConns: 10,
+	})
+	if err != nil {
+		t.Fatalf("NewPostgresStore(peer) error = %v", err)
+	}
+	defer peer.Close()
+
+	runID := time.Now().UnixNano()
+	clientID := fmt.Sprintf("fairness-client-%d", runID)
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cleanupCancel()
+		_, _ = store.db.ExecContext(cleanupCtx, "DELETE FROM z_courier_downlink_messages WHERE client_id = $1", clientID)
+	})
+
+	for _, device := range []struct {
+		id    string
+		count int
+		age   time.Duration
+	}{
+		{id: "hot", count: 8, age: 3 * time.Minute},
+		{id: "cold", count: 2, age: 2 * time.Minute},
+		{id: "warm", count: 2, age: time.Minute},
+	} {
+		for index := 0; index < device.count; index++ {
+			messageID := fmt.Sprintf("fairness-%d-%s-%d", runID, device.id, index)
+			message := Message{
+				MessageID:   messageID,
+				ClientID:    clientID,
+				DeviceID:    device.id,
+				MsgID:       2001,
+				Body:        []byte("fairness"),
+				Status:      MessageStatusPending,
+				CreatedAt:   now.Add(-device.age + time.Duration(index)*time.Millisecond),
+				UpdatedAt:   now.Add(-device.age + time.Duration(index)*time.Millisecond),
+				NextRetryAt: time.Time{},
+			}
+			if _, err := store.Save(ctx, message); err != nil {
+				t.Fatalf("Save(%s) error = %v", messageID, err)
+			}
+		}
+	}
+
+	selection, err := store.ListDueRetryFair(ctx, now, time.Second, 6, 12)
+	if err != nil {
+		t.Fatalf("ListDueRetryFair() error = %v", err)
+	}
+	assertFairDeviceCounts(t, selection, map[string]int{"hot": 2, "cold": 2, "warm": 2})
+
+	claimed, err := store.ClaimDueRetryFair(ctx, now, time.Second, 6, 12, "gateway-a", time.Minute)
+	if err != nil {
+		t.Fatalf("ClaimDueRetryFair() error = %v", err)
+	}
+	assertFairDeviceCounts(t, claimed, map[string]int{"hot": 2, "cold": 2, "warm": 2})
+	for _, message := range claimed.Messages {
+		if message.ClaimOwner != "gateway-a" || !message.ClaimUntil.Equal(now.Add(time.Minute)) {
+			t.Fatalf("claimed message = %+v", message)
+		}
+	}
+
+	if _, err := store.db.ExecContext(ctx, `
+UPDATE z_courier_downlink_messages
+SET claim_owner = '', claim_until = NULL
+WHERE client_id = $1
+`, clientID); err != nil {
+		t.Fatalf("release fairness claims: %v", err)
+	}
+	for index := 0; index < 28; index++ {
+		messageID := fmt.Sprintf("fairness-%d-extra-%d", runID, index)
+		message := Message{
+			MessageID: messageID,
+			ClientID:  clientID,
+			DeviceID:  fmt.Sprintf("extra-%d", index%7),
+			MsgID:     2001,
+			Body:      []byte("fairness"),
+			Status:    MessageStatusPending,
+			CreatedAt: now.Add(time.Duration(index) * time.Millisecond),
+			UpdatedAt: now.Add(time.Duration(index) * time.Millisecond),
+		}
+		if _, err := store.Save(ctx, message); err != nil {
+			t.Fatalf("Save(%s) error = %v", messageID, err)
+		}
+	}
+
+	selections := make(chan RetrySelection, 2)
+	errors := make(chan error, 2)
+	var wait sync.WaitGroup
+	for _, input := range []struct {
+		store *PostgresStore
+		owner string
+	}{{store: store, owner: "gateway-a"}, {store: peer, owner: "gateway-b"}} {
+		wait.Add(1)
+		go func(input struct {
+			store *PostgresStore
+			owner string
+		}) {
+			defer wait.Done()
+			selection, err := input.store.ClaimDueRetryFair(ctx, now, time.Second, 5, 20, input.owner, time.Minute)
+			if err != nil {
+				errors <- err
+				return
+			}
+			selections <- selection
+		}(input)
+	}
+	wait.Wait()
+	close(selections)
+	close(errors)
+	for err := range errors {
+		t.Fatalf("concurrent ClaimDueRetryFair() error = %v", err)
+	}
+	seen := make(map[string]struct{})
+	total := 0
+	for selection := range selections {
+		if len(selection.Messages) != 5 {
+			t.Fatalf("concurrent selection size = %d, want 5", len(selection.Messages))
+		}
+		for _, message := range selection.Messages {
+			if _, exists := seen[message.MessageID]; exists {
+				t.Fatalf("message %q claimed by both gateways", message.MessageID)
+			}
+			seen[message.MessageID] = struct{}{}
+			total++
+		}
+	}
+	if total != 10 {
+		t.Fatalf("concurrent claimed messages = %d, want 10", total)
+	}
+}
+
+func assertFairDeviceCounts(t *testing.T, selection RetrySelection, expected map[string]int) {
+	t.Helper()
+	counts := make(map[string]int)
+	for _, message := range selection.Messages {
+		counts[message.DeviceID]++
+	}
+	if len(selection.Messages) == 0 || selection.Mode != RetrySelectionModeFair || len(counts) != len(expected) {
+		t.Fatalf("selection = %+v, counts = %v", selection, counts)
+	}
+	for deviceID, count := range expected {
+		if counts[deviceID] != count {
+			t.Fatalf("device %s selected %d messages, want %d; all counts = %v", deviceID, counts[deviceID], count, counts)
+		}
+	}
+}
+
 type postgresCapacityOutcome struct {
 	message Message
 	result  SaveResult

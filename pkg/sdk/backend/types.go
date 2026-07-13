@@ -180,11 +180,14 @@ type RetryScanRequest struct {
 
 // RetryScanResponse reports the result of one reliable-downlink retry scan.
 type RetryScanResponse struct {
-	Code    string `json:"code"`
-	Reason  string `json:"reason,omitempty"`
-	Limit   int    `json:"limit,omitempty"`
-	Scanned int    `json:"scanned"`
-	Sent    int    `json:"sent"`
-	Queued  int    `json:"queued"`
-	Failed  int    `json:"failed"`
+	Code            string `json:"code"`
+	Reason          string `json:"reason,omitempty"`
+	Limit           int    `json:"limit,omitempty"`
+	Scanned         int    `json:"scanned"`
+	Sent            int    `json:"sent"`
+	Queued          int    `json:"queued"`
+	Failed          int    `json:"failed"`
+	SelectionMode   string `json:"selection_mode,omitempty"`
+	SelectedDevices int    `json:"selected_devices,omitempty"`
+	MaxPerDevice    int    `json:"max_per_device,omitempty"`
 }

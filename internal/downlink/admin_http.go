@@ -144,13 +144,16 @@ func (h *retryScanHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.record(code)
 		h.audit(r, code, statusCode, limit, result, err)
 		writeJSON(w, statusCode, RetryScanResponse{
-			Code:    code,
-			Reason:  err.Error(),
-			Limit:   limit,
-			Scanned: result.Scanned,
-			Sent:    result.Sent,
-			Queued:  result.Queued,
-			Failed:  result.Failed,
+			Code:            code,
+			Reason:          err.Error(),
+			Limit:           limit,
+			Scanned:         result.Scanned,
+			Sent:            result.Sent,
+			Queued:          result.Queued,
+			Failed:          result.Failed,
+			SelectionMode:   result.SelectionMode,
+			SelectedDevices: result.SelectedDevices,
+			MaxPerDevice:    result.MaxPerDevice,
 		})
 		return
 	}
@@ -158,12 +161,15 @@ func (h *retryScanHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.record("success")
 	h.audit(r, "success", http.StatusOK, limit, result, nil)
 	writeJSON(w, http.StatusOK, RetryScanResponse{
-		Code:    "ok",
-		Limit:   limit,
-		Scanned: result.Scanned,
-		Sent:    result.Sent,
-		Queued:  result.Queued,
-		Failed:  result.Failed,
+		Code:            "ok",
+		Limit:           limit,
+		Scanned:         result.Scanned,
+		Sent:            result.Sent,
+		Queued:          result.Queued,
+		Failed:          result.Failed,
+		SelectionMode:   result.SelectionMode,
+		SelectedDevices: result.SelectedDevices,
+		MaxPerDevice:    result.MaxPerDevice,
 	})
 }
 
@@ -211,11 +217,14 @@ func (h *retryScanHandler) audit(r *http.Request, result string, statusCode int,
 		RemoteAddr:     r.RemoteAddr,
 		Reason:         errorReason(err),
 		Details: map[string]string{
-			"limit":   strconv.Itoa(limit),
-			"scanned": strconv.Itoa(scan.Scanned),
-			"sent":    strconv.Itoa(scan.Sent),
-			"queued":  strconv.Itoa(scan.Queued),
-			"failed":  strconv.Itoa(scan.Failed),
+			"limit":            strconv.Itoa(limit),
+			"scanned":          strconv.Itoa(scan.Scanned),
+			"sent":             strconv.Itoa(scan.Sent),
+			"queued":           strconv.Itoa(scan.Queued),
+			"failed":           strconv.Itoa(scan.Failed),
+			"selection_mode":   scan.SelectionMode,
+			"selected_devices": strconv.Itoa(scan.SelectedDevices),
+			"max_per_device":   strconv.Itoa(scan.MaxPerDevice),
 		},
 	})
 
@@ -238,6 +247,9 @@ func (h *retryScanHandler) audit(r *http.Request, result string, statusCode int,
 		zap.Int("sent", scan.Sent),
 		zap.Int("queued", scan.Queued),
 		zap.Int("failed", scan.Failed),
+		zap.String("selection_mode", scan.SelectionMode),
+		zap.Int("selected_devices", scan.SelectedDevices),
+		zap.Int("max_per_device", scan.MaxPerDevice),
 	}
 	if h.config.GatewayNode != "" {
 		fields = append(fields, zap.String("gateway_node", h.config.GatewayNode))

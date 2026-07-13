@@ -83,6 +83,8 @@ export type DownlinkSummary = {
   policy_names?: string[];
   max_pending_global?: number;
   max_pending_per_device?: number;
+  retry_fairness_enabled?: boolean;
+  retry_fairness_candidate_multiplier?: number;
   terminal_publisher?: string;
   terminal_topic?: string;
   terminal_retry_interval?: string;

@@ -373,6 +373,10 @@ func TestInternalHTTPAdminDiagnostics(t *testing.T) {
 		DownlinkStore:    store,
 		DownlinkDelivery: DownlinkDeliveryConfig{
 			RetryJitter: 5 * time.Second,
+			RetryFairness: downlink.RetryFairness{
+				Enabled:             true,
+				CandidateMultiplier: 6,
+			},
 		},
 		DownlinkPolicies: []downlink.DeliveryPolicyRule{{
 			Policy: downlink.DeliveryPolicy{
@@ -479,6 +483,9 @@ func TestInternalHTTPAdminDiagnostics(t *testing.T) {
 	}
 	if resp.Downlink.MaxPendingGlobal != 5000 || resp.Downlink.MaxPendingPerDevice != 50 {
 		t.Fatalf("downlink capacity diagnostics = %+v", resp.Downlink)
+	}
+	if !resp.Downlink.RetryFairnessEnabled || resp.Downlink.RetryFairnessCandidateMultiplier != 6 {
+		t.Fatalf("downlink retry fairness diagnostics = %+v", resp.Downlink)
 	}
 	if resp.Downlink.TerminalPublisher != "nsq" || resp.Downlink.TerminalTopic != "terminal_events" ||
 		resp.Downlink.TerminalRetryInterval != "5s" || resp.Downlink.TerminalRetryDelay != "30s" {

@@ -126,6 +126,9 @@ data:
         max_attempts: {{ .Values.downlink.delivery.maxAttempts }}
         scan_limit: {{ .Values.downlink.delivery.scanLimit }}
         bind_flush_limit: {{ .Values.downlink.delivery.bindFlushLimit }}
+        retry_fairness:
+          enabled: {{ .Values.downlink.delivery.retryFairness.enabled }}
+          candidate_multiplier: {{ .Values.downlink.delivery.retryFairness.candidateMultiplier }}
       capacity:
         max_pending_global: {{ int .Values.downlink.capacity.maxPendingGlobal }}
         max_pending_per_device: {{ int .Values.downlink.capacity.maxPendingPerDevice }}

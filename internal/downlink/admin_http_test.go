@@ -286,7 +286,8 @@ func TestRetryScanHandlerOK(t *testing.T) {
 	if err := sonic.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("Unmarshal() error = %v", err)
 	}
-	if resp.Code != "ok" || resp.Limit != 25 || resp.Scanned != 1 || resp.Sent != 0 || resp.Queued != 1 || resp.Failed != 0 {
+	if resp.Code != "ok" || resp.Limit != 25 || resp.Scanned != 1 || resp.Sent != 0 || resp.Queued != 1 || resp.Failed != 0 ||
+		resp.SelectionMode != RetrySelectionModeFIFO || resp.SelectedDevices != 1 || resp.MaxPerDevice != 1 {
 		t.Fatalf("response = %+v, want one queued retry", resp)
 	}
 
@@ -302,7 +303,10 @@ func TestRetryScanHandlerOK(t *testing.T) {
 		fields["gateway_node"] != "gateway-a" ||
 		fields["limit"] != int64(25) ||
 		fields["scanned"] != int64(1) ||
-		fields["queued"] != int64(1) {
+		fields["queued"] != int64(1) ||
+		fields["selection_mode"] != RetrySelectionModeFIFO ||
+		fields["selected_devices"] != int64(1) ||
+		fields["max_per_device"] != int64(1) {
 		t.Fatalf("audit fields = %#v", fields)
 	}
 }

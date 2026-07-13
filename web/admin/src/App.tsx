@@ -4183,6 +4183,10 @@ function DiagnosticsPage({
           ["Global Pending", diagnostics.downlink.max_pending_global ? diagnostics.downlink.max_pending_global.toLocaleString() : "unlimited"],
           ["Per Device", diagnostics.downlink.max_pending_per_device ? diagnostics.downlink.max_pending_per_device.toLocaleString() : "unlimited"],
         ]} />
+        <DiagnosticsConfigPanel title="Retry Fairness" rows={[
+          ["Enabled", diagnostics.downlink.retry_fairness_enabled ? "enabled" : "disabled"],
+          ["Candidate Multiplier", (diagnostics.downlink.retry_fairness_candidate_multiplier ?? 4).toLocaleString()],
+        ]} />
         <DiagnosticsConfigPanel title="Terminal Events" rows={[
           ["Publisher", diagnostics.downlink.terminal_publisher || "none"],
           ["Topic", diagnostics.downlink.terminal_topic || "--"],

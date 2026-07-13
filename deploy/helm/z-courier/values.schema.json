@@ -289,7 +289,19 @@
             "retryLease": { "$ref": "#/definitions/duration" },
             "maxAttempts": { "$ref": "#/definitions/nonNegativeInteger" },
             "scanLimit": { "$ref": "#/definitions/nonNegativeInteger" },
-            "bindFlushLimit": { "$ref": "#/definitions/nonNegativeInteger" }
+            "bindFlushLimit": { "$ref": "#/definitions/nonNegativeInteger" },
+            "retryFairness": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "candidateMultiplier": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 16
+                }
+              }
+            }
           }
         },
         "capacity": {

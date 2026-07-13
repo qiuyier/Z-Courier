@@ -842,6 +842,41 @@ func TestServiceRetryDueClaimsPendingMessagesWhenStoreSupportsIt(t *testing.T) {
 	}
 }
 
+func TestServiceRetryDueUsesFairSelection(t *testing.T) {
+	now := time.UnixMilli(1760000000000)
+	store := NewMemoryStore()
+	store.now = func() time.Time { return now }
+	for index := 0; index < 8; index++ {
+		message := fairnessTestMessage("hot", index, now.Add(-time.Minute+time.Duration(index)*time.Millisecond))
+		if _, err := store.Save(context.Background(), message); err != nil {
+			t.Fatalf("Save(hot-%d) error = %v", index, err)
+		}
+	}
+	for index := 0; index < 2; index++ {
+		message := fairnessTestMessage("cold", index, now.Add(-time.Second+time.Duration(index)*time.Millisecond))
+		if _, err := store.Save(context.Background(), message); err != nil {
+			t.Fatalf("Save(cold-%d) error = %v", index, err)
+		}
+	}
+
+	service := NewService(
+		fakeSessions{},
+		fakeConnections{},
+		WithStore(store),
+		WithRetryClaim("gateway-a", time.Minute),
+		WithRetryFairness(RetryFairness{Enabled: true, CandidateMultiplier: 4}),
+	)
+	service.now = func() time.Time { return now }
+	result, err := service.RetryDue(context.Background(), 4)
+	if err != nil {
+		t.Fatalf("RetryDue() error = %v", err)
+	}
+	if result.Scanned != 4 || result.Queued != 4 || result.SelectionMode != RetrySelectionModeFair ||
+		result.SelectedDevices != 2 || result.MaxPerDevice != 2 {
+		t.Fatalf("RetryDue() result = %+v", result)
+	}
+}
+
 func TestServiceRetryDueResendsAckTimedOutMessage(t *testing.T) {
 	now := time.UnixMilli(1760000000000)
 	store := NewMemoryStore()

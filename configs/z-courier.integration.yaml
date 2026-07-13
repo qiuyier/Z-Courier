@@ -58,6 +58,9 @@ downlink:
     max_attempts: 5
     scan_limit: 100
     bind_flush_limit: 100
+    retry_fairness:
+      enabled: true
+      candidate_multiplier: 4
   policies:
     - name: integration-reliable
       enabled: true

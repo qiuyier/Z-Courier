@@ -113,6 +113,9 @@ downlink:
     max_attempts: 10
     scan_limit: 500
     bind_flush_limit: 500
+    retry_fairness:
+      enabled: true
+      candidate_multiplier: 4
   capacity:
     # Benchmark before enabling the globally serialized admission limit.
     max_pending_global: 0

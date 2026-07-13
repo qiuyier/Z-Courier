@@ -34,10 +34,13 @@ type SaveResult struct {
 }
 
 type RetryResult struct {
-	Scanned int
-	Sent    int
-	Queued  int
-	Failed  int
+	Scanned         int
+	Sent            int
+	Queued          int
+	Failed          int
+	SelectionMode   string
+	SelectedDevices int
+	MaxPerDevice    int
 }
 
 type CleanupResult struct {
@@ -142,6 +145,13 @@ type Store interface {
 
 type ClaimStore interface {
 	ClaimDueRetry(context.Context, time.Time, time.Duration, int, string, time.Duration) ([]Message, error)
+}
+
+// FairRetryStore selects from a bounded candidate window and supports atomic
+// multi-node claims while distributing the selected batch across devices.
+type FairRetryStore interface {
+	ListDueRetryFair(context.Context, time.Time, time.Duration, int, int) (RetrySelection, error)
+	ClaimDueRetryFair(context.Context, time.Time, time.Duration, int, int, string, time.Duration) (RetrySelection, error)
 }
 
 // CapacityStore atomically applies queue admission limits with message writes.

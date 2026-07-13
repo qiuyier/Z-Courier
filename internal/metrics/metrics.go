@@ -435,6 +435,24 @@ var (
 		},
 		[]string{"owner", "result"},
 	)
+
+	downlinkRetrySelectedDevices = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "z_courier_downlink_retry_selected_devices",
+			Help:    "Number of unique client and device pairs selected by one downlink retry scan.",
+			Buckets: []float64{0, 1, 2, 5, 10, 25, 50, 100, 250, 500, 1000},
+		},
+		[]string{"mode"},
+	)
+
+	downlinkRetryMaxPerDevice = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "z_courier_downlink_retry_max_per_device",
+			Help:    "Maximum number of messages selected for one client and device pair in a retry scan.",
+			Buckets: []float64{0, 1, 2, 5, 10, 25, 50, 100, 250, 500, 1000},
+		},
+		[]string{"mode"},
+	)
 )
 
 func Handler() http.Handler {
@@ -666,6 +684,12 @@ func RecordDownlinkRetryClaim(owner, result string, claimed int, duration time.D
 	if duration >= 0 {
 		downlinkRetryClaimDuration.WithLabelValues(labels...).Observe(duration.Seconds())
 	}
+}
+
+func RecordDownlinkRetrySelection(mode string, devices, maxPerDevice int) {
+	label := nonEmpty(mode, "unknown")
+	downlinkRetrySelectedDevices.WithLabelValues(label).Observe(float64(devices))
+	downlinkRetryMaxPerDevice.WithLabelValues(label).Observe(float64(maxPerDevice))
 }
 
 func formatMsgID(msgID uint32) string {

@@ -200,6 +200,9 @@ downlink:
     max_attempts: 6
     scan_limit: 77
     bind_flush_limit: 88
+    retry_fairness:
+      enabled: true
+      candidate_multiplier: 6
   policies:
     - name: critical
       msg_id_min: 4000
@@ -435,6 +438,9 @@ upstream:
 	}
 	if config.DownlinkDelivery.BindFlushLimit != 88 {
 		t.Fatalf("DownlinkDelivery BindFlushLimit = %d, want 88", config.DownlinkDelivery.BindFlushLimit)
+	}
+	if !config.DownlinkDelivery.RetryFairness.Enabled || config.DownlinkDelivery.RetryFairness.CandidateMultiplier != 6 {
+		t.Fatalf("DownlinkDelivery RetryFairness = %+v", config.DownlinkDelivery.RetryFairness)
 	}
 	if len(config.DownlinkPolicies) != 2 {
 		t.Fatalf("DownlinkPolicies length = %d, want 2", len(config.DownlinkPolicies))
@@ -1343,6 +1349,37 @@ downlink:
 	_, err := LoadServerConfig(path)
 	if err == nil {
 		t.Fatal("LoadServerConfig() error = nil, want error")
+	}
+}
+
+func TestLoadServerConfigRejectsInvalidRetryFairness(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		config  string
+		message string
+	}{
+		{
+			name:    "negative candidate multiplier",
+			config:  "downlink:\n  delivery:\n    retry_fairness:\n      candidate_multiplier: -1\n",
+			message: "candidate_multiplier must be greater than or equal to 0",
+		},
+		{
+			name:    "candidate multiplier too large",
+			config:  "downlink:\n  delivery:\n    retry_fairness:\n      candidate_multiplier: 17\n",
+			message: "candidate_multiplier must not exceed 16",
+		},
+		{
+			name:    "fairness without storage",
+			config:  "downlink:\n  storage:\n    type: none\n  delivery:\n    retry_fairness:\n      enabled: true\n",
+			message: "retry_fairness requires downlink storage",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := LoadServerConfig(writeConfig(t, test.config))
+			if err == nil || !strings.Contains(err.Error(), test.message) {
+				t.Fatalf("LoadServerConfig() error = %v, want substring %q", err, test.message)
+			}
+		})
 	}
 }
 

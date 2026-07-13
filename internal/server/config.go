@@ -166,6 +166,7 @@ type DownlinkDeliveryConfig struct {
 	MaxAttempts    int
 	ScanLimit      int
 	BindFlushLimit int
+	RetryFairness  downlink.RetryFairness
 }
 
 type DownlinkTerminalConfig struct {
@@ -307,6 +308,9 @@ func DefaultConfig() Config {
 			MaxAttempts:    5,
 			ScanLimit:      100,
 			BindFlushLimit: 100,
+			RetryFairness: downlink.RetryFairness{
+				CandidateMultiplier: downlink.DefaultRetryFairnessCandidateMultiplier,
+			},
 		},
 		DownlinkTerminal: DownlinkTerminalConfig{
 			PublisherType:     downlink.TerminalPublisherNone,

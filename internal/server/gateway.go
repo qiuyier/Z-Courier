@@ -46,6 +46,7 @@ type Gateway struct {
 	downlinkCloser            io.Closer
 	downlinkRetryInterval     time.Duration
 	downlinkRetryScanLimit    int
+	downlinkRetryFairness     downlink.RetryFairness
 	downlinkWorkerCancel      context.CancelFunc
 	downlinkWorkerCompleted   chan struct{}
 	downlinkTerminalInterval  time.Duration
@@ -171,6 +172,7 @@ func New(config Config, logger *zap.Logger) (*Gateway, error) {
 		downlinkCloser:            downlinkCloser,
 		downlinkRetryInterval:     config.DownlinkDelivery.RetryInterval,
 		downlinkRetryScanLimit:    config.DownlinkDelivery.ScanLimit,
+		downlinkRetryFairness:     config.DownlinkDelivery.RetryFairness,
 		downlinkTerminalInterval:  config.DownlinkTerminal.RetryInterval,
 		downlinkTerminalScanLimit: config.DownlinkTerminal.ScanLimit,
 		downlinkRetention: downlink.RetentionPolicy{
@@ -452,6 +454,8 @@ func (g *Gateway) startDownlinkRetryWorker() {
 		"starting downlink retry worker",
 		zap.Duration("interval", interval),
 		zap.Int("scan_limit", g.downlinkRetryScanLimit),
+		zap.Bool("fairness_enabled", g.downlinkRetryFairness.Enabled),
+		zap.Int("fairness_candidate_multiplier", g.downlinkRetryFairness.CandidateMultiplier),
 	)
 
 	go func() {
@@ -488,6 +492,9 @@ func (g *Gateway) retryDownlinkDue(ctx context.Context) {
 		zap.Int("sent", result.Sent),
 		zap.Int("queued", result.Queued),
 		zap.Int("failed", result.Failed),
+		zap.String("selection_mode", result.SelectionMode),
+		zap.Int("selected_devices", result.SelectedDevices),
+		zap.Int("max_per_device", result.MaxPerDevice),
 		zap.Duration("duration", time.Since(startedAt)),
 	)
 }

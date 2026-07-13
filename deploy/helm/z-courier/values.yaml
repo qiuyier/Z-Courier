@@ -160,6 +160,9 @@ downlink:
     maxAttempts: 10
     scanLimit: 500
     bindFlushLimit: 500
+    retryFairness:
+      enabled: true
+      candidateMultiplier: 4
   capacity:
     maxPendingGlobal: 0
     maxPendingPerDevice: 0

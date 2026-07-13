@@ -562,6 +562,33 @@ func (s *PostgresStore) ListDueRetry(ctx context.Context, now time.Time, ackTime
 	if limit <= 0 {
 		limit = 100
 	}
+	return s.listDueRetry(ctx, now, ackTimeout, limit)
+}
+
+func (s *PostgresStore) ListDueRetryFair(
+	ctx context.Context,
+	now time.Time,
+	ackTimeout time.Duration,
+	limit int,
+	candidateLimit int,
+) (RetrySelection, error) {
+	if now.IsZero() {
+		now = time.Now()
+	}
+	limit, candidateLimit = normalizeRetrySelectionLimits(limit, candidateLimit)
+	candidates, err := s.listDueRetry(ctx, now, ackTimeout, candidateLimit)
+	if err != nil {
+		return RetrySelection{}, err
+	}
+	return fairRetrySelection(candidates, limit), nil
+}
+
+func (s *PostgresStore) listDueRetry(
+	ctx context.Context,
+	now time.Time,
+	ackTimeout time.Duration,
+	limit int,
+) ([]Message, error) {
 	includeAckTimeout := ackTimeout > 0
 	ackDeadline := now.Add(-ackTimeout)
 
@@ -646,6 +673,94 @@ RETURNING m.message_id, m.client_id, m.device_id, m.msg_id, m.body,
 	defer rows.Close()
 
 	return scanMessages(rows)
+}
+
+func (s *PostgresStore) ClaimDueRetryFair(
+	ctx context.Context,
+	now time.Time,
+	ackTimeout time.Duration,
+	limit int,
+	candidateLimit int,
+	owner string,
+	lease time.Duration,
+) (RetrySelection, error) {
+	if now.IsZero() {
+		now = time.Now()
+	}
+	limit, candidateLimit = normalizeRetrySelectionLimits(limit, candidateLimit)
+	if owner == "" {
+		return s.ListDueRetryFair(ctx, now, ackTimeout, limit, candidateLimit)
+	}
+	if lease <= 0 {
+		lease = 30 * time.Second
+	}
+	includeAckTimeout := ackTimeout > 0
+	ackDeadline := now.Add(-ackTimeout)
+
+	rows, err := s.db.QueryContext(ctx, `
+WITH candidates AS MATERIALIZED (
+  SELECT message_id, client_id, device_id, created_at
+  FROM z_courier_downlink_messages
+  WHERE (
+      (status = $1 AND (next_retry_at IS NULL OR next_retry_at <= $2))
+      OR (status = $7 AND ack_required = true AND (
+        (next_retry_at IS NOT NULL AND next_retry_at <= $2)
+        OR (next_retry_at IS NULL AND $6 AND sent_at IS NOT NULL AND sent_at <= $8)
+      ))
+    )
+    AND (claim_until IS NULL OR claim_until <= $2)
+  ORDER BY created_at ASC, message_id ASC
+  FOR UPDATE SKIP LOCKED
+  LIMIT $3
+), ranked AS (
+  SELECT message_id, created_at,
+         ROW_NUMBER() OVER (
+           PARTITION BY client_id, device_id
+           ORDER BY created_at ASC, message_id ASC
+         ) AS device_position
+  FROM candidates
+), selected AS (
+  SELECT message_id
+  FROM ranked
+  ORDER BY device_position ASC, created_at ASC, message_id ASC
+  LIMIT $9
+)
+UPDATE z_courier_downlink_messages AS m
+SET claim_owner = $4,
+    claim_until = $5,
+    updated_at = $2
+FROM selected
+WHERE m.message_id = selected.message_id
+RETURNING m.message_id, m.client_id, m.device_id, m.msg_id, m.body,
+          m.identity_fingerprint, m.ack_required, m.trace_id, m.policy_name,
+          m.policy_max_attempts, m.policy_max_age_ns, m.policy_ack_timeout_ns,
+          m.policy_retry_delay_ns, m.policy_backoff_multiplier,
+          m.policy_max_retry_delay_ns, m.policy_retry_jitter_ns, m.session_id,
+          m.status, m.attempts, m.next_retry_at, m.last_error,
+          m.terminal_reason, m.terminal_at, m.terminal_publish_status,
+          m.terminal_publish_attempts, m.terminal_next_publish_at,
+          m.terminal_publish_error, m.terminal_published_at, m.created_at,
+          m.updated_at, m.sent_at, m.delivered_at, m.claim_owner, m.claim_until
+`,
+		string(MessageStatusPending),
+		now,
+		candidateLimit,
+		owner,
+		now.Add(lease),
+		includeAckTimeout,
+		string(MessageStatusSent),
+		ackDeadline,
+		limit,
+	)
+	if err != nil {
+		return RetrySelection{}, err
+	}
+	defer rows.Close()
+	messages, err := scanMessages(rows)
+	if err != nil {
+		return RetrySelection{}, err
+	}
+	return retrySelectionFromMessages(messages, RetrySelectionModeFair), nil
 }
 
 func (s *PostgresStore) ListPendingByClientDevice(ctx context.Context, clientID, deviceID string, limit int) ([]Message, error) {

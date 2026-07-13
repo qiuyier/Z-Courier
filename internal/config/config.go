@@ -228,14 +228,20 @@ type DownlinkPostgresConfig struct {
 }
 
 type DownlinkDeliveryConfig struct {
-	RetryInterval  string `yaml:"retry_interval"`
-	RetryDelay     string `yaml:"retry_delay"`
-	RetryJitter    string `yaml:"retry_jitter"`
-	AckTimeout     string `yaml:"ack_timeout"`
-	RetryLease     string `yaml:"retry_lease"`
-	MaxAttempts    int    `yaml:"max_attempts"`
-	ScanLimit      int    `yaml:"scan_limit"`
-	BindFlushLimit int    `yaml:"bind_flush_limit"`
+	RetryInterval  string                      `yaml:"retry_interval"`
+	RetryDelay     string                      `yaml:"retry_delay"`
+	RetryJitter    string                      `yaml:"retry_jitter"`
+	AckTimeout     string                      `yaml:"ack_timeout"`
+	RetryLease     string                      `yaml:"retry_lease"`
+	MaxAttempts    int                         `yaml:"max_attempts"`
+	ScanLimit      int                         `yaml:"scan_limit"`
+	BindFlushLimit int                         `yaml:"bind_flush_limit"`
+	RetryFairness  DownlinkRetryFairnessConfig `yaml:"retry_fairness"`
+}
+
+type DownlinkRetryFairnessConfig struct {
+	Enabled             bool `yaml:"enabled"`
+	CandidateMultiplier int  `yaml:"candidate_multiplier"`
 }
 
 type DownlinkPolicyConfig struct {
@@ -1331,6 +1337,23 @@ func applyDownlinkConfig(out *server.Config, config DownlinkConfig) error {
 	}
 	if delivery.BindFlushLimit > 0 {
 		out.DownlinkDelivery.BindFlushLimit = delivery.BindFlushLimit
+	}
+	if delivery.RetryFairness.CandidateMultiplier < 0 {
+		return fmt.Errorf("config: downlink delivery retry_fairness candidate_multiplier must be greater than or equal to 0")
+	}
+	if delivery.RetryFairness.CandidateMultiplier > downlink.MaxRetryFairnessCandidateMultiplier {
+		return fmt.Errorf(
+			"config: downlink delivery retry_fairness candidate_multiplier must not exceed %d",
+			downlink.MaxRetryFairnessCandidateMultiplier,
+		)
+	}
+	out.DownlinkDelivery.RetryFairness.Enabled = delivery.RetryFairness.Enabled
+	if delivery.RetryFairness.CandidateMultiplier > 0 {
+		out.DownlinkDelivery.RetryFairness.CandidateMultiplier = delivery.RetryFairness.CandidateMultiplier
+	}
+	if out.DownlinkDelivery.RetryFairness.Enabled &&
+		(out.DownlinkStorage.Type == "none" || out.DownlinkStorage.Type == "disabled") {
+		return fmt.Errorf("config: downlink delivery retry_fairness requires downlink storage")
 	}
 	policies, err := toDownlinkPolicies(out.DownlinkDelivery, config.Policies)
 	if err != nil {

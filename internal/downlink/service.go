@@ -39,6 +39,7 @@ type Service struct {
 	ackTimeout                time.Duration
 	retryClaimOwner           string
 	retryClaimLease           time.Duration
+	retryFairness             RetryFairness
 	maxAttempts               int
 	deliveryPolicies          *DeliveryPolicySet
 	queueCapacity             QueueCapacity
@@ -145,6 +146,12 @@ func WithRetryClaim(owner string, lease time.Duration) ServiceOption {
 		if lease > 0 {
 			s.retryClaimLease = lease
 		}
+	}
+}
+
+func WithRetryFairness(fairness RetryFairness) ServiceOption {
+	return func(s *Service) {
+		s.retryFairness = fairness
 	}
 }
 
@@ -522,13 +529,17 @@ func (s *Service) RetryDue(ctx context.Context, limit int) (RetryResult, error) 
 
 	startedAt := time.Now()
 	now := s.now()
-	messages, err := s.listRetryMessages(ctx, now, limit)
+	selection, err := s.listRetryMessages(ctx, now, limit)
 	if err != nil {
 		metrics.RecordDownlinkRetryScan("failure", time.Since(startedAt))
 		return RetryResult{}, fmt.Errorf("%w: %v", ErrStore, err)
 	}
+	metrics.RecordDownlinkRetrySelection(selection.Mode, selection.DeviceCount, selection.MaxPerDevice)
 
-	result, err := s.retryMessages(ctx, messages)
+	result, err := s.retryMessages(ctx, selection.Messages)
+	result.SelectionMode = selection.Mode
+	result.SelectedDevices = selection.DeviceCount
+	result.MaxPerDevice = selection.MaxPerDevice
 	if err != nil {
 		metrics.RecordDownlinkRetryMessages(result.Scanned, result.Sent, result.Queued, result.Failed)
 		metrics.RecordDownlinkRetryScan("failure", time.Since(startedAt))
@@ -671,7 +682,36 @@ func (s *Service) CleanupExpired(ctx context.Context, policy RetentionPolicy) (C
 	return result, nil
 }
 
-func (s *Service) listRetryMessages(ctx context.Context, now time.Time, limit int) ([]Message, error) {
+func (s *Service) listRetryMessages(ctx context.Context, now time.Time, limit int) (RetrySelection, error) {
+	if s.retryFairness.Enabled {
+		fairStore, ok := s.store.(FairRetryStore)
+		if !ok {
+			return RetrySelection{}, fmt.Errorf("retry fairness requires a fairness-capable store")
+		}
+		candidateLimit := s.retryFairness.CandidateLimit(limit, s.queueCapacity.MaxPendingPerDevice)
+		startedAt := time.Now()
+		var selection RetrySelection
+		var err error
+		if s.retryClaimOwner != "" {
+			selection, err = fairStore.ClaimDueRetryFair(
+				ctx,
+				now,
+				s.ackTimeout,
+				limit,
+				candidateLimit,
+				s.retryClaimOwner,
+				s.retryClaimLease,
+			)
+			result := "success"
+			if err != nil {
+				result = "failure"
+			}
+			metrics.RecordDownlinkRetryClaim(s.retryClaimOwner, result, len(selection.Messages), time.Since(startedAt))
+			return selection, err
+		}
+		return fairStore.ListDueRetryFair(ctx, now, s.ackTimeout, limit, candidateLimit)
+	}
+
 	claimStore, ok := s.store.(ClaimStore)
 	if ok && s.retryClaimOwner != "" {
 		startedAt := time.Now()
@@ -681,10 +721,11 @@ func (s *Service) listRetryMessages(ctx context.Context, now time.Time, limit in
 			result = "failure"
 		}
 		metrics.RecordDownlinkRetryClaim(s.retryClaimOwner, result, len(messages), time.Since(startedAt))
-		return messages, err
+		return retrySelectionFromMessages(messages, RetrySelectionModeFIFO), err
 	}
 
-	return s.store.ListDueRetry(ctx, now, s.ackTimeout, limit)
+	messages, err := s.store.ListDueRetry(ctx, now, s.ackTimeout, limit)
+	return retrySelectionFromMessages(messages, RetrySelectionModeFIFO), err
 }
 
 func (s *Service) FlushClientDevice(ctx context.Context, clientID, deviceID string, limit int) (RetryResult, error) {

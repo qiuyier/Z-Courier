@@ -152,15 +152,77 @@ func (s *MemoryStore) ListDueRetry(ctx context.Context, now time.Time, ackTimeou
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
+	return limitMessages(s.retryCandidatesLocked(now, ackTimeout), limit), nil
+}
+
+func (s *MemoryStore) ListDueRetryFair(
+	ctx context.Context,
+	now time.Time,
+	ackTimeout time.Duration,
+	limit int,
+	candidateLimit int,
+) (RetrySelection, error) {
+	if err := ctx.Err(); err != nil {
+		return RetrySelection{}, err
+	}
+	if now.IsZero() {
+		now = s.now()
+	}
+	limit, candidateLimit = normalizeRetrySelectionLimits(limit, candidateLimit)
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	candidates := limitMessages(s.retryCandidatesLocked(now, ackTimeout), candidateLimit)
+	return fairRetrySelection(candidates, limit), nil
+}
+
+func (s *MemoryStore) ClaimDueRetryFair(
+	ctx context.Context,
+	now time.Time,
+	ackTimeout time.Duration,
+	limit int,
+	candidateLimit int,
+	owner string,
+	lease time.Duration,
+) (RetrySelection, error) {
+	if err := ctx.Err(); err != nil {
+		return RetrySelection{}, err
+	}
+	if owner == "" {
+		return s.ListDueRetryFair(ctx, now, ackTimeout, limit, candidateLimit)
+	}
+	if now.IsZero() {
+		now = s.now()
+	}
+	if lease <= 0 {
+		lease = 30 * time.Second
+	}
+	limit, candidateLimit = normalizeRetrySelectionLimits(limit, candidateLimit)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	candidates := limitMessages(s.retryCandidatesLocked(now, ackTimeout), candidateLimit)
+	selection := fairRetrySelection(candidates, limit)
+	for index := range selection.Messages {
+		message := selection.Messages[index]
+		stored := s.messages[message.MessageID]
+		stored.ClaimOwner = owner
+		stored.ClaimUntil = now.Add(lease)
+		stored.UpdatedAt = now
+		s.messages[message.MessageID] = stored
+		selection.Messages[index] = stored.Clone()
+	}
+	return selection, nil
+}
+
+func (s *MemoryStore) retryCandidatesLocked(now time.Time, ackTimeout time.Duration) []Message {
 	messages := make([]Message, 0)
 	for _, message := range s.messages {
-		if !messageDueForRetry(message, now, ackTimeout) {
-			continue
+		if messageDueForRetry(message, now, ackTimeout) {
+			messages = append(messages, message.Clone())
 		}
-		messages = append(messages, message.Clone())
 	}
-
-	return limitMessages(messages, limit), nil
+	return messages
 }
 
 func messageDueForRetry(message Message, now time.Time, ackTimeout time.Duration) bool {
