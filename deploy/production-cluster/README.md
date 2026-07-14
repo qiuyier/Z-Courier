@@ -105,6 +105,13 @@ both gateway nodes. If you enable it, expose `/console/` only through VPN,
 bastion, private ingress, or an authenticating reverse proxy. Do not publish
 `/console/` or `/internal/*` directly to the public internet.
 
+Both gateway configs also contain the same disabled `production-critical`
+delivery-policy example and keep `downlink.terminal.publisher.type: none`.
+Keep policy ranges, queue capacity, and terminal-publisher settings identical
+on every node sharing PostgreSQL. Enable NSQ terminal publication only after
+provisioning the topic and validating a controlled policy exhaustion; terminal
+events never contain the business message body.
+
 ## Required Environment
 
 Copy `deploy/production-cluster/.env.example` to

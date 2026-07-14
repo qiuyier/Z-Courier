@@ -344,7 +344,7 @@ Candidate work:
 - Keep CI, Docker image checks, Helm chart checks, browser smoke, E2E, and
   manual load-test summaries aligned with the new outcomes.
 
-Current implementation (V12.6.1):
+Current implementation (V12.6.2):
 
 - Extracts the authoritative PostgreSQL downlink schema into the versioned
   `internal/downlink/migrations/v0.12.0.sql` file and embeds that same file in
@@ -357,6 +357,12 @@ Current implementation (V12.6.1):
 - Adds English and Chinese release-readiness guidance covering migration
   ownership, mixed-version limitations, non-destructive rollback, direct
   verification commands, and an evidence-oriented release acceptance matrix.
+- Exposes named delivery policies and terminal-publisher settings through the
+  production Compose references and Helm chart `0.7.0`, while preserving
+  disabled policy examples and the `none` publisher default.
+- Extends kind Helm E2E to select a named policy, exhaust a dedicated terminal
+  policy, consume the body-free NSQ event, and verify its persisted publication
+  state. Release checks now statically validate all production gateway configs.
 
 Acceptance criteria:
 

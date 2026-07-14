@@ -82,6 +82,49 @@ downlink:
     maxAttempts: 5
     scanLimit: 100
     bindFlushLimit: 100
+  policies:
+    - name: k8s-reliable
+      enabled: true
+      msgIDMin: 2001
+      msgIDMax: 2001
+      maxAttempts: 5
+      maxAge: 1h
+      ackTimeout: 1s
+      retryDelay: 1s
+      backoffMultiplier: 1
+      maxRetryDelay: 1s
+      retryJitter: 0s
+    - name: k8s-terminal
+      enabled: true
+      msgIDMin: 2999
+      msgIDMax: 2999
+      maxAttempts: 1
+      maxAge: 1h
+      ackTimeout: 1s
+      retryDelay: 1s
+      backoffMultiplier: 1
+      maxRetryDelay: 1s
+      retryJitter: 0s
+  terminal:
+    publisher:
+      type: nsq
+      nsq:
+        nsqdAddrs:
+          - nsqd:4150
+        topic: downlink_terminal_events
+        authSecret: ""
+        dialTimeout: 1s
+        readTimeout: 60s
+        writeTimeout: 1s
+        publishMode: round_robin
+        retryAttempts: 1
+    retryInterval: 1s
+    retryDelay: 1s
+    retryJitter: 0s
+    backoffMultiplier: 1
+    maxRetryDelay: 1s
+    retryLease: 5s
+    scanLimit: 100
 
 pipeline:
   rateLimit:

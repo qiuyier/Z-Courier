@@ -163,9 +163,20 @@ downlink:
     retryFairness:
       enabled: true
       candidateMultiplier: 4
+  policies: []
   capacity:
     maxPendingGlobal: 0
     maxPendingPerDevice: 0
+  terminal:
+    publisher:
+      type: none
+    retryInterval: 5s
+    retryDelay: 30s
+    retryJitter: 5s
+    backoffMultiplier: 2
+    maxRetryDelay: 5m
+    retryLease: 30s
+    scanLimit: 100
   retention:
     deliveredTTL: 24h
     failedTTL: 168h

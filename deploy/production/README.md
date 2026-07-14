@@ -171,6 +171,10 @@ The reference gateway config uses:
   `internal_http.auth.mode: hmac`
 - PostgreSQL downlink storage:
   `downlink.storage.type: postgres`
+- A disabled delivery-policy example:
+  `downlink.policies[0].enabled: false`
+- Terminal-event publication disabled by default:
+  `downlink.terminal.publisher.type: none`
 - Redis registry settings that are ready for cluster mode:
   `cluster.registry.type: redis`
 - Admin console disabled by default:
@@ -186,6 +190,12 @@ use the development configs instead.
 
 If you keep `production-http-upstream` enabled, add `business-backend` to the
 same private network or change the route URL to your real backend address.
+
+Before enabling the example policy, assign a reviewed MsgID range and make sure
+it does not overlap another enabled policy. To export terminal failures, change
+the publisher type to `nsq` only after provisioning and monitoring the configured
+topic. Terminal events contain no business message body; consumers should be
+idempotent by `MessageID` and terminal state.
 
 ## Required Environment
 

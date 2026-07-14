@@ -5,11 +5,15 @@ E2E_COMPOSE_FILE="$E2E_ROOT_DIR/deploy/local/docker-compose.yml"
 E2E_CONFIG_FILE="$E2E_ROOT_DIR/configs/z-courier.integration.yaml"
 E2E_ZINX_CONFIG_FILE="$E2E_ROOT_DIR/conf/zinx.integration.json"
 E2E_GATEWAY_PID=""
+E2E_GATEWAY_BIN=""
 
 e2e_cleanup_gateway() {
   if [[ -n "$E2E_GATEWAY_PID" ]] && kill -0 "$E2E_GATEWAY_PID" >/dev/null 2>&1; then
     kill "$E2E_GATEWAY_PID" >/dev/null 2>&1 || true
     wait "$E2E_GATEWAY_PID" >/dev/null 2>&1 || true
+  fi
+  if [[ -n "$E2E_GATEWAY_BIN" ]]; then
+    rm -f "$E2E_GATEWAY_BIN"
   fi
 }
 
@@ -80,8 +84,12 @@ e2e_start_gateway() {
   e2e_require_port_free 9899
   e2e_require_port_free 18082
 
+  E2E_GATEWAY_BIN="${TMPDIR:-/tmp}/z-courier-e2e-gateway-$$"
+  echo "building gateway..."
+  go build -o "$E2E_GATEWAY_BIN" ./cmd/gateway
+
   echo "starting gateway..."
-  ZINX_CONFIG_FILE_PATH="$E2E_ZINX_CONFIG_FILE" go run ./cmd/gateway -config "$E2E_CONFIG_FILE" &
+  ZINX_CONFIG_FILE_PATH="$E2E_ZINX_CONFIG_FILE" "$E2E_GATEWAY_BIN" -config "$E2E_CONFIG_FILE" &
   E2E_GATEWAY_PID="$!"
 
   e2e_wait_http "gateway readiness" "http://127.0.0.1:18082/readyz"

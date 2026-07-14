@@ -42,6 +42,13 @@ semantic versioning after the first public MVP tag.
   migration shared by automatic and manual upgrade paths; V11 upgrade and
   rollback-write compatibility integration coverage in cluster E2E; and
   English/Chinese schema, mixed-version, rollback, and release-matrix guidance.
+- V12.6.2 production deployment parity for named delivery policies and terminal
+  publication: production Compose references, Helm chart `0.7.0` values/schema,
+  static production config validation, and kind E2E coverage for policy
+  selection, exhaustion, NSQ terminal-event consumption, and persisted publish
+  state while retaining disabled/`none` defaults. The local E2E gateway now
+  runs as a directly tracked binary so cleanup cannot leave an orphan retry
+  worker racing the following cluster fairness test.
 
 ## [v0.11.0] - 2026-07-10
 

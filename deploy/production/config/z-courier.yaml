@@ -116,10 +116,44 @@ downlink:
     retry_fairness:
       enabled: true
       candidate_multiplier: 4
+  policies:
+    # Disabled example. Enable only after assigning a reviewed MsgID range.
+    - name: production-critical
+      enabled: false
+      msg_id_min: 3000
+      msg_id_max: 3099
+      max_attempts: 20
+      max_age: 24h
+      ack_timeout: 30s
+      retry_delay: 5s
+      backoff_multiplier: 2
+      max_retry_delay: 5m
+      retry_jitter: 5s
   capacity:
     # Benchmark before enabling the globally serialized admission limit.
     max_pending_global: 0
     max_pending_per_device: 1000
+  terminal:
+    # Change type to nsq only after provisioning and monitoring the topic.
+    publisher:
+      type: none
+      nsq:
+        nsqd_addrs:
+          - nsqd:4150
+        topic: downlink_terminal_events
+        auth_secret: ""
+        dial_timeout: 1s
+        read_timeout: 60s
+        write_timeout: 1s
+        publish_mode: round_robin
+        retry_attempts: 2
+    retry_interval: 5s
+    retry_delay: 30s
+    retry_jitter: 5s
+    backoff_multiplier: 2
+    max_retry_delay: 5m
+    retry_lease: 30s
+    scan_limit: 100
   retention:
     delivered_ttl: 24h
     failed_ttl: 168h

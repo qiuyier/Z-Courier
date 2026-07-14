@@ -5,7 +5,7 @@ replicaCount: 2
 
 image:
   repository: ghcr.io/qiuyier/z-courier-gateway
-  tag: v0.11.0
+  tag: v0.12.0
   pullPolicy: IfNotPresent
 
 secret:
@@ -56,10 +56,43 @@ downlink:
       autoMigrate: true
   delivery:
     retryJitter: 5s
+  policies:
+    # Disabled example. Enable only after assigning a reviewed MsgID range.
+    - name: production-critical
+      enabled: false
+      msgIDMin: 3000
+      msgIDMax: 3099
+      maxAttempts: 20
+      maxAge: 24h
+      ackTimeout: 30s
+      retryDelay: 5s
+      backoffMultiplier: 2
+      maxRetryDelay: 5m
+      retryJitter: 5s
   capacity:
     # Benchmark before enabling the globally serialized admission limit.
     maxPendingGlobal: 0
     maxPendingPerDevice: 1000
+  terminal:
+    publisher:
+      type: none
+      # To publish terminal events, change type to nsq and add:
+      # nsq:
+      #   nsqdAddrs: [nsqd.z-courier.svc.cluster.local:4150]
+      #   topic: downlink_terminal_events
+      #   authSecret: ""
+      #   dialTimeout: 1s
+      #   readTimeout: 60s
+      #   writeTimeout: 1s
+      #   publishMode: round_robin
+      #   retryAttempts: 2
+    retryInterval: 5s
+    retryDelay: 30s
+    retryJitter: 5s
+    backoffMultiplier: 2
+    maxRetryDelay: 5m
+    retryLease: 30s
+    scanLimit: 100
 
 upstream:
   routes:

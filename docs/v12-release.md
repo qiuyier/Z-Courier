@@ -41,6 +41,23 @@ Upgrading from `v0.11.0` does not require a client wire-protocol migration:
 The PostgreSQL downlink schema does change. All changes are additive and keep
 defaults that allow a V11 binary to write to the upgraded message table.
 
+## Deployment Configuration
+
+The production Compose references and Helm chart expose V12 delivery policies
+and terminal publication without enabling new behavior by default:
+
+- production Compose includes a disabled `production-critical` policy example;
+- Helm `downlink.policies` defaults to an empty list;
+- `downlink.terminal.publisher.type` defaults to `none`;
+- Helm chart `0.7.0` is aligned with gateway image `v0.12.0`.
+
+Before enabling a policy, assign a reviewed non-overlapping MsgID range. All
+gateway nodes sharing the PostgreSQL downlink store must use the same policy,
+capacity, and terminal-publisher configuration. To export terminal events, set
+the publisher type to `nsq`, configure the NSQD addresses and topic, and verify
+a controlled policy exhaustion in staging. The event envelope contains no
+business message body, and its consumer must remain idempotent.
+
 ## PostgreSQL Schema Changes
 
 The authoritative migration is
@@ -201,7 +218,7 @@ Run every required check on the exact commit intended for the tag.
 | Two-node lifecycle | Shared storage, idempotency, capacity, fairness, terminal publication, repair audit | `bash scripts/e2e_cluster.sh` |
 | Browser operations | Admin roles, guarded repair, readonly boundary | `bash scripts/console_smoke.sh` |
 | Production references | Single/cluster Compose startup and health | `bash scripts/production_smoke.sh` and `bash scripts/production_cluster_smoke.sh` |
-| Kubernetes | Helm lint/template/package and kind E2E | `bash scripts/k8s_helm_smoke.sh` and `bash scripts/k8s_helm_e2e.sh` |
+| Kubernetes | Helm lint/template/package plus kind policy selection, exhaustion, and terminal-event consumption | `bash scripts/k8s_helm_smoke.sh` and `bash scripts/k8s_helm_e2e.sh` |
 | Performance | Load reports reviewed; baseline comparison remains informational | `bash scripts/loadtest_smoke.sh` plus the manual load-test workflow |
 | GitHub | CI and Kubernetes workflows green on the tag commit | GitHub Actions run summary |
 | Artifacts | Docker image, Helm package/OCI chart, checksums and release notes verified | Tag publication workflows |

@@ -304,12 +304,30 @@
             }
           }
         },
+        "policies": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/downlinkPolicy" }
+        },
         "capacity": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
             "maxPendingGlobal": { "$ref": "#/definitions/nonNegativeInteger" },
             "maxPendingPerDevice": { "$ref": "#/definitions/nonNegativeInteger" }
+          }
+        },
+        "terminal": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "publisher": { "$ref": "#/definitions/terminalPublisher" },
+            "retryInterval": { "$ref": "#/definitions/duration" },
+            "retryDelay": { "$ref": "#/definitions/duration" },
+            "retryJitter": { "$ref": "#/definitions/duration" },
+            "backoffMultiplier": { "type": "number", "minimum": 1 },
+            "maxRetryDelay": { "$ref": "#/definitions/duration" },
+            "retryLease": { "$ref": "#/definitions/duration" },
+            "scanLimit": { "$ref": "#/definitions/nonNegativeInteger" }
           }
         },
         "retention": {
@@ -489,6 +507,76 @@
         "maxClockSkew": { "$ref": "#/definitions/duration" },
         "nonceTTL": { "$ref": "#/definitions/duration" },
         "maxNonceEntries": { "$ref": "#/definitions/nonNegativeInteger" }
+      }
+    },
+    "downlinkPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "enabled", "msgIDMin"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+        },
+        "enabled": { "type": "boolean" },
+        "msgIDMin": { "$ref": "#/definitions/positiveInteger" },
+        "msgIDMax": { "$ref": "#/definitions/nonNegativeInteger" },
+        "maxAttempts": { "$ref": "#/definitions/positiveInteger" },
+        "maxAge": { "$ref": "#/definitions/duration" },
+        "ackTimeout": { "$ref": "#/definitions/duration" },
+        "retryDelay": { "$ref": "#/definitions/duration" },
+        "backoffMultiplier": { "type": "number", "minimum": 1 },
+        "maxRetryDelay": { "$ref": "#/definitions/duration" },
+        "retryJitter": { "$ref": "#/definitions/duration" }
+      }
+    },
+    "terminalPublisher": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type"],
+          "properties": {
+            "type": { "type": "string", "enum": ["none"] }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "nsq"],
+          "properties": {
+            "type": { "type": "string", "enum": ["nsq"] },
+            "nsq": { "$ref": "#/definitions/terminalNSQTarget" }
+          }
+        }
+      ]
+    },
+    "terminalNSQTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "nsqdAddrs",
+        "topic",
+        "authSecret",
+        "dialTimeout",
+        "readTimeout",
+        "writeTimeout",
+        "publishMode",
+        "retryAttempts"
+      ],
+      "properties": {
+        "nsqdAddrs": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "topic": { "type": "string", "minLength": 1 },
+        "authSecret": { "type": "string" },
+        "dialTimeout": { "$ref": "#/definitions/duration" },
+        "readTimeout": { "$ref": "#/definitions/duration" },
+        "writeTimeout": { "$ref": "#/definitions/duration" },
+        "publishMode": { "type": "string", "enum": ["round_robin"] },
+        "retryAttempts": { "$ref": "#/definitions/nonNegativeInteger" }
       }
     },
     "policyList": {

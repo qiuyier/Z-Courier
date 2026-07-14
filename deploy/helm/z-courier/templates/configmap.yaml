@@ -129,9 +129,63 @@ data:
         retry_fairness:
           enabled: {{ .Values.downlink.delivery.retryFairness.enabled }}
           candidate_multiplier: {{ .Values.downlink.delivery.retryFairness.candidateMultiplier }}
+{{- if .Values.downlink.policies }}
+      policies:
+        {{- range .Values.downlink.policies }}
+        - name: {{ .name | quote }}
+          enabled: {{ .enabled }}
+          msg_id_min: {{ .msgIDMin }}
+          msg_id_max: {{ default 0 .msgIDMax }}
+          {{- with .maxAttempts }}
+          max_attempts: {{ . }}
+          {{- end }}
+          {{- with .maxAge }}
+          max_age: {{ . | quote }}
+          {{- end }}
+          {{- with .ackTimeout }}
+          ack_timeout: {{ . | quote }}
+          {{- end }}
+          {{- with .retryDelay }}
+          retry_delay: {{ . | quote }}
+          {{- end }}
+          {{- with .backoffMultiplier }}
+          backoff_multiplier: {{ . }}
+          {{- end }}
+          {{- with .maxRetryDelay }}
+          max_retry_delay: {{ . | quote }}
+          {{- end }}
+          {{- with .retryJitter }}
+          retry_jitter: {{ . | quote }}
+          {{- end }}
+        {{- end }}
+{{- else }}
+      policies: []
+{{- end }}
       capacity:
         max_pending_global: {{ int .Values.downlink.capacity.maxPendingGlobal }}
         max_pending_per_device: {{ int .Values.downlink.capacity.maxPendingPerDevice }}
+      terminal:
+        publisher:
+          type: {{ .Values.downlink.terminal.publisher.type | quote }}
+          {{- if eq .Values.downlink.terminal.publisher.type "nsq" }}
+          nsq:
+            nsqd_addrs:
+              {{- toYaml .Values.downlink.terminal.publisher.nsq.nsqdAddrs | nindent 14 }}
+            topic: {{ .Values.downlink.terminal.publisher.nsq.topic | quote }}
+            auth_secret: {{ .Values.downlink.terminal.publisher.nsq.authSecret | quote }}
+            dial_timeout: {{ .Values.downlink.terminal.publisher.nsq.dialTimeout | quote }}
+            read_timeout: {{ .Values.downlink.terminal.publisher.nsq.readTimeout | quote }}
+            write_timeout: {{ .Values.downlink.terminal.publisher.nsq.writeTimeout | quote }}
+            publish_mode: {{ .Values.downlink.terminal.publisher.nsq.publishMode | quote }}
+            retry_attempts: {{ .Values.downlink.terminal.publisher.nsq.retryAttempts }}
+          {{- end }}
+        retry_interval: {{ .Values.downlink.terminal.retryInterval | quote }}
+        retry_delay: {{ .Values.downlink.terminal.retryDelay | quote }}
+        retry_jitter: {{ .Values.downlink.terminal.retryJitter | quote }}
+        backoff_multiplier: {{ .Values.downlink.terminal.backoffMultiplier }}
+        max_retry_delay: {{ .Values.downlink.terminal.maxRetryDelay | quote }}
+        retry_lease: {{ .Values.downlink.terminal.retryLease | quote }}
+        scan_limit: {{ .Values.downlink.terminal.scanLimit }}
       retention:
         delivered_ttl: {{ .Values.downlink.retention.deliveredTTL | quote }}
         failed_ttl: {{ .Values.downlink.retention.failedTTL | quote }}

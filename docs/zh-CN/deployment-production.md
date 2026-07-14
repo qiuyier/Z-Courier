@@ -27,7 +27,7 @@ ghcr.io/qiuyier/z-courier-gateway:latest
 生产环境建议固定版本号，不要依赖 `latest`：
 
 ```text
-ghcr.io/qiuyier/z-courier-gateway:v0.9.1
+ghcr.io/qiuyier/z-courier-gateway:v0.12.0
 ```
 
 ## 单节点参考
@@ -138,6 +138,34 @@ backend HMAC 和 peer HMAC 应该使用不同密钥。
 如果没有 `auth-backend` 服务，客户端 AUTH/BIND 会失败，这是预期行为。生产 token
 验证应该由你的业务后端或身份服务负责。
 
+## 可靠下行配置
+
+生产 Compose 配置已包含一条默认禁用的 `production-critical` 策略示例，以及默认
+关闭的终态发布器：
+
+```yaml
+downlink:
+  policies:
+    - name: production-critical
+      enabled: false
+      msg_id_min: 3000
+      msg_id_max: 3099
+      max_attempts: 20
+      max_age: 24h
+  terminal:
+    publisher:
+      type: none
+```
+
+这不会改变现有投递行为。上线前先规划并审核 MsgID 区间，确认所有启用的策略互不
+重叠，再将对应策略设为 `enabled: true`。集群节点共享 PostgreSQL 存储时，策略、
+容量和终态发布配置必须保持一致。
+
+需要把策略耗尽事件发布到 NSQ 时，把 `publisher.type` 改为 `nsq`，并检查配置中
+预留的 `nsqd_addrs`、topic、超时和重试参数。终态事件不包含业务消息体，consumer
+仍应按 `MessageID` 与终态做幂等处理。建议先在预发布环境制造一次受控策略耗尽，
+确认 outbox 最终变为 `published`，再在生产启用。
+
 ## 端口和安全边界
 
 | 端口 | 用途 |
@@ -212,5 +240,7 @@ PRODUCTION_CLUSTER_SMOKE_KEEP_STACK=1 bash scripts/production_cluster_smoke.sh
 - 下行在线推送成功。
 - 客户端断线后消息可以入库。
 - 客户端重连后 pending 消息可以补发。
+- 启用自定义策略时，消息保存了预期的 `policy_name`。
+- 启用终态发布时，受控策略耗尽会产生且只产生一份可幂等消费的终态事件。
 - 两节点时 peer push 成功。
 - Grafana dashboard 和 alert rules 已导入并按实际流量调过阈值。

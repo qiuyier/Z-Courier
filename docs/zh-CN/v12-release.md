@@ -32,6 +32,21 @@ V12 在不改变客户端协议版本、不解析业务消息体的前提下，�
 PostgreSQL 下行表会发生 schema 变化，但所有变化都是新增列、表和索引，并为
 V11 写入路径保留了兼容默认值。
 
+## 部署配置
+
+生产 Compose 参考和 Helm chart 已暴露 V12 投递策略与终态发布配置，但默认不会
+开启新行为：
+
+- 生产 Compose 只提供一条禁用的 `production-critical` 策略示例；
+- Helm 的 `downlink.policies` 默认为空列表；
+- `downlink.terminal.publisher.type` 默认为 `none`；
+- Helm chart `0.7.0` 与 gateway 镜像 `v0.12.0` 对齐。
+
+启用策略前必须分配经过审核且互不重叠的 MsgID 区间。共享同一个 PostgreSQL 下行
+存储的所有 gateway 节点必须使用相同的策略、容量和终态发布配置。需要导出终态
+事件时，把 publisher 改为 `nsq`，配置 NSQD 地址与 topic，并先在预发布环境验证
+一次受控策略耗尽。事件不包含业务消息体，consumer 仍必须幂等。
+
 ## PostgreSQL Schema 变化
 
 唯一权威迁移文件是
@@ -170,7 +185,7 @@ go test ./internal/downlink \
 | 双节点生命周期 | 共享存储、幂等、容量、公平性、终态发布、修复审计 | `bash scripts/e2e_cluster.sh` |
 | 浏览器运维 | 角色权限、受保护修复、readonly 边界 | `bash scripts/console_smoke.sh` |
 | 生产参考 | 单节点/集群 Compose 启动与健康 | `bash scripts/production_smoke.sh`、`bash scripts/production_cluster_smoke.sh` |
-| Kubernetes | Helm lint/template/package 与 kind E2E | `bash scripts/k8s_helm_smoke.sh`、`bash scripts/k8s_helm_e2e.sh` |
+| Kubernetes | Helm lint/template/package，以及 kind 策略选择、耗尽和终态事件消费 | `bash scripts/k8s_helm_smoke.sh`、`bash scripts/k8s_helm_e2e.sh` |
 | 性能 | 审阅压测报告，baseline 比较保持提示性质 | `bash scripts/loadtest_smoke.sh` 和手动压测 workflow |
 | GitHub | tag commit 上 CI 与 Kubernetes workflow 全绿 | GitHub Actions 汇总页 |
 | 产物 | Docker、Helm 包/OCI chart、校验和及 release notes 正确 | tag 发布 workflow |

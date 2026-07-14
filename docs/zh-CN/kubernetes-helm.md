@@ -52,7 +52,7 @@ helm upgrade --install z-courier ./deploy/helm/z-courier \
   --namespace z-courier \
   -f deploy/helm/z-courier/examples/values-production.yaml \
   --set image.repository=ghcr.io/qiuyier/z-courier-gateway \
-  --set image.tag=v0.10.0 \
+  --set image.tag=v0.12.0 \
   --set secret.name=z-courier-secret
 ```
 
@@ -62,16 +62,16 @@ helm upgrade --install z-courier ./deploy/helm/z-courier \
 
 ```bash
 helm upgrade --install z-courier oci://ghcr.io/qiuyier/charts/z-courier \
-  --version 0.5.0 \
+  --version 0.7.0 \
   --namespace z-courier \
   -f values-production.yaml \
-  --set image.tag=v0.10.0
+  --set image.tag=v0.12.0
 ```
 
 注意：
 
-- `--version 0.5.0` 是 Helm chart 版本。
-- `image.tag=v0.10.0` 是 gateway 镜像版本。
+- `--version 0.7.0` 是 Helm chart 版本。
+- `image.tag=v0.12.0` 是 gateway 镜像版本。
 - 两者相关，但不是同一个版本号体系。
 
 ## Services
@@ -127,6 +127,44 @@ console session 在多个 gateway Pod 之间共享；单节点开发也可以使
 角色建议按最小权限选择：
 `readonly` 用于查看，`operator` 用于受保护的修复操作，`admin` 表示当前完整
 console 权限集。
+
+## 可靠下行策略与终态事件
+
+V12 chart 已暴露 `downlink.policies` 和 `downlink.terminal`。默认仍兼容旧版本：
+策略列表为空，终态发布器类型为 `none`，不会向外部系统发布终态事件。
+
+```yaml
+downlink:
+  policies:
+    - name: critical-notifications
+      enabled: true
+      msgIDMin: 3000
+      msgIDMax: 3099
+      maxAttempts: 20
+      maxAge: 24h
+      ackTimeout: 30s
+      retryDelay: 5s
+      backoffMultiplier: 2
+      maxRetryDelay: 5m
+      retryJitter: 5s
+  terminal:
+    publisher:
+      type: nsq
+      nsq:
+        nsqdAddrs:
+          - nsqd.z-courier.svc.cluster.local:4150
+        topic: downlink_terminal_events
+        authSecret: ""
+        dialTimeout: 1s
+        readTimeout: 60s
+        writeTimeout: 1s
+        publishMode: round_robin
+        retryAttempts: 2
+```
+
+所有连接同一个 PostgreSQL 下行存储的 gateway Pod 必须使用相同的策略和终态发布
+配置。启用前应确认 MsgID 区间没有重叠。终态事件只包含受限的投递元数据，不包含
+业务消息体；consumer 应按 `MessageID` 和终态做幂等处理。
 
 ## ServiceMonitor 和告警
 
@@ -197,4 +235,5 @@ bash scripts/k8s_helm_e2e.sh
 ```
 
 E2E 会在 kind 里安装 PostgreSQL、Redis、NSQ，验证 AUTH/BIND、可靠下行、重连补发、
-Redis 在线路由、跨 Pod peer push、NSQ upstream 和 metrics。
+Redis 在线路由、跨 Pod peer push、策略选择与耗尽、NSQ 终态事件发布和消费、
+NSQ upstream 以及 metrics。

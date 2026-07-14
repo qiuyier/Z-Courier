@@ -19,7 +19,8 @@ CLIENT_LOCAL_PORT="${K8S_HELM_E2E_CLIENT_PORT:-9899}"
 INTERNAL_A_LOCAL_PORT="${K8S_HELM_E2E_INTERNAL_A_PORT:-18082}"
 INTERNAL_B_LOCAL_PORT="${K8S_HELM_E2E_INTERNAL_B_PORT:-18083}"
 POSTGRES_LOCAL_PORT="${K8S_HELM_E2E_POSTGRES_PORT:-15432}"
-E2E_TIMEOUT="${K8S_HELM_E2E_TIMEOUT:-90s}"
+NSQD_LOCAL_PORT="${K8S_HELM_E2E_NSQD_PORT:-24150}"
+E2E_TIMEOUT="${K8S_HELM_E2E_TIMEOUT:-120s}"
 INTERNAL_HMAC_KEY_ID="${K8S_HELM_E2E_INTERNAL_HMAC_KEY_ID:-e2e-internal-2026-01}"
 INTERNAL_HMAC_SECRET="${K8S_HELM_E2E_INTERNAL_HMAC_SECRET:-kind-internal-hmac-secret-0123456789abcdef}"
 RUN_ID="$(date +%s)-$$"
@@ -179,6 +180,7 @@ kubectl -n "$NAMESPACE" get pods -o wide
 kubectl -n "$NAMESPACE" get svc "$RELEASE_NAME-client" "$RELEASE_NAME-internal" "$RELEASE_NAME-headless" postgres redis nsqd
 
 start_port_forward "postgres" "svc/postgres" "$POSTGRES_LOCAL_PORT:5432"
+start_port_forward "nsqd" "svc/nsqd" "$NSQD_LOCAL_PORT:4150"
 start_port_forward "gateway-a-internal" "pod/$RELEASE_NAME-0" "$INTERNAL_A_LOCAL_PORT:18080"
 start_port_forward "gateway-b-internal" "pod/$RELEASE_NAME-1" "$INTERNAL_B_LOCAL_PORT:18080"
 start_port_forward "gateway-b-client" "pod/$RELEASE_NAME-1" "$CLIENT_LOCAL_PORT:8999"
@@ -188,6 +190,7 @@ wait_http "http://127.0.0.1:$INTERNAL_B_LOCAL_PORT/readyz" "ready"
 wait_http "http://127.0.0.1:$INTERNAL_A_LOCAL_PORT/metrics" "z_courier"
 wait_http "http://127.0.0.1:$INTERNAL_B_LOCAL_PORT/metrics" "z_courier"
 wait_tcp "127.0.0.1" "$CLIENT_LOCAL_PORT"
+wait_tcp "127.0.0.1" "$NSQD_LOCAL_PORT"
 
 echo "running e2e verifier against Helm chart"
 go run ./cmd/e2e \
@@ -206,6 +209,10 @@ go run ./cmd/e2e \
   -expect-session-url "http://127.0.0.1:$INTERNAL_B_LOCAL_PORT" \
   -expect-session-node "$RELEASE_NAME-1" \
   -check-reconnect-retry \
+  -expect-policy-name k8s-reliable \
+  -check-terminal-event \
+  -terminal-nsqd-address "127.0.0.1:$NSQD_LOCAL_PORT" \
+  -expect-terminal-policy k8s-terminal \
   -timeout "$E2E_TIMEOUT" \
   "$@"
 

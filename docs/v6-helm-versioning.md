@@ -91,6 +91,7 @@ Maintain this matrix when releasing or changing the chart:
 | `0.4.1` | `v0.9.1` | `v0.9.1` | Same protocol, config contract, and chart behavior as `0.4.0`. | Patch chart release aligned with the Chinese documentation refresh. |
 | `0.5.0` | `v0.10.0` | `v0.10.0` | Same packet protocol and dependency contract as `0.4.1`; chart metadata and production examples align with the V10 admin console operations release. | Chart release aligned with guarded console operations, browser sessions, and role-aware admin workflows. |
 | `0.6.0` | `v0.11.0` | `v0.11.0` | Same packet protocol and dependency contract as `0.5.0`; chart values support Redis admin sessions and PostgreSQL admin audit storage. | Chart release aligned with the durable, cluster-aware V11 admin control plane. |
+| `0.7.0` | `v0.12.0` | `v0.12.0` | Same packet protocol and dependency contract as `0.6.0`; chart values add optional MsgID delivery policies and NSQ terminal-event publication while preserving empty/`none` defaults. | Chart release aligned with the V12 reliable-downlink lifecycle and policy-exhaustion Kubernetes E2E. |
 
 If the chart is used with a gateway image that differs from `appVersion`, the
 operator owns compatibility validation. The safest check is:
@@ -139,7 +140,7 @@ Production operators should pin both the chart version and gateway image tag:
 ```yaml
 image:
   repository: ghcr.io/qiuyier/z-courier-gateway
-  tag: v0.11.0
+  tag: v0.12.0
 ```
 
 This makes rollbacks explicit:

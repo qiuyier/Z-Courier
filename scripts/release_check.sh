@@ -105,6 +105,25 @@ run_release_docker_build() {
   run docker build --tag z-courier-gateway:release-check .
 }
 
+run_production_config_checks() {
+  local config_file
+  local -a config_env=(
+    ZCOURIER_POSTGRES_PASSWORD=release-check-postgres
+    ZCOURIER_REDIS_PASSWORD=release-check-redis
+    ZCOURIER_AUTH_PROVIDER_SHARED_TOKEN=release-check-auth-provider
+    ZCOURIER_INTERNAL_HMAC_SECRET=release-check-internal-hmac-secret-0123456789
+    ZCOURIER_PEER_HMAC_SECRET=release-check-peer-hmac-secret-0123456789
+    ZCOURIER_UPSTREAM_INTERNAL_TOKEN=release-check-upstream-token
+  )
+
+  for config_file in \
+    deploy/production/config/z-courier.yaml \
+    deploy/production-cluster/config/gateway-a.yaml \
+    deploy/production-cluster/config/gateway-b.yaml; do
+    run env "${config_env[@]}" go run ./cmd/gateway -config "$config_file" -check-config
+  done
+}
+
 run_fast_checks() {
   require_cmd go
   require_cmd npm
@@ -132,6 +151,7 @@ run_fast_checks() {
   run go run ./cmd/gateway -config configs/z-courier.integration.yaml -check-config
   run go run ./cmd/gateway -config configs/z-courier.cluster-a.yaml -check-config
   run go run ./cmd/gateway -config configs/z-courier.cluster-b.yaml -check-config
+  run_production_config_checks
   run env \
     ZCOURIER_CONSOLE_SMOKE_ROLE=admin \
     ZCOURIER_CONSOLE_SMOKE_INTERNAL_ADDR=127.0.0.1:18084 \

@@ -1,8 +1,8 @@
 # Z-Courier Helm Chart
 
-This chart deploys the Z-Courier gateway on Kubernetes. It is the first
-Kubernetes-oriented deployment path for `v0.6.0` development and intentionally
-focuses on the gateway process rather than installing the full data plane.
+This chart deploys the Z-Courier gateway on Kubernetes. Chart `0.7.0` aligns
+with gateway `v0.12.0` and focuses on the gateway process rather than
+installing the full data plane.
 
 The chart expects PostgreSQL, Redis, NSQ or another upstream target, the auth
 verifier, and the business backend to already exist in the cluster or be
@@ -49,7 +49,7 @@ Install with the published gateway image and private dependency addresses:
 helm upgrade --install z-courier ./deploy/helm/z-courier \
   --namespace z-courier \
   --set image.repository=ghcr.io/qiuyier/z-courier-gateway \
-  --set image.tag=v0.11.0 \
+  --set image.tag=v0.12.0 \
   --set secret.name=z-courier-secret \
   --set cluster.registry.redis.addr=redis-master.z-courier.svc.cluster.local:6379 \
   --set auth.http.url=http://auth-backend.z-courier.svc.cluster.local:8080/gateway/auth/verify \
@@ -70,7 +70,7 @@ the packaged chart from the OCI registry instead of cloning this repository:
 
 ```bash
 helm upgrade --install z-courier oci://ghcr.io/qiuyier/charts/z-courier \
-  --version 0.6.0 \
+  --version 0.7.0 \
   --namespace z-courier \
   -f values-production.yaml
 ```
@@ -199,6 +199,51 @@ By default, the chart references an existing secret. The default key names are:
 For a private sandbox only, `secret.create=true` can render a Secret from
 `secret.values`. Do not store real production secret values in Git.
 
+## Reliable Downlink Policies
+
+V12 chart values expose named, inclusive MsgID-range policies and the terminal
+event publisher. The defaults preserve previous behavior: `downlink.policies`
+is empty and `downlink.terminal.publisher.type` is `none`.
+
+Enable policy ranges only after checking that enabled ranges do not overlap.
+Every gateway sharing one PostgreSQL downlink store should use the same policy
+and terminal-publisher configuration.
+
+```yaml
+downlink:
+  policies:
+    - name: critical-notifications
+      enabled: true
+      msgIDMin: 3000
+      msgIDMax: 3099
+      maxAttempts: 20
+      maxAge: 24h
+      ackTimeout: 30s
+      retryDelay: 5s
+      backoffMultiplier: 2
+      maxRetryDelay: 5m
+      retryJitter: 5s
+  terminal:
+    publisher:
+      type: nsq
+      nsq:
+        nsqdAddrs:
+          - nsqd.z-courier.svc.cluster.local:4150
+        topic: downlink_terminal_events
+        authSecret: ""
+        dialTimeout: 1s
+        readTimeout: 60s
+        writeTimeout: 1s
+        publishMode: round_robin
+        retryAttempts: 2
+```
+
+Terminal events contain bounded delivery metadata and never include the
+business message body. Consumers should process them idempotently by
+`MessageID` and terminal state. See
+[examples/values-production.yaml](examples/values-production.yaml) for a
+disabled policy example and the safe `none` publisher default.
+
 ## Validate
 
 When Helm is installed locally:
@@ -249,10 +294,11 @@ The E2E path installs PostgreSQL, Redis, and NSQ into the kind cluster, renders
 this chart with `examples/values-k8s-e2e.yaml`, pins the client connection to
 one gateway pod, sends internal downlink requests to another gateway pod, and
 verifies AUTH/BIND, durable downlink storage, reconnect retry, Redis online
-routing, cross-pod peer push, NSQ upstream forwarding, and metrics.
+routing, cross-pod peer push, policy selection, policy exhaustion, NSQ terminal
+event publication and consumption, NSQ upstream forwarding, and metrics.
 
 ## Boundaries
 
-This first chart does not install PostgreSQL, Redis, NSQ, Prometheus, Grafana,
+This chart does not install PostgreSQL, Redis, NSQ, Prometheus, Grafana,
 cert-manager, an ingress controller, or a service mesh. Those should be managed
 by your platform or by dedicated upstream charts.
