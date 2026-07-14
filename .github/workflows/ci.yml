@@ -52,11 +52,21 @@ jobs:
         run: go test ./...
 
       - name: Validate gateway configs
+        env:
+          ZCOURIER_POSTGRES_PASSWORD: ci-postgres-password
+          ZCOURIER_REDIS_PASSWORD: ci-redis-password
+          ZCOURIER_AUTH_PROVIDER_SHARED_TOKEN: ci-auth-provider-token
+          ZCOURIER_INTERNAL_HMAC_SECRET: ci-internal-hmac-secret-0123456789
+          ZCOURIER_PEER_HMAC_SECRET: ci-peer-hmac-secret-0123456789abcdef
+          ZCOURIER_UPSTREAM_INTERNAL_TOKEN: ci-upstream-token
         run: |
           go run ./cmd/gateway -config configs/z-courier.yaml -check-config
           go run ./cmd/gateway -config configs/z-courier.integration.yaml -check-config
           go run ./cmd/gateway -config configs/z-courier.cluster-a.yaml -check-config
           go run ./cmd/gateway -config configs/z-courier.cluster-b.yaml -check-config
+          go run ./cmd/gateway -config deploy/production/config/z-courier.yaml -check-config
+          go run ./cmd/gateway -config deploy/production-cluster/config/gateway-a.yaml -check-config
+          go run ./cmd/gateway -config deploy/production-cluster/config/gateway-b.yaml -check-config
           ZCOURIER_CONSOLE_SMOKE_ROLE=admin \
             ZCOURIER_CONSOLE_SMOKE_INTERNAL_ADDR=127.0.0.1:18084 \
             ZCOURIER_CONSOLE_SMOKE_INTERNAL_TOKEN=dev-internal-token \

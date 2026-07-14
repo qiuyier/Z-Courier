@@ -344,7 +344,7 @@ Candidate work:
 - Keep CI, Docker image checks, Helm chart checks, browser smoke, E2E, and
   manual load-test summaries aligned with the new outcomes.
 
-Current implementation (V12.6.2):
+Current implementation (V12.6.3):
 
 - Extracts the authoritative PostgreSQL downlink schema into the versioned
   `internal/downlink/migrations/v0.12.0.sql` file and embeds that same file in
@@ -363,6 +363,9 @@ Current implementation (V12.6.2):
 - Extends kind Helm E2E to select a named policy, exhaust a dedicated terminal
   policy, consume the body-free NSQ event, and verify its persisted publication
   state. Release checks now statically validate all production gateway configs.
+- Extends the GitHub Actions validation job with the same single-node and
+  two-node production gateway configs, using non-secret CI fixtures for every
+  required environment placeholder so production config drift fails on push.
 
 Acceptance criteria:
 

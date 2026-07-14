@@ -49,6 +49,9 @@ semantic versioning after the first public MVP tag.
   state while retaining disabled/`none` defaults. The local E2E gateway now
   runs as a directly tracked binary so cleanup cannot leave an orphan retry
   worker racing the following cluster fairness test.
+- V12.6.3 GitHub Actions parity for production config validation. Every push now
+  expands non-secret CI fixtures and statically checks the single-node plus both
+  cluster gateway configs alongside development and integration configs.
 
 ## [v0.11.0] - 2026-07-10
 
