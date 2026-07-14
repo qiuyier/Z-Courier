@@ -193,8 +193,10 @@ run_slow_checks() {
   run npm --prefix web/admin exec -- playwright install chromium
   run bash scripts/console_smoke.sh
   run bash scripts/loadtest_smoke.sh
-  run bash scripts/production_smoke.sh
-  run bash scripts/production_cluster_smoke.sh
+  run docker tag z-courier-gateway:release-check z-courier-gateway:production
+  run docker tag z-courier-gateway:release-check z-courier-gateway:production-cluster
+  run env PRODUCTION_SMOKE_SKIP_BUILD=1 bash scripts/production_smoke.sh
+  run env PRODUCTION_CLUSTER_SMOKE_SKIP_BUILD=1 bash scripts/production_cluster_smoke.sh
 
   if [[ "$RUN_K8S" == "1" ]]; then
     run bash scripts/k8s_helm_smoke.sh

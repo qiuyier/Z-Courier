@@ -51,7 +51,12 @@ semantic versioning after the first public MVP tag.
   worker racing the following cluster fairness test.
 - V12.6.3 GitHub Actions parity for production config validation. Every push now
   expands non-secret CI fixtures and statically checks the single-node plus both
-  cluster gateway configs alongside development and integration configs.
+  cluster gateway configs alongside development and integration configs. Load
+  test scripts now run directly tracked gateway binaries so later release
+  checks cannot be routed to an orphan process left behind by `go run`.
+  Full release checks also reuse the already verified gateway image for
+  production smoke stacks, avoiding redundant Dockerfile builds and registry
+  metadata failures without changing standalone smoke behavior.
 
 ## [v0.11.0] - 2026-07-10
 

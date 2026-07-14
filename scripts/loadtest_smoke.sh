@@ -9,11 +9,15 @@ LOG_DIR="${LOADTEST_SMOKE_LOG_DIR:-$ROOT_DIR/log}"
 REPORT_DIR="${LOADTEST_SMOKE_REPORT_DIR:-$ROOT_DIR/reports/loadtest-smoke}"
 
 GATEWAY_PID=""
+GATEWAY_BIN=""
 
 cleanup() {
   if [[ -n "$GATEWAY_PID" ]] && kill -0 "$GATEWAY_PID" >/dev/null 2>&1; then
     kill "$GATEWAY_PID" >/dev/null 2>&1 || true
     wait "$GATEWAY_PID" >/dev/null 2>&1 || true
+  fi
+  if [[ -n "$GATEWAY_BIN" ]]; then
+    rm -f "$GATEWAY_BIN"
   fi
 }
 trap cleanup EXIT
@@ -84,8 +88,12 @@ docker compose -f "$COMPOSE_FILE" up -d postgres nsqlookupd nsqd
 wait_postgres
 wait_http "nsqd" "http://127.0.0.1:14151/ping"
 
+GATEWAY_BIN="${TMPDIR:-/tmp}/z-courier-loadtest-smoke-gateway-$$"
+echo "building gateway..."
+go build -o "$GATEWAY_BIN" ./cmd/gateway
+
 echo "starting gateway..."
-ZINX_CONFIG_FILE_PATH="$ZINX_CONFIG_FILE" go run ./cmd/gateway -config "$CONFIG_FILE" >"$LOG_DIR/loadtest-smoke-gateway.log" 2>&1 &
+ZINX_CONFIG_FILE_PATH="$ZINX_CONFIG_FILE" "$GATEWAY_BIN" -config "$CONFIG_FILE" >"$LOG_DIR/loadtest-smoke-gateway.log" 2>&1 &
 GATEWAY_PID="$!"
 
 wait_http "gateway readiness" "http://127.0.0.1:18082/readyz"

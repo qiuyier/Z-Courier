@@ -7,6 +7,7 @@ ENV_FILE="${PRODUCTION_SMOKE_ENV_FILE:-$ROOT_DIR/deploy/production/.env.example}
 PROMETHEUS_URL="${PRODUCTION_SMOKE_PROMETHEUS_URL:-http://127.0.0.1:9090}"
 TIMEOUT_SECONDS="${PRODUCTION_SMOKE_TIMEOUT_SECONDS:-120}"
 DOCKER_BUILD_PLATFORM="${ZCOURIER_RELEASE_DOCKER_BUILD_PLATFORM:-}"
+SKIP_BUILD="${PRODUCTION_SMOKE_SKIP_BUILD:-0}"
 GATEWAY_HOST_PORT="${PRODUCTION_SMOKE_GATEWAY_PORT:-18999}"
 
 compose() {
@@ -65,6 +66,11 @@ prometheus_target_up() {
 }
 
 start_stack() {
+  if [[ "$SKIP_BUILD" == "1" ]]; then
+    compose up -d --no-build
+    return
+  fi
+
   if [[ -n "$DOCKER_BUILD_PLATFORM" ]]; then
     compose build --build-arg "BUILDPLATFORM=$DOCKER_BUILD_PLATFORM"
     compose up -d
