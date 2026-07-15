@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -18,11 +19,25 @@ func main() {
 	address := flag.String("address", "127.0.0.1:8999", "gateway TCP address")
 	clientID := flag.String("client-id", "example-client", "claimed client ID")
 	deviceID := flag.String("device-id", "worker-1", "device ID")
+	tlsEnabled := flag.Bool("tls", false, "enable certificate-verified TLS")
+	tlsCAFile := flag.String("tls-ca-file", "", "optional private CA PEM file")
+	tlsServerName := flag.String("tls-server-name", "", "optional TLS server name override")
 	msgID := flag.Uint("msg-id", 2001, "business upstream MsgID")
 	body := flag.String("body", `{"source":"go-example"}`, "business upstream body")
 	flag.Parse()
 	if uint64(*msgID) > uint64(^uint32(0)) || protocol.IsReservedMsgID(uint32(*msgID)) {
 		log.Fatalf("msg-id %d must be a non-reserved uint32", *msgID)
+	}
+	if !*tlsEnabled && (strings.TrimSpace(*tlsCAFile) != "" || strings.TrimSpace(*tlsServerName) != "") {
+		log.Fatal("-tls-ca-file and -tls-server-name require -tls")
+	}
+
+	var clientTLS *sdkclient.TLSConfig
+	if *tlsEnabled {
+		clientTLS = &sdkclient.TLSConfig{
+			CAFile:     *tlsCAFile,
+			ServerName: *tlsServerName,
+		}
 	}
 
 	runContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -32,6 +47,7 @@ func main() {
 		Address:       *address,
 		ClientID:      *clientID,
 		DeviceID:      *deviceID,
+		TLS:           clientTLS,
 		TokenProvider: tokenFromEnvironment,
 		DownlinkHandler: func(_ context.Context, packet *protocol.Packet) error {
 			return processDownlink(packet)

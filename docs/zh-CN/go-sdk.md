@@ -91,33 +91,63 @@ if protocol.IsReservedMsgID(msgID) {
 
 ```go
 cfg := client.Config{
-    Addr:     "127.0.0.1:8999",
+    Address:  "127.0.0.1:8999",
     ClientID: "client-1",
     DeviceID: "device-1",
-    TokenProvider: client.StaticToken("client-token"),
+    Token:    "client-token",
 }
 
-c, err := client.Dial(ctx, cfg)
+c, err := client.New(cfg)
 if err != nil {
     return err
 }
 defer c.Close()
 
-ack, err := c.Send(ctx, client.SendRequest{
+if err := c.Connect(ctx); err != nil {
+    return err
+}
+
+result, err := c.Send(ctx, client.SendRequest{
     MsgID:     2001,
     MessageID: "message-1",
     TraceID:   "trace-1",
     Body:      []byte("hello"),
-    WaitAck:   true,
+    AckRequired: true,
 })
 if err != nil {
     return err
 }
-_ = ack
+_ = result.Ack
 ```
 
 具体 API 以 `pkg/sdk/client` 代码为准。项目里的 `cmd/devclient` 已经改为基于 SDK，
 可以作为调试和学习入口。
+
+## client TLS
+
+TLS 是显式开启的，未配置 `TLS` 时仍使用原来的明文 TCP。使用系统根证书验证 TLS
+边缘代理时，可以配置空的 `TLSConfig`：
+
+```go
+TLS: &client.TLSConfig{},
+```
+
+私有 CA 场景可以配置：
+
+```go
+TLS: &client.TLSConfig{
+    CAFile:     "/run/secrets/z-courier/ca.crt",
+    ServerName: "gateway.example.internal",
+},
+```
+
+SDK 不提供关闭证书校验的选项。`ServerName` 留空时取 `Address` 中的 host；只有拨号
+地址与证书名称不一致时才需要显式覆盖。自定义 CA 会加入系统根证书池，最低 TLS
+版本为 1.2。`ConnectTimeout` 同时约束 token 获取、TCP 拨号和 TLS 握手。
+
+如果配置自定义 `Dialer`，它应该返回尚未封装 TLS 的原始流连接，TLS 握手由 SDK
+负责。自动重连每次都会重新拨号、完成 TLS 握手、获取 token，再执行 AUTH/BIND。
+证书文件在 `client.New` 时加载，轮换 CA 后应创建并连接新的 `Client` 实例。
 
 ## 下行处理
 

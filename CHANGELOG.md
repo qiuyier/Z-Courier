@@ -18,6 +18,10 @@ semantic versioning after the first public MVP tag.
 - V14 production secret-file deployment wiring with opt-in Compose overrides,
   externally managed Helm TLS Secrets, conditional read-only mounts, schema
   validation, deterministic render checks, and bilingual operations guidance.
+- V14.2 Go client SDK TLS with mandatory certificate verification, system or
+  private CA roots, server-name overrides, injectable raw dialers, bounded
+  handshakes, reconnect re-handshakes, runnable example flags, and real TLS
+  identity/reconnect tests while plaintext remains the default.
 
 ## [v0.13.0] - 2026-07-15
 

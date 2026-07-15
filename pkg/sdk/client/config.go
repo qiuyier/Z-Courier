@@ -55,7 +55,11 @@ type Config struct {
 	Token         string
 	TokenProvider TokenProvider
 
-	Dialer                Dialer
+	Dialer Dialer
+	// TLS enables certificate-verified TLS over the connection returned by
+	// Dialer. A nil value preserves the plaintext TCP default.
+	TLS *TLSConfig
+
 	ConnectTimeout        time.Duration
 	BindTimeout           time.Duration
 	WriteTimeout          time.Duration
@@ -162,6 +166,13 @@ func normalizeConfig(config Config) (normalizedConfig, error) {
 	dialer := config.Dialer
 	if dialer == nil {
 		dialer = &net.Dialer{}
+	}
+	tlsConfig, err := normalizeTLSConfig(config.TLS, config.Address)
+	if err != nil {
+		return normalizedConfig{}, err
+	}
+	if tlsConfig != nil {
+		dialer = &tlsDialer{next: dialer, config: tlsConfig}
 	}
 	connectTimeout := config.ConnectTimeout
 	if connectTimeout == 0 {

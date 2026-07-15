@@ -12,8 +12,8 @@ var (
 	ErrNotReady = errors.New("client: not ready")
 	// ErrConnectionClosed means the active gateway connection ended.
 	ErrConnectionClosed = errors.New("client: connection closed")
-	// ErrConnectTimeout means the token lookup or network dial exceeded the
-	// configured connect timeout.
+	// ErrConnectTimeout means the token lookup, network dial, or TLS handshake
+	// exceeded the configured connect timeout.
 	ErrConnectTimeout = errors.New("client: connect timeout")
 	// ErrTokenUnavailable means the configured token provider failed or returned
 	// an empty credential.

@@ -359,6 +359,42 @@ ACK-required `MessageID` values; duplicate deliveries skip the handler and
 re-send the delivery ACK. `DownlinkDedupCapacity` defaults to 10,000. This table
 is process-local and is not a substitute for durable application de-duplication.
 
+### TLS Connections
+
+TLS is opt-in so existing private-network deployments remain compatible. Set
+an empty `TLSConfig` to use certificate-verified TLS with the host system roots:
+
+```go
+gateway, err := client.New(client.Config{
+    Address:  "gateway.example.internal:8999",
+    ClientID: "client-1",
+    DeviceID: "device-1",
+    Token:    os.Getenv("ZCOURIER_CLIENT_TOKEN"),
+    TLS:      &client.TLSConfig{},
+})
+```
+
+Private PKI deployments can add a PEM CA and override the certificate identity
+when the dial address differs from the name in the certificate:
+
+```go
+TLS: &client.TLSConfig{
+    CAFile:     "/run/secrets/z-courier/ca.crt",
+    ServerName: "gateway.example.internal",
+},
+```
+
+Certificate verification cannot be disabled. `ServerName` defaults to the host
+portion of `Address`, the custom CA is added to the system root pool, and TLS
+1.2 is the minimum protocol version. `ConnectTimeout` covers token lookup, the
+raw network dial, and the TLS handshake.
+
+When `Dialer` is customized, it must return a raw stream connection; the SDK
+performs TLS over that connection. Every automatic reconnect opens a new raw
+connection, performs a fresh TLS handshake, obtains the next token, and then
+repeats AUTH/BIND. Certificate files are loaded by `client.New`, so CA rotation
+requires constructing and connecting a new `Client` instance.
+
 ### Automatic Reconnect
 
 Automatic reconnect is opt-in. Configure a policy before calling `Connect`:
@@ -441,6 +477,19 @@ go run ./examples/go-client \
   -client-id e2e-client \
   -device-id go-example
 ```
+
+To connect through a TLS edge backed by a private CA:
+
+```bash
+go run ./examples/go-client \
+  -address gateway.example.internal:8999 \
+  -client-id e2e-client \
+  -device-id go-example \
+  -tls \
+  -tls-ca-file /run/secrets/z-courier/ca.crt
+```
+
+Use `-tls-server-name` only when the address host is not the certificate name.
 
 See [v4-sdk-migration.md](v4-sdk-migration.md) for field ownership, durable
 de-duplication, same-identity connection replacement, and rollout guidance.

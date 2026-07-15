@@ -39,6 +39,16 @@ func TestNewValidatesConfig(t *testing.T) {
 		{name: "negative pending limit", mutate: func(config *Config) { config.MaxPendingBeforeReady = -1 }},
 		{name: "negative inbound buffer", mutate: func(config *Config) { config.InboundBuffer = -1 }},
 		{name: "negative downlink dedup capacity", mutate: func(config *Config) { config.DownlinkDedupCapacity = -1 }},
+		{name: "TLS address without port", mutate: func(config *Config) {
+			config.Address = "gateway"
+			config.TLS = &TLSConfig{}
+		}},
+		{name: "TLS invalid server name", mutate: func(config *Config) {
+			config.TLS = &TLSConfig{ServerName: "https://gateway"}
+		}},
+		{name: "TLS unreadable CA", mutate: func(config *Config) {
+			config.TLS = &TLSConfig{CAFile: "/path/that/does/not/exist/ca.crt"}
+		}},
 	}
 
 	for _, test := range tests {
