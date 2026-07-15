@@ -1,0 +1,27 @@
+# Static render fixture for an externally managed terminal-webhook mTLS Secret.
+# Create the referenced Secret before installing the chart; never commit real keys.
+
+secret:
+  create: true
+  values:
+    terminalWebhookHMACSecret: terminal-webhook-test-secret-0123456789abcdef
+
+downlink:
+  terminal:
+    publisher:
+      type: http
+      http:
+        url: https://terminal-events.example.internal/v1/z-courier
+        timeout: 5s
+        allowInsecureHTTP: false
+        hmac:
+          keyID: gateway-terminal-v1
+          secretEnv: ZCOURIER_TERMINAL_WEBHOOK_HMAC_SECRET
+        tls:
+          serverName: terminal-events.example.internal
+          secret:
+            name: z-courier-terminal-webhook-tls
+            mountPath: /run/secrets/terminal-webhook
+            caKey: ca.crt
+            clientCertKey: tls.crt
+            clientKeyKey: tls.key

@@ -93,6 +93,7 @@ jobs:
           docker compose -f deploy/monitoring/docker-compose.yml config
           docker compose --env-file deploy/production/.env.example -f deploy/production/docker-compose.yml config
           docker compose --env-file deploy/production-cluster/.env.example -f deploy/production-cluster/docker-compose.yml config
+          bash scripts/compose_terminal_webhook_tls_check.sh
 
       - name: Validate Prometheus rules and configs
         run: bash scripts/promtool_check.sh

@@ -186,6 +186,23 @@ data:
             hmac:
               key_id: {{ .Values.downlink.terminal.publisher.http.hmac.keyID | quote }}
               secret: {{ printf "${%s}" .Values.downlink.terminal.publisher.http.hmac.secretEnv | quote }}
+            {{- with .Values.downlink.terminal.publisher.http.tls }}
+            tls:
+              {{- with .secret }}
+              {{- if .caKey }}
+              ca_file: {{ printf "%s/%s" (trimSuffix "/" .mountPath) .caKey | quote }}
+              {{- end }}
+              {{- if .clientCertKey }}
+              client_cert_file: {{ printf "%s/%s" (trimSuffix "/" .mountPath) .clientCertKey | quote }}
+              {{- end }}
+              {{- if .clientKeyKey }}
+              client_key_file: {{ printf "%s/%s" (trimSuffix "/" .mountPath) .clientKeyKey | quote }}
+              {{- end }}
+              {{- end }}
+              {{- if .serverName }}
+              server_name: {{ .serverName | quote }}
+              {{- end }}
+            {{- end }}
           {{- end }}
         retry_interval: {{ .Values.downlink.terminal.retryInterval | quote }}
         retry_delay: {{ .Values.downlink.terminal.retryDelay | quote }}

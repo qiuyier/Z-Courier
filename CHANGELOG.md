@@ -15,6 +15,9 @@ semantic versioning after the first public MVP tag.
 - V14.1 terminal HTTP publisher TLS hardening with a dedicated TLS 1.2+
   transport, optional private CA, client-certificate authentication, strict
   startup/config validation, and real private-CA plus mTLS handshake tests.
+- V14 production secret-file deployment wiring with opt-in Compose overrides,
+  externally managed Helm TLS Secrets, conditional read-only mounts, schema
+  validation, deterministic render checks, and bilingual operations guidance.
 
 ## [v0.13.0] - 2026-07-15
 

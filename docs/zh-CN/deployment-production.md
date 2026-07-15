@@ -120,6 +120,8 @@ gateway-b -> client
 | `ZCOURIER_INTERNAL_HMAC_SECRET` | 后端调用 `/internal/*` 的 HMAC secret |
 | `ZCOURIER_PEER_HMAC_SECRET` | gateway peer push 的 HMAC secret |
 | `ZCOURIER_TERMINAL_WEBHOOK_HMAC_SECRET` | 可选的终态 HTTP webhook 出站签名密钥 |
+| `ZCOURIER_TERMINAL_WEBHOOK_TLS_DIR` | 单节点可选 webhook TLS 宿主机目录 |
+| `ZCOURIER_TERMINAL_WEBHOOK_TLS_DIR_A/B` | 集群两个节点各自的可选 TLS 目录 |
 | `ZCOURIER_UPSTREAM_INTERNAL_TOKEN` | HTTP upstream 可选 token |
 
 backend HMAC、peer HMAC 和终态 webhook HMAC 应该使用不同密钥。
@@ -168,6 +170,22 @@ downlink:
 验证 `ZCOURIER-HMAC-SHA256`，并按稳定的 `event_id` 做持久化幂等。终态事件不包含
 业务消息体。建议先在预发布环境制造一次受控策略耗尽，确认首次失败会重试且 outbox
 最终变为 `published`，再在生产启用。
+
+私有 CA 或 mTLS 模式需要在目录中准备 `ca.crt`、`tls.crt` 和 `tls.key`，开启生产
+配置中注释的 `http.tls` 字段，并叠加专用 Compose override。单节点使用：
+
+```bash
+docker compose \
+  --env-file deploy/production/.env \
+  -f deploy/production/docker-compose.yml \
+  -f deploy/production/docker-compose.terminal-webhook-tls.yml \
+  up -d --build
+```
+
+集群改用 `deploy/production-cluster` 下的对应文件，并分别设置 A/B 的证书目录。
+目录会以只读方式挂载到 `/run/secrets/terminal-webhook`。只使用私有 CA 时可以省略
+客户端证书和私钥；使用 mTLS 时二者必须成对存在。`secrets/` 已被 Git 忽略，仍应
+限制 `tls.key` 的宿主机文件权限。
 
 ## 端口和安全边界
 

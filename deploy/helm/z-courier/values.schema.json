@@ -40,7 +40,8 @@
       "properties": {
         "runAsNonRoot": { "type": "boolean" },
         "runAsUser": { "$ref": "#/definitions/nonNegativeInteger" },
-        "runAsGroup": { "$ref": "#/definitions/nonNegativeInteger" }
+        "runAsGroup": { "$ref": "#/definitions/nonNegativeInteger" },
+        "fsGroup": { "$ref": "#/definitions/nonNegativeInteger" }
       }
     },
     "securityContext": { "type": "object" },
@@ -598,7 +599,8 @@
         "url": { "type": "string", "pattern": "^https?://", "minLength": 1 },
         "timeout": { "$ref": "#/definitions/duration" },
         "allowInsecureHTTP": { "type": "boolean" },
-        "hmac": { "$ref": "#/definitions/terminalHTTPHMAC" }
+        "hmac": { "$ref": "#/definitions/terminalHTTPHMAC" },
+        "tls": { "$ref": "#/definitions/terminalHTTPTLS" }
       }
     },
     "terminalHTTPHMAC": {
@@ -609,6 +611,51 @@
         "keyID": { "type": "string", "minLength": 1 },
         "secretEnv": { "$ref": "#/definitions/envName" }
       }
+    },
+    "terminalHTTPTLS": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "serverName": { "type": "string", "minLength": 1 },
+        "secret": { "$ref": "#/definitions/terminalHTTPTLSSecret" }
+      },
+      "anyOf": [
+        { "required": ["serverName"] },
+        { "required": ["secret"] }
+      ]
+    },
+    "terminalHTTPTLSSecret": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "mountPath", "caKey", "clientCertKey", "clientKeyKey"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 253,
+          "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$"
+        },
+        "mountPath": { "type": "string", "minLength": 2, "pattern": "^/" },
+        "caKey": { "type": "string", "pattern": "^$|^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+        "clientCertKey": { "type": "string", "pattern": "^$|^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+        "clientKeyKey": { "type": "string", "pattern": "^$|^[A-Za-z0-9][A-Za-z0-9._-]*$" }
+      },
+      "anyOf": [
+        { "properties": { "caKey": { "minLength": 1 } } },
+        { "properties": { "clientCertKey": { "minLength": 1 } } },
+        { "properties": { "clientKeyKey": { "minLength": 1 } } }
+      ],
+      "allOf": [
+        {
+          "if": { "properties": { "clientCertKey": { "minLength": 1 } } },
+          "then": { "properties": { "clientKeyKey": { "minLength": 1 } } }
+        },
+        {
+          "if": { "properties": { "clientKeyKey": { "minLength": 1 } } },
+          "then": { "properties": { "clientCertKey": { "minLength": 1 } } }
+        }
+      ]
     },
     "policyList": {
       "type": "object",

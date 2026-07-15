@@ -1,0 +1,7 @@
+services:
+  gateway:
+    volumes:
+      - type: bind
+        source: ${ZCOURIER_TERMINAL_WEBHOOK_TLS_DIR:?set ZCOURIER_TERMINAL_WEBHOOK_TLS_DIR}
+        target: /run/secrets/terminal-webhook
+        read_only: true

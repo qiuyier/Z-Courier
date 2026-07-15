@@ -194,6 +194,7 @@ By default, the chart references an existing secret. The default key names are:
 | `peer-hmac-secret` | `ZCOURIER_PEER_HMAC_SECRET` |
 | `postgres-password` | `ZCOURIER_POSTGRES_PASSWORD` |
 | `redis-password` | `ZCOURIER_REDIS_PASSWORD` |
+| `terminal-webhook-hmac-secret` | `ZCOURIER_TERMINAL_WEBHOOK_HMAC_SECRET` when HTTP publication is enabled |
 | `upstream-internal-token` | `ZCOURIER_UPSTREAM_INTERNAL_TOKEN` |
 
 For a private sandbox only, `secret.create=true` can render a Secret from
@@ -243,6 +244,34 @@ business message body. Consumers should process them idempotently by
 `MessageID` and terminal state. See
 [examples/values-production.yaml](examples/values-production.yaml) for a
 disabled policy example and the safe `none` publisher default.
+
+For a private-CA or mTLS HTTP receiver, create a separate externally managed
+Secret containing only the certificate files:
+
+```bash
+kubectl -n z-courier create secret generic z-courier-terminal-webhook-tls \
+  --from-file=ca.crt=/secure/path/ca.crt \
+  --from-file=tls.crt=/secure/path/client.crt \
+  --from-file=tls.key=/secure/path/client.key
+```
+
+Then configure the HTTP publisher using
+[examples/values-terminal-http-mtls.yaml](examples/values-terminal-http-mtls.yaml).
+The chart mounts the external Secret read-only and writes only file paths to
+the ConfigMap. It never copies certificate or private-key bytes into chart
+values or the generated ConfigMap. For custom CA without mTLS, leave
+`clientCertKey` and `clientKeyKey` empty and keep only `caKey`. The default pod
+security context uses `fsGroup: 101`, and the TLS Secret volume uses mode
+`0440`, so the non-root gateway process can read it without making the private
+key world-readable inside the pod.
+
+The gateway loads these files at startup. After replacing Secret data, perform
+a rolling restart so every pod loads the new trust and client identity:
+
+```bash
+kubectl -n z-courier rollout restart statefulset/z-courier
+kubectl -n z-courier rollout status statefulset/z-courier
+```
 
 ## Validate
 

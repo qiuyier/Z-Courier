@@ -181,6 +181,14 @@ downlink:
         hmac:
           keyID: gateway-terminal-v1
           secretEnv: ZCOURIER_TERMINAL_WEBHOOK_HMAC_SECRET
+        tls:
+          serverName: terminal-events.example.internal
+          secret:
+            name: z-courier-terminal-webhook-tls
+            mountPath: /run/secrets/terminal-webhook
+            caKey: ca.crt
+            clientCertKey: tls.crt
+            clientKeyKey: tls.key
 ```
 
 chart 只在 `type: http` 时从 `secret.keys.terminalWebhookHMACSecret` 引用
@@ -188,6 +196,26 @@ Kubernetes Secret，并把它注入 `secretEnv` 指定的环境变量；默认 `
 不会依赖这个 Secret key。接收端必须验签并按稳定 `event_id` 幂等。可以运行
 `bash scripts/helm_terminal_http_check.sh` 静态验证 ConfigMap、StatefulSet 和 Secret
 的条件渲染。
+
+TLS 证书使用独立、外部管理的 Kubernetes Secret，不写入 values 或 ConfigMap：
+
+```bash
+kubectl -n z-courier create secret generic z-courier-terminal-webhook-tls \
+  --from-file=ca.crt=/secure/path/ca.crt \
+  --from-file=tls.crt=/secure/path/client.crt \
+  --from-file=tls.key=/secure/path/client.key
+```
+
+chart 会按 `secret.name` 把指定 key 只读挂载到 `mountPath`。只需要私有 CA 时，把
+`clientCertKey` 和 `clientKeyKey` 都设为空字符串。默认 Pod 安全上下文使用
+`fsGroup: 101`，TLS Secret 文件权限为 `0440`，非 root gateway 可以读取，但不会在
+Pod 内对所有用户开放。证书文件只在 gateway 启动时读取，因此替换 Secret 后需要
+执行滚动重启：
+
+```bash
+kubectl -n z-courier rollout restart statefulset/z-courier
+kubectl -n z-courier rollout status statefulset/z-courier
+```
 
 ## ServiceMonitor 和告警
 

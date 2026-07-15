@@ -172,6 +172,7 @@ run_docker_checks() {
   run docker compose -f deploy/monitoring/docker-compose.yml config
   run docker compose --env-file deploy/production/.env.example -f deploy/production/docker-compose.yml config
   run docker compose --env-file deploy/production-cluster/.env.example -f deploy/production-cluster/docker-compose.yml config
+  run bash scripts/compose_terminal_webhook_tls_check.sh
 
   run bash scripts/promtool_check.sh
   run bash scripts/helm_terminal_http_check.sh

@@ -95,6 +95,14 @@ downlink:
       #   hmac:
       #     keyID: gateway-terminal-v1
       #     secretEnv: ZCOURIER_TERMINAL_WEBHOOK_HMAC_SECRET
+      #   tls:
+      #     serverName: terminal-events.example.internal
+      #     secret:
+      #       name: z-courier-terminal-webhook-tls
+      #       mountPath: /run/secrets/terminal-webhook
+      #       caKey: ca.crt
+      #       clientCertKey: tls.crt
+      #       clientKeyKey: tls.key
     retryInterval: 5s
     retryDelay: 30s
     retryJitter: 5s

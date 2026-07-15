@@ -114,6 +114,23 @@ secret, and retry settings. The receiver verifies `ZCOURIER-HMAC-SHA256` and
 de-duplicates by stable `event_id`; terminal events never contain the business
 message body.
 
+For private-CA or mTLS publication, prepare the host directories configured by
+`ZCOURIER_TERMINAL_WEBHOOK_TLS_DIR_A` and
+`ZCOURIER_TERMINAL_WEBHOOK_TLS_DIR_B`. Each directory uses the in-container
+names `ca.crt`, `tls.crt`, and `tls.key`; the directories may contain the same
+certificate or distinct per-node client certificates. Enable the identical
+`http.tls` paths in both gateway configs and start with the override:
+
+```bash
+docker compose \
+  --env-file deploy/production-cluster/.env \
+  -f deploy/production-cluster/docker-compose.yml \
+  -f deploy/production-cluster/docker-compose.terminal-webhook-tls.yml \
+  up -d --build
+```
+
+Both mounts are read-only. Never commit `deploy/production-cluster/secrets/`.
+
 ## Required Environment
 
 Copy `deploy/production-cluster/.env.example` to
@@ -127,6 +144,8 @@ Copy `deploy/production-cluster/.env.example` to
 | `ZCOURIER_INTERNAL_HMAC_SECRET` | Backend-to-gateway HMAC key |
 | `ZCOURIER_PEER_HMAC_SECRET` | Gateway-to-gateway peer HMAC key |
 | `ZCOURIER_TERMINAL_WEBHOOK_HMAC_SECRET` | Optional outbound terminal-webhook HMAC key |
+| `ZCOURIER_TERMINAL_WEBHOOK_TLS_DIR_A` | Optional gateway-a host TLS directory |
+| `ZCOURIER_TERMINAL_WEBHOOK_TLS_DIR_B` | Optional gateway-b host TLS directory |
 | `ZCOURIER_UPSTREAM_INTERNAL_TOKEN` | Optional HTTP upstream token |
 
 Use different HMAC keys for backend internal HTTP, gateway peer push, and the
@@ -154,6 +173,16 @@ Render the Compose configuration:
 docker compose \
   --env-file deploy/production-cluster/.env.example \
   -f deploy/production-cluster/docker-compose.yml \
+  config
+```
+
+Validate the optional TLS override:
+
+```bash
+docker compose \
+  --env-file deploy/production-cluster/.env.example \
+  -f deploy/production-cluster/docker-compose.yml \
+  -f deploy/production-cluster/docker-compose.terminal-webhook-tls.yml \
   config
 ```
 

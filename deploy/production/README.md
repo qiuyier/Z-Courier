@@ -199,6 +199,23 @@ the commented `http` block, and keep `allow_insecure_http` disabled in
 production. The receiver must verify `ZCOURIER-HMAC-SHA256` and de-duplicate by
 stable `event_id`. Terminal events contain no business message body.
 
+For a private CA or mTLS receiver, place `ca.crt`, `tls.crt`, and `tls.key` in
+the host directory configured by `ZCOURIER_TERMINAL_WEBHOOK_TLS_DIR`, enable the
+commented `http.tls` block, and add the TLS Compose override:
+
+```bash
+docker compose \
+  --env-file deploy/production/.env \
+  -f deploy/production/docker-compose.yml \
+  -f deploy/production/docker-compose.terminal-webhook-tls.yml \
+  up -d --build
+```
+
+The directory is mounted read-only at `/run/secrets/terminal-webhook`. Keep the
+private key mode restricted and never commit `deploy/production/secrets/`.
+Custom-CA-only deployments can omit the client certificate and key from both
+the directory and the config block.
+
 ## Required Environment
 
 Before production use, copy `deploy/production/.env.example` to
@@ -212,6 +229,7 @@ Before production use, copy `deploy/production/.env.example` to
 | `ZCOURIER_INTERNAL_HMAC_SECRET` | Backend-to-gateway HMAC key |
 | `ZCOURIER_PEER_HMAC_SECRET` | Gateway peer HMAC key |
 | `ZCOURIER_TERMINAL_WEBHOOK_HMAC_SECRET` | Optional outbound terminal-webhook HMAC key |
+| `ZCOURIER_TERMINAL_WEBHOOK_TLS_DIR` | Host directory used only by the optional TLS Compose override |
 | `ZCOURIER_UPSTREAM_INTERNAL_TOKEN` | Optional HTTP upstream token |
 
 Use different HMAC keys for backend internal HTTP, gateway peer push, and the
@@ -225,6 +243,16 @@ Render the Compose configuration:
 docker compose \
   --env-file deploy/production/.env.example \
   -f deploy/production/docker-compose.yml \
+  config
+```
+
+Validate the optional TLS override without starting containers:
+
+```bash
+docker compose \
+  --env-file deploy/production/.env.example \
+  -f deploy/production/docker-compose.yml \
+  -f deploy/production/docker-compose.terminal-webhook-tls.yml \
   config
 ```
 

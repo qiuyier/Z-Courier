@@ -26,3 +26,20 @@ If secret.create=false, create the secret before installing:
     --from-literal={{ .Values.secret.keys.redisPassword }}='<replace-me>' \
     --from-literal={{ .Values.secret.keys.upstreamInternalToken }}='<replace-me>'
 
+{{- if eq .Values.downlink.terminal.publisher.type "http" }}
+{{- with .Values.downlink.terminal.publisher.http.tls }}
+{{- with .secret }}
+The terminal webhook TLS files must already exist in Secret {{ .name }}.
+Expected data keys:
+  {{- if .caKey }}
+  - {{ .caKey }}
+  {{- end }}
+  {{- if .clientCertKey }}
+  - {{ .clientCertKey }}
+  {{- end }}
+  {{- if .clientKeyKey }}
+  - {{ .clientKeyKey }}
+  {{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
