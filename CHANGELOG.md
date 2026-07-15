@@ -7,6 +7,8 @@ semantic versioning after the first public MVP tag.
 
 ## [Unreleased]
 
+## [v0.12.0] - 2026-07-15
+
 ### Added
 
 - V12 reliable-downlink idempotency foundation: immutable request identity
