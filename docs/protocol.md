@@ -354,8 +354,8 @@ messages, because those are still part of the delivery/retry lifecycle.
 
 ## Terminal Event Envelope
 
-When `downlink.terminal.publisher.type` is `nsq`, the gateway publishes this
-versioned JSON envelope to the configured topic:
+When `downlink.terminal.publisher.type` is `nsq` or `http`, the gateway
+publishes this versioned JSON envelope to the configured topic or webhook:
 
 ```json
 {
@@ -382,6 +382,11 @@ tokens, HMAC material, and storage credentials. Publication is at least once:
 consumers must de-duplicate using `message_id + terminal_status` (or the
 equivalent deterministic `event_id`). A message can produce a `failed` event
 and, after an operator action, a distinct `discarded` event.
+
+The HTTP publisher signs the exact JSON request bytes with the existing
+`ZCOURIER-HMAC-SHA256` format. Receivers must verify the signing headers, treat
+only their own `2xx` response as successful delivery, and persist the
+`event_id` idempotently. The gateway does not follow redirects.
 
 Publisher retries use their own persisted outbox state and do not retry client
 delivery. A failed publication is visible through the message status fields

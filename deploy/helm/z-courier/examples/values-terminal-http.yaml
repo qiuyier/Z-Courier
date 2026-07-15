@@ -1,0 +1,19 @@
+# Static render fixture for the signed terminal-event HTTP publisher.
+# The receiver URL and secret are examples only.
+
+secret:
+  create: true
+  values:
+    terminalWebhookHMACSecret: terminal-webhook-test-secret-0123456789abcdef
+
+downlink:
+  terminal:
+    publisher:
+      type: http
+      http:
+        url: https://terminal-events.example.internal/v1/z-courier
+        timeout: 5s
+        allowInsecureHTTP: false
+        hmac:
+          keyID: gateway-terminal-v1
+          secretEnv: ZCOURIER_TERMINAL_WEBHOOK_HMAC_SECRET

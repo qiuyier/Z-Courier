@@ -170,6 +170,14 @@ downlink:
   terminal:
     publisher:
       type: none
+      # HTTP example:
+      # http:
+      #   url: https://terminal-events.example.internal/v1/z-courier
+      #   timeout: 5s
+      #   allowInsecureHTTP: false
+      #   hmac:
+      #     keyID: gateway-terminal-v1
+      #     secretEnv: ZCOURIER_TERMINAL_WEBHOOK_HMAC_SECRET
     retryInterval: 5s
     retryDelay: 30s
     retryJitter: 5s
@@ -234,6 +242,7 @@ secret:
     peerHMACSecret: peer-hmac-secret
     postgresPassword: postgres-password
     redisPassword: redis-password
+    terminalWebhookHMACSecret: terminal-webhook-hmac-secret
     upstreamInternalToken: upstream-internal-token
   values:
     authProviderSharedToken: ""
@@ -241,6 +250,7 @@ secret:
     peerHMACSecret: ""
     postgresPassword: ""
     redisPassword: ""
+    terminalWebhookHMACSecret: ""
     upstreamInternalToken: ""
 
 extraEnv: []

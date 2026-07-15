@@ -108,9 +108,11 @@ bastion, private ingress, or an authenticating reverse proxy. Do not publish
 Both gateway configs also contain the same disabled `production-critical`
 delivery-policy example and keep `downlink.terminal.publisher.type: none`.
 Keep policy ranges, queue capacity, and terminal-publisher settings identical
-on every node sharing PostgreSQL. Enable NSQ terminal publication only after
-provisioning the topic and validating a controlled policy exhaustion; terminal
-events never contain the business message body.
+on every node sharing PostgreSQL. Terminal events can be published to NSQ or a
+signed HTTPS webhook. For HTTP, every node must use the same endpoint, key ID,
+secret, and retry settings. The receiver verifies `ZCOURIER-HMAC-SHA256` and
+de-duplicates by stable `event_id`; terminal events never contain the business
+message body.
 
 ## Required Environment
 
@@ -124,9 +126,11 @@ Copy `deploy/production-cluster/.env.example` to
 | `ZCOURIER_AUTH_PROVIDER_SHARED_TOKEN` | Token sent to your auth backend |
 | `ZCOURIER_INTERNAL_HMAC_SECRET` | Backend-to-gateway HMAC key |
 | `ZCOURIER_PEER_HMAC_SECRET` | Gateway-to-gateway peer HMAC key |
+| `ZCOURIER_TERMINAL_WEBHOOK_HMAC_SECRET` | Optional outbound terminal-webhook HMAC key |
 | `ZCOURIER_UPSTREAM_INTERNAL_TOKEN` | Optional HTTP upstream token |
 
-Use different HMAC keys for backend internal HTTP and gateway peer push.
+Use different HMAC keys for backend internal HTTP, gateway peer push, and the
+outbound terminal webhook.
 
 ## Backend And Auth Services
 

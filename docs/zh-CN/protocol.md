@@ -258,8 +258,8 @@ POST /internal/messages/requeue
 
 ## 终态事件协议
 
-当 `downlink.terminal.publisher.type` 配置为 `nsq` 时，网关向指定 topic 发布
-如下版本化 JSON：
+当 `downlink.terminal.publisher.type` 配置为 `nsq` 或 `http` 时，网关向指定
+topic 或 webhook 发布如下版本化 JSON：
 
 ```json
 {
@@ -285,6 +285,10 @@ POST /internal/messages/requeue
 发布语义是 at-least-once，消费者必须使用 `message_id + terminal_status`
 （等价于确定性的 `event_id`）去重。一条消息可以先产生 `failed` 事件，之后被
 管理员 discard 时再产生一条独立的 `discarded` 事件。
+
+HTTP publisher 使用现有 `ZCOURIER-HMAC-SHA256` 格式对实际发送的 JSON 字节
+签名。接收端必须验证签名头、持久化幂等记录 `event_id`，并且只有返回 `2xx` 才表示
+接收成功；网关不会跟随重定向。
 
 终态事件使用独立的持久化 outbox 和重试状态，发布失败不会重新触发客户端投递，
 也不会反复改变消息终态。状态接口会显示发布失败及后续成功的结果。

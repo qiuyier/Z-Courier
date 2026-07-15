@@ -119,9 +119,10 @@ gateway-b -> client
 | `ZCOURIER_AUTH_PROVIDER_SHARED_TOKEN` | gateway 调用 auth backend 的共享 token |
 | `ZCOURIER_INTERNAL_HMAC_SECRET` | 后端调用 `/internal/*` 的 HMAC secret |
 | `ZCOURIER_PEER_HMAC_SECRET` | gateway peer push 的 HMAC secret |
+| `ZCOURIER_TERMINAL_WEBHOOK_HMAC_SECRET` | 可选的终态 HTTP webhook 出站签名密钥 |
 | `ZCOURIER_UPSTREAM_INTERNAL_TOKEN` | HTTP upstream 可选 token |
 
-backend HMAC 和 peer HMAC 应该使用不同密钥。
+backend HMAC、peer HMAC 和终态 webhook HMAC 应该使用不同密钥。
 
 ## 生产配置重点
 
@@ -161,10 +162,12 @@ downlink:
 重叠，再将对应策略设为 `enabled: true`。集群节点共享 PostgreSQL 存储时，策略、
 容量和终态发布配置必须保持一致。
 
-需要把策略耗尽事件发布到 NSQ 时，把 `publisher.type` 改为 `nsq`，并检查配置中
-预留的 `nsqd_addrs`、topic、超时和重试参数。终态事件不包含业务消息体，consumer
-仍应按 `MessageID` 与终态做幂等处理。建议先在预发布环境制造一次受控策略耗尽，
-确认 outbox 最终变为 `published`，再在生产启用。
+终态事件可以发到 NSQ，也可以发到带签名的 HTTPS webhook。HTTP 模式需要设置
+`ZCOURIER_TERMINAL_WEBHOOK_HMAC_SECRET`，把参考配置中的 publisher 改为 `http`，
+并启用注释里的 `http` 配置块。生产环境不要打开 `allow_insecure_http`。接收端必须
+验证 `ZCOURIER-HMAC-SHA256`，并按稳定的 `event_id` 做持久化幂等。终态事件不包含
+业务消息体。建议先在预发布环境制造一次受控策略耗尽，确认首次失败会重试且 outbox
+最终变为 `published`，再在生产启用。
 
 ## 端口和安全边界
 

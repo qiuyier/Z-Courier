@@ -108,6 +108,7 @@ jobs:
           docker run --rm -v "$PWD:/work" -w /work "$HELM_IMAGE" template z-courier deploy/helm/z-courier -f deploy/helm/z-courier/examples/values-kind-smoke.yaml >/tmp/z-courier-helm-kind-smoke.yaml
           docker run --rm -v "$PWD:/work" -w /work "$HELM_IMAGE" lint deploy/helm/z-courier -f deploy/helm/z-courier/examples/values-k8s-e2e.yaml
           docker run --rm -v "$PWD:/work" -w /work "$HELM_IMAGE" template z-courier deploy/helm/z-courier -f deploy/helm/z-courier/examples/values-k8s-e2e.yaml >/tmp/z-courier-helm-k8s-e2e.yaml
+          bash scripts/helm_terminal_http_check.sh
 
       - name: Package Helm chart
         run: |

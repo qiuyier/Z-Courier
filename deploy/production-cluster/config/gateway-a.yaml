@@ -147,6 +147,15 @@ downlink:
         write_timeout: 1s
         publish_mode: round_robin
         retry_attempts: 2
+      # To use a signed webhook, configure this same block and secret on every
+      # node, change type to http, and remove the nsq block:
+      # http:
+      #   url: https://terminal-events.example.internal/v1/z-courier
+      #   timeout: 5s
+      #   allow_insecure_http: false
+      #   hmac:
+      #     key_id: gateway-terminal-v1
+      #     secret: replace-from-ZCOURIER_TERMINAL_WEBHOOK_HMAC_SECRET
     retry_interval: 5s
     retry_delay: 30s
     retry_jitter: 5s

@@ -86,6 +86,13 @@ spec:
                 secretKeyRef:
                   name: {{ include "z-courier.secretName" . }}
                   key: {{ .Values.secret.keys.upstreamInternalToken }}
+            {{- if eq .Values.downlink.terminal.publisher.type "http" }}
+            - name: {{ .Values.downlink.terminal.publisher.http.hmac.secretEnv }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "z-courier.secretName" . }}
+                  key: {{ .Values.secret.keys.terminalWebhookHMACSecret }}
+            {{- end }}
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -149,4 +156,3 @@ spec:
       {{- if .Values.priorityClassName }}
       priorityClassName: {{ .Values.priorityClassName | quote }}
       {{- end }}
-

@@ -178,6 +178,14 @@ data:
             write_timeout: {{ .Values.downlink.terminal.publisher.nsq.writeTimeout | quote }}
             publish_mode: {{ .Values.downlink.terminal.publisher.nsq.publishMode | quote }}
             retry_attempts: {{ .Values.downlink.terminal.publisher.nsq.retryAttempts }}
+          {{- else if eq .Values.downlink.terminal.publisher.type "http" }}
+          http:
+            url: {{ .Values.downlink.terminal.publisher.http.url | quote }}
+            timeout: {{ .Values.downlink.terminal.publisher.http.timeout | quote }}
+            allow_insecure_http: {{ .Values.downlink.terminal.publisher.http.allowInsecureHTTP }}
+            hmac:
+              key_id: {{ .Values.downlink.terminal.publisher.http.hmac.keyID | quote }}
+              secret: {{ printf "${%s}" .Values.downlink.terminal.publisher.http.hmac.secretEnv | quote }}
           {{- end }}
         retry_interval: {{ .Values.downlink.terminal.retryInterval | quote }}
         retry_delay: {{ .Values.downlink.terminal.retryDelay | quote }}

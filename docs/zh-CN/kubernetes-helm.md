@@ -40,6 +40,7 @@ kubectl -n z-courier create secret generic z-courier-secret \
   --from-literal=peer-hmac-secret='<replace-me>' \
   --from-literal=postgres-password='<replace-me>' \
   --from-literal=redis-password='<replace-me>' \
+  --from-literal=terminal-webhook-hmac-secret='<replace-with-separate-32-byte-secret>' \
   --from-literal=upstream-internal-token='<replace-me>'
 ```
 
@@ -165,6 +166,28 @@ downlink:
 所有连接同一个 PostgreSQL 下行存储的 gateway Pod 必须使用相同的策略和终态发布
 配置。启用前应确认 MsgID 区间没有重叠。终态事件只包含受限的投递元数据，不包含
 业务消息体；consumer 应按 `MessageID` 和终态做幂等处理。
+
+不使用 NSQ 时，可以把 publisher 换成签名 HTTP：
+
+```yaml
+downlink:
+  terminal:
+    publisher:
+      type: http
+      http:
+        url: https://terminal-events.example.internal/v1/z-courier
+        timeout: 5s
+        allowInsecureHTTP: false
+        hmac:
+          keyID: gateway-terminal-v1
+          secretEnv: ZCOURIER_TERMINAL_WEBHOOK_HMAC_SECRET
+```
+
+chart 只在 `type: http` 时从 `secret.keys.terminalWebhookHMACSecret` 引用
+Kubernetes Secret，并把它注入 `secretEnv` 指定的环境变量；默认 `none` 与 `nsq`
+不会依赖这个 Secret key。接收端必须验签并按稳定 `event_id` 幂等。可以运行
+`bash scripts/helm_terminal_http_check.sh` 静态验证 ConfigMap、StatefulSet 和 Secret
+的条件渲染。
 
 ## ServiceMonitor 和告警
 

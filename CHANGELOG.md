@@ -16,6 +16,10 @@ semantic versioning after the first public MVP tag.
   per-event first-attempt failure injection, durable retry, stable event ID and
   body-exclusion assertions, and single-node plus two-node successful-delivery
   checks while Kubernetes retains the existing NSQ publication regression.
+- V13 production deployment references for signed terminal webhooks: optional
+  Compose secret injection, identical single/cluster configuration guidance,
+  conditional Helm ConfigMap/StatefulSet/Secret rendering, values schema, and
+  a dedicated CI/release render check that leaves `none` and `nsq` unchanged.
 
 ## [v0.12.0] - 2026-07-15
 

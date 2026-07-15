@@ -192,10 +192,12 @@ If you keep `production-http-upstream` enabled, add `business-backend` to the
 same private network or change the route URL to your real backend address.
 
 Before enabling the example policy, assign a reviewed MsgID range and make sure
-it does not overlap another enabled policy. To export terminal failures, change
-the publisher type to `nsq` only after provisioning and monitoring the configured
-topic. Terminal events contain no business message body; consumers should be
-idempotent by `MessageID` and terminal state.
+it does not overlap another enabled policy. Terminal failures can be exported
+to NSQ or to a signed HTTPS webhook. For HTTP, set
+`ZCOURIER_TERMINAL_WEBHOOK_HMAC_SECRET`, replace the example `nsq` block with
+the commented `http` block, and keep `allow_insecure_http` disabled in
+production. The receiver must verify `ZCOURIER-HMAC-SHA256` and de-duplicate by
+stable `event_id`. Terminal events contain no business message body.
 
 ## Required Environment
 
@@ -209,10 +211,11 @@ Before production use, copy `deploy/production/.env.example` to
 | `ZCOURIER_AUTH_PROVIDER_SHARED_TOKEN` | Token sent to your auth backend |
 | `ZCOURIER_INTERNAL_HMAC_SECRET` | Backend-to-gateway HMAC key |
 | `ZCOURIER_PEER_HMAC_SECRET` | Gateway peer HMAC key |
+| `ZCOURIER_TERMINAL_WEBHOOK_HMAC_SECRET` | Optional outbound terminal-webhook HMAC key |
 | `ZCOURIER_UPSTREAM_INTERNAL_TOKEN` | Optional HTTP upstream token |
 
-Use different HMAC keys for backend internal HTTP and gateway peer push. Do not
-reuse the example values.
+Use different HMAC keys for backend internal HTTP, gateway peer push, and the
+outbound terminal webhook. Do not reuse the example values.
 
 ## Verify
 

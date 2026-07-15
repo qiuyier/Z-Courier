@@ -385,6 +385,7 @@
             "peerHMACSecret": { "type": "string", "minLength": 1 },
             "postgresPassword": { "type": "string", "minLength": 1 },
             "redisPassword": { "type": "string", "minLength": 1 },
+            "terminalWebhookHMACSecret": { "type": "string", "minLength": 1 },
             "upstreamInternalToken": { "type": "string", "minLength": 1 }
           }
         },
@@ -397,6 +398,7 @@
             "peerHMACSecret": { "type": "string" },
             "postgresPassword": { "type": "string" },
             "redisPassword": { "type": "string" },
+            "terminalWebhookHMACSecret": { "type": "string" },
             "upstreamInternalToken": { "type": "string" }
           }
         }
@@ -548,6 +550,15 @@
             "type": { "type": "string", "enum": ["nsq"] },
             "nsq": { "$ref": "#/definitions/terminalNSQTarget" }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "http"],
+          "properties": {
+            "type": { "type": "string", "enum": ["http"] },
+            "http": { "$ref": "#/definitions/terminalHTTPTarget" }
+          }
         }
       ]
     },
@@ -577,6 +588,26 @@
         "writeTimeout": { "$ref": "#/definitions/duration" },
         "publishMode": { "type": "string", "enum": ["round_robin"] },
         "retryAttempts": { "$ref": "#/definitions/nonNegativeInteger" }
+      }
+    },
+    "terminalHTTPTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url", "timeout", "allowInsecureHTTP", "hmac"],
+      "properties": {
+        "url": { "type": "string", "pattern": "^https?://", "minLength": 1 },
+        "timeout": { "$ref": "#/definitions/duration" },
+        "allowInsecureHTTP": { "type": "boolean" },
+        "hmac": { "$ref": "#/definitions/terminalHTTPHMAC" }
+      }
+    },
+    "terminalHTTPHMAC": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["keyID", "secretEnv"],
+      "properties": {
+        "keyID": { "type": "string", "minLength": 1 },
+        "secretEnv": { "$ref": "#/definitions/envName" }
       }
     },
     "policyList": {

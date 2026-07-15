@@ -174,6 +174,7 @@ run_docker_checks() {
   run docker compose --env-file deploy/production-cluster/.env.example -f deploy/production-cluster/docker-compose.yml config
 
   run bash scripts/promtool_check.sh
+  run bash scripts/helm_terminal_http_check.sh
 
   run_helm lint deploy/helm/z-courier
   run_helm lint deploy/helm/z-courier -f deploy/helm/z-courier/examples/values-production.yaml
