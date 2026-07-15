@@ -897,6 +897,38 @@ func TestLoadServerConfigDownlinkTerminalDefaults(t *testing.T) {
 	}
 }
 
+func TestLoadServerConfigDownlinkTerminalHTTPPublisher(t *testing.T) {
+	config, err := LoadServerConfig(writeConfig(t, `
+downlink:
+  storage:
+    type: postgres
+    postgres:
+      dsn: postgres://zcourier:zcourier@postgres:5432/zcourier?sslmode=disable
+  terminal:
+    publisher:
+      type: http
+      http:
+        url: http://receiver.local/v1/z-courier
+        allow_insecure_http: true
+        timeout: 7s
+        hmac:
+          key_id: gateway-terminal-v1
+          secret: 0123456789abcdef0123456789abcdef
+`))
+	if err != nil {
+		t.Fatalf("LoadServerConfig() error = %v", err)
+	}
+	terminal := config.DownlinkTerminal
+	if terminal.PublisherType != "http" ||
+		terminal.HTTP.URL != "http://receiver.local/v1/z-courier" ||
+		terminal.HTTP.Timeout != 7*time.Second ||
+		terminal.HTTP.HMACKeyID != "gateway-terminal-v1" ||
+		string(terminal.HTTP.HMACSecret) != "0123456789abcdef0123456789abcdef" ||
+		!terminal.HTTP.AllowInsecureHTTP {
+		t.Fatalf("DownlinkTerminal HTTP = %+v", terminal.HTTP)
+	}
+}
+
 func TestLoadServerConfigDownlinkQueueCapacity(t *testing.T) {
 	config, err := LoadServerConfig(writeConfig(t, `
 downlink:
@@ -971,6 +1003,26 @@ func TestLoadServerConfigRejectsInvalidDownlinkTerminal(t *testing.T) {
 			name:    "publisher without storage",
 			config:  "downlink:\n  storage:\n    type: none\n  terminal:\n    publisher:\n      type: nsq\n      nsq:\n        addr: 127.0.0.1:4150\n        topic: terminal_events\n",
 			message: "requires downlink storage",
+		},
+		{
+			name:    "http requires postgres storage",
+			config:  "downlink:\n  storage:\n    type: memory\n  terminal:\n    publisher:\n      type: http\n      http:\n        url: https://receiver.local/events\n        hmac:\n          key_id: gateway-terminal\n          secret: 0123456789abcdef0123456789abcdef\n",
+			message: "http publisher requires postgres storage",
+		},
+		{
+			name:    "http requires https by default",
+			config:  "downlink:\n  storage:\n    type: postgres\n    postgres:\n      dsn: postgres://zcourier:zcourier@postgres:5432/zcourier?sslmode=disable\n  terminal:\n    publisher:\n      type: http\n      http:\n        url: http://receiver.local/events\n        hmac:\n          key_id: gateway-terminal\n          secret: 0123456789abcdef0123456789abcdef\n",
+			message: "requires https unless allow_insecure_http is true",
+		},
+		{
+			name:    "http requires HMAC key",
+			config:  "downlink:\n  storage:\n    type: postgres\n    postgres:\n      dsn: postgres://zcourier:zcourier@postgres:5432/zcourier?sslmode=disable\n  terminal:\n    publisher:\n      type: http\n      http:\n        url: https://receiver.local/events\n        hmac:\n          secret: 0123456789abcdef0123456789abcdef\n",
+			message: "downlink terminal publisher http hmac",
+		},
+		{
+			name:    "http settings conflict with NSQ",
+			config:  "downlink:\n  terminal:\n    publisher:\n      type: nsq\n      nsq:\n        addr: 127.0.0.1:4150\n        topic: terminal_events\n      http:\n        url: https://receiver.local/events\n",
+			message: "http settings conflict with type nsq",
 		},
 		{
 			name:    "max delay below initial delay",

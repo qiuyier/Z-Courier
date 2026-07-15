@@ -275,8 +275,21 @@ type DownlinkTerminalConfig struct {
 }
 
 type DownlinkTerminalPublisherConfig struct {
-	Type string       `yaml:"type"`
-	NSQ  TargetConfig `yaml:"nsq"`
+	Type string                              `yaml:"type"`
+	NSQ  TargetConfig                        `yaml:"nsq"`
+	HTTP DownlinkTerminalHTTPPublisherConfig `yaml:"http"`
+}
+
+type DownlinkTerminalHTTPPublisherConfig struct {
+	URL               string                         `yaml:"url"`
+	Timeout           string                         `yaml:"timeout"`
+	AllowInsecureHTTP bool                           `yaml:"allow_insecure_http"`
+	HMAC              DownlinkTerminalHTTPHMACConfig `yaml:"hmac"`
+}
+
+type DownlinkTerminalHTTPHMACConfig struct {
+	KeyID  string `yaml:"key_id"`
+	Secret string `yaml:"secret"`
 }
 
 type DownlinkRetentionConfig struct {
@@ -1375,6 +1388,10 @@ func applyDownlinkConfig(out *server.Config, config DownlinkConfig) error {
 		(out.DownlinkStorage.Type == "none" || out.DownlinkStorage.Type == "disabled") {
 		return fmt.Errorf("config: downlink terminal publisher requires downlink storage")
 	}
+	if out.DownlinkTerminal.PublisherType == downlink.TerminalPublisherHTTP &&
+		out.DownlinkStorage.Type != "postgres" {
+		return fmt.Errorf("config: downlink terminal http publisher requires postgres storage")
+	}
 
 	retention := config.Retention
 	deliveredTTL, err := parseOptionalPositiveDuration(retention.DeliveredTTL)
@@ -1439,8 +1456,14 @@ func applyDownlinkTerminalConfig(out *server.Config, config DownlinkTerminalConf
 	}
 	switch publisherType {
 	case downlink.TerminalPublisherNone:
+		if downlinkTerminalHTTPPublisherConfigSet(config.Publisher.HTTP) {
+			return fmt.Errorf("config: downlink terminal publisher http settings require type http")
+		}
 		out.DownlinkTerminal.PublisherType = publisherType
 	case downlink.TerminalPublisherNSQ:
+		if downlinkTerminalHTTPPublisherConfigSet(config.Publisher.HTTP) {
+			return fmt.Errorf("config: downlink terminal publisher http settings conflict with type nsq")
+		}
 		nsqConfig, err := toNSQUpstreamConfig(UpstreamRouteConfig{
 			Name:   "downlink-terminal",
 			Target: config.Publisher.NSQ,
@@ -1450,6 +1473,13 @@ func applyDownlinkTerminalConfig(out *server.Config, config DownlinkTerminalConf
 		}
 		out.DownlinkTerminal.PublisherType = publisherType
 		out.DownlinkTerminal.NSQ = *nsqConfig
+	case downlink.TerminalPublisherHTTP:
+		httpConfig, err := toDownlinkTerminalHTTPConfig(config.Publisher.HTTP, out.DownlinkTerminal.HTTP)
+		if err != nil {
+			return err
+		}
+		out.DownlinkTerminal.PublisherType = publisherType
+		out.DownlinkTerminal.HTTP = httpConfig
 	default:
 		return fmt.Errorf("config: unsupported downlink terminal publisher type %q", config.Publisher.Type)
 	}
@@ -1507,6 +1537,53 @@ func applyDownlinkTerminalConfig(out *server.Config, config DownlinkTerminalConf
 		out.DownlinkTerminal.ScanLimit = config.ScanLimit
 	}
 	return nil
+}
+
+func toDownlinkTerminalHTTPConfig(
+	config DownlinkTerminalHTTPPublisherConfig,
+	defaults server.DownlinkTerminalHTTPConfig,
+) (server.DownlinkTerminalHTTPConfig, error) {
+	rawURL := strings.TrimSpace(config.URL)
+	if rawURL == "" {
+		return server.DownlinkTerminalHTTPConfig{}, fmt.Errorf("config: downlink terminal publisher http url is required")
+	}
+	if err := validateAbsoluteHTTPURL(rawURL, "downlink terminal publisher http"); err != nil {
+		return server.DownlinkTerminalHTTPConfig{}, fmt.Errorf("config: %w", err)
+	}
+	parsedURL, err := url.Parse(rawURL)
+	if err != nil {
+		return server.DownlinkTerminalHTTPConfig{}, fmt.Errorf("config: downlink terminal publisher http url: %w", err)
+	}
+	if parsedURL.Scheme == "http" && !config.AllowInsecureHTTP {
+		return server.DownlinkTerminalHTTPConfig{}, fmt.Errorf("config: downlink terminal publisher http url requires https unless allow_insecure_http is true")
+	}
+
+	timeout, err := parseOptionalPositiveDuration(config.Timeout)
+	if err != nil {
+		return server.DownlinkTerminalHTTPConfig{}, fmt.Errorf("config: downlink terminal publisher http timeout: %w", err)
+	}
+	if timeout == 0 {
+		timeout = defaults.Timeout
+	}
+
+	keyID := strings.TrimSpace(config.HMAC.KeyID)
+	secret := []byte(config.HMAC.Secret)
+	if _, err := signing.NewSigner(signing.SignerConfig{KeyID: keyID, Secret: secret}); err != nil {
+		return server.DownlinkTerminalHTTPConfig{}, fmt.Errorf("config: downlink terminal publisher http hmac: %w", err)
+	}
+
+	return server.DownlinkTerminalHTTPConfig{
+		URL:               rawURL,
+		Timeout:           timeout,
+		HMACKeyID:         keyID,
+		HMACSecret:        append([]byte(nil), secret...),
+		AllowInsecureHTTP: config.AllowInsecureHTTP,
+	}, nil
+}
+
+func downlinkTerminalHTTPPublisherConfigSet(config DownlinkTerminalHTTPPublisherConfig) bool {
+	return strings.TrimSpace(config.URL) != "" || config.Timeout != "" || config.AllowInsecureHTTP ||
+		strings.TrimSpace(config.HMAC.KeyID) != "" || config.HMAC.Secret != ""
 }
 
 func toDownlinkPolicies(

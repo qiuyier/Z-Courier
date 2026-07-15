@@ -109,6 +109,11 @@ rollback, and release acceptance guidance is in
 [docs/v12-release.md](docs/v12-release.md), with a Chinese version in
 [docs/zh-CN/v12-release.md](docs/zh-CN/v12-release.md).
 
+V13 signed terminal-webhook planning is tracked in
+[docs/v13-roadmap.md](docs/v13-roadmap.md). It extends the existing durable,
+body-free terminal-event outbox with an opt-in signed HTTP publisher for
+deployments that do not use NSQ.
+
 ## Quick Start
 
 Run the single-node integration verifier from the repository root:

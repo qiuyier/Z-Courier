@@ -53,6 +53,28 @@ func TestTerminalEnvelopePublisherPropagatesPublishError(t *testing.T) {
 	}
 }
 
+func TestNewTerminalPublisherHTTP(t *testing.T) {
+	config := DefaultConfig()
+	config.DownlinkTerminal.PublisherType = downlink.TerminalPublisherHTTP
+	config.DownlinkTerminal.HTTP.URL = "https://receiver.local/v1/z-courier"
+	config.DownlinkTerminal.HTTP.HMACKeyID = "gateway-terminal"
+	config.DownlinkTerminal.HTTP.HMACSecret = []byte("0123456789abcdef0123456789abcdef")
+
+	publisher, closer, err := newTerminalPublisher(config)
+	if err != nil {
+		t.Fatalf("newTerminalPublisher() error = %v", err)
+	}
+	if publisher == nil {
+		t.Fatal("newTerminalPublisher() publisher = nil")
+	}
+	if closer != nil {
+		t.Fatalf("newTerminalPublisher() closer = %T, want nil", closer)
+	}
+	if _, ok := publisher.(*terminalEnvelopePublisher); !ok {
+		t.Fatalf("newTerminalPublisher() publisher = %T, want *terminalEnvelopePublisher", publisher)
+	}
+}
+
 type fakeRawTerminalPublisher struct {
 	body []byte
 	err  error

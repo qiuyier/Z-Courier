@@ -486,9 +486,33 @@ downlink:
     scan_limit: 100
 ```
 
-- `publisher.type` 支持 `none` 和 `nsq`；`none` 保持 V12.3 之前的行为。
+- `publisher.type` 支持 `none`、`nsq` 和 `http`；`none` 保持 V12.3 之前的
+  行为。
 - `publisher.nsq` 是有界 NSQ producer 配置，发布端直连 `nsqd`，不通过
   `nsqlookupd`。
+- `publisher.http` 把既有的终态事件 envelope 以签名 JSON `POST` 发给接收端。
+  它必须使用 PostgreSQL 存储，才能在重启后保留发布重试，并在多网关节点之间
+  协调 claim：
+
+  ```yaml
+  downlink:
+    storage:
+      type: postgres
+    terminal:
+      publisher:
+        type: http
+        http:
+          url: https://terminal-events.example.internal/v1/z-courier
+          timeout: 5s
+          hmac:
+            key_id: gateway-terminal-v1
+            secret: ${ZCOURIER_TERMINAL_WEBHOOK_HMAC_SECRET}
+  ```
+
+  默认只接受绝对 `https` URL。本地调试时如确实需要明文 `http` 接收端，必须
+  显式设置 `allow_insecure_http: true`，且不能跨越不可信网络。HMAC 的 key ID
+  和 secret 使用已有的 `ZCOURIER-HMAC-SHA256` 请求签名协议，secret 至少需要
+  32 字节。请求规范和接收端验签方式见[内部 HTTP 签名](internal-http-signing.md)。
 - `retry_interval` 是扫描待发布终态事件的周期。
 - `retry_delay`、`retry_jitter`、`backoff_multiplier`、`max_retry_delay`
   共同控制独立的发布重试，不会重新触发客户端投递。
@@ -497,8 +521,10 @@ downlink:
 
 启用 publisher 必须同时启用下行存储。PostgreSQL 会在同一个事务里写入消息终态
 和 outbox 事件；集群节点通过独立 claim 竞争发布任务。事件投递语义是 at-least-once，
-消费者应使用 `message_id + terminal_status` 去重。事件不包含原始消息 Body、内部
-token、HMAC 密钥或 DSN。V12.3.1 暂不提供 HTTP publisher。
+消费者应使用稳定的 `event_id`（或 `message_id + terminal_status`）去重。事件不包含
+原始消息 Body、内部 token、HMAC 密钥或 DSN。HTTP publisher 与 NSQ 使用同一个版本化
+元数据 envelope，不跟随重定向，只有 `2xx` 响应才算发布成功；超时、网络错误和非
+`2xx` 响应都会进入既有的独立发布重试调度。
 
 升级前已经处于终态的旧数据不会补发事件。当前终态事件仍为 `pending` 或 `failed`
 时，retention 不会提前删除对应消息。

@@ -17,6 +17,7 @@ const (
 
 	TerminalPublisherNone = "none"
 	TerminalPublisherNSQ  = "nsq"
+	TerminalPublisherHTTP = "http"
 
 	failureReasonMaxAttempts = TerminalReasonMaxAttempts
 	failureReasonMaxAge      = TerminalReasonMaxAge

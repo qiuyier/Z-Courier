@@ -727,9 +727,35 @@ downlink:
     scan_limit: 100
 ```
 
-- `publisher.type`: `none` or `nsq`. `none` preserves the pre-V12.3 behavior.
+- `publisher.type`: `none`, `nsq`, or `http`. `none` preserves the pre-V12.3
+  behavior.
 - `publisher.nsq`: standard bounded NSQ producer settings. Producers publish
   directly to `nsqd`; `nsqlookupd` is not used for publication.
+- `publisher.http`: a signed JSON `POST` target for the existing terminal-event
+  envelope. It requires PostgreSQL storage so publication claims and retries
+  survive restarts and coordinate across gateway nodes:
+
+  ```yaml
+  downlink:
+    storage:
+      type: postgres
+    terminal:
+      publisher:
+        type: http
+        http:
+          url: https://terminal-events.example.internal/v1/z-courier
+          timeout: 5s
+          hmac:
+            key_id: gateway-terminal-v1
+            secret: ${ZCOURIER_TERMINAL_WEBHOOK_HMAC_SECRET}
+  ```
+
+  The gateway only accepts an absolute `https` URL by default. Local-only
+  `http` receivers require `allow_insecure_http: true` and should never be
+  used across an untrusted network. The HMAC key ID and secret use the existing
+  `ZCOURIER-HMAC-SHA256` request-signing protocol and require a secret of at
+  least 32 bytes. See [internal HTTP signing](internal-http-signing.md) for
+  the canonical request and receiver verification rules.
 - `retry_interval`: how often a gateway claims due terminal events.
 - `retry_delay`, `retry_jitter`, `backoff_multiplier`, `max_retry_delay`:
   independent publication retry schedule. It never causes another client
@@ -740,9 +766,12 @@ downlink:
 The publisher requires downlink storage. PostgreSQL persists the message
 terminal transition and its outbox event atomically; cluster nodes then use
 independent claims so only one node publishes a due event at a time. Delivery
-is at least once, so consumers must de-duplicate by `message_id` plus
-`terminal_status`. The event never contains the original message Body or
-gateway credentials. HTTP publication is not implemented in V12.3.1.
+is at least once, so consumers must de-duplicate by stable `event_id` (or
+`message_id` plus `terminal_status`). The event never contains the original
+message Body or gateway credentials. HTTP publication sends the same versioned
+metadata envelope as NSQ, follows no redirects, and treats only a `2xx`
+response as success; timeout, transport, and non-`2xx` failures use the
+existing independent publication retry schedule.
 
 Rows that were already terminal before upgrading are not exported
 retroactively. Retention keeps a terminal message while its current event is

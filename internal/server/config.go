@@ -172,6 +172,7 @@ type DownlinkDeliveryConfig struct {
 type DownlinkTerminalConfig struct {
 	PublisherType     string
 	NSQ               NSQUpstreamConfig
+	HTTP              DownlinkTerminalHTTPConfig
 	RetryInterval     time.Duration
 	RetryDelay        time.Duration
 	RetryJitter       time.Duration
@@ -179,6 +180,14 @@ type DownlinkTerminalConfig struct {
 	MaxRetryDelay     time.Duration
 	RetryLease        time.Duration
 	ScanLimit         int
+}
+
+type DownlinkTerminalHTTPConfig struct {
+	URL               string
+	Timeout           time.Duration
+	HMACKeyID         string
+	HMACSecret        []byte
+	AllowInsecureHTTP bool
 }
 
 type DownlinkRetentionConfig struct {
@@ -313,7 +322,10 @@ func DefaultConfig() Config {
 			},
 		},
 		DownlinkTerminal: DownlinkTerminalConfig{
-			PublisherType:     downlink.TerminalPublisherNone,
+			PublisherType: downlink.TerminalPublisherNone,
+			HTTP: DownlinkTerminalHTTPConfig{
+				Timeout: 5 * time.Second,
+			},
 			RetryInterval:     5 * time.Second,
 			RetryDelay:        30 * time.Second,
 			RetryJitter:       0,

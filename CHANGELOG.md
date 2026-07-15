@@ -7,6 +7,12 @@ semantic versioning after the first public MVP tag.
 
 ## [Unreleased]
 
+### Added
+
+- V13 roadmap for an opt-in, signed HTTP publisher for the existing durable,
+  body-free terminal-event outbox, with receiver de-duplication, cluster claim,
+  configuration, operations, deployment, and release acceptance requirements.
+
 ## [v0.12.0] - 2026-07-15
 
 ### Added

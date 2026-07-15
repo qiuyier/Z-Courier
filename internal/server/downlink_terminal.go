@@ -7,7 +7,9 @@ import (
 
 	"github.com/bytedance/sonic"
 	"github.com/qiuyier/Z-Courier/internal/adapter/nsqforwarder"
+	"github.com/qiuyier/Z-Courier/internal/adapter/webhookpublisher"
 	"github.com/qiuyier/Z-Courier/internal/downlink"
+	"github.com/qiuyier/Z-Courier/pkg/sdk/signing"
 )
 
 type rawTerminalPublisher interface {
@@ -50,6 +52,24 @@ func newTerminalPublisher(config Config) (downlink.TerminalPublisher, io.Closer,
 			return nil, nil, fmt.Errorf("downlink terminal NSQ publisher: %w", err)
 		}
 		return &terminalEnvelopePublisher{next: forwarder}, forwarder, nil
+	case downlink.TerminalPublisherHTTP:
+		httpConfig := config.DownlinkTerminal.HTTP
+		signer, err := signing.NewSigner(signing.SignerConfig{
+			KeyID:  httpConfig.HMACKeyID,
+			Secret: httpConfig.HMACSecret,
+		})
+		if err != nil {
+			return nil, nil, fmt.Errorf("downlink terminal HTTP publisher signer: %w", err)
+		}
+		publisher, err := webhookpublisher.New(webhookpublisher.Config{
+			URL:     httpConfig.URL,
+			Timeout: httpConfig.Timeout,
+			Signer:  signer,
+		})
+		if err != nil {
+			return nil, nil, fmt.Errorf("downlink terminal HTTP publisher: %w", err)
+		}
+		return &terminalEnvelopePublisher{next: publisher}, nil, nil
 	default:
 		return nil, nil, fmt.Errorf("unsupported downlink terminal publisher type %q", config.DownlinkTerminal.PublisherType)
 	}
