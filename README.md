@@ -114,6 +114,12 @@ V13 signed terminal-webhook planning is tracked in
 body-free terminal-event outbox with an opt-in signed HTTP publisher for
 deployments that do not use NSQ.
 
+V14 production transport-security planning is tracked in
+[docs/v14-roadmap.md](docs/v14-roadmap.md). It covers private-CA and mTLS
+terminal webhooks, TLS-capable Go and PHP clients, reviewed Nginx and Caddy edge
+templates, secret-file deployment, and zero-downtime key and certificate
+rotation.
+
 ## Quick Start
 
 Run the single-node integration verifier from the repository root:

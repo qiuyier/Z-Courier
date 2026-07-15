@@ -7,6 +7,12 @@ semantic versioning after the first public MVP tag.
 
 ## [Unreleased]
 
+### Added
+
+- V14 production transport-security roadmap covering terminal-webhook custom
+  CA and mTLS, TLS-capable Go/PHP clients, constrained Nginx/Caddy edge
+  templates, secret-file deployment, and reversible HMAC/certificate rotation.
+
 ## [v0.13.0] - 2026-07-15
 
 ### Added
