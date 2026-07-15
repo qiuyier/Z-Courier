@@ -89,16 +89,14 @@ downlink:
     max_pending_per_device: 0
   terminal:
     publisher:
-      type: nsq
-      nsq:
-        nsqd_addrs:
-          - 127.0.0.1:14150
-        topic: downlink_terminal_events
-        dial_timeout: 1s
-        read_timeout: 60s
-        write_timeout: 1s
-        publish_mode: round_robin
-        retry_attempts: 1
+      type: http
+      http:
+        url: http://127.0.0.1:18085/v1/z-courier/terminal
+        timeout: 1s
+        allow_insecure_http: true
+        hmac:
+          key_id: e2e-terminal-webhook
+          secret: 0123456789abcdef0123456789abcdef
     retry_interval: 1s
     retry_delay: 1s
     retry_jitter: 0s

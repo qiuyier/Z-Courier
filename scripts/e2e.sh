@@ -11,6 +11,8 @@ go run ./cmd/e2e \
   -device-id "e2e-device-$RUN_ID" \
   -expect-policy-name integration-reliable \
   -check-terminal-event \
+  -terminal-publisher http \
+  -terminal-webhook-failures 1 \
   -expect-terminal-policy integration-terminal \
   "$@"
 

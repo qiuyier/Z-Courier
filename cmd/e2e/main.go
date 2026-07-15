@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -42,40 +43,54 @@ const (
 
 	internalAuthModeToken = "token"
 	internalAuthModeHMAC  = "hmac"
+
+	terminalPublisherNSQ                   = "nsq"
+	terminalPublisherHTTP                  = "http"
+	defaultTerminalWebhookAddress          = "127.0.0.1:18085"
+	defaultTerminalWebhookPath             = "/v1/z-courier/terminal"
+	defaultTerminalWebhookHMACKeyID        = "e2e-terminal-webhook"
+	defaultTerminalWebhookHMACSecret       = "0123456789abcdef0123456789abcdef"
+	maxTerminalWebhookBodySize       int64 = 64 << 10
 )
 
 type config struct {
-	GatewayHost            string
-	GatewayPort            int
-	InternalURL            string
-	MetricsURLs            []string
-	InternalAuthMode       string
-	InternalToken          string
-	InternalHMACKeyID      string
-	InternalHMACSecret     string
-	PostgresDSN            string
-	ClientID               string
-	DeviceID               string
-	Token                  string
-	Timeout                time.Duration
-	OnlinePushDelay        time.Duration
-	RequireClusterMetrics  bool
-	ExpectRouteNode        string
-	ExpectRouteInternalURL string
-	ExpectSessionURL       string
-	ExpectSessionNode      string
-	CheckReconnectRetry    bool
-	CheckAdminStorage      bool
-	CheckBulkRequeue       bool
-	AdminSessionPeerURL    string
-	ExpectPolicyName       string
-	CheckQueueCapacity     bool
-	ExpectPerDeviceLimit   int
-	CheckRetryFairness     bool
-	RetryFairnessScanLimit int
-	CheckTerminalEvent     bool
-	TerminalNSQDAddress    string
-	ExpectTerminalPolicy   string
+	GatewayHost             string
+	GatewayPort             int
+	InternalURL             string
+	MetricsURLs             []string
+	InternalAuthMode        string
+	InternalToken           string
+	InternalHMACKeyID       string
+	InternalHMACSecret      string
+	PostgresDSN             string
+	ClientID                string
+	DeviceID                string
+	Token                   string
+	Timeout                 time.Duration
+	OnlinePushDelay         time.Duration
+	RequireClusterMetrics   bool
+	ExpectRouteNode         string
+	ExpectRouteInternalURL  string
+	ExpectSessionURL        string
+	ExpectSessionNode       string
+	CheckReconnectRetry     bool
+	CheckAdminStorage       bool
+	CheckBulkRequeue        bool
+	AdminSessionPeerURL     string
+	ExpectPolicyName        string
+	CheckQueueCapacity      bool
+	ExpectPerDeviceLimit    int
+	CheckRetryFairness      bool
+	RetryFairnessScanLimit  int
+	CheckTerminalEvent      bool
+	TerminalPublisher       string
+	TerminalNSQDAddress     string
+	TerminalWebhookAddress  string
+	TerminalWebhookPath     string
+	TerminalWebhookKeyID    string
+	TerminalWebhookSecret   string
+	TerminalWebhookFailures int
+	ExpectTerminalPolicy    string
 }
 
 func main() {
@@ -122,13 +137,23 @@ func parseFlags() config {
 	flag.IntVar(&cfg.ExpectPerDeviceLimit, "expect-per-device-limit", 2, "expected pending-message capacity for the E2E device")
 	flag.BoolVar(&cfg.CheckRetryFairness, "check-retry-fairness", false, "verify a bounded retry scan makes progress across hot and cold offline devices")
 	flag.IntVar(&cfg.RetryFairnessScanLimit, "retry-fairness-scan-limit", defaultRetryFairnessScanLimit, "retry scan limit used by the fairness E2E check")
-	flag.BoolVar(&cfg.CheckTerminalEvent, "check-terminal-event", false, "force a message to terminal failure and verify its NSQ event")
+	flag.BoolVar(&cfg.CheckTerminalEvent, "check-terminal-event", false, "force a message to terminal failure and verify its published event")
+	flag.StringVar(&cfg.TerminalPublisher, "terminal-publisher", terminalPublisherNSQ, "terminal event publisher under test: nsq or http")
 	flag.StringVar(&cfg.TerminalNSQDAddress, "terminal-nsqd-address", "127.0.0.1:14150", "NSQ TCP address used to consume terminal events")
+	flag.StringVar(&cfg.TerminalWebhookAddress, "terminal-webhook-address", defaultTerminalWebhookAddress, "HTTP address used by the terminal webhook test receiver")
+	flag.StringVar(&cfg.TerminalWebhookPath, "terminal-webhook-path", defaultTerminalWebhookPath, "HTTP path used by the terminal webhook test receiver")
+	flag.StringVar(&cfg.TerminalWebhookKeyID, "terminal-webhook-hmac-key-id", defaultTerminalWebhookHMACKeyID, "HMAC key id accepted by the terminal webhook test receiver")
+	flag.StringVar(&cfg.TerminalWebhookSecret, "terminal-webhook-hmac-secret", defaultTerminalWebhookHMACSecret, "HMAC secret accepted by the terminal webhook test receiver")
+	flag.IntVar(&cfg.TerminalWebhookFailures, "terminal-webhook-failures", 0, "number of verified HTTP failures injected before accepting each terminal event")
 	flag.StringVar(&cfg.ExpectTerminalPolicy, "expect-terminal-policy", "integration-terminal", "expected policy for the terminal-event E2E message")
 	flag.Parse()
 
 	cfg.InternalURL = strings.TrimRight(cfg.InternalURL, "/")
 	cfg.InternalAuthMode = strings.ToLower(strings.TrimSpace(cfg.InternalAuthMode))
+	cfg.TerminalPublisher = strings.ToLower(strings.TrimSpace(cfg.TerminalPublisher))
+	cfg.TerminalWebhookAddress = strings.TrimSpace(cfg.TerminalWebhookAddress)
+	cfg.TerminalWebhookPath = strings.TrimSpace(cfg.TerminalWebhookPath)
+	cfg.TerminalWebhookKeyID = strings.TrimSpace(cfg.TerminalWebhookKeyID)
 	cfg.ExpectSessionURL = strings.TrimRight(cfg.ExpectSessionURL, "/")
 	cfg.AdminSessionPeerURL = strings.TrimRight(cfg.AdminSessionPeerURL, "/")
 	cfg.MetricsURLs = parseMetricsURLs(metricsURLRaw, cfg.InternalURL+"/metrics")
@@ -186,6 +211,34 @@ func validateInternalAuthConfig(cfg config) error {
 		}
 		if strings.TrimSpace(cfg.ExpectTerminalPolicy) == "" {
 			return fmt.Errorf("expect-terminal-policy is required when check-bulk-requeue is enabled")
+		}
+	}
+	if cfg.CheckTerminalEvent {
+		if strings.TrimSpace(cfg.ExpectTerminalPolicy) == "" {
+			return fmt.Errorf("expect-terminal-policy is required when check-terminal-event is enabled")
+		}
+		switch cfg.TerminalPublisher {
+		case terminalPublisherNSQ:
+			if strings.TrimSpace(cfg.TerminalNSQDAddress) == "" {
+				return fmt.Errorf("terminal-nsqd-address is required for the NSQ terminal publisher")
+			}
+		case terminalPublisherHTTP:
+			if cfg.TerminalWebhookAddress == "" {
+				return fmt.Errorf("terminal-webhook-address is required for the HTTP terminal publisher")
+			}
+			if !strings.HasPrefix(cfg.TerminalWebhookPath, "/") {
+				return fmt.Errorf("terminal-webhook-path must start with /")
+			}
+			if cfg.TerminalWebhookFailures < 0 {
+				return fmt.Errorf("terminal-webhook-failures must be greater than or equal to 0")
+			}
+			if _, err := signing.NewVerifier(signing.VerifierConfig{
+				Keys: map[string][]byte{cfg.TerminalWebhookKeyID: []byte(cfg.TerminalWebhookSecret)},
+			}); err != nil {
+				return fmt.Errorf("create terminal webhook HMAC verifier: %w", err)
+			}
+		default:
+			return fmt.Errorf("unsupported terminal publisher %q", cfg.TerminalPublisher)
 		}
 	}
 	switch cfg.InternalAuthMode {
@@ -261,9 +314,9 @@ func run(ctx context.Context, cfg config) error {
 	offlineBody := []byte("offline-before-client")
 	onlineBody := []byte("online-after-client")
 
-	var terminalCollector *terminalEventCollector
+	var terminalCollector terminalEventCollector
 	if cfg.CheckTerminalEvent {
-		terminalCollector, err = newTerminalEventCollector(ctx, cfg.TerminalNSQDAddress, runID)
+		terminalCollector, err = newTerminalEventCollector(ctx, cfg, runID)
 		if err != nil {
 			return fmt.Errorf("start terminal event collector: %w", err)
 		}
@@ -1585,12 +1638,28 @@ func cleanupMessagesByPrefix(db *sql.DB, prefix string) {
 	_, _ = db.ExecContext(ctx, "DELETE FROM z_courier_downlink_messages WHERE message_id LIKE $1", prefix+"%")
 }
 
-type terminalEventCollector struct {
+type terminalEventCollector interface {
+	Close()
+	Wait(context.Context, string) (downlink.TerminalEvent, []byte, error)
+}
+
+type terminalNSQEventCollector struct {
 	consumer *nsq.Consumer
 	messages chan []byte
 }
 
-func newTerminalEventCollector(ctx context.Context, address string, runID int64) (*terminalEventCollector, error) {
+func newTerminalEventCollector(ctx context.Context, cfg config, runID int64) (terminalEventCollector, error) {
+	switch cfg.TerminalPublisher {
+	case terminalPublisherNSQ:
+		return newTerminalNSQEventCollector(ctx, cfg.TerminalNSQDAddress, runID)
+	case terminalPublisherHTTP:
+		return newTerminalHTTPEventCollector(cfg)
+	default:
+		return nil, fmt.Errorf("unsupported terminal publisher %q", cfg.TerminalPublisher)
+	}
+}
+
+func newTerminalNSQEventCollector(ctx context.Context, address string, runID int64) (*terminalNSQEventCollector, error) {
 	consumer, err := nsq.NewConsumer(
 		"downlink_terminal_events",
 		fmt.Sprintf("z-courier-e2e-%d#ephemeral", runID),
@@ -1599,7 +1668,7 @@ func newTerminalEventCollector(ctx context.Context, address string, runID int64)
 	if err != nil {
 		return nil, err
 	}
-	collector := &terminalEventCollector{
+	collector := &terminalNSQEventCollector{
 		consumer: consumer,
 		messages: make(chan []byte, 64),
 	}
@@ -1624,7 +1693,7 @@ func newTerminalEventCollector(ctx context.Context, address string, runID int64)
 	return collector, nil
 }
 
-func (c *terminalEventCollector) Close() {
+func (c *terminalNSQEventCollector) Close() {
 	if c == nil || c.consumer == nil {
 		return
 	}
@@ -1632,7 +1701,7 @@ func (c *terminalEventCollector) Close() {
 	<-c.consumer.StopChan
 }
 
-func (c *terminalEventCollector) Wait(ctx context.Context, messageID string) (downlink.TerminalEvent, []byte, error) {
+func (c *terminalNSQEventCollector) Wait(ctx context.Context, messageID string) (downlink.TerminalEvent, []byte, error) {
 	for {
 		select {
 		case body := <-c.messages:
@@ -1649,11 +1718,136 @@ func (c *terminalEventCollector) Wait(ctx context.Context, messageID string) (do
 	}
 }
 
+type terminalHTTPEventCollector struct {
+	server           *http.Server
+	listener         net.Listener
+	path             string
+	verifier         *signing.Verifier
+	failuresPerEvent int
+	messages         chan []byte
+	errors           chan error
+
+	mu        sync.Mutex
+	attempts  map[string]int
+	successes map[string]int
+}
+
+func newTerminalHTTPEventCollector(cfg config) (*terminalHTTPEventCollector, error) {
+	verifier, err := signing.NewVerifier(signing.VerifierConfig{
+		Keys: map[string][]byte{cfg.TerminalWebhookKeyID: []byte(cfg.TerminalWebhookSecret)},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create terminal webhook verifier: %w", err)
+	}
+	listener, err := net.Listen("tcp", cfg.TerminalWebhookAddress)
+	if err != nil {
+		return nil, fmt.Errorf("listen for terminal webhook: %w", err)
+	}
+	collector := &terminalHTTPEventCollector{
+		listener:         listener,
+		path:             cfg.TerminalWebhookPath,
+		verifier:         verifier,
+		failuresPerEvent: cfg.TerminalWebhookFailures,
+		messages:         make(chan []byte, 64),
+		errors:           make(chan error, 1),
+		attempts:         make(map[string]int),
+		successes:        make(map[string]int),
+	}
+	collector.server = &http.Server{
+		Handler:           http.HandlerFunc(collector.handle),
+		ReadHeaderTimeout: 2 * time.Second,
+	}
+	go func() {
+		if err := collector.server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			select {
+			case collector.errors <- err:
+			default:
+			}
+		}
+	}()
+	return collector, nil
+}
+
+func (c *terminalHTTPEventCollector) handle(w http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodPost || request.URL.Path != c.path {
+		http.NotFound(w, request)
+		return
+	}
+	body, err := io.ReadAll(http.MaxBytesReader(w, request.Body, maxTerminalWebhookBodySize))
+	if err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	if err := c.verifier.Verify(request, body); err != nil {
+		http.Error(w, "invalid signature", http.StatusUnauthorized)
+		return
+	}
+	var event downlink.TerminalEvent
+	if err := sonic.Unmarshal(body, &event); err != nil || event.EventID == "" {
+		http.Error(w, "invalid event", http.StatusBadRequest)
+		return
+	}
+
+	c.mu.Lock()
+	c.attempts[event.EventID]++
+	attempt := c.attempts[event.EventID]
+	if attempt <= c.failuresPerEvent {
+		c.mu.Unlock()
+		http.Error(w, "injected failure", http.StatusServiceUnavailable)
+		return
+	}
+	c.successes[event.EventID]++
+	c.mu.Unlock()
+
+	select {
+	case c.messages <- bytes.Clone(body):
+	default:
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (c *terminalHTTPEventCollector) Close() {
+	if c == nil || c.server == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = c.server.Shutdown(ctx)
+}
+
+func (c *terminalHTTPEventCollector) Wait(ctx context.Context, messageID string) (downlink.TerminalEvent, []byte, error) {
+	for {
+		select {
+		case body := <-c.messages:
+			var event downlink.TerminalEvent
+			if err := sonic.Unmarshal(body, &event); err != nil {
+				return downlink.TerminalEvent{}, nil, err
+			}
+			if event.MessageID == messageID {
+				return event, body, nil
+			}
+		case err := <-c.errors:
+			return downlink.TerminalEvent{}, nil, err
+		case <-ctx.Done():
+			return downlink.TerminalEvent{}, nil, ctx.Err()
+		}
+	}
+}
+
+func (c *terminalHTTPEventCollector) counts(eventID string) (int, int) {
+	if c == nil {
+		return 0, 0
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.attempts[eventID], c.successes[eventID]
+}
+
 func checkTerminalEvent(
 	ctx context.Context,
 	cfg config,
 	db *sql.DB,
-	collector *terminalEventCollector,
+	collector terminalEventCollector,
 	messageID string,
 ) error {
 	fmt.Println("checking terminal failure event path")
@@ -1708,7 +1902,7 @@ WHERE message_id = $1
 
 	event, raw, err := collector.Wait(ctx, messageID)
 	if err != nil {
-		return fmt.Errorf("wait terminal NSQ event: %w", err)
+		return fmt.Errorf("wait terminal %s event: %w", cfg.TerminalPublisher, err)
 	}
 	if bytes.Contains(raw, []byte(`"body"`)) || bytes.Contains(raw, []byte("terminal-body-must-not-be-exported")) {
 		return fmt.Errorf("terminal event leaked message body: %s", raw)
@@ -1718,6 +1912,9 @@ WHERE message_id = $1
 		event.PolicyName != cfg.ExpectTerminalPolicy ||
 		event.MessageID != messageID {
 		return fmt.Errorf("terminal event = %+v", event)
+	}
+	if event.EventID != messageID+":"+string(downlink.MessageStatusFailed) {
+		return fmt.Errorf("terminal event id = %q, want stable message/status identity", event.EventID)
 	}
 	if err := waitUntil(ctx, func() (bool, error) {
 		status, err := getMessageStatus(ctx, cfg, messageID)
@@ -1729,7 +1926,25 @@ WHERE message_id = $1
 	}); err != nil {
 		return fmt.Errorf("wait terminal publication status: %w", err)
 	}
-	fmt.Printf("terminal event published: message_id=%s policy=%s\n", messageID, event.PolicyName)
+	if httpCollector, ok := collector.(*terminalHTTPEventCollector); ok {
+		timer := time.NewTimer(duplicateCheckDelay)
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		}
+		attempts, successes := httpCollector.counts(event.EventID)
+		if attempts != cfg.TerminalWebhookFailures+1 || successes != 1 {
+			return fmt.Errorf(
+				"terminal webhook deliveries = attempts:%d successes:%d, want %d/1",
+				attempts,
+				successes,
+				cfg.TerminalWebhookFailures+1,
+			)
+		}
+	}
+	fmt.Printf("terminal event published: publisher=%s message_id=%s policy=%s\n", cfg.TerminalPublisher, messageID, event.PolicyName)
 	return nil
 }
 

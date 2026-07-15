@@ -1,10 +1,102 @@
 package main
 
 import (
+	"bytes"
+	"context"
+	"io"
+	"net/http"
 	"testing"
+	"time"
 
+	"github.com/bytedance/sonic"
 	"github.com/qiuyier/Z-Courier/internal/downlink"
+	"github.com/qiuyier/Z-Courier/pkg/sdk/signing"
 )
+
+func TestTerminalHTTPEventCollectorVerifiesAndInjectsFailure(t *testing.T) {
+	cfg := config{
+		TerminalWebhookAddress:  "127.0.0.1:0",
+		TerminalWebhookPath:     defaultTerminalWebhookPath,
+		TerminalWebhookKeyID:    defaultTerminalWebhookHMACKeyID,
+		TerminalWebhookSecret:   defaultTerminalWebhookHMACSecret,
+		TerminalWebhookFailures: 1,
+	}
+	collector, err := newTerminalHTTPEventCollector(cfg)
+	if err != nil {
+		t.Fatalf("newTerminalHTTPEventCollector() error = %v", err)
+	}
+	defer collector.Close()
+
+	event := downlink.TerminalEvent{
+		Version:        downlink.TerminalEventVersion,
+		Type:           downlink.TerminalEventType,
+		EventID:        "message-1:failed",
+		MessageID:      "message-1",
+		TerminalStatus: downlink.MessageStatusFailed,
+		TerminalReason: downlink.TerminalReasonMaxAttempts,
+	}
+	body, err := sonic.Marshal(event)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	endpoint := "http://" + collector.listener.Addr().String() + cfg.TerminalWebhookPath
+
+	unsigned, err := http.Post(endpoint, "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("unsigned POST error = %v", err)
+	}
+	unsigned.Body.Close()
+	if unsigned.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("unsigned status = %d, want %d", unsigned.StatusCode, http.StatusUnauthorized)
+	}
+
+	signer, err := signing.NewSigner(signing.SignerConfig{
+		KeyID:  cfg.TerminalWebhookKeyID,
+		Secret: []byte(cfg.TerminalWebhookSecret),
+	})
+	if err != nil {
+		t.Fatalf("NewSigner() error = %v", err)
+	}
+	if status := postSignedTerminalEvent(t, endpoint, signer, body); status != http.StatusServiceUnavailable {
+		t.Fatalf("first signed status = %d, want %d", status, http.StatusServiceUnavailable)
+	}
+	if status := postSignedTerminalEvent(t, endpoint, signer, body); status != http.StatusNoContent {
+		t.Fatalf("second signed status = %d, want %d", status, http.StatusNoContent)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	got, raw, err := collector.Wait(ctx, event.MessageID)
+	if err != nil {
+		t.Fatalf("Wait() error = %v", err)
+	}
+	if got.EventID != event.EventID || !bytes.Equal(raw, body) {
+		t.Fatalf("Wait() event = %+v body = %s", got, raw)
+	}
+	attempts, successes := collector.counts(event.EventID)
+	if attempts != 2 || successes != 1 {
+		t.Fatalf("counts = attempts:%d successes:%d, want 2/1", attempts, successes)
+	}
+}
+
+func postSignedTerminalEvent(t *testing.T, endpoint string, signer *signing.Signer, body []byte) int {
+	t.Helper()
+	request, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	if err := signer.Sign(request, body); err != nil {
+		t.Fatalf("Sign() error = %v", err)
+	}
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("Do() error = %v", err)
+	}
+	defer response.Body.Close()
+	_, _ = io.Copy(io.Discard, response.Body)
+	return response.StatusCode
+}
 
 func TestValidateDebugRoute(t *testing.T) {
 	cfg := config{

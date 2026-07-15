@@ -136,7 +136,7 @@ ZCOURIER_TEST_POSTGRES_DSN="postgres://zcourier:zcourier@127.0.0.1:15432/zcourie
 
 wait_http "nsqd" "http://127.0.0.1:14151/ping"
 
-for port in 9901 9902 18182 18183; do
+for port in 9901 9902 18182 18183 18085; do
   require_port_free "$port"
 done
 
@@ -175,6 +175,8 @@ go run ./cmd/e2e \
   -check-retry-fairness \
   -retry-fairness-scan-limit 3 \
   -check-terminal-event \
+  -terminal-publisher http \
+  -terminal-webhook-failures 1 \
   -expect-terminal-policy integration-terminal \
   -timeout 75s \
   "$@"

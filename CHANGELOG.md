@@ -12,6 +12,10 @@ semantic versioning after the first public MVP tag.
 - V13 roadmap for an opt-in, signed HTTP publisher for the existing durable,
   body-free terminal-event outbox, with receiver de-duplication, cluster claim,
   configuration, operations, deployment, and release acceptance requirements.
+- V13 signed HTTP terminal-event E2E coverage with a verifying receiver,
+  per-event first-attempt failure injection, durable retry, stable event ID and
+  body-exclusion assertions, and single-node plus two-node successful-delivery
+  checks while Kubernetes retains the existing NSQ publication regression.
 
 ## [v0.12.0] - 2026-07-15
 

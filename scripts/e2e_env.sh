@@ -83,6 +83,7 @@ e2e_start_gateway() {
 
   e2e_require_port_free 9899
   e2e_require_port_free 18082
+  e2e_require_port_free 18085
 
   E2E_GATEWAY_BIN="${TMPDIR:-/tmp}/z-courier-e2e-gateway-$$"
   echo "building gateway..."
