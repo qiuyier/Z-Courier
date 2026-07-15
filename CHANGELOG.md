@@ -7,6 +7,8 @@ semantic versioning after the first public MVP tag.
 
 ## [Unreleased]
 
+## [v0.13.0] - 2026-07-15
+
 ### Added
 
 - V13 roadmap for an opt-in, signed HTTP publisher for the existing durable,
