@@ -12,6 +12,9 @@ semantic versioning after the first public MVP tag.
 - V14 production transport-security roadmap covering terminal-webhook custom
   CA and mTLS, TLS-capable Go/PHP clients, constrained Nginx/Caddy edge
   templates, secret-file deployment, and reversible HMAC/certificate rotation.
+- V14.1 terminal HTTP publisher TLS hardening with a dedicated TLS 1.2+
+  transport, optional private CA, client-certificate authentication, strict
+  startup/config validation, and real private-CA plus mTLS handshake tests.
 
 ## [v0.13.0] - 2026-07-15
 

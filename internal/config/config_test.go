@@ -929,6 +929,32 @@ downlink:
 	}
 }
 
+func TestLoadServerConfigDownlinkTerminalHTTPTLS(t *testing.T) {
+	config, err := LoadServerConfig(writeConfig(t, `
+downlink:
+  storage:
+    type: postgres
+    postgres:
+      dsn: postgres://zcourier:zcourier@postgres:5432/zcourier?sslmode=disable
+  terminal:
+    publisher:
+      type: http
+      http:
+        url: https://receiver.local/v1/z-courier
+        hmac:
+          key_id: gateway-terminal-v1
+          secret: 0123456789abcdef0123456789abcdef
+        tls:
+          server_name: terminal-events.example.internal
+`))
+	if err != nil {
+		t.Fatalf("LoadServerConfig() error = %v", err)
+	}
+	if got := config.DownlinkTerminal.HTTP.TLS.ServerName; got != "terminal-events.example.internal" {
+		t.Fatalf("DownlinkTerminal HTTP TLS server name = %q", got)
+	}
+}
+
 func TestLoadServerConfigDownlinkQueueCapacity(t *testing.T) {
 	config, err := LoadServerConfig(writeConfig(t, `
 downlink:
@@ -1023,6 +1049,26 @@ func TestLoadServerConfigRejectsInvalidDownlinkTerminal(t *testing.T) {
 			name:    "http settings conflict with NSQ",
 			config:  "downlink:\n  terminal:\n    publisher:\n      type: nsq\n      nsq:\n        addr: 127.0.0.1:4150\n        topic: terminal_events\n      http:\n        url: https://receiver.local/events\n",
 			message: "http settings conflict with type nsq",
+		},
+		{
+			name:    "http tls requires https",
+			config:  "downlink:\n  storage:\n    type: postgres\n    postgres:\n      dsn: postgres://zcourier:zcourier@postgres:5432/zcourier?sslmode=disable\n  terminal:\n    publisher:\n      type: http\n      http:\n        url: http://receiver.local/events\n        allow_insecure_http: true\n        hmac:\n          key_id: gateway-terminal\n          secret: 0123456789abcdef0123456789abcdef\n        tls:\n          server_name: receiver.local\n",
+			message: "tls settings require an https url",
+		},
+		{
+			name:    "http tls certificate requires key",
+			config:  "downlink:\n  storage:\n    type: postgres\n    postgres:\n      dsn: postgres://zcourier:zcourier@postgres:5432/zcourier?sslmode=disable\n  terminal:\n    publisher:\n      type: http\n      http:\n        url: https://receiver.local/events\n        hmac:\n          key_id: gateway-terminal\n          secret: 0123456789abcdef0123456789abcdef\n        tls:\n          client_cert_file: /run/secrets/webhook/tls.crt\n",
+			message: "client_cert_file and client_key_file must be configured together",
+		},
+		{
+			name:    "http tls rejects server name URL",
+			config:  "downlink:\n  storage:\n    type: postgres\n    postgres:\n      dsn: postgres://zcourier:zcourier@postgres:5432/zcourier?sslmode=disable\n  terminal:\n    publisher:\n      type: http\n      http:\n        url: https://receiver.local/events\n        hmac:\n          key_id: gateway-terminal\n          secret: 0123456789abcdef0123456789abcdef\n        tls:\n          server_name: https://receiver.local\n",
+			message: "server_name must be a DNS name or IP address",
+		},
+		{
+			name:    "http tls rejects unreadable CA",
+			config:  "downlink:\n  storage:\n    type: postgres\n    postgres:\n      dsn: postgres://zcourier:zcourier@postgres:5432/zcourier?sslmode=disable\n  terminal:\n    publisher:\n      type: http\n      http:\n        url: https://receiver.local/events\n        hmac:\n          key_id: gateway-terminal\n          secret: 0123456789abcdef0123456789abcdef\n        tls:\n          ca_file: /path/that/does/not/exist/ca.crt\n",
+			message: "read ca_file",
 		},
 		{
 			name:    "max delay below initial delay",

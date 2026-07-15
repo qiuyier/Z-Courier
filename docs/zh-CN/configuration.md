@@ -507,12 +507,23 @@ downlink:
           hmac:
             key_id: gateway-terminal-v1
             secret: ${ZCOURIER_TERMINAL_WEBHOOK_HMAC_SECRET}
+          tls:
+            ca_file: /run/secrets/terminal-webhook/ca.crt
+            client_cert_file: /run/secrets/terminal-webhook/tls.crt
+            client_key_file: /run/secrets/terminal-webhook/tls.key
+            server_name: terminal-events.example.internal
   ```
 
   默认只接受绝对 `https` URL。本地调试时如确实需要明文 `http` 接收端，必须
   显式设置 `allow_insecure_http: true`，且不能跨越不可信网络。HMAC 的 key ID
   和 secret 使用已有的 `ZCOURIER-HMAC-SHA256` 请求签名协议，secret 至少需要
   32 字节。请求规范和接收端验签方式见[内部 HTTP 签名](internal-http-signing.md)。
+  可选的 `tls` 配置块用于私有 PKI 和 mTLS。`ca_file` 中的 PEM CA 会加入这个
+  publisher 独享的根证书池，同时保留系统 CA；`client_cert_file` 和
+  `client_key_file` 必须成对配置，并且证书与私钥必须匹配。`server_name` 可以覆盖
+  证书名称校验目标，但不能包含 scheme、端口或路径。最低 TLS 版本固定为 1.2，
+  不提供关闭证书校验的选项。网关会在 `-check-config` 和 publisher 启动时分别解析
+  文件，并且只有 `https` URL 才能配置 TLS 选项。
 - `retry_interval` 是扫描待发布终态事件的周期。
 - `retry_delay`、`retry_jitter`、`backoff_multiplier`、`max_retry_delay`
   共同控制独立的发布重试，不会重新触发客户端投递。

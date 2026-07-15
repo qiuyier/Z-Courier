@@ -748,6 +748,11 @@ downlink:
           hmac:
             key_id: gateway-terminal-v1
             secret: ${ZCOURIER_TERMINAL_WEBHOOK_HMAC_SECRET}
+          tls:
+            ca_file: /run/secrets/terminal-webhook/ca.crt
+            client_cert_file: /run/secrets/terminal-webhook/tls.crt
+            client_key_file: /run/secrets/terminal-webhook/tls.key
+            server_name: terminal-events.example.internal
   ```
 
   The gateway only accepts an absolute `https` URL by default. Local-only
@@ -756,6 +761,14 @@ downlink:
   `ZCOURIER-HMAC-SHA256` request-signing protocol and require a secret of at
   least 32 bytes. See [internal HTTP signing](internal-http-signing.md) for
   the canonical request and receiver verification rules.
+  The optional `tls` block supports private PKI and mTLS. `ca_file` adds PEM
+  certificates to a root pool dedicated to this publisher while retaining
+  system roots. `client_cert_file` and `client_key_file` must be configured
+  together and contain a matching PEM certificate/key pair. `server_name`
+  optionally overrides certificate-name verification and must not contain a
+  scheme, port, or path. TLS uses a minimum version of 1.2; certificate
+  verification cannot be disabled. Files are parsed during `-check-config` and
+  again when the publisher starts, and TLS settings require an `https` URL.
 - `retry_interval`: how often a gateway claims due terminal events.
 - `retry_delay`, `retry_jitter`, `backoff_multiplier`, `max_retry_delay`:
   independent publication retry schedule. It never causes another client

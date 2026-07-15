@@ -14,6 +14,7 @@ import (
 	"github.com/qiuyier/Z-Courier/internal/downlink"
 	"github.com/qiuyier/Z-Courier/internal/pipeline"
 	"github.com/qiuyier/Z-Courier/internal/server"
+	"github.com/qiuyier/Z-Courier/internal/tlsconfig"
 	"github.com/qiuyier/Z-Courier/pkg/sdk/signing"
 	"gopkg.in/yaml.v3"
 )
@@ -285,11 +286,19 @@ type DownlinkTerminalHTTPPublisherConfig struct {
 	Timeout           string                         `yaml:"timeout"`
 	AllowInsecureHTTP bool                           `yaml:"allow_insecure_http"`
 	HMAC              DownlinkTerminalHTTPHMACConfig `yaml:"hmac"`
+	TLS               DownlinkTerminalHTTPTLSConfig  `yaml:"tls"`
 }
 
 type DownlinkTerminalHTTPHMACConfig struct {
 	KeyID  string `yaml:"key_id"`
 	Secret string `yaml:"secret"`
+}
+
+type DownlinkTerminalHTTPTLSConfig struct {
+	CAFile         string `yaml:"ca_file"`
+	ClientCertFile string `yaml:"client_cert_file"`
+	ClientKeyFile  string `yaml:"client_key_file"`
+	ServerName     string `yaml:"server_name"`
 }
 
 type DownlinkRetentionConfig struct {
@@ -1557,6 +1566,18 @@ func toDownlinkTerminalHTTPConfig(
 	if parsedURL.Scheme == "http" && !config.AllowInsecureHTTP {
 		return server.DownlinkTerminalHTTPConfig{}, fmt.Errorf("config: downlink terminal publisher http url requires https unless allow_insecure_http is true")
 	}
+	tlsFiles := tlsconfig.Files{
+		CAFile:         strings.TrimSpace(config.TLS.CAFile),
+		ClientCertFile: strings.TrimSpace(config.TLS.ClientCertFile),
+		ClientKeyFile:  strings.TrimSpace(config.TLS.ClientKeyFile),
+		ServerName:     strings.TrimSpace(config.TLS.ServerName),
+	}
+	if parsedURL.Scheme != "https" && tlsFiles.Configured() {
+		return server.DownlinkTerminalHTTPConfig{}, fmt.Errorf("config: downlink terminal publisher http tls settings require an https url")
+	}
+	if err := tlsconfig.Validate(tlsFiles); err != nil {
+		return server.DownlinkTerminalHTTPConfig{}, fmt.Errorf("config: downlink terminal publisher http tls: %w", err)
+	}
 
 	timeout, err := parseOptionalPositiveDuration(config.Timeout)
 	if err != nil {
@@ -1578,12 +1599,15 @@ func toDownlinkTerminalHTTPConfig(
 		HMACKeyID:         keyID,
 		HMACSecret:        append([]byte(nil), secret...),
 		AllowInsecureHTTP: config.AllowInsecureHTTP,
+		TLS:               tlsFiles,
 	}, nil
 }
 
 func downlinkTerminalHTTPPublisherConfigSet(config DownlinkTerminalHTTPPublisherConfig) bool {
 	return strings.TrimSpace(config.URL) != "" || config.Timeout != "" || config.AllowInsecureHTTP ||
-		strings.TrimSpace(config.HMAC.KeyID) != "" || config.HMAC.Secret != ""
+		strings.TrimSpace(config.HMAC.KeyID) != "" || config.HMAC.Secret != "" ||
+		strings.TrimSpace(config.TLS.CAFile) != "" || strings.TrimSpace(config.TLS.ClientCertFile) != "" ||
+		strings.TrimSpace(config.TLS.ClientKeyFile) != "" || strings.TrimSpace(config.TLS.ServerName) != ""
 }
 
 func toDownlinkPolicies(

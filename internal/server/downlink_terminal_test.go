@@ -67,8 +67,11 @@ func TestNewTerminalPublisherHTTP(t *testing.T) {
 	if publisher == nil {
 		t.Fatal("newTerminalPublisher() publisher = nil")
 	}
-	if closer != nil {
-		t.Fatalf("newTerminalPublisher() closer = %T, want nil", closer)
+	if closer == nil {
+		t.Fatal("newTerminalPublisher() closer = nil")
+	}
+	if err := closer.Close(); err != nil {
+		t.Fatalf("closer.Close() error = %v", err)
 	}
 	if _, ok := publisher.(*terminalEnvelopePublisher); !ok {
 		t.Fatalf("newTerminalPublisher() publisher = %T, want *terminalEnvelopePublisher", publisher)

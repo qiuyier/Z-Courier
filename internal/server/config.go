@@ -10,6 +10,7 @@ import (
 	"github.com/qiuyier/Z-Courier/internal/pipeline"
 	"github.com/qiuyier/Z-Courier/internal/protocol"
 	"github.com/qiuyier/Z-Courier/internal/session"
+	"github.com/qiuyier/Z-Courier/internal/tlsconfig"
 	"github.com/qiuyier/Z-Courier/pkg/sdk/signing"
 )
 
@@ -188,6 +189,7 @@ type DownlinkTerminalHTTPConfig struct {
 	HMACKeyID         string
 	HMACSecret        []byte
 	AllowInsecureHTTP bool
+	TLS               tlsconfig.Files
 }
 
 type DownlinkRetentionConfig struct {

@@ -65,11 +65,12 @@ func newTerminalPublisher(config Config) (downlink.TerminalPublisher, io.Closer,
 			URL:     httpConfig.URL,
 			Timeout: httpConfig.Timeout,
 			Signer:  signer,
+			TLS:     httpConfig.TLS,
 		})
 		if err != nil {
 			return nil, nil, fmt.Errorf("downlink terminal HTTP publisher: %w", err)
 		}
-		return &terminalEnvelopePublisher{next: publisher}, nil, nil
+		return &terminalEnvelopePublisher{next: publisher}, publisher, nil
 	default:
 		return nil, nil, fmt.Errorf("unsupported downlink terminal publisher type %q", config.DownlinkTerminal.PublisherType)
 	}
