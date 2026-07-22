@@ -12,7 +12,7 @@ if [[ -n "$tracked_runtime_material" ]]; then
   exit 1
 fi
 
-tracked_pem="$(git grep -I -n -F -e '-----BEGIN ' -- . ':!testdata/**' || true)"
+tracked_pem="$(git grep -I -n -F -e '-----BEGIN ' -- . ':!testdata/**' ':!scripts/secret_boundary_check.sh' || true)"
 if [[ -n "$tracked_pem" ]]; then
   echo "tracked PEM certificate or private-key content is forbidden:" >&2
   echo "$tracked_pem" >&2
