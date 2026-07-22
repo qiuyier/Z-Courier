@@ -123,7 +123,10 @@ terminal webhooks, TLS-capable Go and PHP clients, reviewed Nginx and Caddy edge
 templates, secret-file deployment, and zero-downtime key and certificate
 rotation. Runnable edge references and their security boundaries are documented
 in [deploy/edge/README.md](deploy/edge/README.md), with a Chinese guide in
-[docs/zh-CN/edge-proxy.md](docs/zh-CN/edge-proxy.md).
+[docs/zh-CN/edge-proxy.md](docs/zh-CN/edge-proxy.md). The ordered HMAC and
+certificate rotation procedure, including rollback, is in
+[docs/rotation-runbook.md](docs/rotation-runbook.md) and
+[docs/zh-CN/rotation-runbook.md](docs/zh-CN/rotation-runbook.md).
 
 ## Quick Start
 

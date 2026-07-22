@@ -204,3 +204,6 @@ bash scripts/edge_proxy_smoke.sh
 ```
 
 这两项已经接入 CI 和 release checker。证书与私钥只存在于临时或 Git 忽略目录。
+
+完整的 HMAC、TLS/mTLS 轮换顺序、观察信号和回滚步骤见
+[密钥与证书轮换操作手册](rotation-runbook.md)。

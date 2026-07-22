@@ -275,7 +275,9 @@ rotation E2E now verifies old/new server and mTLS-client CA overlap, trust
 retirement, and rollback through an Nginx reload. Rotation runbooks and final
 release acceptance remain.
 
-- Publish English and Chinese HMAC and certificate rotation runbooks.
+- Publish English and Chinese HMAC and certificate rotation runbooks. Completed
+  by [rotation-runbook.md](rotation-runbook.md) and
+  [zh-CN/rotation-runbook.md](zh-CN/rotation-runbook.md).
 - Test a two-node terminal webhook key rotation where old and new gateway pods
   coexist and the receiver accepts both key IDs. Completed by
   `scripts/e2e_cluster.sh`.
