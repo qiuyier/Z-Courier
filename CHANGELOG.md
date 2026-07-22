@@ -29,6 +29,10 @@ semantic versioning after the first public MVP tag.
 - Private-CA TLS edge E2E for both public SDKs, covering AUTH/BIND, upstream,
   reliable downlink ACK, same-device replacement, TLS reconnect, and continued
   traffic without changing the gateway packet protocol.
+- V14.3 Nginx single-node and cluster edge references for client TCP TLS and
+  allowlisted Console HTTPS, standard Caddy automatic/local Console HTTPS,
+  separate optional machine mTLS, generated disposable PKI, opt-in Compose
+  overlays, bilingual deployment guidance, and CI/release smoke coverage.
 
 ## [v0.13.0] - 2026-07-15
 

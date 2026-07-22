@@ -1,0 +1,17 @@
+{
+  "Name": "Z-Courier Edge Proxy Smoke Gateway",
+  "Host": "0.0.0.0",
+  "TCPPort": 9922,
+  "Mode": "tcp",
+  "MaxConn": 1024,
+  "MaxPacketSize": 8388608,
+  "WorkerPoolSize": 4,
+  "MaxWorkerTaskLen": 256,
+  "MaxMsgChanLen": 256,
+  "IOReadBuffSize": 8192,
+  "HeartbeatMax": 30,
+  "LogDir": "./log",
+  "LogFile": "zinx-edge-proxy-smoke.log",
+  "LogCons": true,
+  "LogIsolationLevel": 2
+}

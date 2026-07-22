@@ -111,6 +111,8 @@ run_production_config_checks() {
     ZCOURIER_POSTGRES_PASSWORD=release-check-postgres
     ZCOURIER_REDIS_PASSWORD=release-check-redis
     ZCOURIER_AUTH_PROVIDER_SHARED_TOKEN=release-check-auth-provider
+    ZCOURIER_ADMIN_CONSOLE_ENABLED=false
+    ZCOURIER_ADMIN_SESSION_ENABLED=false
     ZCOURIER_INTERNAL_HMAC_SECRET=release-check-internal-hmac-secret-0123456789
     ZCOURIER_PEER_HMAC_SECRET=release-check-peer-hmac-secret-0123456789
     ZCOURIER_UPSTREAM_INTERNAL_TOKEN=release-check-upstream-token
@@ -173,6 +175,7 @@ run_docker_checks() {
   run docker compose --env-file deploy/production/.env.example -f deploy/production/docker-compose.yml config
   run docker compose --env-file deploy/production-cluster/.env.example -f deploy/production-cluster/docker-compose.yml config
   run bash scripts/compose_terminal_webhook_tls_check.sh
+  run bash scripts/edge_proxy_check.sh
 
   run bash scripts/promtool_check.sh
   run bash scripts/helm_terminal_http_check.sh
@@ -194,6 +197,7 @@ run_slow_checks() {
   run bash scripts/e2e_cluster.sh
   run npm --prefix web/admin exec -- playwright install chromium
   run bash scripts/console_smoke.sh
+  run env ZCOURIER_EDGE_SMOKE_SKIP_BUILD=1 bash scripts/edge_proxy_smoke.sh
   run bash scripts/loadtest_smoke.sh
   run docker tag z-courier-gateway:release-check z-courier-gateway:production
   run docker tag z-courier-gateway:release-check z-courier-gateway:production-cluster

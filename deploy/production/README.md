@@ -216,6 +216,37 @@ private key mode restricted and never commit `deploy/production/secrets/`.
 Custom-CA-only deployments can omit the client certificate and key from both
 the directory and the config block.
 
+## TLS Edge Proxy
+
+V14 provides opt-in edge overlays instead of adding TLS directly to every
+gateway listener. The Nginx overlay terminates both client TCP TLS and Console
+HTTPS, removes the gateway plaintext host port, and forwards only an exact
+Console API allowlist:
+
+```bash
+bash scripts/generate_edge_test_certs.sh deploy/production/secrets/edge
+
+docker compose \
+  --env-file deploy/production/.env \
+  -f deploy/production/docker-compose.yml \
+  -f deploy/production/docker-compose.edge-nginx.yml \
+  up -d --build
+```
+
+The generated certificate is disposable and local-only. Replace it with a
+certificate from the deployment PKI before production use. Standard Caddy can
+provide automatic Console HTTPS, but does not proxy raw client TCP; use the
+Caddy overlay only with a separate TCP-capable load balancer or proxy.
+
+The overlays set `ZCOURIER_ADMIN_CONSOLE_ENABLED=true` and
+`ZCOURIER_ADMIN_SESSION_ENABLED=true`. The base stack keeps both false. The
+production gateway still uses internal HMAC, so a browser's initial session
+login requires a deployment-side identity/signing service; the edge proxy does
+not hold the HMAC key.
+
+See [../edge/README.md](../edge/README.md) for Nginx, Caddy, local certificate,
+private mTLS, route allowlist, SDK, and Kubernetes instructions.
+
 ## Required Environment
 
 Before production use, copy `deploy/production/.env.example` to
@@ -226,11 +257,17 @@ Before production use, copy `deploy/production/.env.example` to
 | `ZCOURIER_POSTGRES_PASSWORD` | PostgreSQL password and gateway DSN |
 | `ZCOURIER_REDIS_PASSWORD` | Redis password and gateway registry password |
 | `ZCOURIER_AUTH_PROVIDER_SHARED_TOKEN` | Token sent to your auth backend |
+| `ZCOURIER_ADMIN_CONSOLE_ENABLED` | Base-stack Console switch; edge overlays set it to true |
+| `ZCOURIER_ADMIN_SESSION_ENABLED` | Base-stack browser-session switch; edge overlays set it to true |
 | `ZCOURIER_INTERNAL_HMAC_SECRET` | Backend-to-gateway HMAC key |
 | `ZCOURIER_PEER_HMAC_SECRET` | Gateway peer HMAC key |
 | `ZCOURIER_TERMINAL_WEBHOOK_HMAC_SECRET` | Optional outbound terminal-webhook HMAC key |
 | `ZCOURIER_TERMINAL_WEBHOOK_TLS_DIR` | Host directory used only by the optional TLS Compose override |
 | `ZCOURIER_UPSTREAM_INTERNAL_TOKEN` | Optional HTTP upstream token |
+| `ZCOURIER_EDGE_SERVER_NAME` | Edge certificate DNS name |
+| `ZCOURIER_EDGE_TLS_DIR` | Read-only edge server certificate directory |
+| `ZCOURIER_EDGE_CLIENT_TLS_PORT` | Published Nginx client TLS port |
+| `ZCOURIER_EDGE_CONSOLE_HTTPS_PORT` | Published Console HTTPS port |
 
 Use different HMAC keys for backend internal HTTP, gateway peer push, and the
 outbound terminal webhook. Do not reuse the example values.

@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -24,11 +25,27 @@ func main() {
 	msgID := flag.Uint("msg-id", uint(protocol.MsgIDBind), "AUTH/BIND message id (must be 1000)")
 	upstreamMsgID := flag.Uint("upstream-msg-id", 0, "optional business upstream message id sent after AUTH/BIND succeeds")
 	upstreamBody := flag.String("upstream-body", "devclient-upstream", "optional business upstream body")
+	tlsEnabled := flag.Bool("tls", false, "enable certificate-verified TLS")
+	tlsCAFile := flag.String("tls-ca-file", "", "optional private CA PEM file")
+	tlsServerName := flag.String("tls-server-name", "", "optional TLS server name override")
+	exitAfterBind := flag.Bool("exit-after-bind", false, "exit after AUTH/BIND and optional upstream send")
 	flag.Parse()
 
 	if uint32(*msgID) != protocol.MsgIDBind {
 		fmt.Fprintf(os.Stderr, "invalid -msg-id %d: AUTH/BIND uses reserved MsgID %d\n", *msgID, protocol.MsgIDBind)
 		os.Exit(2)
+	}
+	if !*tlsEnabled && (strings.TrimSpace(*tlsCAFile) != "" || strings.TrimSpace(*tlsServerName) != "") {
+		fmt.Fprintln(os.Stderr, "-tls-ca-file and -tls-server-name require -tls")
+		os.Exit(2)
+	}
+
+	var clientTLS *sdkclient.TLSConfig
+	if *tlsEnabled {
+		clientTLS = &sdkclient.TLSConfig{
+			CAFile:     *tlsCAFile,
+			ServerName: *tlsServerName,
+		}
 	}
 
 	runContext, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -39,6 +56,7 @@ func main() {
 		ClientID: *clientID,
 		DeviceID: *deviceID,
 		Token:    *token,
+		TLS:      clientTLS,
 		DownlinkHandler: func(_ context.Context, packet *protocol.Packet) error {
 			printPacket("downlink", packet)
 			return nil
@@ -77,6 +95,9 @@ func main() {
 			fmt.Fprintf(os.Stderr, "[upstream] send failed: msg_id=%d error=%v\n", *upstreamMsgID, err)
 			os.Exit(1)
 		}
+	}
+	if *exitAfterBind {
+		return
 	}
 
 	<-runContext.Done()

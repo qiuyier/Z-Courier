@@ -129,6 +129,27 @@ console session 在多个 gateway Pod 之间共享；单节点开发也可以使
 `readonly` 用于查看，`operator` 用于受保护的修复操作，`admin` 表示当前完整
 console 权限集。
 
+## TLS Edge、Ingress 与云负载均衡
+
+chart 不直接安装 Ingress Controller、Gateway API 实现或证书签发器。平台侧接入应
+保持以下边界：
+
+- client Service 后面必须是支持长连接原始 TCP 的负载均衡。它可以终止 TLS，也可
+  以 TCP 方式透传 TLS，但发往 gateway Pod 的最终协议必须仍是原始 Z-Courier 包流。
+- internal Service 保持私有。Console ingress 只能放行项目 edge 参考中列出的精确
+  路径，不能直接放行整个 `/internal` 前缀。
+- `/internal/push`、`/internal/cluster/push`、`/metrics`、`/healthz`、`/readyz`
+  必须走单独私有 route/listener，不能和公网 Console listener 共用策略。
+- 边缘证书放 Kubernetes Secret、cert-manager 或云证书管理器，不能把 PEM 写进
+  values 或 ConfigMap。
+- Console 可能在 Pod 间负载均衡时，使用 Redis admin session。
+- 为长连接配置足够的 idle timeout、连接 draining 和健康摘流。gateway 明确支持前
+  不要启用 PROXY protocol。
+
+不同 controller 和云厂商的 TCP/TLS 注解差异很大，所以项目暂不提交绑定某个实现的
+Ingress manifest。可复制的 Nginx/Caddy 白名单与完整说明见
+[TLS 边缘代理部署](edge-proxy.md)。
+
 ## 可靠下行策略与终态事件
 
 V12 chart 已暴露 `downlink.policies` 和 `downlink.terminal`。默认仍兼容旧版本：

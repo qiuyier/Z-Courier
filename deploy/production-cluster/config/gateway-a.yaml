@@ -30,7 +30,7 @@ internal_http:
   max_in_flight: 2000
 
 admin_console:
-  enabled: false
+  enabled: ${ZCOURIER_ADMIN_CONSOLE_ENABLED}
   path: /console/
   assets_dir: web/admin/dist
   monitoring:
@@ -38,7 +38,7 @@ admin_console:
     grafana_url: ""
     dashboard_url: ""
   session:
-    enabled: false
+    enabled: ${ZCOURIER_ADMIN_SESSION_ENABLED}
     ttl: 8h
     cookie_name: zcourier_admin_session
     cookie_secure: true

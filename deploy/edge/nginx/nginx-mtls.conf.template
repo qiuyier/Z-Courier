@@ -1,0 +1,41 @@
+user nginx;
+worker_processes auto;
+error_log /var/log/nginx/error.log notice;
+pid /var/run/nginx.pid;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+    access_log /var/log/nginx/access.log;
+    sendfile on;
+    keepalive_timeout 65s;
+    server_tokens off;
+
+    upstream zcourier_machine {
+        keepalive 32;
+        server ${ZCOURIER_EDGE_GATEWAY_HOST}:${ZCOURIER_EDGE_GATEWAY_HTTP_PORT} max_fails=3 fail_timeout=10s;
+    }
+
+    server {
+        listen 9443 ssl;
+        server_name ${ZCOURIER_EDGE_SERVER_NAME};
+        client_max_body_size 10m;
+        client_body_timeout 15s;
+
+        ssl_certificate /run/secrets/z-courier-edge/tls.crt;
+        ssl_certificate_key /run/secrets/z-courier-edge/tls.key;
+        ssl_client_certificate /run/secrets/z-courier-edge/client-ca.crt;
+        ssl_verify_client on;
+        ssl_verify_depth 2;
+        ssl_protocols TLSv1.2 TLSv1.3;
+        ssl_session_cache shared:ZCourierMTLS:10m;
+        ssl_session_timeout 10m;
+        ssl_session_tickets off;
+
+        include /etc/nginx/zcourier/machine-locations.conf;
+    }
+}

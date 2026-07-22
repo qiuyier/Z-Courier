@@ -1,0 +1,20 @@
+services:
+  edge-nginx-mtls:
+    image: nginx:1.28-alpine
+    depends_on:
+      gateway:
+        condition: service_started
+    ports:
+      - "${ZCOURIER_EDGE_MTLS_BIND_ADDR:-127.0.0.1}:${ZCOURIER_EDGE_MTLS_PORT:-9443}:9443"
+    environment:
+      NGINX_ENVSUBST_OUTPUT_DIR: /etc/nginx
+      ZCOURIER_EDGE_GATEWAY_HOST: gateway
+      ZCOURIER_EDGE_GATEWAY_HTTP_PORT: "18080"
+      ZCOURIER_EDGE_SERVER_NAME: ${ZCOURIER_EDGE_SERVER_NAME:-console.example.com}
+    volumes:
+      - ../edge/nginx/nginx-mtls.conf.template:/etc/nginx/templates/nginx.conf.template:ro
+      - ../edge/nginx/includes:/etc/nginx/zcourier:ro
+      - ${ZCOURIER_EDGE_TLS_DIR:-./secrets/edge/server}:/run/secrets/z-courier-edge:ro
+    restart: unless-stopped
+    networks:
+      - zcourier-private

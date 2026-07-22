@@ -1,0 +1,5 @@
+import /etc/caddy/console.caddy
+
+{$ZCOURIER_EDGE_CONSOLE_SITE:https://console.example.com} {
+	import zcourier_console
+}

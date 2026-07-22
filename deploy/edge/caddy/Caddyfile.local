@@ -1,0 +1,6 @@
+import /etc/caddy/console.caddy
+
+https://{$ZCOURIER_EDGE_SERVER_NAME:console.example.test} {
+	tls /run/secrets/z-courier-edge/tls.crt /run/secrets/z-courier-edge/tls.key
+	import zcourier_console
+}

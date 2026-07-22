@@ -1,0 +1,47 @@
+(zcourier_console) {
+	request_body {
+		max_size 10MB
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		Content-Security-Policy "default-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'; object-src 'none'"
+		Referrer-Policy "no-referrer"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		-Server
+	}
+
+	handle / {
+		redir /console/ 302
+	}
+
+	@console_assets {
+		method GET HEAD
+		path /console/*
+	}
+	handle @console_assets {
+		reverse_proxy {$ZCOURIER_EDGE_GATEWAY_HTTP_UPSTREAMS:gateway:18080}
+	}
+
+	@console_read {
+		method GET
+		path /internal/admin/session/me /internal/admin/overview /internal/admin/routes /internal/admin/audit /internal/admin/diagnostics /internal/admin/check /internal/admin/diagnose /internal/debug/route /internal/debug/sessions /internal/debug/cluster/routes /internal/message/status /internal/messages
+	}
+	handle @console_read {
+		reverse_proxy {$ZCOURIER_EDGE_GATEWAY_HTTP_UPSTREAMS:gateway:18080}
+	}
+
+	@console_write {
+		method POST
+		path /internal/admin/session/login /internal/admin/session/logout /internal/debug/session/disconnect /internal/debug/push /internal/message/requeue /internal/messages/requeue /internal/message/discard /internal/messages/retry/scan
+	}
+	handle @console_write {
+		reverse_proxy {$ZCOURIER_EDGE_GATEWAY_HTTP_UPSTREAMS:gateway:18080}
+	}
+
+	handle {
+		respond 404
+	}
+}

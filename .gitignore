@@ -21,3 +21,4 @@ reports/*
 # Local production certificate and private-key material.
 /deploy/production/secrets/
 /deploy/production-cluster/secrets/
+/deploy/edge/secrets/

@@ -19,6 +19,23 @@ func TestLoadProductionReferenceConfig(t *testing.T) {
 	if len(config.UpstreamRoutes) != 2 {
 		t.Fatalf("len(UpstreamRoutes) = %d, want 2", len(config.UpstreamRoutes))
 	}
+	if config.AdminConsole.Enabled || config.AdminConsole.Session.Enabled {
+		t.Fatalf("AdminConsole = %+v, want Console and session disabled by default", config.AdminConsole)
+	}
+}
+
+func TestLoadProductionReferenceConfigWithEdgeConsole(t *testing.T) {
+	setProductionReferenceEnv(t)
+	t.Setenv("ZCOURIER_ADMIN_CONSOLE_ENABLED", "true")
+	t.Setenv("ZCOURIER_ADMIN_SESSION_ENABLED", "true")
+
+	config, err := LoadServerConfig("../../deploy/production/config/z-courier.yaml")
+	if err != nil {
+		t.Fatalf("LoadServerConfig(production edge reference) error = %v", err)
+	}
+	if !config.AdminConsole.Enabled || !config.AdminConsole.Session.Enabled {
+		t.Fatalf("AdminConsole = %+v, want Console and session enabled", config.AdminConsole)
+	}
 }
 
 func TestLoadProductionClusterReferenceConfigs(t *testing.T) {
@@ -68,6 +85,9 @@ func TestLoadProductionClusterReferenceConfigs(t *testing.T) {
 			if len(config.UpstreamRoutes) != 2 {
 				t.Fatalf("len(UpstreamRoutes) = %d, want 2", len(config.UpstreamRoutes))
 			}
+			if config.AdminConsole.Enabled || config.AdminConsole.Session.Enabled {
+				t.Fatalf("AdminConsole = %+v, want Console and session disabled by default", config.AdminConsole)
+			}
 		})
 	}
 }
@@ -76,6 +96,8 @@ func setProductionReferenceEnv(t *testing.T) {
 	t.Helper()
 
 	t.Setenv("ZCOURIER_AUTH_PROVIDER_SHARED_TOKEN", "change-me-auth-provider-shared-token")
+	t.Setenv("ZCOURIER_ADMIN_CONSOLE_ENABLED", "false")
+	t.Setenv("ZCOURIER_ADMIN_SESSION_ENABLED", "false")
 	t.Setenv("ZCOURIER_INTERNAL_HMAC_SECRET", "change-me-internal-hmac-secret-32bytes")
 	t.Setenv("ZCOURIER_PEER_HMAC_SECRET", "change-me-peer-hmac-secret-32bytes")
 	t.Setenv("ZCOURIER_POSTGRES_PASSWORD", "change-me-postgres-password")

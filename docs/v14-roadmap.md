@@ -239,6 +239,12 @@ Acceptance criteria:
 
 ### V14.3 Reverse Proxy And Deployment Templates
 
+Implementation status: complete for the V14.3 increment. Nginx single-node and
+cluster references, standard Caddy Console HTTPS, a separate optional machine
+mTLS listener, opt-in Compose overlays, generated local PKI, exact route-policy
+checks, and browser/TCP/mTLS smoke coverage are included. The terminal webhook
+Helm Secret wiring was completed with V14.1 deployment work.
+
 - Add Nginx and Caddy references with generated local test certificates.
 - Add Compose examples for Console HTTPS and Nginx client TCP TLS.
 - Add Helm values and secret-volume wiring for terminal webhook CA, client

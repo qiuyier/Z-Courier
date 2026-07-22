@@ -131,6 +131,33 @@ docker compose \
 
 Both mounts are read-only. Never commit `deploy/production-cluster/secrets/`.
 
+## TLS Edge Proxy
+
+The cluster Nginx overlay removes both plaintext gateway host ports, terminates
+client TCP TLS, load-balances long-lived connections with least-connections,
+and exposes only the exact Console HTTPS allowlist:
+
+```bash
+bash scripts/generate_edge_test_certs.sh deploy/production-cluster/secrets/edge
+
+docker compose \
+  --env-file deploy/production-cluster/.env \
+  -f deploy/production-cluster/docker-compose.yml \
+  -f deploy/production-cluster/docker-compose.edge-nginx.yml \
+  up -d --build
+```
+
+The generated PKI is local-only. Replace it before production use. The cluster
+Console can move between nodes because both configs use Redis admin sessions
+and PostgreSQL audit storage. Internal HMAC remains enabled, so the first
+browser session login still requires a deployment-side identity/signing
+service. The proxy never stores the gateway HMAC key.
+
+The Caddy cluster overlay is available for Console HTTPS only. Standard Caddy
+does not provide raw client TCP proxying; pair it with a managed layer-4 load
+balancer or another reviewed TCP TLS proxy. Full instructions are in
+[../edge/README.md](../edge/README.md).
+
 ## Required Environment
 
 Copy `deploy/production-cluster/.env.example` to
@@ -141,12 +168,18 @@ Copy `deploy/production-cluster/.env.example` to
 | `ZCOURIER_POSTGRES_PASSWORD` | PostgreSQL password and gateway DSN |
 | `ZCOURIER_REDIS_PASSWORD` | Redis password and gateway registry password |
 | `ZCOURIER_AUTH_PROVIDER_SHARED_TOKEN` | Token sent to your auth backend |
+| `ZCOURIER_ADMIN_CONSOLE_ENABLED` | Base-stack Console switch; edge overlays set it to true |
+| `ZCOURIER_ADMIN_SESSION_ENABLED` | Base-stack browser-session switch; edge overlays set it to true |
 | `ZCOURIER_INTERNAL_HMAC_SECRET` | Backend-to-gateway HMAC key |
 | `ZCOURIER_PEER_HMAC_SECRET` | Gateway-to-gateway peer HMAC key |
 | `ZCOURIER_TERMINAL_WEBHOOK_HMAC_SECRET` | Optional outbound terminal-webhook HMAC key |
 | `ZCOURIER_TERMINAL_WEBHOOK_TLS_DIR_A` | Optional gateway-a host TLS directory |
 | `ZCOURIER_TERMINAL_WEBHOOK_TLS_DIR_B` | Optional gateway-b host TLS directory |
 | `ZCOURIER_UPSTREAM_INTERNAL_TOKEN` | Optional HTTP upstream token |
+| `ZCOURIER_EDGE_SERVER_NAME` | Edge certificate DNS name |
+| `ZCOURIER_EDGE_TLS_DIR` | Read-only edge server certificate directory |
+| `ZCOURIER_EDGE_CLIENT_TLS_PORT` | Published Nginx client TLS port |
+| `ZCOURIER_EDGE_CONSOLE_HTTPS_PORT` | Published Console HTTPS port |
 
 Use different HMAC keys for backend internal HTTP, gateway peer push, and the
 outbound terminal webhook.

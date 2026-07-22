@@ -1,0 +1,30 @@
+services:
+  gateway:
+    ports: !override
+      - "127.0.0.1:${ZCOURIER_PRODUCTION_GATEWAY_PORT:-8999}:8999"
+    environment:
+      ZCOURIER_ADMIN_CONSOLE_ENABLED: "true"
+      ZCOURIER_ADMIN_SESSION_ENABLED: "true"
+
+  edge-caddy:
+    image: caddy:2.11-alpine
+    depends_on:
+      gateway:
+        condition: service_started
+    ports:
+      - "${ZCOURIER_EDGE_CONSOLE_HTTPS_PORT:-443}:443"
+    environment:
+      ZCOURIER_EDGE_CONSOLE_SITE: https://${ZCOURIER_EDGE_SERVER_NAME:-console.example.com}
+      ZCOURIER_EDGE_GATEWAY_HTTP_UPSTREAMS: gateway:18080
+    volumes:
+      - ../edge/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../edge/caddy/console.caddy:/etc/caddy/console.caddy:ro
+      - edge-caddy-data:/data
+      - edge-caddy-config:/config
+    restart: unless-stopped
+    networks:
+      - zcourier-private
+
+volumes:
+  edge-caddy-data:
+  edge-caddy-config:

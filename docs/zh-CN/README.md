@@ -18,9 +18,10 @@ roadmap、历史版本文档仍保留在 `docs/` 根目录；这里主要放“�
 
 1. [生产部署参考](deployment-production.md)
 2. [Kubernetes / Helm 部署](kubernetes-helm.md)
-3. [内部 HTTP HMAC 签名](internal-http-signing.md)
-4. [管理和运维](admin-ops.md)
-5. [生产排障手册](production-runbook.md)
+3. [TLS 边缘代理部署](edge-proxy.md)
+4. [内部 HTTP HMAC 签名](internal-http-signing.md)
+5. [管理和运维](admin-ops.md)
+6. [生产排障手册](production-runbook.md)
 
 ## 文档地图
 
@@ -34,6 +35,7 @@ roadmap、历史版本文档仍保留在 `docs/` 根目录；这里主要放“�
 | [本地开发和验证](deployment-local.md) | 开发者 | 本地 docker compose、e2e、devclient、devbackend |
 | [生产部署参考](deployment-production.md) | 运维、SRE | 单节点/两节点生产 Compose、环境变量、端口、安全边界 |
 | [Kubernetes / Helm 部署](kubernetes-helm.md) | K8s 用户 | Helm values、Service、StatefulSet、Secret、ServiceMonitor |
+| [TLS 边缘代理部署](edge-proxy.md) | 运维、安全、SRE | Nginx TCP TLS、Console HTTPS、Caddy、mTLS、K8s 边界 |
 | [管理和运维](admin-ops.md) | 运维、后端 | admin CLI、Web 控制台、消息修复、诊断 bundle |
 | [生产排障手册](production-runbook.md) | 运维、值班同学 | 健康检查、路由排查、下行失败、依赖异常、监控指标 |
 | [v0.10.0 发布复盘和使用说明](v10-release-retrospective.md) | 开发、运维、发布负责人 | 发布结果、产物、升级、控制台启用、验证、回滚 |

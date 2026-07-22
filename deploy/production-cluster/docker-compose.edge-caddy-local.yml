@@ -1,0 +1,7 @@
+services:
+  edge-caddy:
+    environment:
+      ZCOURIER_EDGE_SERVER_NAME: ${ZCOURIER_EDGE_SERVER_NAME:-console.example.test}
+    volumes:
+      - ../edge/caddy/Caddyfile.local:/etc/caddy/Caddyfile:ro
+      - ${ZCOURIER_EDGE_TLS_DIR:-./secrets/edge/server}:/run/secrets/z-courier-edge:ro

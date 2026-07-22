@@ -117,12 +117,18 @@ gateway-b -> client
 | `ZCOURIER_POSTGRES_PASSWORD` | PostgreSQL 密码和 gateway DSN |
 | `ZCOURIER_REDIS_PASSWORD` | Redis 密码 |
 | `ZCOURIER_AUTH_PROVIDER_SHARED_TOKEN` | gateway 调用 auth backend 的共享 token |
+| `ZCOURIER_ADMIN_CONSOLE_ENABLED` | 基础栈 Console 开关；edge override 会设为 true |
+| `ZCOURIER_ADMIN_SESSION_ENABLED` | 基础栈浏览器 session 开关；edge override 会设为 true |
 | `ZCOURIER_INTERNAL_HMAC_SECRET` | 后端调用 `/internal/*` 的 HMAC secret |
 | `ZCOURIER_PEER_HMAC_SECRET` | gateway peer push 的 HMAC secret |
 | `ZCOURIER_TERMINAL_WEBHOOK_HMAC_SECRET` | 可选的终态 HTTP webhook 出站签名密钥 |
 | `ZCOURIER_TERMINAL_WEBHOOK_TLS_DIR` | 单节点可选 webhook TLS 宿主机目录 |
 | `ZCOURIER_TERMINAL_WEBHOOK_TLS_DIR_A/B` | 集群两个节点各自的可选 TLS 目录 |
 | `ZCOURIER_UPSTREAM_INTERNAL_TOKEN` | HTTP upstream 可选 token |
+| `ZCOURIER_EDGE_SERVER_NAME` | edge 证书 DNS 名称 |
+| `ZCOURIER_EDGE_TLS_DIR` | edge 服务端证书只读目录 |
+| `ZCOURIER_EDGE_CLIENT_TLS_PORT` | Nginx 客户端 TLS 宿主机端口 |
+| `ZCOURIER_EDGE_CONSOLE_HTTPS_PORT` | Console HTTPS 宿主机端口 |
 
 backend HMAC、peer HMAC 和终态 webhook HMAC 应该使用不同密钥。
 
@@ -212,6 +218,36 @@ docker compose \
 - 私有 ingress。
 - 带 operator 鉴权的反向代理。
 - mTLS 或 service mesh。
+
+## TLS 边缘代理
+
+V14 不把证书管理塞进每一个 gateway listener，而是提供显式启用的 Nginx/Caddy
+overlay。Nginx 同时负责客户端 TCP TLS 和 Console HTTPS，并移除 gateway 的明文
+宿主机端口：
+
+```bash
+bash scripts/generate_edge_test_certs.sh deploy/production/secrets/edge
+
+docker compose \
+  --env-file deploy/production/.env \
+  -f deploy/production/docker-compose.yml \
+  -f deploy/production/docker-compose.edge-nginx.yml \
+  up -d --build
+```
+
+两节点把路径换成 `deploy/production-cluster`，并使用该目录下的
+`docker-compose.edge-nginx.yml`。生成的证书只能本地测试，生产必须替换为真实 PKI
+签发的证书。
+
+标准 Caddy 参考负责自动 Console HTTPS，不负责任意原始 TCP。选择 Caddy 时，客户端
+TCP TLS 仍需云四层负载均衡、Nginx stream、HAProxy 或 Envoy。公网 Console listener
+只放行前端实际使用的精确路径，backend push、peer push、metrics、health 和 readiness
+都会直接返回 `404`。
+
+edge override 会启用 Console 和 admin session，但生产配置仍是 internal HMAC。首次
+浏览器登录必须由部署侧身份服务验证 operator 后签名登录请求；Nginx/Caddy 不持有
+HMAC secret。完整命令、Caddy 本地证书模式、独立机器 mTLS listener、SDK 连接和
+安全边界见 [TLS 边缘代理部署](edge-proxy.md)。
 
 ## 验证
 

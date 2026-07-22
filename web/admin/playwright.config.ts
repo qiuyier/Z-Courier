@@ -15,6 +15,7 @@ export default defineConfig({
       ]
     : "list",
   use: {
+    ignoreHTTPSErrors: process.env.ZCOURIER_CONSOLE_IGNORE_HTTPS_ERRORS === "1",
     screenshot: "only-on-failure",
     trace: "retain-on-failure",
     viewport: { width: 1365, height: 768 },

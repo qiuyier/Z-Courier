@@ -31,6 +31,9 @@ A high-performance message push gateway based on the `zinx` network framework.
   Grafana dashboards
 - Optional embedded Web admin console for read-only operations, diagnostics,
   session/route/message inspection, and guarded downlink repair actions
+- Reviewed Nginx client TCP TLS and Console HTTPS references, a standard Caddy
+  Console HTTPS reference, exact public route allowlists, and an optional
+  separate machine mTLS listener
 - Graceful shutdown with readiness drain and cluster route cleanup
 - MIT Licensed
 
@@ -118,7 +121,9 @@ V14 production transport-security planning is tracked in
 [docs/v14-roadmap.md](docs/v14-roadmap.md). It covers private-CA and mTLS
 terminal webhooks, TLS-capable Go and PHP clients, reviewed Nginx and Caddy edge
 templates, secret-file deployment, and zero-downtime key and certificate
-rotation.
+rotation. Runnable edge references and their security boundaries are documented
+in [deploy/edge/README.md](deploy/edge/README.md), with a Chinese guide in
+[docs/zh-CN/edge-proxy.md](docs/zh-CN/edge-proxy.md).
 
 ## Quick Start
 

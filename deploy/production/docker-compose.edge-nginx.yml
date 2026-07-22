@@ -1,0 +1,28 @@
+services:
+  gateway:
+    ports: !reset []
+    environment:
+      ZCOURIER_ADMIN_CONSOLE_ENABLED: "true"
+      ZCOURIER_ADMIN_SESSION_ENABLED: "true"
+
+  edge-nginx:
+    image: nginx:1.28-alpine
+    depends_on:
+      gateway:
+        condition: service_started
+    ports:
+      - "${ZCOURIER_EDGE_CLIENT_TLS_PORT:-8999}:8999"
+      - "${ZCOURIER_EDGE_CONSOLE_HTTPS_PORT:-8443}:8443"
+    environment:
+      NGINX_ENVSUBST_OUTPUT_DIR: /etc/nginx
+      ZCOURIER_EDGE_GATEWAY_HOST: gateway
+      ZCOURIER_EDGE_GATEWAY_TCP_PORT: "8999"
+      ZCOURIER_EDGE_GATEWAY_HTTP_PORT: "18080"
+      ZCOURIER_EDGE_SERVER_NAME: ${ZCOURIER_EDGE_SERVER_NAME:-console.example.com}
+    volumes:
+      - ../edge/nginx/nginx.conf.template:/etc/nginx/templates/nginx.conf.template:ro
+      - ../edge/nginx/includes:/etc/nginx/zcourier:ro
+      - ${ZCOURIER_EDGE_TLS_DIR:-./secrets/edge/server}:/run/secrets/z-courier-edge:ro
+    restart: unless-stopped
+    networks:
+      - zcourier-private
