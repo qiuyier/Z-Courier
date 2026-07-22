@@ -129,8 +129,8 @@ wait_until "Nginx Console HTTPS" https_ready "$NGINX_HTTPS_PORT"
 
 curl --noproxy '*' --silent --dump-header "$TMP_DIR/nginx-headers.txt" --output /dev/null \
   --cacert "$CERT_DIR/client/ca.crt" "https://127.0.0.1:$NGINX_HTTPS_PORT/console/"
-rg -qi '^strict-transport-security: max-age=31536000' "$TMP_DIR/nginx-headers.txt"
-rg -qi '^x-content-type-options: nosniff' "$TMP_DIR/nginx-headers.txt"
+grep -Eqi '^strict-transport-security: max-age=31536000' "$TMP_DIR/nginx-headers.txt"
+grep -Eqi '^x-content-type-options: nosniff' "$TMP_DIR/nginx-headers.txt"
 assert_public_denials "$NGINX_HTTPS_PORT"
 
 echo "running Console browser flows through Nginx HTTPS..."
@@ -169,8 +169,8 @@ curl --noproxy '*' --silent --dump-header "$TMP_DIR/caddy-headers.txt" --output 
   --cacert "$CERT_DIR/client/ca.crt" \
   --resolve "edge-proxy.test:$CADDY_HTTPS_PORT:127.0.0.1" \
   "https://edge-proxy.test:$CADDY_HTTPS_PORT/console/"
-rg -qi '^strict-transport-security: max-age=31536000' "$TMP_DIR/caddy-headers.txt"
-rg -qi '^x-content-type-options: nosniff' "$TMP_DIR/caddy-headers.txt"
+grep -Eqi '^strict-transport-security: max-age=31536000' "$TMP_DIR/caddy-headers.txt"
+grep -Eqi '^x-content-type-options: nosniff' "$TMP_DIR/caddy-headers.txt"
 assert_public_denials "$CADDY_HTTPS_PORT" edge-proxy.test
 
 login_status="$(curl --noproxy '*' --silent --output "$TMP_DIR/caddy-login.json" --write-out '%{http_code}' \

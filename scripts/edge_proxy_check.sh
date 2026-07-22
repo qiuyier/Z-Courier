@@ -21,7 +21,6 @@ require_cmd() {
 
 require_cmd docker
 require_cmd openssl
-require_cmd rg
 
 cd "$ROOT_DIR"
 bash scripts/generate_edge_test_certs.sh "$CERT_DIR" >/dev/null 2>&1
@@ -68,9 +67,9 @@ if awk '
   echo "Nginx edge Compose unexpectedly publishes the plaintext gateway service" >&2
   exit 1
 fi
-rg -q 'host_ip: 127\.0\.0\.1' "$TMP_DIR/production-caddy.yaml"
-rg -q 'ZCOURIER_ADMIN_CONSOLE_ENABLED: "true"' "$TMP_DIR/production-nginx.yaml"
-rg -q 'ZCOURIER_ADMIN_SESSION_ENABLED: "true"' "$TMP_DIR/cluster-nginx.yaml"
+grep -Eq 'host_ip: 127\.0\.0\.1' "$TMP_DIR/production-caddy.yaml"
+grep -Eq 'ZCOURIER_ADMIN_CONSOLE_ENABLED: "true"' "$TMP_DIR/production-nginx.yaml"
+grep -Eq 'ZCOURIER_ADMIN_SESSION_ENABLED: "true"' "$TMP_DIR/cluster-nginx.yaml"
 
 echo "validating Nginx edge configuration..."
 docker run --rm \
@@ -129,11 +128,12 @@ docker run --rm \
   --volume "$CERT_DIR/server:/run/secrets/z-courier-edge:ro" \
   "$CADDY_IMAGE" caddy validate --config /etc/caddy/Caddyfile
 
-if find deploy/edge -type f -print0 | xargs -0 rg -l 'BEGIN (RSA |EC )?PRIVATE KEY|BEGIN CERTIFICATE' >/dev/null 2>&1; then
+committed_pem_files="$(grep -RIlE 'BEGIN (RSA |EC )?PRIVATE KEY|BEGIN CERTIFICATE' deploy/edge 2>/dev/null || true)"
+if [[ -n "$committed_pem_files" ]]; then
   echo "committed edge reference contains certificate or private-key PEM data" >&2
   exit 1
 fi
-if find "$CERT_DIR/server" -maxdepth 1 -type f -name '*ca.key' -print -quit | rg -q .; then
+if [[ -n "$(find "$CERT_DIR/server" -maxdepth 1 -type f -name '*ca.key' -print -quit)" ]]; then
   echo "edge runtime directory unexpectedly contains a CA private key" >&2
   exit 1
 fi
