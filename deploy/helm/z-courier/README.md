@@ -200,6 +200,25 @@ By default, the chart references an existing secret. The default key names are:
 For a private sandbox only, `secret.create=true` can render a Secret from
 `secret.values`. Do not store real production secret values in Git.
 
+## HMAC Rotation Overlap
+
+`internalHttp.auth.hmac.additionalKeys` and
+`cluster.peer.auth.hmac.additionalKeys` extend the accepted verification key
+ring during a rolling rotation. The primary `keyID` remains the key used by the
+peer signer; additional keys verify inbound requests but never become active
+signers by themselves.
+
+Each additional key names an environment variable. Inject that variable from a
+Kubernetes Secret with `extraEnv`; do not put the secret value in the ConfigMap
+or values file. See
+`examples/values-hmac-rotation.yaml` for the overlap stage where new keys are
+active and previous keys are still accepted. After all old-key traffic has
+stopped, remove the additional keys and their environment variables.
+
+Run `bash scripts/helm_hmac_rotation_check.sh` to verify default isolation,
+multi-key rendering, duplicate-key rejection, Secret references, and gateway
+config loading.
+
 ## Reliable Downlink Policies
 
 V12 chart values expose named, inclusive MsgID-range policies and the terminal

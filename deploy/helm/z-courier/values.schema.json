@@ -507,9 +507,23 @@
       "properties": {
         "keyID": { "type": "string", "minLength": 1 },
         "secretEnv": { "$ref": "#/definitions/envName" },
+        "additionalKeys": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/hmacAdditionalKey" }
+        },
         "maxClockSkew": { "$ref": "#/definitions/duration" },
         "nonceTTL": { "$ref": "#/definitions/duration" },
         "maxNonceEntries": { "$ref": "#/definitions/nonNegativeInteger" }
+      }
+    },
+    "hmacAdditionalKey": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["keyID", "secretEnv"],
+      "properties": {
+        "keyID": { "type": "string", "minLength": 1 },
+        "secretEnv": { "$ref": "#/definitions/envName" }
       }
     },
     "downlinkPolicy": {

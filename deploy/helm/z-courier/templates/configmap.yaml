@@ -1,3 +1,19 @@
+{{- $internalHMACKeyIDs := dict -}}
+{{- $_ := set $internalHMACKeyIDs .Values.internalHttp.auth.hmac.keyID true -}}
+{{- range .Values.internalHttp.auth.hmac.additionalKeys -}}
+{{- if hasKey $internalHMACKeyIDs .keyID -}}
+{{- fail (printf "internalHttp.auth.hmac contains duplicate keyID %q" .keyID) -}}
+{{- end -}}
+{{- $_ := set $internalHMACKeyIDs .keyID true -}}
+{{- end -}}
+{{- $peerHMACKeyIDs := dict -}}
+{{- $_ := set $peerHMACKeyIDs .Values.cluster.peer.auth.hmac.keyID true -}}
+{{- range .Values.cluster.peer.auth.hmac.additionalKeys -}}
+{{- if hasKey $peerHMACKeyIDs .keyID -}}
+{{- fail (printf "cluster.peer.auth.hmac contains duplicate keyID %q" .keyID) -}}
+{{- end -}}
+{{- $_ := set $peerHMACKeyIDs .keyID true -}}
+{{- end -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -35,7 +51,10 @@ data:
         mode: {{ .Values.internalHttp.auth.mode | quote }}
         hmac:
           keys:
-            {{ .Values.internalHttp.auth.hmac.keyID }}: {{ printf "${%s}" .Values.internalHttp.auth.hmac.secretEnv | quote }}
+            {{ .Values.internalHttp.auth.hmac.keyID | quote }}: {{ printf "${%s}" .Values.internalHttp.auth.hmac.secretEnv | quote }}
+            {{- range .Values.internalHttp.auth.hmac.additionalKeys }}
+            {{ .keyID | quote }}: {{ printf "${%s}" .secretEnv | quote }}
+            {{- end }}
           max_clock_skew: {{ .Values.internalHttp.auth.hmac.maxClockSkew | quote }}
           nonce_ttl: {{ .Values.internalHttp.auth.hmac.nonceTTL | quote }}
           max_nonce_entries: {{ .Values.internalHttp.auth.hmac.maxNonceEntries }}
@@ -103,7 +122,10 @@ data:
           hmac:
             key_id: {{ .Values.cluster.peer.auth.hmac.keyID | quote }}
             keys:
-              {{ .Values.cluster.peer.auth.hmac.keyID }}: {{ printf "${%s}" .Values.cluster.peer.auth.hmac.secretEnv | quote }}
+              {{ .Values.cluster.peer.auth.hmac.keyID | quote }}: {{ printf "${%s}" .Values.cluster.peer.auth.hmac.secretEnv | quote }}
+              {{- range .Values.cluster.peer.auth.hmac.additionalKeys }}
+              {{ .keyID | quote }}: {{ printf "${%s}" .secretEnv | quote }}
+              {{- end }}
             max_clock_skew: {{ .Values.cluster.peer.auth.hmac.maxClockSkew | quote }}
             nonce_ttl: {{ .Values.cluster.peer.auth.hmac.nonceTTL | quote }}
             max_nonce_entries: {{ .Values.cluster.peer.auth.hmac.maxNonceEntries }}

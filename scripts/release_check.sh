@@ -179,11 +179,13 @@ run_docker_checks() {
 
   run bash scripts/promtool_check.sh
   run bash scripts/helm_terminal_http_check.sh
+  run bash scripts/helm_hmac_rotation_check.sh
 
   run_helm lint deploy/helm/z-courier
   run_helm lint deploy/helm/z-courier -f deploy/helm/z-courier/examples/values-production.yaml
   run_helm lint deploy/helm/z-courier -f deploy/helm/z-courier/examples/values-kind-smoke.yaml
   run_helm lint deploy/helm/z-courier -f deploy/helm/z-courier/examples/values-k8s-e2e.yaml
+  run_helm lint deploy/helm/z-courier -f deploy/helm/z-courier/examples/values-hmac-rotation.yaml
   run_helm template z-courier deploy/helm/z-courier
   run_helm package deploy/helm/z-courier --destination /tmp
 

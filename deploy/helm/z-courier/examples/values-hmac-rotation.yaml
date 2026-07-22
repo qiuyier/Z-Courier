@@ -1,0 +1,32 @@
+# Rotation overlap stage: new keys sign outbound traffic while old keys remain
+# accepted. The referenced Secret must contain all four keys before this rollout.
+internalHttp:
+  auth:
+    hmac:
+      keyID: prod-internal-2026-02
+      secretEnv: ZCOURIER_INTERNAL_HMAC_SECRET
+      additionalKeys:
+        - keyID: prod-internal-2026-01
+          secretEnv: ZCOURIER_INTERNAL_HMAC_PREVIOUS_SECRET
+
+cluster:
+  peer:
+    auth:
+      hmac:
+        keyID: prod-peer-2026-02
+        secretEnv: ZCOURIER_PEER_HMAC_SECRET
+        additionalKeys:
+          - keyID: prod-peer-2026-01
+            secretEnv: ZCOURIER_PEER_HMAC_PREVIOUS_SECRET
+
+extraEnv:
+  - name: ZCOURIER_INTERNAL_HMAC_PREVIOUS_SECRET
+    valueFrom:
+      secretKeyRef:
+        name: z-courier-secret
+        key: internal-hmac-previous-secret
+  - name: ZCOURIER_PEER_HMAC_PREVIOUS_SECRET
+    valueFrom:
+      secretKeyRef:
+        name: z-courier-secret
+        key: peer-hmac-previous-secret

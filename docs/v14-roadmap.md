@@ -263,6 +263,13 @@ Acceptance criteria:
 
 ### V14.4 Rotation Runbook And Release Acceptance
 
+Implementation status: in progress. Internal HTTP, cluster peer, and terminal
+webhook overlap tests now prove that old and new HMAC key IDs can coexist. Helm
+supports opt-in `additionalKeys`, rejects duplicate key IDs, injects previous
+keys through external Secret references, and validates the rendered gateway
+configuration. Cluster rotation E2E, certificate rotation, rollback runbooks,
+and final release acceptance remain.
+
 - Publish English and Chinese HMAC and certificate rotation runbooks.
 - Test a two-node terminal webhook key rotation where old and new gateway pods
   coexist and the receiver accepts both key IDs.

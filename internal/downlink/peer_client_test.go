@@ -14,6 +14,7 @@ import (
 )
 
 var peerHMACTestSecret = []byte("cluster-peer-secret-0123456789abcdef")
+var peerHMACPreviousTestSecret = []byte("previous-peer-secret-0123456789abcdef")
 
 func TestHTTPPeerDispatcherPushOK(t *testing.T) {
 	var gotReq PeerPushRequest
@@ -108,7 +109,10 @@ func TestHTTPPeerDispatcherReturnsHTTPError(t *testing.T) {
 
 func TestHTTPPeerDispatcherSignsExactRequestBody(t *testing.T) {
 	verifier, err := signing.NewVerifier(signing.VerifierConfig{
-		Keys: map[string][]byte{"gateway-2026-01": peerHMACTestSecret},
+		Keys: map[string][]byte{
+			"gateway-2025-12": peerHMACPreviousTestSecret,
+			"gateway-2026-01": peerHMACTestSecret,
+		},
 	})
 	if err != nil {
 		t.Fatalf("NewVerifier() error = %v", err)
@@ -121,6 +125,9 @@ func TestHTTPPeerDispatcherSignsExactRequestBody(t *testing.T) {
 		}
 		if got := r.Header.Get(InternalTokenHeader); got != "" {
 			t.Fatalf("token header = %q, want empty", got)
+		}
+		if got := r.Header.Get(signing.HeaderKeyID); got != "gateway-2026-01" {
+			t.Fatalf("HMAC key id = %q, want active key gateway-2026-01", got)
 		}
 		if err := verifier.Verify(r, body); err != nil {
 			t.Fatalf("Verify() error = %v", err)

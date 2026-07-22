@@ -75,6 +75,7 @@ internalHttp:
     hmac:
       keyID: prod-internal-2026-01
       secretEnv: ZCOURIER_INTERNAL_HMAC_SECRET
+      additionalKeys: []
       maxClockSkew: 30s
       nonceTTL: 2m
       maxNonceEntries: 100000
@@ -139,6 +140,7 @@ cluster:
       hmac:
         keyID: prod-peer-2026-01
         secretEnv: ZCOURIER_PEER_HMAC_SECRET
+        additionalKeys: []
         maxClockSkew: 30s
         nonceTTL: 2m
         maxNonceEntries: 100000

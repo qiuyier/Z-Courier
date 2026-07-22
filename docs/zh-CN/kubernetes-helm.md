@@ -46,6 +46,26 @@ kubectl -n z-courier create secret generic z-courier-secret \
 
 生产环境不要把 secret 写进 Git。
 
+## HMAC 轮换重叠窗口
+
+`internalHttp.auth.hmac.additionalKeys` 和
+`cluster.peer.auth.hmac.additionalKeys` 用于滚动轮换期间临时扩展验签 Key 集合。
+Peer 的 `keyID` 仍然决定当前出站签名使用哪把 Key；`additionalKeys` 只接受入站
+签名，不会自行成为签名 Key。
+
+每个附加 Key 只填写 Key ID 和环境变量名，再通过 `extraEnv` 从 Kubernetes Secret
+注入真正的 secret。不要把 secret 明文写入 ConfigMap 或 values。可参考
+`deploy/helm/z-courier/examples/values-hmac-rotation.yaml`，它表示“新 Key 已用于签名，
+旧 Key 暂时仍被接受”的重叠阶段。确认旧 Key 流量归零后，应删除附加 Key 及其环境
+变量。
+
+下面的命令会验证默认 Chart 不包含旧 Key、轮换配置能渲染双 Key、重复 Key ID 会被
+拒绝、Secret 引用正确，并把生成的配置交给 gateway 真实加载：
+
+```bash
+bash scripts/helm_hmac_rotation_check.sh
+```
+
 ## 使用本地 chart 安装
 
 ```bash

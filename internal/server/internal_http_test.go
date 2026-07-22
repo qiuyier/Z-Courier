@@ -1346,6 +1346,60 @@ func TestInternalHTTPHMACAcceptsSignedRequestAndRejectsReplay(t *testing.T) {
 	}
 }
 
+func TestInternalHTTPHMACAcceptsOverlappingRotationKeys(t *testing.T) {
+	oldSecret := []byte("internal-old-secret-0123456789abcdef")
+	newSecret := []byte("internal-new-secret-0123456789abcdef")
+	config := normalizeConfig(Config{
+		InternalHTTPAddr: "127.0.0.1:18080",
+		InternalHTTPAuth: InternalHTTPAuthConfig{
+			Mode: InternalHTTPAuthModeHMAC,
+			HMAC: InternalHTTPHMACConfig{
+				Keys: map[string][]byte{
+					"backend-2026-01": oldSecret,
+					"backend-2026-02": newSecret,
+				},
+			},
+		},
+	})
+	var gotIdentity httpauth.Identity
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotIdentity, _ = httpauth.IdentityFromContext(r.Context())
+		w.WriteHeader(http.StatusNoContent)
+	})
+	handler, err := newInternalHMACHandler(next, config, zap.NewNop())
+	if err != nil {
+		t.Fatalf("newInternalHMACHandler() error = %v", err)
+	}
+
+	for _, key := range []struct {
+		id     string
+		secret []byte
+	}{
+		{id: "backend-2026-01", secret: oldSecret},
+		{id: "backend-2026-02", secret: newSecret},
+	} {
+		t.Run(key.id, func(t *testing.T) {
+			signer, signerErr := signing.NewSigner(signing.SignerConfig{KeyID: key.id, Secret: key.secret})
+			if signerErr != nil {
+				t.Fatalf("NewSigner() error = %v", signerErr)
+			}
+			body := []byte(`{"message_id":"rotation-probe"}`)
+			req := httptest.NewRequest(http.MethodPost, "/internal/message/requeue", strings.NewReader(string(body)))
+			if signerErr = signer.Sign(req, body); signerErr != nil {
+				t.Fatalf("Sign() error = %v", signerErr)
+			}
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != http.StatusNoContent {
+				t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusNoContent, rec.Body.String())
+			}
+			if gotIdentity.Mode != httpauth.ModeHMAC || gotIdentity.KeyID != key.id {
+				t.Fatalf("identity = %+v, want HMAC key %q", gotIdentity, key.id)
+			}
+		})
+	}
+}
+
 func TestInternalHTTPHMACStoresAuthIdentity(t *testing.T) {
 	config := normalizeConfig(Config{
 		InternalHTTPAddr: "127.0.0.1:18080",
@@ -1607,6 +1661,49 @@ func TestInternalHTTPPeerHMACAcceptsSignatureAndRejectsReplay(t *testing.T) {
 	server.Handler.ServeHTTP(tamperedRec, tampered)
 	if tamperedRec.Code != http.StatusUnauthorized {
 		t.Fatalf("tampered status = %d, want %d", tamperedRec.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestPeerHMACAcceptsOverlappingRotationKeys(t *testing.T) {
+	oldSecret := []byte("peer-old-secret-0123456789abcdef0123")
+	newSecret := []byte("peer-new-secret-0123456789abcdef0123")
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+	handler, err := newPeerHMACHandler(next, ClusterPeerHMACConfig{
+		KeyID: "peer-2026-02",
+		Keys: map[string][]byte{
+			"peer-2026-01": oldSecret,
+			"peer-2026-02": newSecret,
+		},
+	}, 1<<20, zap.NewNop())
+	if err != nil {
+		t.Fatalf("newPeerHMACHandler() error = %v", err)
+	}
+
+	for _, key := range []struct {
+		id     string
+		secret []byte
+	}{
+		{id: "peer-2026-01", secret: oldSecret},
+		{id: "peer-2026-02", secret: newSecret},
+	} {
+		t.Run(key.id, func(t *testing.T) {
+			signer, signerErr := signing.NewSigner(signing.SignerConfig{KeyID: key.id, Secret: key.secret})
+			if signerErr != nil {
+				t.Fatalf("NewSigner() error = %v", signerErr)
+			}
+			body := []byte(`{"message_id":"rotation-probe"}`)
+			req := httptest.NewRequest(http.MethodPost, downlink.PeerPushPath, strings.NewReader(string(body)))
+			if signerErr = signer.Sign(req, body); signerErr != nil {
+				t.Fatalf("Sign() error = %v", signerErr)
+			}
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != http.StatusNoContent {
+				t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusNoContent, rec.Body.String())
+			}
+		})
 	}
 }
 

@@ -33,6 +33,10 @@ semantic versioning after the first public MVP tag.
   allowlisted Console HTTPS, standard Caddy automatic/local Console HTTPS,
   separate optional machine mTLS, generated disposable PKI, opt-in Compose
   overlays, bilingual deployment guidance, and CI/release smoke coverage.
+- V14.4 HMAC rotation foundation with old/new overlap tests across internal
+  HTTP, cluster peer, and terminal webhook boundaries, plus opt-in Helm
+  `additionalKeys`, duplicate-key rejection, external Secret injection, a
+  rotation-stage values example, and deterministic CI/release validation.
 
 ## [v0.13.0] - 2026-07-15
 

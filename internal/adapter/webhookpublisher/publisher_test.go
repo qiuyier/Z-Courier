@@ -25,6 +25,7 @@ import (
 )
 
 const testSecret = "0123456789abcdef0123456789abcdef"
+const previousTestSecret = "abcdef0123456789abcdef0123456789"
 
 func TestPublisherPostsSignedBody(t *testing.T) {
 	verifier, err := signing.NewVerifier(signing.VerifierConfig{
@@ -58,6 +59,65 @@ func TestPublisherPostsSignedBody(t *testing.T) {
 	publisher := newTestPublisher(t, server.URL)
 	if err := publisher.Publish(context.Background(), body); err != nil {
 		t.Fatalf("Publish() error = %v", err)
+	}
+}
+
+func TestPublisherRotationOverlapAcceptsOldAndNewKeys(t *testing.T) {
+	verifier, err := signing.NewVerifier(signing.VerifierConfig{
+		Keys: map[string][]byte{
+			"gateway-terminal-2026-01": []byte(previousTestSecret),
+			"gateway-terminal-2026-02": []byte(testSecret),
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewVerifier() error = %v", err)
+	}
+	accepted := make(chan string, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, readErr := io.ReadAll(r.Body)
+		if readErr != nil {
+			t.Errorf("ReadAll() error = %v", readErr)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if verifyErr := verifier.Verify(r, body); verifyErr != nil {
+			t.Errorf("Verify() error = %v", verifyErr)
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		accepted <- r.Header.Get(signing.HeaderKeyID)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	for _, key := range []struct {
+		id     string
+		secret string
+	}{
+		{id: "gateway-terminal-2026-01", secret: previousTestSecret},
+		{id: "gateway-terminal-2026-02", secret: testSecret},
+	} {
+		signer, signerErr := signing.NewSigner(signing.SignerConfig{KeyID: key.id, Secret: []byte(key.secret)})
+		if signerErr != nil {
+			t.Fatalf("NewSigner(%q) error = %v", key.id, signerErr)
+		}
+		publisher, publisherErr := New(Config{URL: server.URL, Signer: signer})
+		if publisherErr != nil {
+			t.Fatalf("New(%q) error = %v", key.id, publisherErr)
+		}
+		if publisherErr = publisher.Publish(context.Background(), []byte(`{"event_id":"rotation-probe"}`)); publisherErr != nil {
+			publisher.Close()
+			t.Fatalf("Publish(%q) error = %v", key.id, publisherErr)
+		}
+		publisher.Close()
+	}
+
+	seen := map[string]bool{}
+	for range 2 {
+		seen[<-accepted] = true
+	}
+	if !seen["gateway-terminal-2026-01"] || !seen["gateway-terminal-2026-02"] {
+		t.Fatalf("accepted key IDs = %v, want old and new", seen)
 	}
 }
 
