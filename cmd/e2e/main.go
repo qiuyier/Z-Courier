@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -54,43 +55,47 @@ const (
 )
 
 type config struct {
-	GatewayHost             string
-	GatewayPort             int
-	InternalURL             string
-	MetricsURLs             []string
-	InternalAuthMode        string
-	InternalToken           string
-	InternalHMACKeyID       string
-	InternalHMACSecret      string
-	PostgresDSN             string
-	ClientID                string
-	DeviceID                string
-	Token                   string
-	Timeout                 time.Duration
-	OnlinePushDelay         time.Duration
-	RequireClusterMetrics   bool
-	ExpectRouteNode         string
-	ExpectRouteInternalURL  string
-	ExpectSessionURL        string
-	ExpectSessionNode       string
-	CheckReconnectRetry     bool
-	CheckAdminStorage       bool
-	CheckBulkRequeue        bool
-	AdminSessionPeerURL     string
-	ExpectPolicyName        string
-	CheckQueueCapacity      bool
-	ExpectPerDeviceLimit    int
-	CheckRetryFairness      bool
-	RetryFairnessScanLimit  int
-	CheckTerminalEvent      bool
-	TerminalPublisher       string
-	TerminalNSQDAddress     string
-	TerminalWebhookAddress  string
-	TerminalWebhookPath     string
-	TerminalWebhookKeyID    string
-	TerminalWebhookSecret   string
-	TerminalWebhookFailures int
-	ExpectTerminalPolicy    string
+	GatewayHost                   string
+	GatewayPort                   int
+	InternalURL                   string
+	MetricsURLs                   []string
+	InternalAuthMode              string
+	InternalToken                 string
+	InternalHMACKeyID             string
+	InternalHMACSecret            string
+	PostgresDSN                   string
+	ClientID                      string
+	DeviceID                      string
+	Token                         string
+	Timeout                       time.Duration
+	OnlinePushDelay               time.Duration
+	RequireClusterMetrics         bool
+	ExpectRouteNode               string
+	ExpectRouteInternalURL        string
+	ExpectSessionURL              string
+	ExpectSessionNode             string
+	CheckReconnectRetry           bool
+	CheckAdminStorage             bool
+	CheckBulkRequeue              bool
+	AdminSessionPeerURL           string
+	ExpectPolicyName              string
+	CheckQueueCapacity            bool
+	ExpectPerDeviceLimit          int
+	CheckRetryFairness            bool
+	RetryFairnessScanLimit        int
+	CheckTerminalEvent            bool
+	CheckTerminalEventOnly        bool
+	TerminalPublisher             string
+	TerminalNSQDAddress           string
+	TerminalWebhookAddress        string
+	TerminalWebhookPath           string
+	TerminalWebhookKeyID          string
+	TerminalWebhookSecret         string
+	TerminalWebhookKeys           string
+	TerminalWebhookRequiredKeyIDs string
+	TerminalEventTargets          string
+	TerminalWebhookFailures       int
+	ExpectTerminalPolicy          string
 }
 
 func main() {
@@ -138,12 +143,16 @@ func parseFlags() config {
 	flag.BoolVar(&cfg.CheckRetryFairness, "check-retry-fairness", false, "verify a bounded retry scan makes progress across hot and cold offline devices")
 	flag.IntVar(&cfg.RetryFairnessScanLimit, "retry-fairness-scan-limit", defaultRetryFairnessScanLimit, "retry scan limit used by the fairness E2E check")
 	flag.BoolVar(&cfg.CheckTerminalEvent, "check-terminal-event", false, "force a message to terminal failure and verify its published event")
+	flag.BoolVar(&cfg.CheckTerminalEventOnly, "check-terminal-event-only", false, "run only the terminal-event verifier; requires check-terminal-event")
 	flag.StringVar(&cfg.TerminalPublisher, "terminal-publisher", terminalPublisherNSQ, "terminal event publisher under test: nsq or http")
 	flag.StringVar(&cfg.TerminalNSQDAddress, "terminal-nsqd-address", "127.0.0.1:14150", "NSQ TCP address used to consume terminal events")
 	flag.StringVar(&cfg.TerminalWebhookAddress, "terminal-webhook-address", defaultTerminalWebhookAddress, "HTTP address used by the terminal webhook test receiver")
 	flag.StringVar(&cfg.TerminalWebhookPath, "terminal-webhook-path", defaultTerminalWebhookPath, "HTTP path used by the terminal webhook test receiver")
 	flag.StringVar(&cfg.TerminalWebhookKeyID, "terminal-webhook-hmac-key-id", defaultTerminalWebhookHMACKeyID, "HMAC key id accepted by the terminal webhook test receiver")
 	flag.StringVar(&cfg.TerminalWebhookSecret, "terminal-webhook-hmac-secret", defaultTerminalWebhookHMACSecret, "HMAC secret accepted by the terminal webhook test receiver")
+	flag.StringVar(&cfg.TerminalWebhookKeys, "terminal-webhook-hmac-keys", "", "comma-separated HMAC key_id=secret entries accepted by the terminal webhook test receiver; defaults to terminal-webhook-hmac-key-id/secret")
+	flag.StringVar(&cfg.TerminalWebhookRequiredKeyIDs, "terminal-webhook-required-key-ids", "", "comma-separated HMAC key IDs that must be observed on verified terminal webhook attempts")
+	flag.StringVar(&cfg.TerminalEventTargets, "terminal-event-targets", "", "comma-separated internal-url@expected-key-id targets; each target must publish one terminal event with its expected HMAC key")
 	flag.IntVar(&cfg.TerminalWebhookFailures, "terminal-webhook-failures", 0, "number of verified HTTP failures injected before accepting each terminal event")
 	flag.StringVar(&cfg.ExpectTerminalPolicy, "expect-terminal-policy", "integration-terminal", "expected policy for the terminal-event E2E message")
 	flag.Parse()
@@ -154,6 +163,9 @@ func parseFlags() config {
 	cfg.TerminalWebhookAddress = strings.TrimSpace(cfg.TerminalWebhookAddress)
 	cfg.TerminalWebhookPath = strings.TrimSpace(cfg.TerminalWebhookPath)
 	cfg.TerminalWebhookKeyID = strings.TrimSpace(cfg.TerminalWebhookKeyID)
+	cfg.TerminalWebhookKeys = strings.TrimSpace(cfg.TerminalWebhookKeys)
+	cfg.TerminalWebhookRequiredKeyIDs = strings.TrimSpace(cfg.TerminalWebhookRequiredKeyIDs)
+	cfg.TerminalEventTargets = strings.TrimSpace(cfg.TerminalEventTargets)
 	cfg.ExpectSessionURL = strings.TrimRight(cfg.ExpectSessionURL, "/")
 	cfg.AdminSessionPeerURL = strings.TrimRight(cfg.AdminSessionPeerURL, "/")
 	cfg.MetricsURLs = parseMetricsURLs(metricsURLRaw, cfg.InternalURL+"/metrics")
@@ -181,7 +193,20 @@ func parseMetricsURLs(raw, fallback string) []string {
 	return urls
 }
 
+func parseCSV(raw string) []string {
+	values := make([]string, 0)
+	for _, value := range strings.Split(raw, ",") {
+		if value = strings.TrimSpace(value); value != "" {
+			values = append(values, value)
+		}
+	}
+	return values
+}
+
 func validateInternalAuthConfig(cfg config) error {
+	if cfg.CheckTerminalEventOnly && !cfg.CheckTerminalEvent {
+		return errors.New("check-terminal-event-only requires check-terminal-event")
+	}
 	if cfg.CheckQueueCapacity && cfg.ExpectPerDeviceLimit <= 0 {
 		return fmt.Errorf("expect-per-device-limit must be greater than 0 when check-queue-capacity is enabled")
 	}
@@ -232,10 +257,26 @@ func validateInternalAuthConfig(cfg config) error {
 			if cfg.TerminalWebhookFailures < 0 {
 				return fmt.Errorf("terminal-webhook-failures must be greater than or equal to 0")
 			}
-			if _, err := signing.NewVerifier(signing.VerifierConfig{
-				Keys: map[string][]byte{cfg.TerminalWebhookKeyID: []byte(cfg.TerminalWebhookSecret)},
-			}); err != nil {
+			keys, err := terminalWebhookKeyring(cfg)
+			if err != nil {
 				return fmt.Errorf("create terminal webhook HMAC verifier: %w", err)
+			}
+			if _, err := signing.NewVerifier(signing.VerifierConfig{Keys: keys}); err != nil {
+				return fmt.Errorf("create terminal webhook HMAC verifier: %w", err)
+			}
+			targets, err := parseTerminalEventTargets(cfg.TerminalEventTargets)
+			if err != nil {
+				return fmt.Errorf("parse terminal event targets: %w", err)
+			}
+			for _, target := range targets {
+				if _, found := keys[target.ExpectedKeyID]; !found {
+					return fmt.Errorf("terminal event target %s expects unknown HMAC key id %q", target.InternalURL, target.ExpectedKeyID)
+				}
+			}
+			for _, keyID := range parseCSV(cfg.TerminalWebhookRequiredKeyIDs) {
+				if _, found := keys[keyID]; !found {
+					return fmt.Errorf("required terminal webhook HMAC key id %q is not accepted", keyID)
+				}
 			}
 		default:
 			return fmt.Errorf("unsupported terminal publisher %q", cfg.TerminalPublisher)
@@ -321,6 +362,13 @@ func run(ctx context.Context, cfg config) error {
 			return fmt.Errorf("start terminal event collector: %w", err)
 		}
 		defer terminalCollector.Close()
+	}
+	if cfg.CheckTerminalEventOnly {
+		if err := checkTerminalEvents(ctx, cfg, db, terminalCollector, terminalMessageID); err != nil {
+			return err
+		}
+		fmt.Println("terminal event verifier passed")
+		return nil
 	}
 	if cfg.CheckQueueCapacity {
 		if err := checkQueueCapacity(ctx, cfg, db, runID); err != nil {
@@ -474,7 +522,7 @@ func run(ctx context.Context, cfg config) error {
 	}
 
 	if cfg.CheckTerminalEvent {
-		if err := checkTerminalEvent(ctx, cfg, db, terminalCollector, terminalMessageID); err != nil {
+		if err := checkTerminalEvents(ctx, cfg, db, terminalCollector, terminalMessageID); err != nil {
 			return err
 		}
 	}
@@ -1643,6 +1691,59 @@ type terminalEventCollector interface {
 	Wait(context.Context, string) (downlink.TerminalEvent, []byte, error)
 }
 
+type terminalEventTarget struct {
+	InternalURL   string
+	ExpectedKeyID string
+}
+
+type terminalWebhookKeyIDCollector interface {
+	keyIDs(messageID string) []string
+	observedKeyIDs() []string
+}
+
+func terminalWebhookKeyring(cfg config) (map[string][]byte, error) {
+	if cfg.TerminalWebhookKeys == "" {
+		if cfg.TerminalWebhookKeyID == "" || cfg.TerminalWebhookSecret == "" {
+			return nil, errors.New("terminal webhook HMAC key id and secret are required")
+		}
+		return map[string][]byte{cfg.TerminalWebhookKeyID: []byte(cfg.TerminalWebhookSecret)}, nil
+	}
+
+	keys := make(map[string][]byte)
+	for _, raw := range strings.Split(cfg.TerminalWebhookKeys, ",") {
+		parts := strings.SplitN(strings.TrimSpace(raw), "=", 2)
+		if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
+			return nil, fmt.Errorf("invalid key entry %q, want key_id=secret", raw)
+		}
+		keyID := strings.TrimSpace(parts[0])
+		if _, exists := keys[keyID]; exists {
+			return nil, fmt.Errorf("duplicate key id %q", keyID)
+		}
+		keys[keyID] = []byte(strings.TrimSpace(parts[1]))
+	}
+	return keys, nil
+}
+
+func parseTerminalEventTargets(raw string) ([]terminalEventTarget, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	targets := make([]terminalEventTarget, 0, len(strings.Split(raw, ",")))
+	for _, item := range strings.Split(raw, ",") {
+		parts := strings.SplitN(strings.TrimSpace(item), "@", 2)
+		if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
+			return nil, fmt.Errorf("invalid target %q, want internal-url@expected-key-id", item)
+		}
+		internalURL := strings.TrimRight(strings.TrimSpace(parts[0]), "/")
+		parsed, err := url.Parse(internalURL)
+		if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+			return nil, fmt.Errorf("invalid internal URL %q", internalURL)
+		}
+		targets = append(targets, terminalEventTarget{InternalURL: internalURL, ExpectedKeyID: strings.TrimSpace(parts[1])})
+	}
+	return targets, nil
+}
+
 type terminalNSQEventCollector struct {
 	consumer *nsq.Consumer
 	messages chan []byte
@@ -1727,15 +1828,18 @@ type terminalHTTPEventCollector struct {
 	messages         chan []byte
 	errors           chan error
 
-	mu        sync.Mutex
-	attempts  map[string]int
-	successes map[string]int
+	mu                      sync.Mutex
+	attempts                map[string]int
+	successes               map[string]int
+	observedKeyIDsByMessage map[string][]string
 }
 
 func newTerminalHTTPEventCollector(cfg config) (*terminalHTTPEventCollector, error) {
-	verifier, err := signing.NewVerifier(signing.VerifierConfig{
-		Keys: map[string][]byte{cfg.TerminalWebhookKeyID: []byte(cfg.TerminalWebhookSecret)},
-	})
+	keys, err := terminalWebhookKeyring(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("parse terminal webhook HMAC keys: %w", err)
+	}
+	verifier, err := signing.NewVerifier(signing.VerifierConfig{Keys: keys})
 	if err != nil {
 		return nil, fmt.Errorf("create terminal webhook verifier: %w", err)
 	}
@@ -1744,14 +1848,15 @@ func newTerminalHTTPEventCollector(cfg config) (*terminalHTTPEventCollector, err
 		return nil, fmt.Errorf("listen for terminal webhook: %w", err)
 	}
 	collector := &terminalHTTPEventCollector{
-		listener:         listener,
-		path:             cfg.TerminalWebhookPath,
-		verifier:         verifier,
-		failuresPerEvent: cfg.TerminalWebhookFailures,
-		messages:         make(chan []byte, 64),
-		errors:           make(chan error, 1),
-		attempts:         make(map[string]int),
-		successes:        make(map[string]int),
+		listener:                listener,
+		path:                    cfg.TerminalWebhookPath,
+		verifier:                verifier,
+		failuresPerEvent:        cfg.TerminalWebhookFailures,
+		messages:                make(chan []byte, 64),
+		errors:                  make(chan error, 1),
+		attempts:                make(map[string]int),
+		successes:               make(map[string]int),
+		observedKeyIDsByMessage: make(map[string][]string),
 	}
 	collector.server = &http.Server{
 		Handler:           http.HandlerFunc(collector.handle),
@@ -1791,6 +1896,7 @@ func (c *terminalHTTPEventCollector) handle(w http.ResponseWriter, request *http
 	c.mu.Lock()
 	c.attempts[event.EventID]++
 	attempt := c.attempts[event.EventID]
+	c.observedKeyIDsByMessage[event.MessageID] = append(c.observedKeyIDsByMessage[event.MessageID], request.Header.Get(signing.HeaderKeyID))
 	if attempt <= c.failuresPerEvent {
 		c.mu.Unlock()
 		http.Error(w, "injected failure", http.StatusServiceUnavailable)
@@ -1843,12 +1949,69 @@ func (c *terminalHTTPEventCollector) counts(eventID string) (int, int) {
 	return c.attempts[eventID], c.successes[eventID]
 }
 
+func (c *terminalHTTPEventCollector) keyIDs(messageID string) []string {
+	if c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return slices.Clone(c.observedKeyIDsByMessage[messageID])
+}
+
+func (c *terminalHTTPEventCollector) observedKeyIDs() []string {
+	if c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	keyIDs := make([]string, 0)
+	for _, values := range c.observedKeyIDsByMessage {
+		keyIDs = append(keyIDs, values...)
+	}
+	return keyIDs
+}
+
+func checkTerminalEvents(
+	ctx context.Context,
+	cfg config,
+	db *sql.DB,
+	collector terminalEventCollector,
+	messageID string,
+) error {
+	targets, err := parseTerminalEventTargets(cfg.TerminalEventTargets)
+	if err != nil {
+		return err
+	}
+	if len(targets) == 0 {
+		return checkTerminalEvent(ctx, cfg, db, collector, messageID, "")
+	}
+	for index, target := range targets {
+		targetCfg := cfg
+		targetCfg.InternalURL = target.InternalURL
+		targetMessageID := fmt.Sprintf("%s-%d", messageID, index+1)
+		if err := checkTerminalEvent(ctx, targetCfg, db, collector, targetMessageID, target.ExpectedKeyID); err != nil {
+			return fmt.Errorf("terminal event target %s: %w", target.InternalURL, err)
+		}
+	}
+	for _, requiredKeyID := range parseCSV(cfg.TerminalWebhookRequiredKeyIDs) {
+		keyIDCollector, ok := collector.(terminalWebhookKeyIDCollector)
+		if !ok {
+			return fmt.Errorf("terminal publisher %s does not expose webhook key ids", cfg.TerminalPublisher)
+		}
+		if !slices.Contains(keyIDCollector.observedKeyIDs(), requiredKeyID) {
+			return fmt.Errorf("terminal webhook observed key ids = %q, want %q", keyIDCollector.observedKeyIDs(), requiredKeyID)
+		}
+	}
+	return nil
+}
+
 func checkTerminalEvent(
 	ctx context.Context,
 	cfg config,
 	db *sql.DB,
 	collector terminalEventCollector,
 	messageID string,
+	expectedKeyID string,
 ) error {
 	fmt.Println("checking terminal failure event path")
 	response, err := pushDownlinkTarget(
@@ -1915,6 +2078,15 @@ WHERE message_id = $1
 	}
 	if event.EventID != messageID+":"+string(downlink.MessageStatusFailed) {
 		return fmt.Errorf("terminal event id = %q, want stable message/status identity", event.EventID)
+	}
+	if expectedKeyID != "" {
+		keyIDCollector, ok := collector.(terminalWebhookKeyIDCollector)
+		if !ok {
+			return fmt.Errorf("terminal publisher %s does not expose webhook key id", cfg.TerminalPublisher)
+		}
+		if !slices.Contains(keyIDCollector.keyIDs(messageID), expectedKeyID) {
+			return fmt.Errorf("terminal webhook key ids = %q, want one %q", keyIDCollector.keyIDs(messageID), expectedKeyID)
+		}
 	}
 	if err := waitUntil(ctx, func() (bool, error) {
 		status, err := getMessageStatus(ctx, cfg, messageID)

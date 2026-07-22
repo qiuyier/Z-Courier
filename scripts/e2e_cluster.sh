@@ -14,6 +14,11 @@ CONFIG_A="$TMP_DIR/z-courier.cluster-a.yaml"
 CONFIG_B="$TMP_DIR/z-courier.cluster-b.yaml"
 GATEWAY_BIN="$TMP_DIR/gateway"
 
+TERMINAL_WEBHOOK_OLD_KEY_ID="e2e-terminal-webhook-old-2026"
+TERMINAL_WEBHOOK_OLD_SECRET="0123456789abcdef0123456789abcdef"
+TERMINAL_WEBHOOK_NEW_KEY_ID="e2e-terminal-webhook-new-2026"
+TERMINAL_WEBHOOK_NEW_SECRET="fedcba9876543210fedcba9876543210"
+
 GATEWAY_A_PID=""
 GATEWAY_B_PID=""
 
@@ -95,12 +100,26 @@ prepare_e2e_config() {
   ' "$source" >"$destination"
 }
 
+configure_terminal_webhook_key() {
+  local config_file="$1"
+  local key_id="$2"
+  local secret="$3"
+
+  sed -i.bak \
+    -e "s/key_id: e2e-terminal-webhook/key_id: ${key_id}/" \
+    -e "s/secret: 0123456789abcdef0123456789abcdef/secret: ${secret}/" \
+    "$config_file"
+  rm -f "$config_file.bak"
+}
+
 cd "$ROOT_DIR"
 mkdir -p "$LOG_DIR"
 : >"$LOG_DIR/e2e-cluster-gateway-a.log"
 : >"$LOG_DIR/e2e-cluster-gateway-b.log"
 prepare_e2e_config "$CONFIG_A_SOURCE" "$CONFIG_A"
 prepare_e2e_config "$CONFIG_B_SOURCE" "$CONFIG_B"
+configure_terminal_webhook_key "$CONFIG_A" "$TERMINAL_WEBHOOK_OLD_KEY_ID" "$TERMINAL_WEBHOOK_OLD_SECRET"
+configure_terminal_webhook_key "$CONFIG_B" "$TERMINAL_WEBHOOK_NEW_KEY_ID" "$TERMINAL_WEBHOOK_NEW_SECRET"
 
 docker compose -f "$COMPOSE_FILE" up -d postgres redis nsqlookupd nsqd
 
@@ -176,7 +195,34 @@ go run ./cmd/e2e \
   -retry-fairness-scan-limit 3 \
   -check-terminal-event \
   -terminal-publisher http \
+  -terminal-webhook-hmac-keys "$TERMINAL_WEBHOOK_OLD_KEY_ID=$TERMINAL_WEBHOOK_OLD_SECRET,$TERMINAL_WEBHOOK_NEW_KEY_ID=$TERMINAL_WEBHOOK_NEW_SECRET" \
+  -terminal-webhook-required-key-ids "$TERMINAL_WEBHOOK_OLD_KEY_ID" \
+  -terminal-event-targets "http://127.0.0.1:18182@$TERMINAL_WEBHOOK_OLD_KEY_ID" \
   -terminal-webhook-failures 1 \
   -expect-terminal-policy integration-terminal \
   -timeout 75s \
   "$@"
+
+echo "draining old-key gateway-a before verifying the new-key gateway..."
+kill "$GATEWAY_A_PID"
+wait "$GATEWAY_A_PID" || true
+GATEWAY_A_PID=""
+
+go run ./cmd/e2e \
+  -gateway-port 9902 \
+  -internal-url http://127.0.0.1:18183 \
+  -device-id "e2e-cluster-rotation-device-$RUN_ID" \
+  -check-terminal-event \
+  -check-terminal-event-only \
+  -check-retry-fairness \
+  -expect-per-device-limit 8 \
+  -retry-fairness-scan-limit 3 \
+  -terminal-publisher http \
+  -terminal-webhook-hmac-keys "$TERMINAL_WEBHOOK_OLD_KEY_ID=$TERMINAL_WEBHOOK_OLD_SECRET,$TERMINAL_WEBHOOK_NEW_KEY_ID=$TERMINAL_WEBHOOK_NEW_SECRET" \
+  -terminal-webhook-required-key-ids "$TERMINAL_WEBHOOK_NEW_KEY_ID" \
+  -terminal-event-targets "http://127.0.0.1:18183@$TERMINAL_WEBHOOK_NEW_KEY_ID" \
+  -terminal-webhook-failures 1 \
+  -expect-terminal-policy integration-terminal \
+  -timeout 30s
+
+echo "two-node terminal webhook HMAC rotation verified"

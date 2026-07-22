@@ -172,7 +172,7 @@ jobs:
       - name: Run local, Go SDK, and PHP SDK integration verifiers
         run: bash scripts/e2e.sh
 
-      - name: Run local cluster integration verifier
+      - name: Run local cluster integration and HMAC rotation verifier
         run: bash scripts/e2e_cluster.sh
 
       - name: Run admin console browser smoke

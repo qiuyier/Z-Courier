@@ -79,6 +79,96 @@ func TestTerminalHTTPEventCollectorVerifiesAndInjectsFailure(t *testing.T) {
 	}
 }
 
+func TestTerminalWebhookKeyringAcceptsRotationOverlap(t *testing.T) {
+	keys, err := terminalWebhookKeyring(config{
+		TerminalWebhookKeys: "old-2026=0123456789abcdef0123456789abcdef,new-2026=fedcba9876543210fedcba9876543210",
+	})
+	if err != nil {
+		t.Fatalf("terminalWebhookKeyring() error = %v", err)
+	}
+	if got := string(keys["old-2026"]); got != "0123456789abcdef0123456789abcdef" {
+		t.Fatalf("old key = %q", got)
+	}
+	if got := string(keys["new-2026"]); got != "fedcba9876543210fedcba9876543210" {
+		t.Fatalf("new key = %q", got)
+	}
+}
+
+func TestTerminalHTTPEventCollectorAcceptsOldAndNewRotationKeys(t *testing.T) {
+	const oldKeyID = "old-2026"
+	const oldSecret = "0123456789abcdef0123456789abcdef"
+	const newKeyID = "new-2026"
+	const newSecret = "fedcba9876543210fedcba9876543210"
+
+	collector, err := newTerminalHTTPEventCollector(config{
+		TerminalWebhookAddress: "127.0.0.1:0",
+		TerminalWebhookPath:    defaultTerminalWebhookPath,
+		TerminalWebhookKeys:    oldKeyID + "=" + oldSecret + "," + newKeyID + "=" + newSecret,
+	})
+	if err != nil {
+		t.Fatalf("newTerminalHTTPEventCollector() error = %v", err)
+	}
+	defer collector.Close()
+	endpoint := "http://" + collector.listener.Addr().String() + defaultTerminalWebhookPath
+
+	for _, key := range []struct {
+		id     string
+		secret string
+	}{
+		{id: oldKeyID, secret: oldSecret},
+		{id: newKeyID, secret: newSecret},
+	} {
+		body, err := sonic.Marshal(downlink.TerminalEvent{
+			Version: downlink.TerminalEventVersion, Type: downlink.TerminalEventType,
+			EventID: key.id + ":failed", MessageID: key.id,
+			TerminalStatus: downlink.MessageStatusFailed, TerminalReason: downlink.TerminalReasonMaxAttempts,
+		})
+		if err != nil {
+			t.Fatalf("Marshal() error = %v", err)
+		}
+		signer, err := signing.NewSigner(signing.SignerConfig{KeyID: key.id, Secret: []byte(key.secret)})
+		if err != nil {
+			t.Fatalf("NewSigner() error = %v", err)
+		}
+		if status := postSignedTerminalEvent(t, endpoint, signer, body); status != http.StatusNoContent {
+			t.Fatalf("signed %s status = %d, want %d", key.id, status, http.StatusNoContent)
+		}
+	}
+
+	if !containsAll(collector.observedKeyIDs(), oldKeyID, newKeyID) {
+		t.Fatalf("observed key ids = %q, want old and new", collector.observedKeyIDs())
+	}
+}
+
+func containsAll(values []string, wants ...string) bool {
+	for _, want := range wants {
+		found := false
+		for _, value := range values {
+			if value == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+func TestParseTerminalEventTargets(t *testing.T) {
+	targets, err := parseTerminalEventTargets("http://127.0.0.1:18182@old-2026,http://127.0.0.1:18183/@new-2026")
+	if err != nil {
+		t.Fatalf("parseTerminalEventTargets() error = %v", err)
+	}
+	if len(targets) != 2 || targets[0].InternalURL != "http://127.0.0.1:18182" || targets[0].ExpectedKeyID != "old-2026" || targets[1].InternalURL != "http://127.0.0.1:18183" || targets[1].ExpectedKeyID != "new-2026" {
+		t.Fatalf("targets = %+v", targets)
+	}
+	if _, err := parseTerminalEventTargets("http://127.0.0.1:18182"); err == nil {
+		t.Fatal("parseTerminalEventTargets() error = nil, want invalid target error")
+	}
+}
+
 func postSignedTerminalEvent(t *testing.T, endpoint string, signer *signing.Signer, body []byte) int {
 	t.Helper()
 	request, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(body))

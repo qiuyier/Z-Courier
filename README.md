@@ -162,8 +162,11 @@ bash scripts/e2e_cluster.sh
 It starts two local gateway processes sharing PostgreSQL and Redis, connects the
 test client to `gateway-b`, sends `/internal/push` to `gateway-a`, and verifies
 that HMAC-signed peer push delivers the message across nodes. It also verifies
-debug route/session APIs, disconnect -> queued retry -> reconnect flush, NSQ
-upstream publishing, and cluster/retry/signature metrics.
+an overlapping terminal-webhook HMAC rotation: `gateway-a` signs with the old
+key while `gateway-b` signs with the new key, and the receiver accepts and
+identifies both. The verifier also covers debug route/session APIs, disconnect
+-> queued retry -> reconnect flush, NSQ upstream publishing, and
+cluster/retry/signature metrics.
 
 The cluster verifier is the fastest way to confirm the current multi-node
 behavior:
@@ -523,9 +526,9 @@ bash scripts/e2e_cluster.sh
 ```
 
 The cluster verifier includes shared PostgreSQL capacity and retry fairness,
-Redis-backed admin sessions, persistent admin audit, terminal NSQ publication,
-and a cross-node guarded bulk requeue that must return one success plus one
-capacity failure without losing the successful item.
+Redis-backed admin sessions, persistent admin audit, terminal HTTP publication
+with old/new HMAC-key overlap, and a cross-node guarded bulk requeue that must
+return one success plus one capacity failure without losing the successful item.
 
 Start the gateway:
 
