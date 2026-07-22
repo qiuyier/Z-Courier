@@ -200,6 +200,7 @@ run_slow_checks() {
   run npm --prefix web/admin exec -- playwright install chromium
   run bash scripts/console_smoke.sh
   run env ZCOURIER_EDGE_SMOKE_SKIP_BUILD=1 bash scripts/edge_proxy_smoke.sh
+  run bash scripts/certificate_rotation_smoke.sh
   run bash scripts/loadtest_smoke.sh
   run docker tag z-courier-gateway:release-check z-courier-gateway:production
   run docker tag z-courier-gateway:release-check z-courier-gateway:production-cluster

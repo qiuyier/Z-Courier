@@ -181,6 +181,9 @@ jobs:
       - name: Run TLS edge proxy smoke
         run: ZCOURIER_EDGE_SMOKE_SKIP_BUILD=1 bash scripts/edge_proxy_smoke.sh
 
+      - name: Run certificate rotation smoke
+        run: bash scripts/certificate_rotation_smoke.sh
+
       - name: Upload admin console smoke report
         if: failure()
         uses: actions/upload-artifact@v6

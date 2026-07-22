@@ -271,13 +271,16 @@ configuration. The local cluster verifier now starts `gateway-a` with an old
 terminal-webhook signer and `gateway-b` with a new signer, verifies the old-key
 event while both nodes coexist, then drains `gateway-a` and verifies the
 new-key event through the same dual-key receiver configuration. Certificate
-rotation, rollback runbooks, and final release acceptance remain.
+rotation E2E now verifies old/new server and mTLS-client CA overlap, trust
+retirement, and rollback through an Nginx reload. Rotation runbooks and final
+release acceptance remain.
 
 - Publish English and Chinese HMAC and certificate rotation runbooks.
 - Test a two-node terminal webhook key rotation where old and new gateway pods
   coexist and the receiver accepts both key IDs. Completed by
   `scripts/e2e_cluster.sh`.
 - Test certificate replacement with overlapping trust and a rolling restart.
+  Completed by `scripts/certificate_rotation_smoke.sh`.
 - Add rollback steps and failure signals for every rotation phase.
 - Include TLS/mTLS, proxy, Compose, Helm, SDK, and secret-leak checks in release
   acceptance.

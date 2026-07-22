@@ -254,5 +254,13 @@ and the separate mTLS listener:
 bash scripts/edge_proxy_smoke.sh
 ```
 
-Both checks are included in CI and the release checker. Generated certificates
-and private keys remain in temporary or gitignored directories.
+Run the certificate-rotation smoke to exercise mTLS trust overlap, server
+certificate replacement through an Nginx reload, old-trust retirement, and
+rollback:
+
+```bash
+bash scripts/certificate_rotation_smoke.sh
+```
+
+All three checks are included in CI and the release checker. Generated
+certificates and private keys remain in temporary or gitignored directories.
