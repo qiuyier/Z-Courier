@@ -126,7 +126,9 @@ in [deploy/edge/README.md](deploy/edge/README.md), with a Chinese guide in
 [docs/zh-CN/edge-proxy.md](docs/zh-CN/edge-proxy.md). The ordered HMAC and
 certificate rotation procedure, including rollback, is in
 [docs/rotation-runbook.md](docs/rotation-runbook.md) and
-[docs/zh-CN/rotation-runbook.md](docs/zh-CN/rotation-runbook.md).
+[docs/zh-CN/rotation-runbook.md](docs/zh-CN/rotation-runbook.md). The V14
+release acceptance matrix is in [docs/v14-release.md](docs/v14-release.md) and
+[docs/zh-CN/v14-release.md](docs/zh-CN/v14-release.md).
 
 ## Quick Start
 

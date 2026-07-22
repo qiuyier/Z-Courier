@@ -100,6 +100,9 @@ jobs:
       - name: Validate edge proxy references
         run: bash scripts/edge_proxy_check.sh
 
+      - name: Validate secret boundaries
+        run: bash scripts/secret_boundary_check.sh
+
       - name: Validate Prometheus rules and configs
         run: bash scripts/promtool_check.sh
 

@@ -272,8 +272,9 @@ terminal-webhook signer and `gateway-b` with a new signer, verifies the old-key
 event while both nodes coexist, then drains `gateway-a` and verifies the
 new-key event through the same dual-key receiver configuration. Certificate
 rotation E2E now verifies old/new server and mTLS-client CA overlap, trust
-retirement, and rollback through an Nginx reload. Rotation runbooks and final
-release acceptance remain.
+retirement, and rollback through an Nginx reload. Bilingual runbooks and the
+release acceptance matrix now map every V14 security boundary to an executable
+check. Final release execution remains.
 
 - Publish English and Chinese HMAC and certificate rotation runbooks. Completed
   by [rotation-runbook.md](rotation-runbook.md) and
@@ -285,7 +286,9 @@ release acceptance remain.
   Completed by `scripts/certificate_rotation_smoke.sh`.
 - Add rollback steps and failure signals for every rotation phase.
 - Include TLS/mTLS, proxy, Compose, Helm, SDK, and secret-leak checks in release
-  acceptance.
+  acceptance. Completed by [v14-release.md](v14-release.md),
+  [zh-CN/v14-release.md](zh-CN/v14-release.md), and
+  `scripts/secret_boundary_check.sh`.
 
 Acceptance criteria:
 

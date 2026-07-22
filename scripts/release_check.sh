@@ -132,6 +132,7 @@ run_fast_checks() {
   local shell_script
 
   run_actionlint
+  run bash scripts/secret_boundary_check.sh
 
   run npm ci --prefix web/admin
   run npm run build --prefix web/admin
