@@ -22,6 +22,13 @@ semantic versioning after the first public MVP tag.
   private CA roots, server-name overrides, injectable raw dialers, bounded
   handshakes, reconnect re-handshakes, runnable example flags, and real TLS
   identity/reconnect tests while plaintext remains the default.
+- V14.2 PHP client TLS parity with system or private CA verification,
+  server-name overrides, injectable raw connectors, bounded OpenSSL handshakes,
+  reconnect re-handshakes, runtime-generated certificate tests, and example
+  environment configuration.
+- Private-CA TLS edge E2E for both public SDKs, covering AUTH/BIND, upstream,
+  reliable downlink ACK, same-device replacement, TLS reconnect, and continued
+  traffic without changing the gateway packet protocol.
 
 ## [v0.13.0] - 2026-07-15
 

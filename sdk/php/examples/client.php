@@ -14,6 +14,7 @@ use ZCourier\Client\Client;
 use ZCourier\Client\Config;
 use ZCourier\Client\ReconnectConfig;
 use ZCourier\Client\SendRequest;
+use ZCourier\Client\TlsConfig;
 use ZCourier\Exception\DownlinkException;
 use ZCourier\Protocol\Packet;
 
@@ -31,6 +32,7 @@ $client = new Client(new Config(
         jitter: 0.2,
         maxAttempts: 0,
     ),
+    tls: tlsFromEnvironment(),
 ));
 
 try {
@@ -77,4 +79,29 @@ function environment(string $name, ?string $default = null): string
         return $default;
     }
     throw new RuntimeException("{$name} is required");
+}
+
+function tlsFromEnvironment(): ?TlsConfig
+{
+    $enabled = strtolower(optionalEnvironment('ZCOURIER_CLIENT_TLS'));
+    $caFile = optionalEnvironment('ZCOURIER_CLIENT_TLS_CA_FILE');
+    $serverName = optionalEnvironment('ZCOURIER_CLIENT_TLS_SERVER_NAME');
+    if ($enabled === '' || in_array($enabled, ['0', 'false', 'no', 'off'], true)) {
+        if ($caFile !== '' || $serverName !== '') {
+            throw new RuntimeException(
+                'ZCOURIER_CLIENT_TLS_CA_FILE and ZCOURIER_CLIENT_TLS_SERVER_NAME require ZCOURIER_CLIENT_TLS=1',
+            );
+        }
+        return null;
+    }
+    if (!in_array($enabled, ['1', 'true', 'yes', 'on'], true)) {
+        throw new RuntimeException('ZCOURIER_CLIENT_TLS must be a boolean value');
+    }
+    return new TlsConfig(caFile: $caFile, serverName: $serverName);
+}
+
+function optionalEnvironment(string $name): string
+{
+    $value = getenv($name);
+    return is_string($value) ? trim($value) : '';
 }

@@ -16,10 +16,18 @@ go run ./cmd/e2e \
   -expect-terminal-policy integration-terminal \
   "$@"
 
+e2e_start_tls_proxy
+
 echo "running public Go SDK integration verifier..."
 go run ./cmd/sdke2e \
+  -tcp-address "$E2E_TLS_PROXY_ADDRESS" \
+  -tls \
+  -tls-ca-file "$E2E_TLS_CA_FILE" \
   -device-id "sdk-e2e-device-$RUN_ID" \
   -expect-policy-name integration-reliable
 
 echo "running public PHP SDK integration verifier..."
-ZCOURIER_E2E_REUSE_GATEWAY=1 bash scripts/php_sdk_e2e.sh
+ZCOURIER_E2E_REUSE_GATEWAY=1 bash scripts/php_sdk_e2e.sh \
+  --tcp-address="$E2E_TLS_PROXY_ADDRESS" \
+  --tls \
+  --tls-ca-file="$E2E_TLS_CA_FILE"

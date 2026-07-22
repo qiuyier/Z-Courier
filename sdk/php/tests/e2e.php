@@ -9,6 +9,7 @@ use ZCourier\Client\Client;
 use ZCourier\Client\Config;
 use ZCourier\Client\ReconnectConfig;
 use ZCourier\Client\SendRequest;
+use ZCourier\Client\TlsConfig;
 use ZCourier\Exception\ClientException;
 use ZCourier\Exception\DownlinkException;
 use ZCourier\Protocol\Ack;
@@ -32,6 +33,9 @@ function readConfiguration(): array
         'client-id:',
         'device-id:',
         'token:',
+        'tls',
+        'tls-ca-file:',
+        'tls-server-name:',
         'upstream-msg-id:',
         'timeout:',
     ]);
@@ -46,6 +50,12 @@ function readConfiguration(): array
     if ($timeout <= 0) {
         throw new RuntimeException('timeout must be greater than zero');
     }
+    $tlsEnabled = array_key_exists('tls', $options);
+    $tlsCaFile = optionOptionalString($options, 'tls-ca-file');
+    $tlsServerName = optionOptionalString($options, 'tls-server-name');
+    if (!$tlsEnabled && ($tlsCaFile !== '' || $tlsServerName !== '')) {
+        throw new RuntimeException('--tls-ca-file and --tls-server-name require --tls');
+    }
     return [
         'tcp_address' => optionString($options, 'tcp-address', '127.0.0.1:9899'),
         'internal_url' => rtrim(optionString($options, 'internal-url', 'http://127.0.0.1:18082'), '/'),
@@ -53,6 +63,9 @@ function readConfiguration(): array
         'client_id' => optionString($options, 'client-id', 'e2e-client'),
         'device_id' => optionString($options, 'device-id', 'php-sdk-e2e-device'),
         'token' => optionString($options, 'token', 'e2e-token'),
+        'tls_enabled' => $tlsEnabled ? 1 : 0,
+        'tls_ca_file' => $tlsCaFile,
+        'tls_server_name' => $tlsServerName,
         'upstream_msg_id' => $msgId,
         'timeout' => $timeout,
     ];
@@ -82,6 +95,7 @@ function runE2E(array $configuration): void
             jitter: 0.1,
             maxAttempts: 10,
         ),
+        tls: e2eTlsConfig($configuration),
     ));
 
     try {
@@ -173,6 +187,7 @@ function verifyReconnect(Client $client, array $configuration, string $initialSe
         clientId: (string) $configuration['client_id'],
         deviceId: (string) $configuration['device_id'],
         token: (string) $configuration['token'],
+        tls: e2eTlsConfig($configuration),
     ));
     try {
         $replacement->connect();
@@ -200,6 +215,18 @@ function verifyReconnect(Client $client, array $configuration, string $initialSe
     fwrite(
         STDOUT,
         "PHP SDK reconnected: old_session_id={$initialSessionId} new_session_id={$sessionId}\n",
+    );
+}
+
+/** @param array<string, int|string> $configuration */
+function e2eTlsConfig(array $configuration): ?TlsConfig
+{
+    if ((int) $configuration['tls_enabled'] !== 1) {
+        return null;
+    }
+    return new TlsConfig(
+        caFile: (string) $configuration['tls_ca_file'],
+        serverName: (string) $configuration['tls_server_name'],
     );
 }
 
@@ -293,6 +320,19 @@ function optionString(array $options, string $name, string $default): string
     $value = $options[$name] ?? $default;
     if (!is_string($value) || trim($value) === '') {
         throw new RuntimeException("option --{$name} must be a non-empty string");
+    }
+    return $value;
+}
+
+/** @param array<string, mixed> $options */
+function optionOptionalString(array $options, string $name): string
+{
+    if (!array_key_exists($name, $options)) {
+        return '';
+    }
+    $value = $options[$name];
+    if (!is_string($value) || trim($value) === '') {
+        throw new RuntimeException("option --{$name} must be a non-empty string when configured");
     }
     return $value;
 }

@@ -452,13 +452,15 @@ bash scripts/e2e.sh
 
 In addition to the gateway's original queue, NSQ, and metrics checks, the script
 runs `cmd/sdke2e` entirely through the public `pkg/sdk/client` and
-`pkg/sdk/backend` APIs. It verifies:
+`pkg/sdk/backend` APIs. It starts an ephemeral private-CA TLS edge and also runs
+the PHP SDK verifier through the same edge. It verifies:
 
 - AUTH/BIND and canonical session identity
 - upstream send with correlated accepted ACK
 - backend downlink push and automatic `MsgID = 2` delivery ACK
 - gateway-side replacement of an existing device connection
 - automatic reconnect with a new `SessionID`
+- a fresh certificate-verified TLS handshake on reconnect
 - successful upstream and downlink traffic after reconnect
 
 `cmd/devclient` also uses `pkg/sdk/client` and remains the interactive tool for

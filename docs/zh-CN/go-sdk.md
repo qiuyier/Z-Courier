@@ -149,6 +149,20 @@ SDK 不提供关闭证书校验的选项。`ServerName` 留空时取 `Address` �
 负责。自动重连每次都会重新拨号、完成 TLS 握手、获取 token，再执行 AUTH/BIND。
 证书文件在 `client.New` 时加载，轮换 CA 后应创建并连接新的 `Client` 实例。
 
+PHP SDK 提供等价的 `TlsConfig`：
+
+```php
+tls: new TlsConfig(
+    caFile: '/run/secrets/z-courier/ca.crt',
+    serverName: 'gateway.example.internal',
+),
+```
+
+PHP 同样不允许关闭证书校验，最低版本为 TLS 1.2。自定义 `Connector` 应返回原始阻塞
+stream；每次自动重连都会建立新 stream、重新 TLS 握手、刷新 token 并再次 AUTH/BIND。
+`bash scripts/e2e.sh` 会创建临时私有 CA 和 TLS edge，验证 Go/PHP SDK 的首次连接、
+上下行、ACK、连接替换和 TLS 重连。
+
 ## 下行处理
 
 如果业务希望自动 ACK，可以注册 handler，让 SDK 在处理后自动回 ACK。

@@ -31,6 +31,7 @@ final readonly class Config
         public int $readChunkSize = 8192,
         public int $downlinkDedupCapacity = 10000,
         public ?ReconnectConfig $reconnect = null,
+        public ?TlsConfig $tls = null,
     ) {
         if (trim($address) === '' || trim($clientId) === '' || trim($deviceId) === '') {
             throw new ClientException(
@@ -59,6 +60,7 @@ final readonly class Config
         }
 
         $this->tokenProvider = $tokenProvider ?? new StaticTokenProvider($token);
-        $this->connector = $connector ?? new NativeConnector();
+        $baseConnector = $connector ?? new NativeConnector();
+        $this->connector = $tls === null ? $baseConnector : new TlsConnector($baseConnector, $tls);
     }
 }

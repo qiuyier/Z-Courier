@@ -6,14 +6,32 @@ E2E_CONFIG_FILE="$E2E_ROOT_DIR/configs/z-courier.integration.yaml"
 E2E_ZINX_CONFIG_FILE="$E2E_ROOT_DIR/conf/zinx.integration.json"
 E2E_GATEWAY_PID=""
 E2E_GATEWAY_BIN=""
+E2E_TLS_PROXY_ADDRESS="127.0.0.1:9900"
+E2E_TLS_PROXY_PID=""
+E2E_TLS_PROXY_BIN=""
+E2E_TLS_PROXY_DIR=""
+E2E_TLS_CA_FILE=""
 
 e2e_cleanup_gateway() {
+  if [[ -n "$E2E_TLS_PROXY_PID" ]] && kill -0 "$E2E_TLS_PROXY_PID" >/dev/null 2>&1; then
+    kill "$E2E_TLS_PROXY_PID" >/dev/null 2>&1 || true
+    wait "$E2E_TLS_PROXY_PID" >/dev/null 2>&1 || true
+  fi
   if [[ -n "$E2E_GATEWAY_PID" ]] && kill -0 "$E2E_GATEWAY_PID" >/dev/null 2>&1; then
     kill "$E2E_GATEWAY_PID" >/dev/null 2>&1 || true
     wait "$E2E_GATEWAY_PID" >/dev/null 2>&1 || true
   fi
   if [[ -n "$E2E_GATEWAY_BIN" ]]; then
     rm -f "$E2E_GATEWAY_BIN"
+  fi
+  if [[ -n "$E2E_TLS_PROXY_BIN" ]]; then
+    rm -f "$E2E_TLS_PROXY_BIN"
+  fi
+  if [[ -n "$E2E_TLS_CA_FILE" ]]; then
+    rm -f "$E2E_TLS_CA_FILE"
+  fi
+  if [[ -n "$E2E_TLS_PROXY_DIR" ]]; then
+    rmdir "$E2E_TLS_PROXY_DIR" >/dev/null 2>&1 || true
   fi
 }
 
@@ -24,10 +42,17 @@ e2e_check_gateway_alive() {
   fi
 }
 
+e2e_check_tls_proxy_alive() {
+  if [[ -n "$E2E_TLS_PROXY_PID" ]] && ! kill -0 "$E2E_TLS_PROXY_PID" >/dev/null 2>&1; then
+    echo "TLS proxy exited unexpectedly" >&2
+    exit 1
+  fi
+}
+
 e2e_require_port_free() {
   local port="$1"
   if (echo >/dev/tcp/127.0.0.1/"$port") >/dev/null 2>&1; then
-    echo "gateway test port $port is already in use" >&2
+    echo "test port $port is already in use" >&2
     return 1
   fi
 }
@@ -94,4 +119,37 @@ e2e_start_gateway() {
   E2E_GATEWAY_PID="$!"
 
   e2e_wait_http "gateway readiness" "http://127.0.0.1:18082/readyz"
+}
+
+e2e_start_tls_proxy() {
+  cd "$E2E_ROOT_DIR"
+  e2e_require_port_free 9900
+
+  E2E_TLS_PROXY_DIR="$(mktemp -d "${TMPDIR:-/tmp}/z-courier-e2e-tls-XXXXXX")"
+  E2E_TLS_CA_FILE="$E2E_TLS_PROXY_DIR/ca.crt"
+  E2E_TLS_PROXY_BIN="${TMPDIR:-/tmp}/z-courier-e2e-tls-proxy-$$"
+
+  echo "building SDK TLS edge..."
+  go build -o "$E2E_TLS_PROXY_BIN" ./cmd/e2etlsproxy
+
+  echo "starting SDK TLS edge..."
+  "$E2E_TLS_PROXY_BIN" \
+    -listen "$E2E_TLS_PROXY_ADDRESS" \
+    -upstream 127.0.0.1:9899 \
+    -ca-file "$E2E_TLS_CA_FILE" &
+  E2E_TLS_PROXY_PID="$!"
+
+  echo "waiting for SDK TLS edge..."
+  for attempt in $(seq 1 100); do
+    e2e_check_gateway_alive
+    e2e_check_tls_proxy_alive
+    if [[ -s "$E2E_TLS_CA_FILE" ]]; then
+      return 0
+    fi
+    if [[ "$attempt" == "100" ]]; then
+      echo "SDK TLS edge did not become ready in time" >&2
+      return 1
+    fi
+    sleep 0.1
+  done
 }

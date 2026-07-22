@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	sdkbackend "github.com/qiuyier/Z-Courier/pkg/sdk/backend"
@@ -22,6 +23,9 @@ type config struct {
 	ClientID      string
 	DeviceID      string
 	Token         string
+	TLSEnabled    bool
+	TLSCAFile     string
+	TLSServerName string
 	UpstreamMsgID uint32
 	PolicyName    string
 	Timeout       time.Duration
@@ -47,10 +51,18 @@ func parseConfig() config {
 	flag.StringVar(&configuration.ClientID, "client-id", "e2e-client", "authenticated client ID")
 	flag.StringVar(&configuration.DeviceID, "device-id", "sdk-e2e-device", "device ID")
 	flag.StringVar(&configuration.Token, "token", "e2e-token", "client authentication token")
+	flag.BoolVar(&configuration.TLSEnabled, "tls", false, "enable certificate-verified TLS")
+	flag.StringVar(&configuration.TLSCAFile, "tls-ca-file", "", "optional private CA PEM file")
+	flag.StringVar(&configuration.TLSServerName, "tls-server-name", "", "optional TLS server name override")
 	upstreamMsgID := flag.Uint("upstream-msg-id", 2001, "business upstream MsgID")
 	flag.StringVar(&configuration.PolicyName, "expect-policy-name", "", "expected downlink policy name; empty disables the check")
 	flag.DurationVar(&configuration.Timeout, "timeout", 30*time.Second, "overall verification timeout")
 	flag.Parse()
+	if !configuration.TLSEnabled &&
+		(strings.TrimSpace(configuration.TLSCAFile) != "" || strings.TrimSpace(configuration.TLSServerName) != "") {
+		fmt.Fprintln(os.Stderr, "-tls-ca-file and -tls-server-name require -tls")
+		os.Exit(2)
+	}
 	if uint64(*upstreamMsgID) > uint64(^uint32(0)) {
 		fmt.Fprintf(os.Stderr, "invalid -upstream-msg-id %d: exceeds uint32\n", *upstreamMsgID)
 		os.Exit(2)
@@ -113,6 +125,12 @@ func newGatewayClient(
 		ClientID: configuration.ClientID,
 		DeviceID: configuration.DeviceID,
 		Token:    configuration.Token,
+	}
+	if configuration.TLSEnabled {
+		clientConfig.TLS = &sdkclient.TLSConfig{
+			CAFile:     configuration.TLSCAFile,
+			ServerName: configuration.TLSServerName,
+		}
 	}
 	if downlinks != nil {
 		clientConfig.DownlinkHandler = func(ctx context.Context, packet *protocol.Packet) error {

@@ -100,6 +100,41 @@ errors use stable `ClientException::$kind` values.
 The blocking client serializes sends. Packets arriving while an ACK is pending
 are retained in a bounded inbound queue rather than mistaken for the ACK.
 
+### TLS Connections
+
+TLS is opt-in so existing private-network TCP deployments remain compatible.
+Use an empty `TlsConfig` to verify the edge certificate with the PHP/OpenSSL
+system trust store:
+
+```php
+use ZCourier\Client\TlsConfig;
+
+$config = new Config(
+    address: 'gateway.example.internal:8999',
+    clientId: 'client-1',
+    deviceId: 'device-1',
+    token: $token,
+    tls: new TlsConfig(),
+);
+```
+
+Private PKI deployments can provide a PEM CA file and override the expected
+certificate name when it differs from the address host:
+
+```php
+tls: new TlsConfig(
+    caFile: '/run/secrets/z-courier/ca.crt',
+    serverName: 'gateway.example.internal',
+),
+```
+
+Certificate verification cannot be disabled. `serverName` defaults to the host
+in `Config::$address`; TLS 1.2 is the minimum protocol version. The connect
+timeout covers the raw dial and TLS handshake. A custom `Connector` must return
+a raw blocking stream, after which the SDK applies TLS. Every reconnect obtains
+a new raw stream, performs a fresh handshake, fetches the next token, and then
+repeats AUTH/BIND.
+
 ### Downlink Messages
 
 Use `run()` for automatic callback dispatch. A successful callback sends the
@@ -196,6 +231,18 @@ export ZCOURIER_CLIENT_TOKEN=e2e-token
 php sdk/php/examples/client.php
 ```
 
+To use a private-CA TLS edge:
+
+```bash
+export ZCOURIER_CLIENT_TLS=1
+export ZCOURIER_CLIENT_TLS_CA_FILE=/run/secrets/z-courier/ca.crt
+export ZCOURIER_GATEWAY_ADDRESS=gateway.example.internal:8999
+php sdk/php/examples/client.php
+```
+
+Set `ZCOURIER_CLIENT_TLS_SERVER_NAME` only when the address host is not the
+certificate name.
+
 The worker sends one ACK-required upstream message, then continuously receives
 downlinks with automatic delivery ACK and reconnect enabled. It is designed for
 a CLI process managed by Supervisor, systemd, Docker, or Kubernetes. Do not run
@@ -206,7 +253,8 @@ rollout, especially its durable `MessageID` de-duplication requirements.
 
 ## Verify
 
-The test runner has no third-party dependency:
+The test runner has no Composer dependency. Client transport tests require the
+standard `pcntl` and `openssl` extensions:
 
 ```bash
 php sdk/php/tests/run.php
@@ -229,8 +277,8 @@ The analysis targets PHP 8.2 and does not use an ignore baseline.
 
 Run the live-gateway verifier from the repository root. It starts the existing
 local integration stack and checks bind, upstream ACK, automatic downlink ACK,
-connection replacement, reconnect with a fresh SessionID, and continued
-traffic:
+connection replacement, reconnect with a fresh TLS handshake and SessionID,
+and continued traffic through an ephemeral private-CA TLS edge:
 
 ```bash
 bash scripts/php_sdk_e2e.sh

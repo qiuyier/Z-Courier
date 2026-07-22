@@ -136,10 +136,10 @@ gateway, then validates:
 - online push and client delivery ACK
 - upstream forwarding to NSQ
 - Prometheus metrics exposure
-- public Go SDK bind, upstream ACK, downlink automatic ACK, reconnect, and
-  continued delivery after reconnect
-- public PHP SDK bind, upstream ACK, downlink automatic ACK, reconnect with a
-  fresh SessionID, and continued delivery after reconnect
+- public Go SDK bind, upstream ACK, downlink automatic ACK, TLS reconnect, and
+  continued delivery through an ephemeral private-CA TLS edge
+- public PHP SDK bind, upstream ACK, downlink automatic ACK, TLS reconnect with
+  a fresh SessionID, and continued delivery through the same TLS edge
 
 Run only the PHP SDK live-gateway verifier with the same local integration
 environment:

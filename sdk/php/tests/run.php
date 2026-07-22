@@ -719,6 +719,8 @@ assertClientError(
 );
 $client->close();
 
+require __DIR__ . '/tls.php';
+
 echo "PHP SDK tests passed: {$assertions} assertions\n";
 
 /** @return array<string, mixed> */
