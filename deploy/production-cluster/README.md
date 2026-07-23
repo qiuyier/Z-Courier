@@ -32,7 +32,7 @@ The stack includes:
 | ---: | --- | --- |
 | `8999` | `gateway-a:8999` | TCP client gateway |
 | `9000` | `gateway-b:8999` | TCP client gateway |
-| `9091` | `prometheus:9090` | Prometheus UI |
+| `9091` | `prometheus:9090` | Prometheus UI (override with `ZCOURIER_PRODUCTION_PROMETHEUS_PORT`) |
 
 The internal HTTP port `18080` is exposed only inside the Compose network. In a
 real deployment, backend services should call it through a private network or a
