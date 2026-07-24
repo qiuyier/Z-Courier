@@ -874,12 +874,14 @@ HTTP target fields:
   Packets above this limit are rejected quickly instead of waiting behind a
   slow backend.
 
-### HTTP Discovery Configuration (V15.1)
+### HTTP Discovery Configuration (V15.1-V15.2.1)
 
 V15.1 defines and validates the configuration contract for HTTP endpoint
-discovery. At this checkpoint, discovery routes are intentionally rejected
-during gateway runtime initialization because the resolver and selection
-runtime are delivered in V15.2. Existing `url` routes remain fully operational.
+discovery. V15.2.1 makes static discovery operational with immutable endpoint
+snapshots, concurrent round-robin selection, and process-local cooldown. DNS
+configuration is still rejected during runtime initialization until the
+refreshable resolver lands in V15.2.2. Existing `url` routes remain fully
+operational.
 
 Static discovery lists complete backend URLs:
 
@@ -929,7 +931,7 @@ Validation rules and defaults:
 - `discovery.type` is `static` or `dns`; `url` and `discovery` cannot be set
   together.
 - Static endpoints must be distinct absolute `http` or `https` URLs. Their
-  paths are part of each URL.
+  paths are part of each URL. Requests select endpoints in round-robin order.
 - DNS requires `scheme`, `hostname`, and a port from `1` through `65535`.
   `path` defaults to `/`; `refresh_interval` defaults to `30s` and accepts
   values from `1s` through `1h`.
@@ -938,12 +940,20 @@ Validation rules and defaults:
   `unhealthy_cooldown` defaults to `15s` and is bounded from `1s` through
   `10m`. For static discovery, `max_attempts` cannot exceed the number of
   configured endpoints.
+- Without failover, each message has one selected endpoint and one HTTP
+  attempt. With failover enabled, only a transport failure observed before
+  response headers can try another unattempted endpoint. The failed endpoint
+  remains in process-local cooldown and is skipped while another healthy
+  endpoint exists.
+- `timeout` applies to each endpoint attempt. Choose `timeout` and
+  `max_attempts` together so their worst-case latency remains inside the
+  gateway's request budget.
 - A regular Kubernetes Service normally resolves to its virtual ClusterIP. A
   headless Service can return Pod addresses and therefore exposes multiple
   candidates to endpoint selection.
-- Failover is intended for failures observed before response headers. A
-  received HTTP response is not replayed automatically. Backends should use
-  `MessageID` as an idempotency key where duplicate processing is unsafe.
+- A received HTTP response, including `5xx`, is not replayed automatically.
+  Backends should use `MessageID` as an idempotency key where duplicate
+  processing is unsafe.
 
 NSQ target example:
 

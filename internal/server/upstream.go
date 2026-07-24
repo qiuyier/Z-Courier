@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/qiuyier/Z-Courier/internal/adapter/httpforwarder"
 	"github.com/qiuyier/Z-Courier/internal/adapter/nsqforwarder"
@@ -59,14 +60,39 @@ func newUpstreamEngine(config Config) (*router.Engine, error) {
 
 func newRouteForwarder(routeConfig UpstreamRouteConfig) (router.Forwarder, error) {
 	if routeConfig.HTTP != nil {
-		if routeConfig.HTTP.URL == "" && routeConfig.HTTP.Discovery.Type != "" {
-			return nil, fmt.Errorf("upstream route %q: HTTP discovery runtime is not initialized", routeConfig.Name)
+		switch routeConfig.HTTP.Discovery.Type {
+		case "":
+			return httpforwarder.New(httpforwarder.Config{
+				URL:     routeConfig.HTTP.URL,
+				Token:   routeConfig.HTTP.Token,
+				Timeout: routeConfig.HTTP.Timeout,
+			}), nil
+		case "static":
+			resolver, err := httpforwarder.NewStaticResolver(routeConfig.HTTP.Discovery.Endpoints)
+			if err != nil {
+				return nil, fmt.Errorf("upstream route %q: %w", routeConfig.Name, err)
+			}
+			maxAttempts := 1
+			var unhealthyCooldown time.Duration
+			if routeConfig.HTTP.Failover.Enabled {
+				maxAttempts = routeConfig.HTTP.Failover.MaxAttempts
+				unhealthyCooldown = routeConfig.HTTP.Failover.UnhealthyCooldown
+			}
+			forwarder, err := httpforwarder.NewDiscovered(httpforwarder.DiscoveryConfig{
+				Resolver:          resolver,
+				Token:             routeConfig.HTTP.Token,
+				Timeout:           routeConfig.HTTP.Timeout,
+				MaxAttempts:       maxAttempts,
+				UnhealthyCooldown: unhealthyCooldown,
+			})
+			if err != nil {
+				_ = resolver.Close()
+				return nil, fmt.Errorf("upstream route %q: %w", routeConfig.Name, err)
+			}
+			return forwarder, nil
+		default:
+			return nil, fmt.Errorf("upstream route %q: HTTP discovery type %q runtime is not initialized", routeConfig.Name, routeConfig.HTTP.Discovery.Type)
 		}
-		return httpforwarder.New(httpforwarder.Config{
-			URL:     routeConfig.HTTP.URL,
-			Token:   routeConfig.HTTP.Token,
-			Timeout: routeConfig.HTTP.Timeout,
-		}), nil
 	}
 
 	if routeConfig.NSQ != nil {

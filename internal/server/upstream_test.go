@@ -7,24 +7,101 @@ import (
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/qiuyier/Z-Courier/internal/protocol"
 	"github.com/qiuyier/Z-Courier/internal/resilience"
 	"github.com/qiuyier/Z-Courier/internal/router"
 )
 
-func TestNewRouteForwarderRejectsDiscoveryWithoutRuntime(t *testing.T) {
-	_, err := newRouteForwarder(UpstreamRouteConfig{
+func TestNewRouteForwarderRunsStaticDiscoveryFailover(t *testing.T) {
+	unavailable := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	var received atomic.Int32
+	healthy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		received.Add(1)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer healthy.Close()
+	unavailableURL := unavailable.URL
+	unavailable.Close()
+
+	forwarder, err := newRouteForwarder(UpstreamRouteConfig{
 		Name: "orders",
 		HTTP: &HTTPUpstreamConfig{
 			Discovery: HTTPUpstreamDiscoveryConfig{
 				Type:      "static",
-				Endpoints: []string{"http://orders.internal/gateway/upstream"},
+				Endpoints: []string{unavailableURL, healthy.URL},
+			},
+			Failover: HTTPUpstreamFailoverConfig{
+				Enabled:           true,
+				MaxAttempts:       2,
+				UnhealthyCooldown: time.Minute,
 			},
 		},
 	})
-	if err == nil || err.Error() != `upstream route "orders": HTTP discovery runtime is not initialized` {
+	if err != nil {
 		t.Fatalf("newRouteForwarder() error = %v", err)
+	}
+	defer func() {
+		if closer, ok := forwarder.(interface{ Close() error }); ok {
+			_ = closer.Close()
+		}
+	}()
+
+	result, err := forwarder.Forward(context.Background(), protocol.NewPacket(1001, []byte("hello")))
+	if err != nil {
+		t.Fatalf("Forward() error = %v", err)
+	}
+	if result == nil || result.StatusCode != http.StatusNoContent || received.Load() != 1 {
+		t.Fatalf("result = %+v, received = %d", result, received.Load())
+	}
+}
+
+func TestNewRouteForwarderRejectsDNSDiscoveryWithoutRuntime(t *testing.T) {
+	_, err := newRouteForwarder(UpstreamRouteConfig{
+		Name: "orders",
+		HTTP: &HTTPUpstreamConfig{
+			Discovery: HTTPUpstreamDiscoveryConfig{Type: "dns"},
+		},
+	})
+	if err == nil || err.Error() != `upstream route "orders": HTTP discovery type "dns" runtime is not initialized` {
+		t.Fatalf("newRouteForwarder() error = %v", err)
+	}
+}
+
+func TestPrimaryHTTPUpstreamURLUsesStaticEndpoint(t *testing.T) {
+	config := &HTTPUpstreamConfig{
+		Discovery: HTTPUpstreamDiscoveryConfig{
+			Type:      "static",
+			Endpoints: []string{"https://orders-a.internal/gateway/upstream", "https://orders-b.internal/gateway/upstream"},
+		},
+	}
+	if got := primaryHTTPUpstreamURL(config); got != config.Discovery.Endpoints[0] {
+		t.Fatalf("primaryHTTPUpstreamURL() = %q", got)
+	}
+}
+
+func TestCheckHTTPUpstreamReportsPartialStaticFailure(t *testing.T) {
+	unavailable := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	healthy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer healthy.Close()
+	unavailableURL := unavailable.URL
+	unavailable.Close()
+
+	handler := &adminCheckHandler{httpClient: &http.Client{Timeout: time.Second}}
+	result := handler.checkHTTPUpstream(context.Background(), UpstreamRouteConfig{
+		Name: "orders",
+		HTTP: &HTTPUpstreamConfig{
+			Discovery: HTTPUpstreamDiscoveryConfig{
+				Type:      "static",
+				Endpoints: []string{unavailableURL, healthy.URL},
+			},
+		},
+	})
+	if result.Status != adminCheckStatusDegraded || result.Error != "1/2 http upstream endpoints passed" {
+		t.Fatalf("check result = %+v", result)
 	}
 }
 

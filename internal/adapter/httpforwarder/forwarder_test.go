@@ -3,9 +3,12 @@ package httpforwarder
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/bytedance/sonic"
 	"github.com/qiuyier/Z-Courier/internal/protocol"
@@ -84,6 +87,186 @@ func TestForwarderReturnsErrorOnNon2xx(t *testing.T) {
 	}
 	if result == nil || result.StatusCode != http.StatusBadGateway {
 		t.Fatalf("result = %+v, want status %d", result, http.StatusBadGateway)
+	}
+}
+
+func TestDiscoveredForwarderUsesRoundRobinSelection(t *testing.T) {
+	resolver, err := NewStaticResolver([]string{
+		"http://backend-a.local/gateway/upstream",
+		"http://backend-b.local/gateway/upstream",
+	})
+	if err != nil {
+		t.Fatalf("NewStaticResolver() error = %v", err)
+	}
+
+	var mu sync.Mutex
+	var hosts []string
+	forwarder, err := NewDiscovered(DiscoveryConfig{
+		Resolver:    resolver,
+		MaxAttempts: 1,
+		Client: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			mu.Lock()
+			hosts = append(hosts, r.URL.Host)
+			mu.Unlock()
+			return response(http.StatusNoContent, ""), nil
+		})},
+	})
+	if err != nil {
+		t.Fatalf("NewDiscovered() error = %v", err)
+	}
+
+	for range 4 {
+		if _, err := forwarder.Forward(context.Background(), protocol.NewPacket(1001, nil)); err != nil {
+			t.Fatalf("Forward() error = %v", err)
+		}
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	want := []string{"backend-a.local", "backend-b.local", "backend-a.local", "backend-b.local"}
+	if len(hosts) != len(want) {
+		t.Fatalf("hosts = %v, want %v", hosts, want)
+	}
+	for index := range want {
+		if hosts[index] != want[index] {
+			t.Fatalf("hosts = %v, want %v", hosts, want)
+		}
+	}
+}
+
+func TestDiscoveredForwarderFailsOverTransportError(t *testing.T) {
+	resolver, err := NewStaticResolver([]string{
+		"http://backend-a.local/gateway/upstream",
+		"http://backend-b.local/gateway/upstream",
+	})
+	if err != nil {
+		t.Fatalf("NewStaticResolver() error = %v", err)
+	}
+
+	var hosts []string
+	var bodies [][]byte
+	forwarder, err := NewDiscovered(DiscoveryConfig{
+		Resolver:          resolver,
+		MaxAttempts:       2,
+		UnhealthyCooldown: time.Minute,
+		Client: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			hosts = append(hosts, r.URL.Host)
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				return nil, err
+			}
+			bodies = append(bodies, body)
+			if r.URL.Host == "backend-a.local" {
+				return nil, errors.New("connection refused")
+			}
+			return response(http.StatusAccepted, ""), nil
+		})},
+	})
+	if err != nil {
+		t.Fatalf("NewDiscovered() error = %v", err)
+	}
+
+	packet := protocol.NewPacket(1001, []byte("hello"))
+	packet.MessageID = "message-1"
+	result, err := forwarder.Forward(context.Background(), packet)
+	if err != nil {
+		t.Fatalf("Forward() error = %v", err)
+	}
+	if result == nil || result.StatusCode != http.StatusAccepted {
+		t.Fatalf("result = %+v", result)
+	}
+	want := []string{"backend-a.local", "backend-b.local"}
+	if len(hosts) != len(want) || hosts[0] != want[0] || hosts[1] != want[1] {
+		t.Fatalf("hosts = %v, want %v", hosts, want)
+	}
+	if len(bodies) != 2 || !bytes.Equal(bodies[0], bodies[1]) || !bytes.Contains(bodies[0], []byte(`"message_id":"message-1"`)) {
+		t.Fatalf("failover bodies do not preserve the same message identity: %q", bodies)
+	}
+
+	hosts = nil
+	bodies = nil
+	if _, err := forwarder.Forward(context.Background(), protocol.NewPacket(1001, nil)); err != nil {
+		t.Fatalf("Forward() during cooldown error = %v", err)
+	}
+	if len(hosts) != 1 || hosts[0] != "backend-b.local" {
+		t.Fatalf("hosts during cooldown = %v, want backend-b only", hosts)
+	}
+}
+
+func TestDiscoveredForwarderDoesNotReplayHTTPResponse(t *testing.T) {
+	resolver, err := NewStaticResolver([]string{
+		"http://backend-a.local/gateway/upstream",
+		"http://backend-b.local/gateway/upstream",
+	})
+	if err != nil {
+		t.Fatalf("NewStaticResolver() error = %v", err)
+	}
+
+	var requests int
+	forwarder, err := NewDiscovered(DiscoveryConfig{
+		Resolver:          resolver,
+		MaxAttempts:       2,
+		UnhealthyCooldown: time.Minute,
+		Client: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			requests++
+			return response(http.StatusInternalServerError, "boom"), nil
+		})},
+	})
+	if err != nil {
+		t.Fatalf("NewDiscovered() error = %v", err)
+	}
+
+	result, err := forwarder.Forward(context.Background(), protocol.NewPacket(1001, nil))
+	if err == nil {
+		t.Fatal("Forward() error = nil, want HTTP status error")
+	}
+	if result == nil || result.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("result = %+v", result)
+	}
+	if requests != 1 {
+		t.Fatalf("requests = %d, want 1", requests)
+	}
+}
+
+func TestDiscoveredForwarderDoesNotReplayRedirectPolicyError(t *testing.T) {
+	resolver, err := NewStaticResolver([]string{
+		"http://backend-a.local/gateway/upstream",
+		"http://backend-b.local/gateway/upstream",
+	})
+	if err != nil {
+		t.Fatalf("NewStaticResolver() error = %v", err)
+	}
+
+	var requests int
+	forwarder, err := NewDiscovered(DiscoveryConfig{
+		Resolver:          resolver,
+		MaxAttempts:       2,
+		UnhealthyCooldown: time.Minute,
+		Client: &http.Client{
+			Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+				requests++
+				resp := response(http.StatusTemporaryRedirect, "")
+				resp.Header.Set("Location", "http://redirected.local/gateway/upstream")
+				return resp, nil
+			}),
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return errors.New("redirects disabled")
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewDiscovered() error = %v", err)
+	}
+
+	result, err := forwarder.Forward(context.Background(), protocol.NewPacket(1001, nil))
+	if err == nil {
+		t.Fatal("Forward() error = nil, want redirect policy error")
+	}
+	if result == nil || result.StatusCode != http.StatusTemporaryRedirect {
+		t.Fatalf("result = %+v", result)
+	}
+	if requests != 1 {
+		t.Fatalf("requests = %d, want 1", requests)
 	}
 }
 

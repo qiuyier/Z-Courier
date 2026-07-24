@@ -205,31 +205,51 @@ func (h *adminCheckHandler) checkClusterRegistry(ctx context.Context) adminCheck
 
 func (h *adminCheckHandler) checkHTTPUpstream(ctx context.Context, route UpstreamRouteConfig) adminCheckResult {
 	name := "http_upstream:" + route.Name
-	target := sanitizeAdminURL(route.HTTP.URL)
+	upstreamURLs := httpUpstreamURLs(route.HTTP)
+	target := sanitizeAdminURL(primaryHTTPUpstreamURL(route.HTTP))
 	startedAt := time.Now()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodHead, route.HTTP.URL, nil)
-	if err != nil {
+	if len(upstreamURLs) == 0 {
 		return adminCheckResult{Name: name, Status: adminCheckStatusFailed, Target: target, Latency: durationString(time.Since(startedAt)), Error: "invalid http upstream URL"}
 	}
-	if route.HTTP.Token != "" {
-		req.Header.Set("X-ZCourier-Internal-Token", route.HTTP.Token)
+
+	passed := 0
+	degraded := 0
+	for _, upstreamURL := range upstreamURLs {
+		req, err := http.NewRequestWithContext(ctx, http.MethodHead, upstreamURL, nil)
+		if err != nil {
+			continue
+		}
+		if route.HTTP.Token != "" {
+			req.Header.Set("X-ZCourier-Internal-Token", route.HTTP.Token)
+		}
+
+		resp, err := h.httpClient.Do(req)
+		if err != nil {
+			continue
+		}
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1024))
+		_ = resp.Body.Close()
+		if resp.StatusCode >= http.StatusInternalServerError {
+			degraded++
+			continue
+		}
+		passed++
 	}
 
-	resp, err := h.httpClient.Do(req)
-	if err != nil {
-		return adminCheckResult{Name: name, Status: adminCheckStatusFailed, Target: target, Latency: durationString(time.Since(startedAt)), Error: "http upstream request failed"}
+	latency := durationString(time.Since(startedAt))
+	if passed == len(upstreamURLs) {
+		return adminCheckResult{Name: name, Status: adminCheckStatusOK, Target: target, Latency: latency}
 	}
-	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1024))
-
-	status := adminCheckStatusOK
-	errorText := ""
-	if resp.StatusCode >= http.StatusInternalServerError {
-		status = adminCheckStatusDegraded
-		errorText = "http upstream returned " + resp.Status
+	if passed > 0 || degraded > 0 {
+		return adminCheckResult{
+			Name:    name,
+			Status:  adminCheckStatusDegraded,
+			Target:  target,
+			Latency: latency,
+			Error:   fmt.Sprintf("%d/%d http upstream endpoints passed", passed, len(upstreamURLs)),
+		}
 	}
-	return adminCheckResult{Name: name, Status: status, Target: target, Latency: durationString(time.Since(startedAt)), Error: errorText}
+	return adminCheckResult{Name: name, Status: adminCheckStatusFailed, Target: target, Latency: latency, Error: "http upstream request failed"}
 }
 
 func (h *adminCheckHandler) checkNSQUpstream(ctx context.Context, route UpstreamRouteConfig) adminCheckResult {

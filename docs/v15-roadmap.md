@@ -18,8 +18,11 @@ Implementation status:
 
 - V15.1 defines and validates the static/DNS discovery and bounded failover
   configuration contract.
-- Discovery route runtime initialization is intentionally blocked until the
-  resolver and endpoint-selection path lands in V15.2.
+- V15.2.1 makes static discovery operational with immutable snapshots,
+  round-robin selection, process-local cooldown, and bounded transport
+  failover.
+- DNS runtime initialization remains intentionally blocked until the
+  refreshable resolver lands in V15.2.2.
 
 ## Product Direction
 

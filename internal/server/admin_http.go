@@ -691,7 +691,7 @@ func adminRouteFromConfig(route UpstreamRouteConfig) adminRoute {
 	case route.HTTP != nil:
 		resp.TargetType = "http"
 		resp.HTTP = &adminHTTPRoute{
-			URL:     sanitizeAdminURL(route.HTTP.URL),
+			URL:     sanitizeAdminURL(primaryHTTPUpstreamURL(route.HTTP)),
 			Timeout: durationString(route.HTTP.Timeout),
 		}
 	case route.NSQ != nil:
@@ -713,6 +713,27 @@ func adminRouteFromConfig(route UpstreamRouteConfig) adminRoute {
 		resp.TargetType = "unknown"
 	}
 	return resp
+}
+
+func primaryHTTPUpstreamURL(config *HTTPUpstreamConfig) string {
+	urls := httpUpstreamURLs(config)
+	if len(urls) == 0 {
+		return ""
+	}
+	return urls[0]
+}
+
+func httpUpstreamURLs(config *HTTPUpstreamConfig) []string {
+	if config == nil {
+		return nil
+	}
+	if config.URL != "" {
+		return []string{config.URL}
+	}
+	if config.Discovery.Type == "static" && len(config.Discovery.Endpoints) > 0 {
+		return append([]string(nil), config.Discovery.Endpoints...)
+	}
+	return nil
 }
 
 func sanitizeAdminURL(raw string) string {
