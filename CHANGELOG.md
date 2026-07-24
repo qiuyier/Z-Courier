@@ -7,6 +7,8 @@ semantic versioning after the first public MVP tag.
 
 ## [Unreleased]
 
+## [v0.14.0] - 2026-07-24
+
 ### Added
 
 - V14 production transport-security roadmap covering terminal-webhook custom
