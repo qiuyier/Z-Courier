@@ -7,6 +7,15 @@ semantic versioning after the first public MVP tag.
 
 ## [Unreleased]
 
+### Added
+
+- V15.1 HTTP upstream discovery configuration for mutually exclusive legacy
+  URL, static endpoint-list, and DNS modes, with bounded refresh, failover, and
+  unhealthy-cooldown validation plus English and Chinese operator guidance.
+- Explicit gateway initialization rejection for discovery routes until the
+  V15.2 resolver runtime is connected, avoiding deferred empty-URL failures on
+  the first business packet.
+
 ## [v0.14.0] - 2026-07-24
 
 ### Added

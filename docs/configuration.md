@@ -866,12 +866,84 @@ upstream:
 
 HTTP target fields:
 
-- `url`: backend endpoint.
+- `url`: backend endpoint. It remains the operational single-endpoint mode and
+  is mutually exclusive with `discovery`.
 - `token`: optional bearer token sent to the backend.
 - `timeout`: HTTP request timeout.
 - `max_in_flight`: optional per-route upstream forwarding concurrency limit.
   Packets above this limit are rejected quickly instead of waiting behind a
   slow backend.
+
+### HTTP Discovery Configuration (V15.1)
+
+V15.1 defines and validates the configuration contract for HTTP endpoint
+discovery. At this checkpoint, discovery routes are intentionally rejected
+during gateway runtime initialization because the resolver and selection
+runtime are delivered in V15.2. Existing `url` routes remain fully operational.
+
+Static discovery lists complete backend URLs:
+
+```yaml
+upstream:
+  routes:
+    - name: orders-http
+      enabled: true
+      msg_id_min: 1001
+      msg_id_max: 1999
+      target:
+        type: http
+        discovery:
+          type: static
+          endpoints:
+            - http://orders-a:8080/gateway/upstream
+            - http://orders-b:8080/gateway/upstream
+        timeout: 2s
+        failover:
+          enabled: true
+          max_attempts: 2
+          unhealthy_cooldown: 15s
+```
+
+DNS discovery builds endpoint URLs from a scheme, resolved address, port, and
+route path:
+
+```yaml
+target:
+  type: http
+  path: /gateway/upstream
+  discovery:
+    type: dns
+    scheme: http
+    hostname: orders.default.svc.cluster.local
+    port: 8080
+    refresh_interval: 10s
+  timeout: 2s
+  failover:
+    enabled: true
+    max_attempts: 2
+    unhealthy_cooldown: 15s
+```
+
+Validation rules and defaults:
+
+- `discovery.type` is `static` or `dns`; `url` and `discovery` cannot be set
+  together.
+- Static endpoints must be distinct absolute `http` or `https` URLs. Their
+  paths are part of each URL.
+- DNS requires `scheme`, `hostname`, and a port from `1` through `65535`.
+  `path` defaults to `/`; `refresh_interval` defaults to `30s` and accepts
+  values from `1s` through `1h`.
+- `failover` is available only with discovery. When enabled,
+  `max_attempts` defaults to `2` and is bounded from `2` through `4`;
+  `unhealthy_cooldown` defaults to `15s` and is bounded from `1s` through
+  `10m`. For static discovery, `max_attempts` cannot exceed the number of
+  configured endpoints.
+- A regular Kubernetes Service normally resolves to its virtual ClusterIP. A
+  headless Service can return Pod addresses and therefore exposes multiple
+  candidates to endpoint selection.
+- Failover is intended for failures observed before response headers. A
+  received HTTP response is not replayed automatically. Backends should use
+  `MessageID` as an idempotency key where duplicate processing is unsafe.
 
 NSQ target example:
 

@@ -127,9 +127,27 @@ type UpstreamRouteConfig struct {
 }
 
 type HTTPUpstreamConfig struct {
-	URL     string
-	Token   string
-	Timeout time.Duration
+	URL       string
+	Path      string
+	Token     string
+	Timeout   time.Duration
+	Discovery HTTPUpstreamDiscoveryConfig
+	Failover  HTTPUpstreamFailoverConfig
+}
+
+type HTTPUpstreamDiscoveryConfig struct {
+	Type            string
+	Endpoints       []string
+	Scheme          string
+	Hostname        string
+	Port            int
+	RefreshInterval time.Duration
+}
+
+type HTTPUpstreamFailoverConfig struct {
+	Enabled           bool
+	MaxAttempts       int
+	UnhealthyCooldown time.Duration
 }
 
 type NSQUpstreamConfig struct {

@@ -1650,6 +1650,139 @@ upstream:
 	}
 }
 
+func TestLoadServerConfigHTTPStaticDiscovery(t *testing.T) {
+	path := writeConfig(t, `
+upstream:
+  routes:
+    - name: orders
+      msg_id_min: 1001
+      target:
+        type: http
+        timeout: 2s
+        discovery:
+          type: static
+          endpoints:
+            - https://orders-a.internal/gateway/upstream
+            - https://orders-b.internal/gateway/upstream
+        failover:
+          enabled: true
+`)
+
+	config, err := LoadServerConfig(path)
+	if err != nil {
+		t.Fatalf("LoadServerConfig() error = %v", err)
+	}
+	httpConfig := config.UpstreamRoutes[0].HTTP
+	if httpConfig == nil || httpConfig.URL != "" || httpConfig.Discovery.Type != "static" {
+		t.Fatalf("HTTP config = %+v", httpConfig)
+	}
+	if len(httpConfig.Discovery.Endpoints) != 2 || httpConfig.Discovery.Endpoints[1] != "https://orders-b.internal/gateway/upstream" {
+		t.Fatalf("discovery endpoints = %v", httpConfig.Discovery.Endpoints)
+	}
+	if !httpConfig.Failover.Enabled || httpConfig.Failover.MaxAttempts != 2 || httpConfig.Failover.UnhealthyCooldown != 15*time.Second {
+		t.Fatalf("failover = %+v", httpConfig.Failover)
+	}
+}
+
+func TestLoadServerConfigHTTPDNSDiscovery(t *testing.T) {
+	path := writeConfig(t, `
+upstream:
+  routes:
+    - name: orders
+      msg_id_min: 1001
+      target:
+        type: http
+        path: /gateway/upstream
+        discovery:
+          type: DNS
+          scheme: https
+          hostname: Orders.Default.SVC.Cluster.Local.
+          port: 8443
+          refresh_interval: 12s
+        failover:
+          enabled: true
+          max_attempts: 3
+          unhealthy_cooldown: 20s
+`)
+
+	config, err := LoadServerConfig(path)
+	if err != nil {
+		t.Fatalf("LoadServerConfig() error = %v", err)
+	}
+	httpConfig := config.UpstreamRoutes[0].HTTP
+	if httpConfig == nil || httpConfig.Path != "/gateway/upstream" || httpConfig.Discovery.Type != "dns" {
+		t.Fatalf("HTTP config = %+v", httpConfig)
+	}
+	if httpConfig.Discovery.Scheme != "https" || httpConfig.Discovery.Hostname != "orders.default.svc.cluster.local" || httpConfig.Discovery.Port != 8443 || httpConfig.Discovery.RefreshInterval != 12*time.Second {
+		t.Fatalf("DNS discovery = %+v", httpConfig.Discovery)
+	}
+	if httpConfig.Failover.MaxAttempts != 3 || httpConfig.Failover.UnhealthyCooldown != 20*time.Second {
+		t.Fatalf("failover = %+v", httpConfig.Failover)
+	}
+}
+
+func TestLoadServerConfigHTTPDNSDiscoveryDefaults(t *testing.T) {
+	path := writeConfig(t, `
+upstream:
+  routes:
+    - name: orders
+      msg_id_min: 1001
+      target:
+        type: http
+        discovery:
+          type: dns
+          scheme: http
+          hostname: orders.internal
+          port: 8080
+`)
+
+	config, err := LoadServerConfig(path)
+	if err != nil {
+		t.Fatalf("LoadServerConfig() error = %v", err)
+	}
+	httpConfig := config.UpstreamRoutes[0].HTTP
+	if httpConfig == nil {
+		t.Fatal("HTTP config = nil")
+	}
+	if httpConfig.Path != "/" || httpConfig.Discovery.RefreshInterval != 30*time.Second {
+		t.Fatalf("HTTP config = %+v, want path / and refresh interval 30s", httpConfig)
+	}
+	if httpConfig.Failover.Enabled || httpConfig.Failover.MaxAttempts != 0 || httpConfig.Failover.UnhealthyCooldown != 0 {
+		t.Fatalf("failover = %+v, want disabled zero values", httpConfig.Failover)
+	}
+}
+
+func TestLoadServerConfigRejectsInvalidHTTPDiscovery(t *testing.T) {
+	tests := []struct {
+		name      string
+		target    string
+		wantError string
+	}{
+		{name: "url and discovery", target: "url: http://backend.local\n        discovery:\n          type: static\n          endpoints: [http://backend-a.local]", wantError: "mutually exclusive"},
+		{name: "missing discovery type", target: "discovery:\n          endpoints: [http://backend-a.local]", wantError: "type must be static or dns"},
+		{name: "static endpoints required", target: "discovery:\n          type: static", wantError: "requires endpoints"},
+		{name: "duplicate static endpoint", target: "discovery:\n          type: static\n          endpoints: [http://backend-a.local, http://backend-a.local]", wantError: "duplicate endpoint"},
+		{name: "dns invalid scheme", target: "discovery:\n          type: dns\n          scheme: ftp\n          hostname: backend.local\n          port: 8080", wantError: "scheme must be http or https"},
+		{name: "dns invalid hostname", target: "discovery:\n          type: dns\n          scheme: http\n          hostname: bad_name.local\n          port: 8080", wantError: "hostname is invalid"},
+		{name: "dns invalid port", target: "discovery:\n          type: dns\n          scheme: http\n          hostname: backend.local\n          port: 70000", wantError: "port must be between"},
+		{name: "dns invalid refresh", target: "discovery:\n          type: dns\n          scheme: http\n          hostname: backend.local\n          port: 8080\n          refresh_interval: 500ms", wantError: "refresh_interval must be between"},
+		{name: "dns invalid path", target: "path: /gateway?secret=value\n        discovery:\n          type: dns\n          scheme: http\n          hostname: backend.local\n          port: 8080", wantError: "without query or fragment"},
+		{name: "failover requires discovery", target: "url: http://backend.local\n        failover:\n          enabled: true", wantError: "failover requires discovery"},
+		{name: "disabled failover settings", target: "discovery:\n          type: static\n          endpoints: [http://backend-a.local]\n        failover:\n          max_attempts: 2", wantError: "require enabled: true"},
+		{name: "attempts exceed endpoints", target: "discovery:\n          type: static\n          endpoints: [http://backend-a.local, http://backend-b.local]\n        failover:\n          enabled: true\n          max_attempts: 3", wantError: "exceeds static endpoint count"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			configText := "upstream:\n  routes:\n    - name: broken\n      msg_id_min: 1001\n      target:\n        type: http\n        " + test.target + "\n"
+			_, err := LoadServerConfig(writeConfig(t, configText))
+			if err == nil || !strings.Contains(err.Error(), test.wantError) {
+				t.Fatalf("LoadServerConfig() error = %v, want %q", err, test.wantError)
+			}
+		})
+	}
+}
+
 func TestValidateFileRejectsOverlappingUpstreamRoutes(t *testing.T) {
 	path := writeConfig(t, `
 upstream:

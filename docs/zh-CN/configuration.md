@@ -572,6 +572,69 @@ upstream:
 
 同一个 `MsgID` 只能匹配一个启用的 route。配置校验会拦截 route 重叠和保留 MsgID。
 
+### HTTP 服务发现配置（V15.1）
+
+原有 `target.url` 仍是当前可运行的单端点模式。V15.1 先确定并严格校验 HTTP
+服务发现的配置契约；这一阶段还没有接入 V15.2 的解析和端点选择运行时，因此配置了
+`discovery` 的 route 会在 gateway 初始化时明确拒绝启动，不会等到第一条业务消息
+才以空 URL 失败。
+
+静态发现直接填写完整的后端 URL：
+
+```yaml
+upstream:
+  routes:
+    - name: orders-http
+      enabled: true
+      msg_id_min: 1001
+      msg_id_max: 1999
+      target:
+        type: http
+        discovery:
+          type: static
+          endpoints:
+            - http://orders-a:8080/gateway/upstream
+            - http://orders-b:8080/gateway/upstream
+        timeout: 2s
+        failover:
+          enabled: true
+          max_attempts: 2
+          unhealthy_cooldown: 15s
+```
+
+DNS 发现使用协议、解析出的地址、端口和 route 级路径拼出端点 URL：
+
+```yaml
+target:
+  type: http
+  path: /gateway/upstream
+  discovery:
+    type: dns
+    scheme: http
+    hostname: orders.default.svc.cluster.local
+    port: 8080
+    refresh_interval: 10s
+  timeout: 2s
+  failover:
+    enabled: true
+    max_attempts: 2
+    unhealthy_cooldown: 15s
+```
+
+规则和默认值：
+
+- `discovery.type` 只能是 `static` 或 `dns`，并且不能和 `url` 同时配置。
+- 静态端点必须是互不重复的完整 `http` / `https` URL，路径直接写在各 URL 中。
+- DNS 模式必须提供 `scheme`、`hostname` 和 `1` 到 `65535` 的端口；`path`
+  默认 `/`；`refresh_interval` 默认 `30s`，范围为 `1s` 到 `1h`。
+- `failover` 只能搭配服务发现使用。启用后 `max_attempts` 默认 `2`，范围为
+  `2` 到 `4`；`unhealthy_cooldown` 默认 `15s`，范围为 `1s` 到 `10m`。
+  静态发现的 `max_attempts` 不能超过已配置的端点数量。
+- Kubernetes 普通 Service 通常只解析出虚拟 ClusterIP；Headless Service
+  可以返回多个 Pod 地址，端点选择器才会看到多个候选地址。
+- 故障切换面向“收到响应头之前”的连接类失败。只要已经收到 HTTP 响应，默认就
+  不自动重放；重要业务仍应在 backend 端用 `MessageID` 做幂等。
+
 ## Pipeline
 
 ```yaml

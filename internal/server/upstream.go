@@ -59,6 +59,9 @@ func newUpstreamEngine(config Config) (*router.Engine, error) {
 
 func newRouteForwarder(routeConfig UpstreamRouteConfig) (router.Forwarder, error) {
 	if routeConfig.HTTP != nil {
+		if routeConfig.HTTP.URL == "" && routeConfig.HTTP.Discovery.Type != "" {
+			return nil, fmt.Errorf("upstream route %q: HTTP discovery runtime is not initialized", routeConfig.Name)
+		}
 		return httpforwarder.New(httpforwarder.Config{
 			URL:     routeConfig.HTTP.URL,
 			Token:   routeConfig.HTTP.Token,

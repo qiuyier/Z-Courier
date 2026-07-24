@@ -20,8 +20,12 @@ import (
 )
 
 const (
-	DefaultPath = "configs/z-courier.yaml"
-	EnvPathKey  = "ZCOURIER_CONFIG"
+	DefaultPath                         = "configs/z-courier.yaml"
+	EnvPathKey                          = "ZCOURIER_CONFIG"
+	defaultHTTPDiscoveryRefreshInterval = 30 * time.Second
+	defaultHTTPFailoverMaxAttempts      = 2
+	defaultHTTPUnhealthyCooldown        = 15 * time.Second
+	maxHTTPFailoverAttempts             = 4
 )
 
 type File struct {
@@ -335,20 +339,38 @@ type UpstreamRouteConfig struct {
 }
 
 type TargetConfig struct {
-	Type          string   `yaml:"type"`
-	URL           string   `yaml:"url"`
-	Token         string   `yaml:"token"`
-	Timeout       string   `yaml:"timeout"`
-	MaxInFlight   int      `yaml:"max_in_flight"`
-	Addr          string   `yaml:"addr"`
-	NSQDAddrs     []string `yaml:"nsqd_addrs"`
-	Topic         string   `yaml:"topic"`
-	AuthSecret    string   `yaml:"auth_secret"`
-	DialTimeout   string   `yaml:"dial_timeout"`
-	ReadTimeout   string   `yaml:"read_timeout"`
-	WriteTimeout  string   `yaml:"write_timeout"`
-	PublishMode   string   `yaml:"publish_mode"`
-	RetryAttempts int      `yaml:"retry_attempts"`
+	Type          string              `yaml:"type"`
+	URL           string              `yaml:"url"`
+	Path          string              `yaml:"path"`
+	Token         string              `yaml:"token"`
+	Timeout       string              `yaml:"timeout"`
+	MaxInFlight   int                 `yaml:"max_in_flight"`
+	Discovery     HTTPDiscoveryConfig `yaml:"discovery"`
+	Failover      HTTPFailoverConfig  `yaml:"failover"`
+	Addr          string              `yaml:"addr"`
+	NSQDAddrs     []string            `yaml:"nsqd_addrs"`
+	Topic         string              `yaml:"topic"`
+	AuthSecret    string              `yaml:"auth_secret"`
+	DialTimeout   string              `yaml:"dial_timeout"`
+	ReadTimeout   string              `yaml:"read_timeout"`
+	WriteTimeout  string              `yaml:"write_timeout"`
+	PublishMode   string              `yaml:"publish_mode"`
+	RetryAttempts int                 `yaml:"retry_attempts"`
+}
+
+type HTTPDiscoveryConfig struct {
+	Type            string   `yaml:"type"`
+	Endpoints       []string `yaml:"endpoints"`
+	Scheme          string   `yaml:"scheme"`
+	Hostname        string   `yaml:"hostname"`
+	Port            int      `yaml:"port"`
+	RefreshInterval string   `yaml:"refresh_interval"`
+}
+
+type HTTPFailoverConfig struct {
+	Enabled           bool   `yaml:"enabled"`
+	MaxAttempts       int    `yaml:"max_attempts"`
+	UnhealthyCooldown string `yaml:"unhealthy_cooldown"`
 }
 
 func ResolvePath(flagValue string) string {
@@ -1794,20 +1816,179 @@ func toPipelineConfig(config PipelineConfig) (pipeline.Config, error) {
 }
 
 func toHTTPUpstreamConfig(route UpstreamRouteConfig) (*server.HTTPUpstreamConfig, error) {
-	if route.Target.URL == "" {
+	rawURL := strings.TrimSpace(route.Target.URL)
+	discoverySet := httpDiscoveryConfigSet(route.Target.Discovery)
+	if rawURL == "" && !discoverySet {
 		return nil, fmt.Errorf("config: route %q http target url is required", route.Name)
+	}
+	if rawURL != "" && discoverySet {
+		return nil, fmt.Errorf("config: route %q http target url and discovery are mutually exclusive", route.Name)
+	}
+	if rawURL != "" {
+		if err := validateAbsoluteHTTPURL(rawURL, fmt.Sprintf("route %q http target url", route.Name)); err != nil {
+			return nil, fmt.Errorf("config: %w", err)
+		}
+		if strings.TrimSpace(route.Target.Path) != "" {
+			return nil, fmt.Errorf("config: route %q http target path is only valid with dns discovery", route.Name)
+		}
 	}
 
 	timeout, err := parseOptionalDuration(route.Target.Timeout)
 	if err != nil {
 		return nil, fmt.Errorf("config: route %q target timeout: %w", route.Name, err)
 	}
+	discovery, pathValue, err := toHTTPDiscoveryConfig(route.Name, route.Target.Discovery, route.Target.Path)
+	if err != nil {
+		return nil, err
+	}
+	failover, err := toHTTPFailoverConfig(route.Name, route.Target.Failover, discovery)
+	if err != nil {
+		return nil, err
+	}
 
 	return &server.HTTPUpstreamConfig{
-		URL:     route.Target.URL,
-		Token:   route.Target.Token,
-		Timeout: timeout,
+		URL:       rawURL,
+		Path:      pathValue,
+		Token:     route.Target.Token,
+		Timeout:   timeout,
+		Discovery: discovery,
+		Failover:  failover,
 	}, nil
+}
+
+func toHTTPDiscoveryConfig(routeName string, config HTTPDiscoveryConfig, targetPath string) (server.HTTPUpstreamDiscoveryConfig, string, error) {
+	if !httpDiscoveryConfigSet(config) {
+		return server.HTTPUpstreamDiscoveryConfig{}, "", nil
+	}
+
+	discoveryType := strings.ToLower(strings.TrimSpace(config.Type))
+	switch discoveryType {
+	case "static":
+		if len(config.Endpoints) == 0 {
+			return server.HTTPUpstreamDiscoveryConfig{}, "", fmt.Errorf("config: route %q static discovery requires endpoints", routeName)
+		}
+		if config.Scheme != "" || config.Hostname != "" || config.Port != 0 || config.RefreshInterval != "" || strings.TrimSpace(targetPath) != "" {
+			return server.HTTPUpstreamDiscoveryConfig{}, "", fmt.Errorf("config: route %q static discovery accepts only type and endpoints", routeName)
+		}
+		endpoints := make([]string, 0, len(config.Endpoints))
+		seen := make(map[string]struct{}, len(config.Endpoints))
+		for index, endpoint := range config.Endpoints {
+			normalized := strings.TrimSpace(endpoint)
+			if err := validateAbsoluteHTTPURL(normalized, fmt.Sprintf("route %q static discovery endpoint #%d", routeName, index+1)); err != nil {
+				return server.HTTPUpstreamDiscoveryConfig{}, "", fmt.Errorf("config: %w", err)
+			}
+			if _, exists := seen[normalized]; exists {
+				return server.HTTPUpstreamDiscoveryConfig{}, "", fmt.Errorf("config: route %q static discovery contains duplicate endpoint %q", routeName, normalized)
+			}
+			seen[normalized] = struct{}{}
+			endpoints = append(endpoints, normalized)
+		}
+		return server.HTTPUpstreamDiscoveryConfig{Type: discoveryType, Endpoints: endpoints}, "", nil
+
+	case "dns":
+		if len(config.Endpoints) != 0 {
+			return server.HTTPUpstreamDiscoveryConfig{}, "", fmt.Errorf("config: route %q dns discovery does not accept endpoints", routeName)
+		}
+		scheme := strings.ToLower(strings.TrimSpace(config.Scheme))
+		if scheme != "http" && scheme != "https" {
+			return server.HTTPUpstreamDiscoveryConfig{}, "", fmt.Errorf("config: route %q dns discovery scheme must be http or https", routeName)
+		}
+		hostname := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(config.Hostname)), ".")
+		if !validDNSHostname(hostname) {
+			return server.HTTPUpstreamDiscoveryConfig{}, "", fmt.Errorf("config: route %q dns discovery hostname is invalid", routeName)
+		}
+		if config.Port < 1 || config.Port > 65535 {
+			return server.HTTPUpstreamDiscoveryConfig{}, "", fmt.Errorf("config: route %q dns discovery port must be between 1 and 65535", routeName)
+		}
+		refreshInterval := defaultHTTPDiscoveryRefreshInterval
+		if config.RefreshInterval != "" {
+			parsed, err := parseOptionalDuration(config.RefreshInterval)
+			if err != nil {
+				return server.HTTPUpstreamDiscoveryConfig{}, "", fmt.Errorf("config: route %q dns discovery refresh_interval: %w", routeName, err)
+			}
+			refreshInterval = parsed
+		}
+		if refreshInterval < time.Second || refreshInterval > time.Hour {
+			return server.HTTPUpstreamDiscoveryConfig{}, "", fmt.Errorf("config: route %q dns discovery refresh_interval must be between 1s and 1h", routeName)
+		}
+		pathValue := strings.TrimSpace(targetPath)
+		if pathValue == "" {
+			pathValue = "/"
+		}
+		parsedPath, err := url.ParseRequestURI(pathValue)
+		if err != nil || !strings.HasPrefix(pathValue, "/") || strings.HasPrefix(pathValue, "//") || parsedPath.RawQuery != "" || parsedPath.Fragment != "" {
+			return server.HTTPUpstreamDiscoveryConfig{}, "", fmt.Errorf("config: route %q dns discovery target path must be an absolute path without query or fragment", routeName)
+		}
+		return server.HTTPUpstreamDiscoveryConfig{
+			Type:            discoveryType,
+			Scheme:          scheme,
+			Hostname:        hostname,
+			Port:            config.Port,
+			RefreshInterval: refreshInterval,
+		}, pathValue, nil
+
+	default:
+		return server.HTTPUpstreamDiscoveryConfig{}, "", fmt.Errorf("config: route %q http discovery type must be static or dns", routeName)
+	}
+}
+
+func toHTTPFailoverConfig(routeName string, config HTTPFailoverConfig, discovery server.HTTPUpstreamDiscoveryConfig) (server.HTTPUpstreamFailoverConfig, error) {
+	if !config.Enabled {
+		if config.MaxAttempts != 0 || config.UnhealthyCooldown != "" {
+			return server.HTTPUpstreamFailoverConfig{}, fmt.Errorf("config: route %q http failover settings require enabled: true", routeName)
+		}
+		return server.HTTPUpstreamFailoverConfig{}, nil
+	}
+	if discovery.Type == "" {
+		return server.HTTPUpstreamFailoverConfig{}, fmt.Errorf("config: route %q http failover requires discovery", routeName)
+	}
+
+	maxAttempts := config.MaxAttempts
+	if maxAttempts == 0 {
+		maxAttempts = defaultHTTPFailoverMaxAttempts
+	}
+	if maxAttempts < 2 || maxAttempts > maxHTTPFailoverAttempts {
+		return server.HTTPUpstreamFailoverConfig{}, fmt.Errorf("config: route %q http failover max_attempts must be between 2 and %d", routeName, maxHTTPFailoverAttempts)
+	}
+	if discovery.Type == "static" && maxAttempts > len(discovery.Endpoints) {
+		return server.HTTPUpstreamFailoverConfig{}, fmt.Errorf("config: route %q http failover max_attempts exceeds static endpoint count", routeName)
+	}
+
+	cooldown := defaultHTTPUnhealthyCooldown
+	if config.UnhealthyCooldown != "" {
+		parsed, err := parseOptionalDuration(config.UnhealthyCooldown)
+		if err != nil {
+			return server.HTTPUpstreamFailoverConfig{}, fmt.Errorf("config: route %q http failover unhealthy_cooldown: %w", routeName, err)
+		}
+		cooldown = parsed
+	}
+	if cooldown < time.Second || cooldown > 10*time.Minute {
+		return server.HTTPUpstreamFailoverConfig{}, fmt.Errorf("config: route %q http failover unhealthy_cooldown must be between 1s and 10m", routeName)
+	}
+
+	return server.HTTPUpstreamFailoverConfig{Enabled: true, MaxAttempts: maxAttempts, UnhealthyCooldown: cooldown}, nil
+}
+
+func httpDiscoveryConfigSet(config HTTPDiscoveryConfig) bool {
+	return config.Type != "" || len(config.Endpoints) != 0 || config.Scheme != "" || config.Hostname != "" || config.Port != 0 || config.RefreshInterval != ""
+}
+
+func validDNSHostname(hostname string) bool {
+	if hostname == "" || len(hostname) > 253 || strings.ContainsAny(hostname, "/:@?#") {
+		return false
+	}
+	for _, label := range strings.Split(hostname, ".") {
+		if label == "" || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for _, character := range label {
+			if (character >= 'a' && character <= 'z') || (character >= '0' && character <= '9') || character == '-' {
+				continue
+			}
+			return false
+		}
+	}
+	return true
 }
 
 func toNSQUpstreamConfig(route UpstreamRouteConfig) (*server.NSQUpstreamConfig, error) {

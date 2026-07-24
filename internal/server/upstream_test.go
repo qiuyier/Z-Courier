@@ -13,6 +13,21 @@ import (
 	"github.com/qiuyier/Z-Courier/internal/router"
 )
 
+func TestNewRouteForwarderRejectsDiscoveryWithoutRuntime(t *testing.T) {
+	_, err := newRouteForwarder(UpstreamRouteConfig{
+		Name: "orders",
+		HTTP: &HTTPUpstreamConfig{
+			Discovery: HTTPUpstreamDiscoveryConfig{
+				Type:      "static",
+				Endpoints: []string{"http://orders.internal/gateway/upstream"},
+			},
+		},
+	})
+	if err == nil || err.Error() != `upstream route "orders": HTTP discovery runtime is not initialized` {
+		t.Fatalf("newRouteForwarder() error = %v", err)
+	}
+}
+
 func TestCapacityForwarderRejectsWhenFull(t *testing.T) {
 	release := make(chan struct{})
 	entered := make(chan struct{})

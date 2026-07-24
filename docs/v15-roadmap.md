@@ -14,6 +14,13 @@ This document is a roadmap, not a release guarantee. A feature is not part of
 `v0.15.0` until it is implemented, documented, tested, and included in the
 release guide for that version.
 
+Implementation status:
+
+- V15.1 defines and validates the static/DNS discovery and bounded failover
+  configuration contract.
+- Discovery route runtime initialization is intentionally blocked until the
+  resolver and endpoint-selection path lands in V15.2.
+
 ## Product Direction
 
 V15 adds health-aware endpoint selection to the existing HTTP upstream
@@ -54,15 +61,14 @@ request may have reached a backend before a network failure is observed. The
 gateway must never hide that fact.
 
 - Endpoint selection happens before a request is sent.
-- A connection error, timeout before response headers, or an explicitly
-  retryable gateway response may try one other currently healthy endpoint only
-  when the route opt-in is enabled.
+- A connection error or timeout before response headers may try another
+  currently healthy endpoint only when the route opt-in is enabled.
 - A response with received headers is never replayed by default, including
   `5xx`; the backend has already observed a request attempt.
 - The backend must treat `MessageID` as its idempotency key for any operation
   where duplicate processing is unsafe.
-- Existing single-URL routes retain their current one-attempt behavior unless
-  an operator explicitly enables endpoint failover.
+- Existing single-URL routes retain their current one-attempt behavior.
+  Operators opt into failover by migrating that route to discovery mode.
 
 This keeps the gateway honest about delivery ambiguity while still letting a
 new TCP connection avoid an endpoint known to be unavailable.
@@ -77,12 +83,13 @@ upstream:
   routes:
     - name: orders-http
       enabled: true
-      msg_id_min: 1000
+      msg_id_min: 1001
       msg_id_max: 1999
       target:
         type: http
         discovery:
           type: dns
+          scheme: http
           hostname: orders.default.svc.cluster.local
           port: 8080
           refresh_interval: 10s
@@ -147,7 +154,8 @@ Purpose: improve connection-failure availability without claiming exactly once.
 
 - Classify retryable pre-response transport failures separately from received
   HTTP responses.
-- Permit at most the configured number of endpoint attempts, defaulting to one.
+- Keep existing single-URL routes at one attempt. Discovery routes with
+  failover enabled default to two attempts and remain explicitly bounded.
 - Add the endpoint and attempt count to structured logs and audit-safe error
   metadata, never to client responses if it would expose internal topology.
 - Reuse the existing request `MessageID`; do not create a new business identity
