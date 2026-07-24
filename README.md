@@ -130,6 +130,11 @@ certificate rotation procedure, including rollback, is in
 release acceptance matrix is in [docs/v14-release.md](docs/v14-release.md) and
 [docs/zh-CN/v14-release.md](docs/zh-CN/v14-release.md).
 
+V15 upstream service-discovery planning is tracked in
+[docs/v15-roadmap.md](docs/v15-roadmap.md). It defines static and DNS endpoint
+discovery, bounded health-aware failover, and operational visibility without
+changing the opaque client-message protocol.
+
 ## Quick Start
 
 Run the single-node integration verifier from the repository root:
