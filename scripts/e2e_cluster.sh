@@ -193,20 +193,40 @@ go run ./cmd/e2e \
   -expect-per-device-limit 8 \
   -check-retry-fairness \
   -retry-fairness-scan-limit 3 \
+  -timeout 75s \
+  "$@"
+
+echo "draining new-key gateway-b before verifying the old-key gateway..."
+kill "$GATEWAY_B_PID"
+wait "$GATEWAY_B_PID" || true
+GATEWAY_B_PID=""
+
+go run ./cmd/e2e \
+  -gateway-port 9901 \
+  -internal-url http://127.0.0.1:18182 \
+  -device-id "e2e-cluster-old-key-device-$RUN_ID" \
   -check-terminal-event \
+  -check-terminal-event-only \
+  -check-retry-fairness \
+  -expect-per-device-limit 8 \
+  -retry-fairness-scan-limit 3 \
   -terminal-publisher http \
   -terminal-webhook-hmac-keys "$TERMINAL_WEBHOOK_OLD_KEY_ID=$TERMINAL_WEBHOOK_OLD_SECRET,$TERMINAL_WEBHOOK_NEW_KEY_ID=$TERMINAL_WEBHOOK_NEW_SECRET" \
   -terminal-webhook-required-key-ids "$TERMINAL_WEBHOOK_OLD_KEY_ID" \
   -terminal-event-targets "http://127.0.0.1:18182@$TERMINAL_WEBHOOK_OLD_KEY_ID" \
   -terminal-webhook-failures 1 \
   -expect-terminal-policy integration-terminal \
-  -timeout 75s \
-  "$@"
+  -timeout 30s
 
 echo "draining old-key gateway-a before verifying the new-key gateway..."
 kill "$GATEWAY_A_PID"
 wait "$GATEWAY_A_PID" || true
 GATEWAY_A_PID=""
+
+echo "restarting new-key gateway-b..."
+ZINX_CONFIG_FILE_PATH="$ZINX_CONFIG_B" "$GATEWAY_BIN" -config "$CONFIG_B" >"$LOG_DIR/e2e-cluster-gateway-b.log" 2>&1 &
+GATEWAY_B_PID="$!"
+wait_http "gateway-b restart readiness" "http://127.0.0.1:18183/readyz"
 
 go run ./cmd/e2e \
   -gateway-port 9902 \
