@@ -113,6 +113,52 @@ groups:
           description: "At least one HTTP upstream route has repeated forwarding failures. Check cmd/admin diagnostics for route state and last_reason."
           runbook_url: "https://github.com/qiuyier/Z-Courier/blob/main/docs/v5-production-runbook.md#upstream-forwarding-failures"
 
+      - alert: ZCourierUpstreamDiscoveryEmpty
+        expr: |
+          (
+            max by (job, instance, route, discovery_type) (z_courier_upstream_discovery_resolved_endpoints) == 0
+          )
+          and on (job, instance)
+          (
+            max by (job, instance) (z_courier_gateway_readiness{status="ready"}) == 1
+          )
+        for: 5m
+        labels:
+          severity: warning
+          component: upstream-discovery
+        annotations:
+          summary: "Z-Courier upstream discovery has no resolved endpoints"
+          description: "Ready gateway {{ $labels.instance }} has no resolved endpoints for route {{ $labels.route }} ({{ $labels.discovery_type }})."
+          runbook_url: "https://github.com/qiuyier/Z-Courier/blob/main/docs/v5-production-runbook.md#upstream-discovery-unavailable"
+
+      - alert: ZCourierUpstreamDiscoveryAllEndpointsUnavailable
+        expr: |
+          (
+            max by (job, instance, route, discovery_type) (z_courier_upstream_endpoint_unhealthy)
+            >=
+            max by (job, instance, route, discovery_type) (z_courier_upstream_discovery_resolved_endpoints)
+          )
+          and
+          (
+            max by (job, instance, route, discovery_type) (z_courier_upstream_discovery_resolved_endpoints) > 0
+          )
+          and on (job, instance, route, discovery_type)
+          (
+            sum by (job, instance, route, discovery_type) (rate(z_courier_upstream_endpoint_selection_total{result="no_available"}[5m])) > 0
+          )
+          and on (job, instance)
+          (
+            max by (job, instance) (z_courier_gateway_readiness{status="ready"}) == 1
+          )
+        for: 5m
+        labels:
+          severity: warning
+          component: upstream-discovery
+        annotations:
+          summary: "Z-Courier upstream discovery cannot select an endpoint"
+          description: "Ready gateway {{ $labels.instance }} cannot select an endpoint for route {{ $labels.route }} because every resolved endpoint remains unavailable."
+          runbook_url: "https://github.com/qiuyier/Z-Courier/blob/main/docs/v5-production-runbook.md#upstream-discovery-unavailable"
+
       - alert: ZCourierUpstreamOverloadRejects
         expr: sum(rate(z_courier_upstream_overload_rejected_total[5m])) > 0
         for: 5m

@@ -104,6 +104,7 @@ before changing message state.
 | ACK | `downlink_ack_total{result="delivered"}` increases for ACK-required messages |
 | Retry | retry scans run without sustained failed claim or store errors |
 | Cluster | peer push success increases when cross-node delivery is expected |
+| Discovery | every enabled discovery route has resolved endpoints and can select one |
 
 ## Prometheus Alerts
 
@@ -129,6 +130,8 @@ and Slack live under `deploy/monitoring/alertmanager/examples/`.
 | `ZCourierAuthFailureRatioHigh` | Auth backend/JWT issue or client token rollout problem | Check auth provider status and rejected bind logs |
 | `ZCourierHMACSignatureFailures` | Wrong key ID, secret mismatch, clock skew, replay | Check internal and peer HMAC config on both caller and gateway |
 | `ZCourierUpstreamFailureRatioHigh` | Business backend, NSQ, network, or route config problem | Run `cmd/admin routes` and `cmd/admin check`; inspect upstream logs |
+| `ZCourierUpstreamDiscoveryEmpty` | DNS returns no usable address or a discovery route has no active snapshot | Inspect Console Diagnostics or `cmd/admin diagnostics`; check DNS and route config |
+| `ZCourierUpstreamDiscoveryAllEndpointsUnavailable` | Every resolved endpoint is in cooldown while traffic still needs an endpoint | Check classified endpoint failures, backend reachability, and cooldown settings |
 | `ZCourierUpstreamOverloadRejects` | Upstream capacity limit reached | Check backend latency, route `max_in_flight`, and load-test traffic |
 | `ZCourierInternalHTTPOverloadRejects` | Backend push/admin pressure exceeds gateway limit | Check internal push rate and `internal_http.max_in_flight` |
 | `ZCourierDownlinkPushFailures` | Missing route, peer push issue, storage/retry problem | Run `cmd/admin route` for affected client/device |
@@ -413,6 +416,54 @@ Look for:
 - NSQ address or topic mismatch
 - route disabled in YAML
 - in-flight limiter saturation
+
+### Upstream Discovery Unavailable
+
+Symptoms:
+
+- `ZCourierUpstreamDiscoveryEmpty` or
+  `ZCourierUpstreamDiscoveryAllEndpointsUnavailable` is firing.
+- Console Diagnostics reports discovery as `unavailable`.
+- upstream ACKs report `upstream_failed` while a discovery-backed route is
+  selected.
+
+Inspect the process-local snapshot:
+
+```bash
+go run ./cmd/admin diagnostics
+```
+
+PromQL:
+
+```promql
+max by (instance, route, discovery_type) (z_courier_upstream_discovery_resolved_endpoints)
+max by (instance, route, discovery_type) (z_courier_upstream_endpoint_unhealthy)
+sum by (instance, route, discovery_type, result) (rate(z_courier_upstream_discovery_refresh_total[5m]))
+sum by (instance, route, discovery_type, result) (rate(z_courier_upstream_endpoint_selection_total[5m]))
+sum by (instance, route, discovery_type, failure_class) (rate(z_courier_upstream_endpoint_failure_total[5m]))
+sum by (instance, route, discovery_type, decision) (rate(z_courier_upstream_failover_total[5m]))
+```
+
+Interpretation:
+
+- `resolved_endpoints == 0` means there is no active snapshot. For DNS, check
+  the configured name, resolver reachability, and whether the answer contains
+  usable A/AAAA records. For static discovery, validate the configured endpoint
+  list and the running gateway configuration.
+- `unhealthy_endpoints >= resolved_endpoints` together with repeated
+  `selection{result="no_available"}` means current traffic cannot leave
+  cooldown. Use `failure_class` to separate transport, timeout, response, and
+  request failures before changing retry or cooldown settings.
+- A DNS refresh `error` with `resolved_endpoints > 0` means the last-known-good
+  snapshot is still serving traffic. Treat the refresh failure as a dashboard
+  signal; it does not fire the empty-discovery alert unless the active snapshot
+  is actually empty.
+- Discovery and cooldown state are process-local. Compare the Prometheus
+  `instance` label and the Diagnostics page on each gateway instead of assuming
+  every node has the same DNS snapshot at the same instant.
+
+Do not increase failover attempts until backend reachability and
+application-level idempotency have been checked.
 
 ### PostgreSQL Store Errors
 

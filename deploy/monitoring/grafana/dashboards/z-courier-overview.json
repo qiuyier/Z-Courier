@@ -3457,6 +3457,367 @@
       ],
       "title": "Downlink Queue Capacity Rejects / sec",
       "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 168
+      },
+      "id": 40,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "max by (instance, route, discovery_type) (z_courier_upstream_discovery_resolved_endpoints)",
+          "legendFormat": "resolved {{instance}} {{route}} {{discovery_type}}",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "max by (instance, route, discovery_type) (z_courier_upstream_endpoint_unhealthy)",
+          "legendFormat": "unhealthy {{instance}} {{route}} {{discovery_type}}",
+          "range": true,
+          "refId": "B"
+        }
+      ],
+      "title": "Discovery Endpoints",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 168
+      },
+      "id": 41,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (instance, route, discovery_type, result) (rate(z_courier_upstream_discovery_refresh_total[5m]))",
+          "legendFormat": "{{instance}} {{route}} {{discovery_type}} {{result}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Discovery Refresh / sec",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 176
+      },
+      "id": 42,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.95, sum by (instance, route, discovery_type, result, le) (rate(z_courier_upstream_discovery_refresh_duration_seconds_bucket[5m])))",
+          "legendFormat": "p95 {{instance}} {{route}} {{discovery_type}} {{result}}",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.99, sum by (instance, route, discovery_type, result, le) (rate(z_courier_upstream_discovery_refresh_duration_seconds_bucket[5m])))",
+          "legendFormat": "p99 {{instance}} {{route}} {{discovery_type}} {{result}}",
+          "range": true,
+          "refId": "B"
+        }
+      ],
+      "title": "Discovery Refresh Latency",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 176
+      },
+      "id": 43,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (instance, route, discovery_type, result) (rate(z_courier_upstream_endpoint_selection_total[5m]))",
+          "legendFormat": "selection {{instance}} {{route}} {{result}}",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (instance, route, discovery_type) (rate(z_courier_upstream_endpoint_cooldown_skipped_total[5m]))",
+          "legendFormat": "cooldown {{instance}} {{route}}",
+          "range": true,
+          "refId": "B"
+        }
+      ],
+      "title": "Endpoint Selection And Cooldown / sec",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 184
+      },
+      "id": 44,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.95, sum by (instance, route, discovery_type, result, le) (rate(z_courier_upstream_discovery_attempts_bucket[5m])))",
+          "legendFormat": "p95 {{instance}} {{route}} {{result}}",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.99, sum by (instance, route, discovery_type, result, le) (rate(z_courier_upstream_discovery_attempts_bucket[5m])))",
+          "legendFormat": "p99 {{instance}} {{route}} {{result}}",
+          "range": true,
+          "refId": "B"
+        }
+      ],
+      "title": "Forward Attempts",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 184
+      },
+      "id": 45,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (instance, route, discovery_type, failure_class) (rate(z_courier_upstream_endpoint_failure_total[5m]))",
+          "legendFormat": "failure {{instance}} {{route}} {{failure_class}}",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (instance, route, discovery_type, decision) (rate(z_courier_upstream_failover_total[5m]))",
+          "legendFormat": "failover {{instance}} {{route}} {{decision}}",
+          "range": true,
+          "refId": "B"
+        }
+      ],
+      "title": "Endpoint Failures And Failover / sec",
+      "type": "timeseries"
     }
   ],
   "refresh": "5s",
@@ -3476,6 +3837,6 @@
   "timezone": "browser",
   "title": "Z-Courier Overview",
   "uid": "z-courier-overview",
-  "version": 10,
+  "version": 11,
   "weekStart": ""
 }

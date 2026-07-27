@@ -1156,6 +1156,152 @@
       ],
       "title": "Admin Control Plane Errors / sec",
       "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 44
+      },
+      "id": 15,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "max by (job, instance, route, discovery_type) (z_courier_upstream_discovery_resolved_endpoints)",
+          "legendFormat": "resolved {{instance}} {{route}} {{discovery_type}}",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "max by (job, instance, route, discovery_type) (z_courier_upstream_endpoint_unhealthy)",
+          "legendFormat": "unhealthy {{instance}} {{route}} {{discovery_type}}",
+          "range": true,
+          "refId": "B"
+        }
+      ],
+      "title": "Discovery Endpoint Availability",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 44
+      },
+      "id": 16,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (instance, route, discovery_type, result) (rate(z_courier_upstream_discovery_refresh_total{result=~\"error|empty\"}[5m]))",
+          "legendFormat": "refresh {{instance}} {{route}} {{result}}",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (instance, route, discovery_type, result) (rate(z_courier_upstream_endpoint_selection_total{result=~\"resolver_error|no_available\"}[5m]))",
+          "legendFormat": "selection {{instance}} {{route}} {{result}}",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (instance, route, discovery_type, failure_class) (rate(z_courier_upstream_endpoint_failure_total[5m]))",
+          "legendFormat": "endpoint {{instance}} {{route}} {{failure_class}}",
+          "range": true,
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (instance, route, discovery_type, decision) (rate(z_courier_upstream_failover_total{decision=~\"exhausted|no_alternate\"}[5m]))",
+          "legendFormat": "failover {{instance}} {{route}} {{decision}}",
+          "range": true,
+          "refId": "D"
+        }
+      ],
+      "title": "Discovery And Failover Problems / sec",
+      "type": "timeseries"
     }
   ],
   "refresh": "10s",
@@ -1176,6 +1322,6 @@
   "timezone": "browser",
   "title": "Z-Courier Production Signals",
   "uid": "z-courier-production-signals",
-  "version": 1,
+  "version": 2,
   "weekStart": ""
 }

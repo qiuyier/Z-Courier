@@ -1,0 +1,65 @@
+rule_files:
+  - /workspace/deploy/monitoring/prometheus/rules/z-courier-alerts.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: empty discovery alerts only while the gateway is ready
+    interval: 1m
+    input_series:
+      - series: 'z_courier_gateway_readiness{job="z-courier",instance="gateway-a",status="ready"}'
+        values: "1 1 1 1 1 1 1 1"
+      - series: 'z_courier_upstream_discovery_resolved_endpoints{job="z-courier",instance="gateway-a",route="orders",discovery_type="dns"}'
+        values: "0 0 0 0 0 0 0 0"
+      - series: 'z_courier_gateway_readiness{job="z-courier",instance="gateway-b",status="ready"}'
+        values: "0 0 0 0 0 0 0 0"
+      - series: 'z_courier_upstream_discovery_resolved_endpoints{job="z-courier",instance="gateway-b",route="orders",discovery_type="dns"}'
+        values: "0 0 0 0 0 0 0 0"
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: ZCourierUpstreamDiscoveryEmpty
+        exp_alerts:
+          - exp_labels:
+              component: upstream-discovery
+              discovery_type: dns
+              instance: gateway-a
+              job: z-courier
+              route: orders
+              severity: warning
+            exp_annotations:
+              summary: "Z-Courier upstream discovery has no resolved endpoints"
+              description: "Ready gateway gateway-a has no resolved endpoints for route orders (dns)."
+              runbook_url: "https://github.com/qiuyier/Z-Courier/blob/main/docs/v5-production-runbook.md#upstream-discovery-unavailable"
+
+  - name: unavailable endpoints require active selection failures
+    interval: 1m
+    input_series:
+      - series: 'z_courier_gateway_readiness{job="z-courier",instance="gateway-a",status="ready"}'
+        values: "1 1 1 1 1 1 1 1 1"
+      - series: 'z_courier_upstream_discovery_resolved_endpoints{job="z-courier",instance="gateway-a",route="orders",discovery_type="static"}'
+        values: "2 2 2 2 2 2 2 2 2"
+      - series: 'z_courier_upstream_endpoint_unhealthy{job="z-courier",instance="gateway-a",route="orders",discovery_type="static"}'
+        values: "2 2 2 2 2 2 2 2 2"
+      - series: 'z_courier_upstream_endpoint_selection_total{job="z-courier",instance="gateway-a",route="orders",discovery_type="static",result="no_available"}'
+        values: "0 1 2 3 4 5 6 7 8"
+      - series: 'z_courier_gateway_readiness{job="z-courier",instance="gateway-b",status="ready"}'
+        values: "1 1 1 1 1 1 1 1 1"
+      - series: 'z_courier_upstream_discovery_resolved_endpoints{job="z-courier",instance="gateway-b",route="orders",discovery_type="static"}'
+        values: "2 2 2 2 2 2 2 2 2"
+      - series: 'z_courier_upstream_endpoint_unhealthy{job="z-courier",instance="gateway-b",route="orders",discovery_type="static"}'
+        values: "2 2 2 2 2 2 2 2 2"
+    alert_rule_test:
+      - eval_time: 7m
+        alertname: ZCourierUpstreamDiscoveryAllEndpointsUnavailable
+        exp_alerts:
+          - exp_labels:
+              component: upstream-discovery
+              discovery_type: static
+              instance: gateway-a
+              job: z-courier
+              route: orders
+              severity: warning
+            exp_annotations:
+              summary: "Z-Courier upstream discovery cannot select an endpoint"
+              description: "Ready gateway gateway-a cannot select an endpoint for route orders because every resolved endpoint remains unavailable."
+              runbook_url: "https://github.com/qiuyier/Z-Courier/blob/main/docs/v5-production-runbook.md#upstream-discovery-unavailable"

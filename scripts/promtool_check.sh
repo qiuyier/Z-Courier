@@ -22,6 +22,7 @@ amtool() {
 
 echo "checking Prometheus alert and recording rules..."
 promtool check rules /workspace/deploy/monitoring/prometheus/rules/z-courier-alerts.yml
+promtool test rules /workspace/deploy/monitoring/prometheus/tests/z-courier-alerts.test.yml
 
 echo "checking Prometheus configs..."
 promtool check config /workspace/deploy/monitoring/prometheus/prometheus.yml

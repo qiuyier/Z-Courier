@@ -32,6 +32,10 @@ Implementation status:
   endpoint failures, attempt distributions, and terminal failover decisions.
 - V15.4.2 adds sanitized process-local discovery snapshots to admin diagnostics
   and diagnosis bundles without exposing endpoint identity or raw errors.
+- V15.4.3 renders those snapshots as a read-only Console route view, adds
+  discovery and failover panels to the operations and production Grafana
+  dashboards, and ships readiness-gated availability alerts with promtool
+  behavior tests and bilingual response guidance.
 
 ## Product Direction
 

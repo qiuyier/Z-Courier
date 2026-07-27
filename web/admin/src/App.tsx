@@ -72,6 +72,7 @@ import type {
   MessageStatus,
   MessageStatusResponse,
   RetryScanResponse,
+  UpstreamDiscoveryRuntime,
 } from "./types";
 
 const messageStatuses: MessageStatus[] = ["failed", "pending", "sent", "delivered", "discarded"];
@@ -121,6 +122,18 @@ const diagnosticsMetricContexts: MetricContext[] = [
     metric: "z_courier_upstream_route_degraded",
     promql: "z_courier_upstream_route_degraded",
     hint: "One-hot route state for HTTP upstream routes with consecutive failures.",
+  },
+  {
+    label: "Discovery Endpoints",
+    metric: "z_courier_upstream_discovery_resolved_endpoints",
+    promql: "max by (route, discovery_type) (z_courier_upstream_discovery_resolved_endpoints)",
+    hint: "Compares the process-local endpoint snapshot across static and DNS routes.",
+  },
+  {
+    label: "Failover Decisions",
+    metric: "z_courier_upstream_failover_total",
+    promql: "sum by (route, discovery_type, decision) (rate(z_courier_upstream_failover_total[5m]))",
+    hint: "Separates successful alternate selection from disabled, exhausted, or unavailable failover.",
   },
   {
     label: "Internal HTTP Pressure",
@@ -4494,6 +4507,7 @@ function DiagnosticsPage({
                   <MetricRow label="Reason" value={route.last_reason || "--"} />
                 </div>
               </div>
+              {route.discovery && <DiscoveryRuntimePanel discovery={route.discovery} />}
             </article>
           ))}
         </section>
@@ -4863,6 +4877,136 @@ function MetricRow({ label, value }: { label: string; value: string }) {
       <span className="truncate text-right font-mono text-sm font-medium text-ink">{value}</span>
     </div>
   );
+}
+
+function DiscoveryRuntimePanel({ discovery }: { discovery: UpstreamDiscoveryRuntime }) {
+  const health = discoveryRuntimeHealth(discovery);
+  const forwardAttempts =
+    discovery.last_forward_attempts == null
+      ? undefined
+      : `${discovery.last_forward_attempts.toLocaleString()} attempt${discovery.last_forward_attempts === 1 ? "" : "s"}`;
+
+  return (
+    <div className="mt-4 border-t border-line pt-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="grid size-9 shrink-0 place-items-center rounded-lg border border-line bg-zinc-50 text-zinc-700">
+            <GitBranch size={18} weight="duotone" />
+          </span>
+          <div className="min-w-0">
+            <p className="font-medium text-ink">Endpoint Discovery</p>
+            <p className="mt-0.5 font-mono text-xs uppercase text-zinc-500">{discovery.type} runtime</p>
+          </div>
+        </div>
+        <StatusBadge label={health.label} tone={health.tone} />
+      </div>
+
+      <div className="mt-4 grid grid-cols-3 divide-x divide-line border-y border-line bg-zinc-50">
+        <DiscoveryRuntimeStat label="Resolved endpoints" shortLabel="Resolved" value={discovery.resolved_endpoints} />
+        <DiscoveryRuntimeStat label="Unhealthy endpoints" shortLabel="Unhealthy" value={discovery.unhealthy_endpoints} />
+        <DiscoveryRuntimeStat label="Cooldown skips" shortLabel="Cooldown" value={discovery.cooldown_skipped_total} />
+      </div>
+
+      <dl className="mt-2 grid gap-x-6 md:grid-cols-2 xl:grid-cols-3">
+        <DiscoveryRuntimeEvent
+          at={discovery.last_refresh_at}
+          detail={discovery.type === "static" ? "static snapshot" : discovery.last_refresh_duration}
+          label="Refresh"
+          result={discovery.type === "static" ? "not applicable" : discovery.last_refresh_result}
+        />
+        <DiscoveryRuntimeEvent
+          at={discovery.last_selection_at}
+          label="Selection"
+          result={discovery.last_selection_result}
+        />
+        <DiscoveryRuntimeEvent
+          at={discovery.last_forward_at}
+          detail={forwardAttempts}
+          label="Forward"
+          result={discovery.last_forward_result}
+        />
+        <DiscoveryRuntimeEvent
+          at={discovery.last_failover_at}
+          label="Failover"
+          result={discovery.last_failover_decision}
+        />
+        <DiscoveryRuntimeEvent
+          at={discovery.last_endpoint_failure_at}
+          label="Endpoint failure"
+          result={discovery.last_endpoint_failure_class}
+        />
+        <DiscoveryRuntimeEvent
+          at={discovery.last_cooldown_skipped_at}
+          detail={`${discovery.cooldown_skipped_total.toLocaleString()} total`}
+          label="Cooldown activity"
+          result={discovery.cooldown_skipped_total > 0 ? "skipped" : "none"}
+        />
+      </dl>
+    </div>
+  );
+}
+
+function DiscoveryRuntimeStat({
+  label,
+  shortLabel,
+  value,
+}: {
+  label: string;
+  shortLabel: string;
+  value: number;
+}) {
+  return (
+    <div aria-label={`${label}: ${value}`} className="min-w-0 px-3 py-3 text-center sm:px-4">
+      <p className="truncate text-xs text-zinc-500">{shortLabel}</p>
+      <p className="mt-1 font-mono text-xl font-semibold text-ink">{value.toLocaleString()}</p>
+    </div>
+  );
+}
+
+function DiscoveryRuntimeEvent({
+  at,
+  detail,
+  label,
+  result,
+}: {
+  at?: string;
+  detail?: string;
+  label: string;
+  result?: string;
+}) {
+  return (
+    <div className="min-w-0 border-b border-line py-3">
+      <dt className="text-xs uppercase text-zinc-500">{label}</dt>
+      <dd className="mt-1 flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
+        <span className="break-words font-mono text-sm font-medium text-ink">{result || "--"}</span>
+        {detail && <span className="break-words font-mono text-xs text-zinc-500">{detail}</span>}
+      </dd>
+      <dd className="mt-1 truncate text-xs text-zinc-400">{formatOptionalDate(at)}</dd>
+    </div>
+  );
+}
+
+function discoveryRuntimeHealth(discovery: UpstreamDiscoveryRuntime): {
+  label: string;
+  tone: StatusBadgeTone;
+} {
+  if (
+    discovery.resolved_endpoints === 0 ||
+    (discovery.resolved_endpoints > 0 && discovery.unhealthy_endpoints >= discovery.resolved_endpoints)
+  ) {
+    return { label: "unavailable", tone: "warn" };
+  }
+  if (
+    discovery.unhealthy_endpoints > 0 ||
+    discovery.last_refresh_result === "error" ||
+    discovery.last_refresh_result === "empty" ||
+    discovery.last_selection_result === "resolver_error" ||
+    discovery.last_selection_result === "no_available" ||
+    discovery.last_forward_result === "failure"
+  ) {
+    return { label: "degraded", tone: "warn" };
+  }
+  return { label: "healthy", tone: "ok" };
 }
 
 function DarkLineItem({ label, value }: { label: string; value: string }) {

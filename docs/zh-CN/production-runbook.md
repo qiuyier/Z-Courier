@@ -95,6 +95,43 @@ z_courier_upstream_inflight
 z_courier_upstream_overload_rejected_total
 ```
 
+## 5.1 服务发现无可用端点
+
+如果出现 `ZCourierUpstreamDiscoveryEmpty` 或
+`ZCourierUpstreamDiscoveryAllEndpointsUnavailable`，先打开 Console 的
+Diagnostics 页面，或者执行：
+
+```bash
+go run ./cmd/admin diagnostics \
+  -internal-url "$ZCOURIER_ADMIN_INTERNAL_URL"
+```
+
+相关 PromQL：
+
+```promql
+max by (instance, route, discovery_type) (z_courier_upstream_discovery_resolved_endpoints)
+max by (instance, route, discovery_type) (z_courier_upstream_endpoint_unhealthy)
+sum by (instance, route, discovery_type, result) (rate(z_courier_upstream_discovery_refresh_total[5m]))
+sum by (instance, route, discovery_type, result) (rate(z_courier_upstream_endpoint_selection_total[5m]))
+sum by (instance, route, discovery_type, failure_class) (rate(z_courier_upstream_endpoint_failure_total[5m]))
+sum by (instance, route, discovery_type, decision) (rate(z_courier_upstream_failover_total[5m]))
+```
+
+判断方式：
+
+- `resolved_endpoints == 0` 表示当前没有可用快照。DNS 模式检查配置域名、DNS
+  可达性以及 A/AAAA 结果；static 模式检查实际运行配置中的 endpoint 列表。
+- `unhealthy_endpoints >= resolved_endpoints`，同时持续出现
+  `selection{result="no_available"}`，表示当前流量无法选出不在 cooldown 的端点。
+  先按 `failure_class` 区分 transport、timeout、response 或 request 问题。
+- DNS refresh 为 `error`，但 `resolved_endpoints > 0`，表示 last-known-good
+  快照仍在工作。这种情况保留为 dashboard 信号；只有活动快照真的为空才触发
+  empty-discovery 告警。
+- discovery 和 cooldown 都是进程内状态。集群排障时按 Prometheus `instance`
+  分节点比较，并分别查看每个 gateway 的 Diagnostics。
+
+确认 backend 网络和业务幂等之前，不要直接增加 failover attempts。
+
 ## 6. 下行消息没有到客户端
 
 先确认后端 push 返回：
@@ -231,6 +268,14 @@ retry：
 
 ```promql
 sum by (result) (rate(z_courier_downlink_retry_messages_total[5m]))
+```
+
+服务发现：
+
+```promql
+max by (instance, route, discovery_type) (z_courier_upstream_discovery_resolved_endpoints)
+max by (instance, route, discovery_type) (z_courier_upstream_endpoint_unhealthy)
+sum by (instance, route, discovery_type, failure_class) (rate(z_courier_upstream_endpoint_failure_total[5m]))
 ```
 
 HMAC：

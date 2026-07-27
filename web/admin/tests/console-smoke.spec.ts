@@ -53,6 +53,54 @@ test("logs in and navigates core console pages", async ({ page }) => {
   await gotoNav(page, "Overview", "Operations Overview");
 });
 
+test("renders sanitized discovery runtime diagnostics", async ({ page }) => {
+  await login(page);
+  await page.route("**/internal/admin/diagnostics", async (route) => {
+    const response = await route.fetch();
+    const diagnostics = await response.json();
+    diagnostics.upstream.http_route_states = [
+      {
+        name: "orders-dns",
+        target_type: "http",
+        status: "degraded",
+        consecutive_failures: 1,
+        last_reason: "transport",
+        updated_at: "2026-07-28T08:30:00Z",
+        discovery: {
+          type: "dns",
+          resolved_endpoints: 3,
+          unhealthy_endpoints: 1,
+          last_refresh_result: "success",
+          last_refresh_duration: "2.1ms",
+          last_refresh_at: "2026-07-28T08:29:58Z",
+          last_selection_result: "selected",
+          last_selection_at: "2026-07-28T08:30:00Z",
+          cooldown_skipped_total: 4,
+          last_cooldown_skipped_at: "2026-07-28T08:30:00Z",
+          last_endpoint_failure_class: "transport",
+          last_endpoint_failure_at: "2026-07-28T08:30:00Z",
+          last_forward_result: "success",
+          last_forward_attempts: 2,
+          last_forward_at: "2026-07-28T08:30:00Z",
+          last_failover_decision: "succeeded",
+          last_failover_at: "2026-07-28T08:30:00Z",
+        },
+      },
+    ];
+    await route.fulfill({ response, json: diagnostics });
+  });
+
+  await gotoNav(page, "Diagnostics");
+  const routeCard = page.locator("article").filter({ has: page.getByRole("heading", { name: "orders-dns" }) });
+  await expect(routeCard.getByText("Endpoint Discovery")).toBeVisible();
+  await expect(routeCard.getByText("dns runtime")).toBeVisible();
+  await expect(routeCard.getByLabel("Resolved endpoints: 3")).toBeVisible();
+  await expect(routeCard.getByLabel("Unhealthy endpoints: 1")).toBeVisible();
+  await expect(routeCard.locator("dl").getByText("transport", { exact: true })).toBeVisible();
+  await expect(routeCard.locator("dl").getByText("succeeded", { exact: true })).toBeVisible();
+  await expect(routeCard).not.toContainText("10.0.0.1");
+});
+
 test("operator mutation actions are guarded by confirmation dialogs", async ({ page }) => {
   test.skip(expectedRole === "readonly", "readonly role has a dedicated disabled-actions smoke test");
 

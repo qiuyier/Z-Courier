@@ -131,7 +131,15 @@ Dashboards -> Z-Courier -> Z-Courier Production Signals
 Signals` focuses on alert-oriented signals: target health, firing alerts, auth
 failure ratio, overload rejects, upstream failures, downlink push or ACK
 problems, retry worker failures, stale routes, HMAC failures, JWKS refresh
-failures, and peer push latency.
+failures, peer push latency, discovery endpoint availability, and active
+discovery/failover problems.
+
+The Overview dashboard includes discovery endpoint counts, DNS refresh
+outcomes and latency, endpoint selection and cooldown skips, forward attempt
+quantiles, classified endpoint failures, and terminal failover decisions. The
+Production Signals dashboard keeps the smaller incident view: resolved versus
+unhealthy endpoints and only refresh, selection, endpoint, or failover problem
+rates.
 
 ## Alert Rules
 
@@ -152,10 +160,14 @@ The rule file includes:
 - ingress rejection spike alerts
 - auth and HMAC failure alerts
 - upstream failure and overload alerts
+- readiness-gated empty-discovery and actively unavailable-endpoint alerts
 - downlink push, ACK latency, retry, and stale-route alerts
 - peer push and JWKS refresh failure alerts
 
 Alert annotations link to the production runbook for first-response actions.
+`scripts/promtool_check.sh` also runs the behavior cases in
+`deploy/monitoring/prometheus/tests/z-courier-alerts.test.yml`, including the
+readiness and active-selection gates used by the discovery alerts.
 
 ## Alertmanager
 

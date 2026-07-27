@@ -71,9 +71,15 @@ http://127.0.0.1:18080/console/
   session 断开操作。
 - Messages：下行测试推送、消息列表、状态查询、requeue、discard。
 - Checks：主动依赖检查。
-- Diagnostics：诊断快照和 diagnosis bundle 下载。
+- Diagnostics：诊断快照、discovery route 的只读运行状态和 diagnosis bundle
+  下载。
 
 生产环境不要公开暴露 console。它是 internal admin plane 的 UI。
+
+Diagnostics 中每条使用 `static` 或 `dns` discovery 的 HTTP route 都会显示端点
+总数、不健康端点数、cooldown 跳过次数，以及最近一次 refresh、selection、
+forward、endpoint failure 和 failover 结果。这个区域只读，不会显示端点地址、
+域名、URL、token 或原始错误，也不能修改 route 配置。
 
 如果启用了 `admin_console.session.enabled`，console 可以使用短期 HTTP-only cookie
 访问内部 admin/debug/message API。login 仍然需要有效 internal token，或者通过 HMAC

@@ -1,12 +1,19 @@
 # V5 Admin Operations
 
-V5 introduces a small operations surface for answering common gateway questions
-without querying Redis, PostgreSQL, or raw logs by hand.
-
-This is not a browser admin console. The first milestone is a stable internal
-HTTP contract plus a safe `cmd/admin` CLI. For incident-oriented command
-sequences and Prometheus queries, see the
+V5 introduced a small operations surface for answering common gateway questions
+without querying Redis, PostgreSQL, or raw logs by hand. The same internal HTTP
+contract now serves both the safe `cmd/admin` CLI and the embedded browser
+Console. For incident-oriented command sequences and Prometheus queries, see the
 [V5 Production Runbook](v5-production-runbook.md).
+
+## Web Admin Console
+
+The embedded Console is available at `/console/` on the internal HTTP listener.
+Its Diagnostics page renders a read-only discovery section for each
+discovery-backed HTTP route. The view shows only process-local endpoint counts
+and bounded refresh, selection, cooldown, failure, forward, and failover
+results. It does not expose endpoint addresses, hostnames, URLs, tokens, or raw
+errors, and it cannot edit discovery configuration.
 
 ## Internal APIs
 

@@ -31,6 +31,10 @@ semantic versioning after the first public MVP tag.
   selection, cooldown, classified failure, forwarding, and failover state
   without placing addresses, hostnames, URLs, secrets, or raw errors in the
   discovery snapshot.
+- V15.4.3 read-only discovery runtime visualization in Console Diagnostics,
+  complete discovery/failover panels in both Grafana dashboards, and
+  readiness-gated alerts for sustained empty discovery or actively unavailable
+  endpoint sets with promtool behavior tests and bilingual runbook guidance.
 
 ## [v0.14.0] - 2026-07-24
 

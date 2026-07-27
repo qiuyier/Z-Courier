@@ -102,4 +102,15 @@ pipeline:
     window: 1s
 
 upstream:
-  routes: []
+  routes:
+    - name: console-smoke-static
+      enabled: true
+      msg_id_min: 1001
+      msg_id_max: 1001
+      target:
+        type: http
+        discovery:
+          type: static
+          endpoints:
+            - http://${ZCOURIER_CONSOLE_SMOKE_INTERNAL_ADDR}/healthz
+        timeout: 1s
