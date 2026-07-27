@@ -66,7 +66,7 @@ func TestEndpointSelectorRoundRobinCooldownAndRecovery(t *testing.T) {
 	now := time.Date(2026, time.July, 24, 12, 0, 0, 0, time.UTC)
 	selector := newEndpointSelector(resolver, 10*time.Second, func() time.Time {
 		return now
-	})
+	}, nil)
 
 	first, err := selector.Select(context.Background(), nil)
 	if err != nil {
@@ -108,7 +108,7 @@ func TestEndpointSelectorReturnsNoEndpointWhenAllCandidatesUnavailable(t *testin
 	if err != nil {
 		t.Fatalf("NewStaticResolver() error = %v", err)
 	}
-	selector := newEndpointSelector(resolver, time.Minute, nil)
+	selector := newEndpointSelector(resolver, time.Minute, nil, nil)
 	selector.MarkFailure("http://backend-a.local")
 
 	_, err = selector.Select(context.Background(), nil)
@@ -126,7 +126,7 @@ func TestEndpointSelectorConcurrentRoundRobin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStaticResolver() error = %v", err)
 	}
-	selector := newEndpointSelector(resolver, 0, nil)
+	selector := newEndpointSelector(resolver, 0, nil, nil)
 
 	var counts [3]atomic.Int64
 	var waitGroup sync.WaitGroup

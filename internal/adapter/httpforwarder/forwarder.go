@@ -41,6 +41,7 @@ type DiscoveryConfig struct {
 	RequestHost       string
 	ServerName        string
 	Client            *http.Client
+	Observer          Observer
 }
 
 type Forwarder struct {
@@ -51,6 +52,7 @@ type Forwarder struct {
 	ownsClient  bool
 	selector    *endpointSelector
 	maxAttempts int
+	observer    Observer
 }
 
 type UpstreamRequest = upstream.Message
@@ -92,8 +94,9 @@ func NewDiscovered(config DiscoveryConfig) (*Forwarder, error) {
 		requestHost: config.RequestHost,
 		client:      client,
 		ownsClient:  ownsClient,
-		selector:    newEndpointSelector(config.Resolver, config.UnhealthyCooldown, nil),
+		selector:    newEndpointSelector(config.Resolver, config.UnhealthyCooldown, nil, config.Observer),
 		maxAttempts: config.MaxAttempts,
+		observer:    config.Observer,
 	}, nil
 }
 
@@ -124,7 +127,13 @@ func httpClient(client *http.Client, timeout time.Duration, serverName string) (
 	return &http.Client{Timeout: timeout, Transport: transport}, true
 }
 
-func (f *Forwarder) Forward(ctx context.Context, packet *protocol.Packet) (*router.ForwardResult, error) {
+func (f *Forwarder) Forward(ctx context.Context, packet *protocol.Packet) (result *router.ForwardResult, err error) {
+	if f.observer != nil {
+		defer func() {
+			f.observeForward(result, err)
+		}()
+	}
+
 	if f.selector == nil && f.url == "" {
 		cause := fmt.Errorf("http forwarder: empty url")
 		result := annotateForwardResult(nil, "", 0, 1)
@@ -203,6 +212,9 @@ func (f *Forwarder) forwardDiscovered(ctx context.Context, packet *protocol.Pack
 			f.selector.MarkSuccess(endpoint)
 			return result, nil
 		}
+		if f.observer != nil {
+			f.observer.RecordEndpointFailure(failure.class)
+		}
 		if !failure.retryable {
 			if failure.class == router.FailureClassResponse {
 				f.selector.MarkSuccess(endpoint)
@@ -223,6 +235,26 @@ func (f *Forwarder) forwardDiscovered(ctx context.Context, packet *protocol.Pack
 	}
 
 	return lastResult, newForwardError(lastFailure, lastResult, router.FailoverDecisionExhausted)
+}
+
+func (f *Forwarder) observeForward(result *router.ForwardResult, err error) {
+	attempts := 0
+	if result != nil {
+		attempts = result.Attempts
+	}
+
+	observationResult := ForwardObservationSuccess
+	var decision router.FailoverDecision
+	if err != nil {
+		observationResult = ForwardObservationFailure
+		var forwardErr *router.ForwardError
+		if errors.As(err, &forwardErr) && forwardErr != nil {
+			decision = forwardErr.Decision
+		}
+	} else if attempts > 1 {
+		decision = router.FailoverDecisionSucceeded
+	}
+	f.observer.ObserveForward(attempts, observationResult, decision)
 }
 
 func (f *Forwarder) forwardTo(ctx context.Context, endpoint string, packet *protocol.Packet, body []byte) (*router.ForwardResult, *attemptFailure) {

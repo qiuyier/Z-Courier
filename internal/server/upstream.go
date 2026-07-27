@@ -69,13 +69,15 @@ func newRouteForwarder(routeConfig UpstreamRouteConfig) (router.Forwarder, error
 				Timeout: routeConfig.HTTP.Timeout,
 			}), nil
 		case "static":
-			resolver, err := httpforwarder.NewStaticResolver(routeConfig.HTTP.Discovery.Endpoints)
+			observer := newUpstreamDiscoveryMetricsObserver(routeConfig.Name, routeConfig.HTTP.Discovery.Type)
+			resolver, err := httpforwarder.NewStaticResolverWithObserver(routeConfig.HTTP.Discovery.Endpoints, observer)
 			if err != nil {
 				return nil, fmt.Errorf("upstream route %q: %w", routeConfig.Name, err)
 			}
-			return newDiscoveredHTTPForwarder(routeConfig, resolver, "", "")
+			return newDiscoveredHTTPForwarder(routeConfig, resolver, "", "", observer)
 		case "dns":
 			discovery := routeConfig.HTTP.Discovery
+			observer := newUpstreamDiscoveryMetricsObserver(routeConfig.Name, discovery.Type)
 			resolver, err := httpforwarder.NewDNSResolver(httpforwarder.DNSResolverConfig{
 				Scheme:          discovery.Scheme,
 				Hostname:        discovery.Hostname,
@@ -84,12 +86,13 @@ func newRouteForwarder(routeConfig UpstreamRouteConfig) (router.Forwarder, error
 				RefreshInterval: discovery.RefreshInterval,
 				LookupTimeout:   discovery.LookupTimeout,
 				Lookup:          discovery.Lookup,
+				Observer:        observer,
 			})
 			if err != nil {
 				return nil, fmt.Errorf("upstream route %q: %w", routeConfig.Name, err)
 			}
 			requestHost := net.JoinHostPort(discovery.Hostname, strconv.Itoa(discovery.Port))
-			return newDiscoveredHTTPForwarder(routeConfig, resolver, requestHost, discovery.Hostname)
+			return newDiscoveredHTTPForwarder(routeConfig, resolver, requestHost, discovery.Hostname, observer)
 		default:
 			return nil, fmt.Errorf("upstream route %q: unsupported HTTP discovery type %q", routeConfig.Name, routeConfig.HTTP.Discovery.Type)
 		}
@@ -116,7 +119,13 @@ func newRouteForwarder(routeConfig UpstreamRouteConfig) (router.Forwarder, error
 	return nil, nil
 }
 
-func newDiscoveredHTTPForwarder(routeConfig UpstreamRouteConfig, resolver httpforwarder.Resolver, requestHost, serverName string) (router.Forwarder, error) {
+func newDiscoveredHTTPForwarder(
+	routeConfig UpstreamRouteConfig,
+	resolver httpforwarder.Resolver,
+	requestHost string,
+	serverName string,
+	observer httpforwarder.Observer,
+) (router.Forwarder, error) {
 	maxAttempts := 1
 	var unhealthyCooldown time.Duration
 	if routeConfig.HTTP.Failover.Enabled {
@@ -131,6 +140,7 @@ func newDiscoveredHTTPForwarder(routeConfig UpstreamRouteConfig, resolver httpfo
 		UnhealthyCooldown: unhealthyCooldown,
 		RequestHost:       requestHost,
 		ServerName:        serverName,
+		Observer:          observer,
 	})
 	if err != nil {
 		_ = resolver.Close()

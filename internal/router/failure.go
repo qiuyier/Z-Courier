@@ -17,6 +17,7 @@ const (
 type FailoverDecision string
 
 const (
+	FailoverDecisionSucceeded    FailoverDecision = "succeeded"
 	FailoverDecisionDisabled     FailoverDecision = "disabled"
 	FailoverDecisionNotRetryable FailoverDecision = "not_retryable"
 	FailoverDecisionExhausted    FailoverDecision = "exhausted"

@@ -572,7 +572,7 @@ upstream:
 
 同一个 `MsgID` 只能匹配一个启用的 route。配置校验会拦截 route 重叠和保留 MsgID。
 
-### HTTP 服务发现配置（V15.1-V15.3.1）
+### HTTP 服务发现配置（V15.1-V15.4.1）
 
 原有 `target.url` 仍是当前可运行的单端点模式。V15.1 先确定并严格校验 HTTP
 服务发现的配置契约；V15.2.1 已让静态发现可以运行，包括不可变端点快照、并发安全
@@ -664,6 +664,29 @@ V15.3.1 会记录最终转发决策，但不会通过客户端 ACK 暴露内部 
 - 上行转发被拒绝时，客户端只收到稳定的 `upstream_failed` 原因。它不代表
   backend 一定没有看到之前的请求；客户端重试必须复用同一个 `MessageID`，
   业务幂等仍由 backend 负责。
+
+V15.4.1 通过 Prometheus 暴露服务发现和故障切换状态：
+
+- `z_courier_upstream_discovery_refresh_total` 和
+  `z_courier_upstream_discovery_refresh_duration_seconds` 记录 DNS 刷新的
+  `success`、`error`、`empty` 结果及耗时。
+- `z_courier_upstream_discovery_resolved_endpoints` 表示当前静态快照或 DNS
+  最近一次成功快照中的端点数量。
+- `z_courier_upstream_endpoint_selection_total` 记录 `selected`、
+  `resolver_error`、`no_available` 三种端点选择结果。
+- `z_courier_upstream_endpoint_cooldown_skipped_total` 和
+  `z_courier_upstream_endpoint_unhealthy` 分别表示因进程内 cooldown 被跳过的
+  端点次数，以及当前被标记为不健康的端点数量。
+- `z_courier_upstream_endpoint_failure_total` 按有限枚举
+  `failure_class` 汇总实际端点尝试失败。
+- `z_courier_upstream_discovery_attempts` 是每条发现式上行消息实际使用端点
+  尝试次数的直方图，并区分 `success` 与 `failure`。
+- `z_courier_upstream_failover_total` 汇总最终切换决策，包括 `succeeded`、
+  `disabled`、`not_retryable`、`exhausted` 和 `no_alternate`。
+
+这些指标只使用 route 名、发现类型以及有限的结果、分类或决策作为 label。
+解析出的 IP、域名、内部 URL、token、原始错误和消息标识都不会成为指标 label。
+生产配置中的 route 名也应保持为有限集合，避免产生不必要的 Prometheus 高基数。
 
 ## Pipeline
 

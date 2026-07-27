@@ -136,7 +136,7 @@ func TestDNSResolverRetiredEndpointDropsCooldownState(t *testing.T) {
 	lookup := &mutableHostLookup{addresses: []string{"127.0.0.1"}}
 	resolver := newTestDNSResolver(t, lookup, time.Hour)
 	defer resolver.Close()
-	selector := newEndpointSelector(resolver, time.Hour, nil)
+	selector := newEndpointSelector(resolver, time.Hour, nil, nil)
 
 	first, err := selector.Select(context.Background(), nil)
 	if err != nil {

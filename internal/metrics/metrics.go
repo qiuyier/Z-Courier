@@ -209,6 +209,80 @@ var (
 		[]string{"route", "target_type"},
 	)
 
+	upstreamDiscoveryRefresh = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "z_courier_upstream_discovery_refresh_total",
+			Help: "Total number of upstream endpoint discovery refresh attempts.",
+		},
+		[]string{"route", "discovery_type", "result"},
+	)
+
+	upstreamDiscoveryRefreshDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "z_courier_upstream_discovery_refresh_duration_seconds",
+			Help:    "Duration of upstream endpoint discovery refresh attempts in seconds.",
+			Buckets: []float64{0.0001, 0.0005, 0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5},
+		},
+		[]string{"route", "discovery_type", "result"},
+	)
+
+	upstreamDiscoveryResolvedEndpoints = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "z_courier_upstream_discovery_resolved_endpoints",
+			Help: "Current number of endpoints in the active upstream discovery snapshot.",
+		},
+		[]string{"route", "discovery_type"},
+	)
+
+	upstreamEndpointSelection = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "z_courier_upstream_endpoint_selection_total",
+			Help: "Total number of upstream endpoint selection attempts.",
+		},
+		[]string{"route", "discovery_type", "result"},
+	)
+
+	upstreamEndpointCooldownSkipped = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "z_courier_upstream_endpoint_cooldown_skipped_total",
+			Help: "Total number of upstream endpoints skipped while in failure cooldown.",
+		},
+		[]string{"route", "discovery_type"},
+	)
+
+	upstreamEndpointUnhealthy = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "z_courier_upstream_endpoint_unhealthy",
+			Help: "Current number of upstream endpoints marked unhealthy by the local selector.",
+		},
+		[]string{"route", "discovery_type"},
+	)
+
+	upstreamEndpointFailure = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "z_courier_upstream_endpoint_failure_total",
+			Help: "Total number of upstream endpoint attempts that failed.",
+		},
+		[]string{"route", "discovery_type", "failure_class"},
+	)
+
+	upstreamDiscoveryAttempts = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "z_courier_upstream_discovery_attempts",
+			Help:    "Number of endpoint attempts used by each discovery-backed upstream forward.",
+			Buckets: []float64{0, 1, 2, 3, 4},
+		},
+		[]string{"route", "discovery_type", "result"},
+	)
+
+	upstreamFailover = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "z_courier_upstream_failover_total",
+			Help: "Total number of terminal upstream failover decisions.",
+		},
+		[]string{"route", "discovery_type", "decision"},
+	)
+
 	sessionsOnline = promauto.NewGauge(
 		prometheus.GaugeOpts{
 			Name: "z_courier_sessions_online",
@@ -552,6 +626,80 @@ func SetUpstreamRouteDegraded(route, targetType string, degraded bool) {
 		value = 1
 	}
 	upstreamRouteDegraded.WithLabelValues(nonEmpty(route, "unknown"), nonEmpty(targetType, "unknown")).Set(value)
+}
+
+func RecordUpstreamDiscoveryRefresh(route, discoveryType, result string, duration time.Duration) {
+	labels := []string{
+		nonEmpty(route, "unknown"),
+		nonEmpty(discoveryType, "unknown"),
+		nonEmpty(result, "unknown"),
+	}
+	upstreamDiscoveryRefresh.WithLabelValues(labels...).Inc()
+	if duration >= 0 {
+		upstreamDiscoveryRefreshDuration.WithLabelValues(labels...).Observe(duration.Seconds())
+	}
+}
+
+func SetUpstreamDiscoveryResolvedEndpoints(route, discoveryType string, count int) {
+	if count < 0 {
+		count = 0
+	}
+	upstreamDiscoveryResolvedEndpoints.WithLabelValues(
+		nonEmpty(route, "unknown"),
+		nonEmpty(discoveryType, "unknown"),
+	).Set(float64(count))
+}
+
+func RecordUpstreamEndpointSelection(route, discoveryType, result string) {
+	upstreamEndpointSelection.WithLabelValues(
+		nonEmpty(route, "unknown"),
+		nonEmpty(discoveryType, "unknown"),
+		nonEmpty(result, "unknown"),
+	).Inc()
+}
+
+func RecordUpstreamEndpointCooldownSkipped(route, discoveryType string, count int) {
+	addCounter(upstreamEndpointCooldownSkipped.WithLabelValues(
+		nonEmpty(route, "unknown"),
+		nonEmpty(discoveryType, "unknown"),
+	), count)
+}
+
+func SetUpstreamEndpointUnhealthy(route, discoveryType string, count int) {
+	if count < 0 {
+		count = 0
+	}
+	upstreamEndpointUnhealthy.WithLabelValues(
+		nonEmpty(route, "unknown"),
+		nonEmpty(discoveryType, "unknown"),
+	).Set(float64(count))
+}
+
+func RecordUpstreamEndpointFailure(route, discoveryType, failureClass string) {
+	upstreamEndpointFailure.WithLabelValues(
+		nonEmpty(route, "unknown"),
+		nonEmpty(discoveryType, "unknown"),
+		nonEmpty(failureClass, "unknown"),
+	).Inc()
+}
+
+func ObserveUpstreamDiscoveryAttempts(route, discoveryType, result string, attempts int) {
+	if attempts < 0 {
+		attempts = 0
+	}
+	upstreamDiscoveryAttempts.WithLabelValues(
+		nonEmpty(route, "unknown"),
+		nonEmpty(discoveryType, "unknown"),
+		nonEmpty(result, "unknown"),
+	).Observe(float64(attempts))
+}
+
+func RecordUpstreamFailoverDecision(route, discoveryType, decision string) {
+	upstreamFailover.WithLabelValues(
+		nonEmpty(route, "unknown"),
+		nonEmpty(discoveryType, "unknown"),
+		nonEmpty(decision, "unknown"),
+	).Inc()
 }
 
 func SetSessionsOnline(count int) {

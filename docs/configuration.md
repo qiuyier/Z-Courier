@@ -874,7 +874,7 @@ HTTP target fields:
   Packets above this limit are rejected quickly instead of waiting behind a
   slow backend.
 
-### HTTP Discovery Configuration (V15.1-V15.3.1)
+### HTTP Discovery Configuration (V15.1-V15.4.1)
 
 V15.1 defines and validates the configuration contract for HTTP endpoint
 discovery. V15.2.1 makes static discovery operational with immutable endpoint
@@ -983,6 +983,31 @@ response body, or network error through the client ACK:
   `upstream_failed`. This does not prove that a backend never observed an
   earlier attempt. A client retry must reuse the same `MessageID`, and the
   backend remains responsible for business idempotency.
+
+V15.4.1 exposes discovery and failover behavior through Prometheus:
+
+- `z_courier_upstream_discovery_refresh_total` and
+  `z_courier_upstream_discovery_refresh_duration_seconds` report DNS refresh
+  outcomes (`success`, `error`, or `empty`) and latency.
+- `z_courier_upstream_discovery_resolved_endpoints` reports the size of the
+  active static or last-known-good DNS snapshot.
+- `z_courier_upstream_endpoint_selection_total` reports `selected`,
+  `resolver_error`, and `no_available` selection outcomes.
+- `z_courier_upstream_endpoint_cooldown_skipped_total` and
+  `z_courier_upstream_endpoint_unhealthy` show process-local cooldown activity
+  and the current unhealthy count.
+- `z_courier_upstream_endpoint_failure_total` groups failed endpoint attempts
+  by the bounded `failure_class`.
+- `z_courier_upstream_discovery_attempts` is a histogram of endpoint attempts
+  used by each discovery-backed message, split by `success` or `failure`.
+- `z_courier_upstream_failover_total` reports terminal decisions including
+  `succeeded`, `disabled`, `not_retryable`, `exhausted`, and `no_alternate`.
+
+Every metric is labeled only by route name, discovery type, and a bounded
+result/class/decision where applicable. Resolved IP addresses, hostnames,
+internal URLs, tokens, raw errors, and message identifiers are deliberately
+not metric labels. Keep route names from a bounded configuration set to avoid
+unnecessary Prometheus cardinality.
 
 NSQ target example:
 

@@ -33,6 +33,7 @@ type DNSResolverConfig struct {
 	RefreshInterval time.Duration
 	LookupTimeout   time.Duration
 	Lookup          HostLookup
+	Observer        Observer
 }
 
 type DNSResolver struct {
@@ -43,6 +44,7 @@ type DNSResolver struct {
 	refreshInterval time.Duration
 	lookupTimeout   time.Duration
 	lookup          HostLookup
+	observer        Observer
 
 	mu        sync.RWMutex
 	endpoints []string
@@ -99,10 +101,14 @@ func NewDNSResolver(config DNSResolverConfig) (*DNSResolver, error) {
 		refreshInterval: config.RefreshInterval,
 		lookupTimeout:   lookupTimeout,
 		lookup:          lookup,
+		observer:        config.Observer,
 		ctx:             ctx,
 		cancel:          cancel,
 		initialReady:    make(chan struct{}),
 		done:            make(chan struct{}),
+	}
+	if resolver.observer != nil {
+		resolver.observer.SetResolvedEndpoints(0)
 	}
 	go resolver.run()
 	return resolver, nil
@@ -144,6 +150,9 @@ func (r *DNSResolver) Close() error {
 	r.closeOnce.Do(func() {
 		r.cancel()
 		<-r.done
+		if r.observer != nil {
+			r.observer.SetResolvedEndpoints(0)
+		}
 	})
 	return nil
 }
@@ -173,12 +182,16 @@ func (r *DNSResolver) refresh(parent context.Context) error {
 	r.refreshMu.Lock()
 	defer r.refreshMu.Unlock()
 
+	startedAt := time.Now()
 	ctx, cancel := context.WithTimeout(parent, r.lookupTimeout)
 	defer cancel()
 	addresses, err := r.lookup.LookupHost(ctx, r.hostname)
 	if err != nil {
 		wrapped := fmt.Errorf("http forwarder: dns lookup failed: %w", err)
 		r.recordFailure(wrapped)
+		if parent.Err() == nil && r.observer != nil {
+			r.observer.ObserveDiscoveryRefresh(DiscoveryRefreshError, time.Since(startedAt))
+		}
 		return wrapped
 	}
 
@@ -186,6 +199,9 @@ func (r *DNSResolver) refresh(parent context.Context) error {
 	if len(endpoints) == 0 {
 		err := fmt.Errorf("http forwarder: dns lookup returned no usable addresses")
 		r.recordFailure(err)
+		if parent.Err() == nil && r.observer != nil {
+			r.observer.ObserveDiscoveryRefresh(DiscoveryRefreshEmpty, time.Since(startedAt))
+		}
 		return err
 	}
 
@@ -193,6 +209,10 @@ func (r *DNSResolver) refresh(parent context.Context) error {
 	r.endpoints = endpoints
 	r.lastErr = nil
 	r.mu.Unlock()
+	if r.observer != nil {
+		r.observer.SetResolvedEndpoints(len(endpoints))
+		r.observer.ObserveDiscoveryRefresh(DiscoveryRefreshSuccess, time.Since(startedAt))
+	}
 	return nil
 }
 

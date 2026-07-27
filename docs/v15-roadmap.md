@@ -27,6 +27,9 @@ Implementation status:
 - V15.3.1 adds explicit forwarding failure classes, bounded failover decisions,
   audit-safe endpoint and attempt metadata, stable client ACK reasons, and
   cancellation-safe request handling.
+- V15.4.1 adds low-cardinality route-level metrics for discovery refreshes,
+  active and unhealthy endpoint counts, selection/cooldown behavior, classified
+  endpoint failures, attempt distributions, and terminal failover decisions.
 
 ## Product Direction
 

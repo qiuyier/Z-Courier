@@ -22,6 +22,10 @@ semantic versioning after the first public MVP tag.
   bounded failover decisions, sanitized endpoint and attempt fields in
   structured logs, stable `upstream_failed` client ACKs, and prompt
   timeout/cancellation handling.
+- V15.4.1 low-cardinality Prometheus visibility for static/DNS discovery
+  refreshes, active and unhealthy endpoint counts, endpoint selection and
+  cooldown behavior, classified attempt failures, per-message attempt counts,
+  and terminal failover decisions without endpoint or error-text labels.
 
 ## [v0.14.0] - 2026-07-24
 

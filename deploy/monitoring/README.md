@@ -69,6 +69,15 @@ histogram_quantile(0.95, sum by (le, route, target_type) (rate(z_courier_upstrea
 sum by (route, target_type) (z_courier_upstream_inflight)
 sum by (route, target_type) (rate(z_courier_upstream_overload_rejected_total[1m]))
 sum by (route, target_type) (z_courier_upstream_route_degraded)
+sum by (route, discovery_type, result) (rate(z_courier_upstream_discovery_refresh_total[5m]))
+histogram_quantile(0.95, sum by (le, route, discovery_type, result) (rate(z_courier_upstream_discovery_refresh_duration_seconds_bucket[5m])))
+max by (route, discovery_type) (z_courier_upstream_discovery_resolved_endpoints)
+sum by (route, discovery_type, result) (rate(z_courier_upstream_endpoint_selection_total[1m]))
+sum by (route, discovery_type) (rate(z_courier_upstream_endpoint_cooldown_skipped_total[1m]))
+max by (route, discovery_type) (z_courier_upstream_endpoint_unhealthy)
+sum by (route, discovery_type, failure_class) (rate(z_courier_upstream_endpoint_failure_total[1m]))
+histogram_quantile(0.95, sum by (le, route, discovery_type, result) (rate(z_courier_upstream_discovery_attempts_bucket[5m])))
+sum by (route, discovery_type, decision) (rate(z_courier_upstream_failover_total[1m]))
 sum by (path) (z_courier_internal_http_inflight)
 sum by (path) (rate(z_courier_internal_http_overload_rejected_total[1m]))
 sum by (result) (rate(z_courier_downlink_push_total[1m]))
@@ -92,6 +101,12 @@ sum by (reason) (rate(z_courier_cluster_stale_routes_total[1m]))
 `z_courier_sessions_online` and `z_courier_clients_online` are emitted per
 gateway instance. Use `sum(...)` for the cluster total, or the raw metric with
 the `instance` label to inspect per-node distribution.
+
+Discovery gauges and cooldown state are also emitted per gateway process.
+Use the Prometheus `instance` label when comparing independently resolved DNS
+snapshots or unhealthy state across gateway nodes. The discovery metrics never
+use endpoint addresses, hostnames, internal URLs, raw errors, tokens, or
+message identifiers as labels; route names and all result labels are bounded.
 
 Open Grafana:
 
