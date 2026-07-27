@@ -24,6 +24,9 @@ Implementation status:
 - V15.2.2 makes DNS A/AAAA discovery operational with periodic immutable
   snapshots, last-known-good retention, retired-endpoint cleanup, preserved
   logical Host/SNI, and lifecycle-aware cancellation.
+- V15.3.1 adds explicit forwarding failure classes, bounded failover decisions,
+  audit-safe endpoint and attempt metadata, stable client ACK reasons, and
+  cancellation-safe request handling.
 
 ## Product Direction
 

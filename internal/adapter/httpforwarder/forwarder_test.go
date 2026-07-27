@@ -6,12 +6,15 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/bytedance/sonic"
 	"github.com/qiuyier/Z-Courier/internal/protocol"
+	"github.com/qiuyier/Z-Courier/internal/router"
 )
 
 func TestForwarderPostsPacketEnvelope(t *testing.T) {
@@ -61,6 +64,9 @@ func TestForwarderPostsPacketEnvelope(t *testing.T) {
 	if result.StatusCode != http.StatusAccepted {
 		t.Fatalf("StatusCode = %d, want %d", result.StatusCode, http.StatusAccepted)
 	}
+	if result.Endpoint != "http://backend.local/gateway/upstream" || result.Attempts != 1 || result.MaxAttempts != 1 {
+		t.Fatalf("forward metadata = %+v", result)
+	}
 	if got.MsgID != packet.MsgID || got.ClientID != packet.ClientID || got.DeviceID != packet.DeviceID {
 		t.Fatalf("request identity = msgID:%d client:%q device:%q", got.MsgID, got.ClientID, got.DeviceID)
 	}
@@ -87,6 +93,14 @@ func TestForwarderReturnsErrorOnNon2xx(t *testing.T) {
 	}
 	if result == nil || result.StatusCode != http.StatusBadGateway {
 		t.Fatalf("result = %+v, want status %d", result, http.StatusBadGateway)
+	}
+	forwardErr := requireForwardError(t, err)
+	if forwardErr.Class != router.FailureClassResponse || forwardErr.Retryable ||
+		forwardErr.Decision != router.FailoverDecisionNotRetryable {
+		t.Fatalf("forward error = %+v", forwardErr)
+	}
+	if strings.Contains(err.Error(), "boom") || strings.Contains(err.Error(), "backend.local") {
+		t.Fatalf("error exposes backend response or endpoint: %q", err)
 	}
 }
 
@@ -175,6 +189,9 @@ func TestDiscoveredForwarderFailsOverTransportError(t *testing.T) {
 	if result == nil || result.StatusCode != http.StatusAccepted {
 		t.Fatalf("result = %+v", result)
 	}
+	if result.Endpoint != "http://backend-b.local/gateway/upstream" || result.Attempts != 2 || result.MaxAttempts != 2 {
+		t.Fatalf("failover metadata = %+v", result)
+	}
 	want := []string{"backend-a.local", "backend-b.local"}
 	if len(hosts) != len(want) || hosts[0] != want[0] || hosts[1] != want[1] {
 		t.Fatalf("hosts = %v, want %v", hosts, want)
@@ -226,6 +243,11 @@ func TestDiscoveredForwarderDoesNotReplayHTTPResponse(t *testing.T) {
 	if requests != 1 {
 		t.Fatalf("requests = %d, want 1", requests)
 	}
+	forwardErr := requireForwardError(t, err)
+	if forwardErr.Class != router.FailureClassResponse || forwardErr.Retryable ||
+		forwardErr.Decision != router.FailoverDecisionNotRetryable || forwardErr.Attempts != 1 {
+		t.Fatalf("forward error = %+v", forwardErr)
+	}
 }
 
 func TestDiscoveredForwarderDoesNotReplayRedirectPolicyError(t *testing.T) {
@@ -267,6 +289,268 @@ func TestDiscoveredForwarderDoesNotReplayRedirectPolicyError(t *testing.T) {
 	}
 	if requests != 1 {
 		t.Fatalf("requests = %d, want 1", requests)
+	}
+	forwardErr := requireForwardError(t, err)
+	if forwardErr.Class != router.FailureClassResponse || forwardErr.Retryable ||
+		forwardErr.Decision != router.FailoverDecisionNotRetryable {
+		t.Fatalf("forward error = %+v", forwardErr)
+	}
+}
+
+func TestForwarderKeepsSingleURLTransportFailureAtOneAttempt(t *testing.T) {
+	var requests int
+	cause := errors.New("connection refused")
+	forwarder := New(Config{
+		URL: "http://backend.local/gateway/upstream?token=secret",
+		Client: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			requests++
+			return nil, cause
+		})},
+	})
+
+	result, err := forwarder.Forward(context.Background(), protocol.NewPacket(1001, nil))
+	if requests != 1 {
+		t.Fatalf("requests = %d, want 1", requests)
+	}
+	forwardErr := requireForwardError(t, err)
+	if forwardErr.Class != router.FailureClassTransport || !forwardErr.Retryable ||
+		forwardErr.Decision != router.FailoverDecisionDisabled {
+		t.Fatalf("forward error = %+v", forwardErr)
+	}
+	if !errors.Is(err, cause) {
+		t.Fatalf("error = %v, want wrapped cause", err)
+	}
+	if result.Endpoint != "http://backend.local/gateway/upstream" ||
+		forwardErr.Endpoint != result.Endpoint || strings.Contains(forwardErr.Endpoint, "secret") {
+		t.Fatalf("sanitized metadata: result=%+v error=%+v", result, forwardErr)
+	}
+}
+
+func TestDiscoveredForwarderClassifiesExhaustedTransportFailure(t *testing.T) {
+	resolver, err := NewStaticResolver([]string{
+		"http://backend-a.local/gateway/upstream",
+		"http://backend-b.local/gateway/upstream?token=secret",
+	})
+	if err != nil {
+		t.Fatalf("NewStaticResolver() error = %v", err)
+	}
+
+	var requests int
+	lastCause := errors.New("second connection refused")
+	forwarder, err := NewDiscovered(DiscoveryConfig{
+		Resolver:          resolver,
+		MaxAttempts:       2,
+		UnhealthyCooldown: time.Minute,
+		Client: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			requests++
+			if r.URL.Host == "backend-b.local" {
+				return nil, lastCause
+			}
+			return nil, errors.New("first connection refused")
+		})},
+	})
+	if err != nil {
+		t.Fatalf("NewDiscovered() error = %v", err)
+	}
+
+	result, err := forwarder.Forward(context.Background(), protocol.NewPacket(1001, nil))
+	if requests != 2 {
+		t.Fatalf("requests = %d, want 2", requests)
+	}
+	forwardErr := requireForwardError(t, err)
+	if forwardErr.Class != router.FailureClassTransport || !forwardErr.Retryable ||
+		forwardErr.Decision != router.FailoverDecisionExhausted ||
+		forwardErr.Attempts != 2 || forwardErr.MaxAttempts != 2 {
+		t.Fatalf("forward error = %+v", forwardErr)
+	}
+	if !errors.Is(err, lastCause) {
+		t.Fatalf("error = %v, want final cause", err)
+	}
+	if result.Endpoint != "http://backend-b.local/gateway/upstream" ||
+		forwardErr.Endpoint != result.Endpoint || strings.Contains(forwardErr.Endpoint, "secret") {
+		t.Fatalf("sanitized metadata: result=%+v error=%+v", result, forwardErr)
+	}
+}
+
+func TestDiscoveredForwarderClassifiesMissingAlternateEndpoint(t *testing.T) {
+	resolver, err := NewStaticResolver([]string{"http://backend-a.local/gateway/upstream"})
+	if err != nil {
+		t.Fatalf("NewStaticResolver() error = %v", err)
+	}
+	forwarder, err := NewDiscovered(DiscoveryConfig{
+		Resolver:    resolver,
+		MaxAttempts: 2,
+		Client: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return nil, errors.New("connection refused")
+		})},
+	})
+	if err != nil {
+		t.Fatalf("NewDiscovered() error = %v", err)
+	}
+
+	result, err := forwarder.Forward(context.Background(), protocol.NewPacket(1001, nil))
+	forwardErr := requireForwardError(t, err)
+	if forwardErr.Class != router.FailureClassTransport || !forwardErr.Retryable ||
+		forwardErr.Decision != router.FailoverDecisionNoAlternate ||
+		forwardErr.Attempts != 1 || result.Attempts != 1 {
+		t.Fatalf("forward result=%+v error=%+v", result, forwardErr)
+	}
+}
+
+func TestDiscoveredForwarderClassifiesUnavailableDiscovery(t *testing.T) {
+	forwarder, err := NewDiscovered(DiscoveryConfig{
+		Resolver:    stubResolver{err: ErrNoAvailableEndpoint},
+		MaxAttempts: 2,
+	})
+	if err != nil {
+		t.Fatalf("NewDiscovered() error = %v", err)
+	}
+
+	result, err := forwarder.Forward(context.Background(), protocol.NewPacket(1001, nil))
+	forwardErr := requireForwardError(t, err)
+	if forwardErr.Class != router.FailureClassDiscovery || forwardErr.Retryable ||
+		forwardErr.Decision != router.FailoverDecisionNoAlternate ||
+		forwardErr.Attempts != 0 || forwardErr.MaxAttempts != 2 ||
+		result.Attempts != 0 || result.MaxAttempts != 2 {
+		t.Fatalf("forward result=%+v error=%+v", result, forwardErr)
+	}
+}
+
+func TestDiscoveredForwarderDoesNotRetryInvalidRequestEndpoint(t *testing.T) {
+	forwarder, err := NewDiscovered(DiscoveryConfig{
+		Resolver: stubResolver{snapshot: EndpointSnapshot{Endpoints: []string{
+			"://invalid",
+			"http://backend-b.local/gateway/upstream",
+		}}},
+		MaxAttempts: 2,
+	})
+	if err != nil {
+		t.Fatalf("NewDiscovered() error = %v", err)
+	}
+
+	result, err := forwarder.Forward(context.Background(), protocol.NewPacket(1001, nil))
+	forwardErr := requireForwardError(t, err)
+	if forwardErr.Class != router.FailureClassRequest || forwardErr.Retryable ||
+		forwardErr.Decision != router.FailoverDecisionNotRetryable ||
+		forwardErr.Attempts != 1 || result.Attempts != 1 {
+		t.Fatalf("forward result=%+v error=%+v", result, forwardErr)
+	}
+}
+
+func TestDiscoveredForwarderFailsOverClientTimeout(t *testing.T) {
+	slowStarted := make(chan struct{})
+	slowStopped := make(chan struct{})
+	slow := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		_ = r.Body.Close()
+		close(slowStarted)
+		<-r.Context().Done()
+		close(slowStopped)
+	}))
+	defer slow.Close()
+	defer slow.CloseClientConnections()
+	healthy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer healthy.Close()
+
+	resolver, err := NewStaticResolver([]string{
+		slow.URL,
+		healthy.URL,
+	})
+	if err != nil {
+		t.Fatalf("NewStaticResolver() error = %v", err)
+	}
+
+	forwarder, err := NewDiscovered(DiscoveryConfig{
+		Resolver:    resolver,
+		MaxAttempts: 2,
+		Client:      &http.Client{Timeout: 50 * time.Millisecond},
+	})
+	if err != nil {
+		t.Fatalf("NewDiscovered() error = %v", err)
+	}
+
+	result, err := forwarder.Forward(context.Background(), protocol.NewPacket(1001, nil))
+	if err != nil {
+		t.Fatalf("Forward() error = %v", err)
+	}
+	if result.Attempts != 2 || result.Endpoint != safeEndpoint(healthy.URL) {
+		t.Fatalf("result=%+v", result)
+	}
+	select {
+	case <-slowStarted:
+	default:
+		t.Fatal("slow endpoint was not attempted")
+	}
+	select {
+	case <-slowStopped:
+	case <-time.After(time.Second):
+		t.Fatal("timed-out HTTP attempt did not release its request context")
+	}
+}
+
+func TestDiscoveredForwarderStopsOnCallerCancellation(t *testing.T) {
+	started := make(chan struct{})
+	stopped := make(chan struct{})
+	backend := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		_ = r.Body.Close()
+		close(started)
+		<-r.Context().Done()
+		close(stopped)
+	}))
+	defer backend.Close()
+	defer backend.CloseClientConnections()
+	resolver, err := NewStaticResolver([]string{backend.URL})
+	if err != nil {
+		t.Fatalf("NewStaticResolver() error = %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	forwarder, err := NewDiscovered(DiscoveryConfig{
+		Resolver:    resolver,
+		MaxAttempts: 2,
+	})
+	if err != nil {
+		t.Fatalf("NewDiscovered() error = %v", err)
+	}
+
+	type outcome struct {
+		result *router.ForwardResult
+		err    error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		result, err := forwarder.Forward(ctx, protocol.NewPacket(1001, nil))
+		done <- outcome{result: result, err: err}
+	}()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("HTTP attempt did not start")
+	}
+	cancel()
+
+	var got outcome
+	select {
+	case got = <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Forward() did not stop after caller cancellation")
+	}
+	if !errors.Is(got.err, context.Canceled) {
+		t.Fatalf("error = %v, want context canceled", got.err)
+	}
+	forwardErr := requireForwardError(t, got.err)
+	if forwardErr.Class != router.FailureClassCanceled || forwardErr.Retryable ||
+		forwardErr.Decision != router.FailoverDecisionNotRetryable ||
+		forwardErr.Attempts != 1 || got.result.Attempts != 1 {
+		t.Fatalf("forward result=%+v error=%+v", got.result, forwardErr)
+	}
+	select {
+	case <-stopped:
+	case <-time.After(time.Second):
+		t.Fatal("canceled HTTP attempt did not release its request context")
 	}
 }
 
@@ -364,6 +648,22 @@ func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
 }
 
+type stubResolver struct {
+	snapshot EndpointSnapshot
+	err      error
+}
+
+func (r stubResolver) Resolve(ctx context.Context) (EndpointSnapshot, error) {
+	if err := ctx.Err(); err != nil {
+		return EndpointSnapshot{}, err
+	}
+	return r.snapshot, r.err
+}
+
+func (stubResolver) Close() error {
+	return nil
+}
+
 func response(statusCode int, body string) *http.Response {
 	return &http.Response{
 		StatusCode: statusCode,
@@ -371,4 +671,16 @@ func response(statusCode int, body string) *http.Response {
 		Body:       io.NopCloser(bytes.NewBufferString(body)),
 		Header:     make(http.Header),
 	}
+}
+
+func requireForwardError(t *testing.T, err error) *router.ForwardError {
+	t.Helper()
+	if err == nil {
+		t.Fatal("error = nil, want *router.ForwardError")
+	}
+	var forwardErr *router.ForwardError
+	if !errors.As(err, &forwardErr) {
+		t.Fatalf("error type = %T, want *router.ForwardError", err)
+	}
+	return forwardErr
 }

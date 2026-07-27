@@ -138,6 +138,9 @@ ACK body 是 JSON：
 
 - `rate_limited`：入口限流。
 - `overloaded`：upstream 或内部容量限制拒绝。
+- `upstream_failed`：匹配到的 upstream route 没有成功完成转发。ACK 不会暴露
+  内部端点、响应内容或底层网络原因；由于之前的请求可能已经到达 backend，重试时
+  必须复用同一个 `MessageID`。
 - `route_not_found`：没有匹配的 upstream route。
 
 ## 下行推送

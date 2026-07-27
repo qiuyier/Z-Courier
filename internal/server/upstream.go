@@ -263,6 +263,10 @@ func safeUpstreamFailureReason(result *router.ForwardResult, err error) string {
 	if result != nil && result.StatusCode > 0 {
 		return "http_status_" + strconv.Itoa(result.StatusCode)
 	}
+	var forwardErr *router.ForwardError
+	if errors.As(err, &forwardErr) && forwardErr != nil && forwardErr.Class != "" {
+		return string(forwardErr.Class)
+	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		return "timeout"
 	}

@@ -16,10 +16,13 @@ type closeForwarder interface {
 }
 
 type ForwardResult struct {
-	RouteName  string
-	TargetType string
-	Status     string
-	StatusCode int
+	RouteName   string
+	TargetType  string
+	Status      string
+	StatusCode  int
+	Endpoint    string
+	Attempts    int
+	MaxAttempts int
 }
 
 type Route struct {

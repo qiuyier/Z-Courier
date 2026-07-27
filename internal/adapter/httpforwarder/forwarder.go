@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -52,6 +54,12 @@ type Forwarder struct {
 }
 
 type UpstreamRequest = upstream.Message
+
+type attemptFailure struct {
+	class     router.FailureClass
+	retryable bool
+	cause     error
+}
 
 func New(config Config) *Forwarder {
 	client, ownsClient := httpClient(config.Client, config.Timeout, "")
@@ -118,65 +126,109 @@ func httpClient(client *http.Client, timeout time.Duration, serverName string) (
 
 func (f *Forwarder) Forward(ctx context.Context, packet *protocol.Packet) (*router.ForwardResult, error) {
 	if f.selector == nil && f.url == "" {
-		return nil, fmt.Errorf("http forwarder: empty url")
+		cause := fmt.Errorf("http forwarder: empty url")
+		result := annotateForwardResult(nil, "", 0, 1)
+		return result, newForwardError(
+			&attemptFailure{class: router.FailureClassRequest, cause: cause},
+			result,
+			router.FailoverDecisionDisabled,
+		)
 	}
 
 	body, err := sonic.Marshal(newUpstreamRequest(packet))
 	if err != nil {
-		return nil, err
+		maxAttempts := f.maxAttempts
+		if maxAttempts < 1 {
+			maxAttempts = 1
+		}
+		result := annotateForwardResult(nil, "", 0, maxAttempts)
+		return result, newForwardError(
+			&attemptFailure{class: router.FailureClassEncoding, cause: err},
+			result,
+			router.FailoverDecisionNotRetryable,
+		)
 	}
 
 	if f.selector == nil {
-		return f.forwardTo(ctx, f.url, packet, body)
+		return f.forwardSingle(ctx, packet, body)
 	}
 
 	return f.forwardDiscovered(ctx, packet, body)
 }
 
+func (f *Forwarder) forwardSingle(ctx context.Context, packet *protocol.Packet, body []byte) (*router.ForwardResult, error) {
+	result, failure := f.forwardTo(ctx, f.url, packet, body)
+	result = annotateForwardResult(result, f.url, 1, 1)
+	if failure == nil {
+		return result, nil
+	}
+
+	decision := router.FailoverDecisionNotRetryable
+	if failure.retryable {
+		decision = router.FailoverDecisionDisabled
+	}
+	return result, newForwardError(failure, result, decision)
+}
+
 func (f *Forwarder) forwardDiscovered(ctx context.Context, packet *protocol.Packet, body []byte) (*router.ForwardResult, error) {
 	attempted := make(map[string]struct{}, f.maxAttempts)
 	var lastResult *router.ForwardResult
-	var lastErr error
+	var lastFailure *attemptFailure
 
-	for range f.maxAttempts {
+	for attempt := 1; attempt <= f.maxAttempts; attempt++ {
 		if err := ctx.Err(); err != nil {
-			return lastResult, err
+			result := annotateForwardResult(lastResult, resultEndpoint(lastResult), attempt-1, f.maxAttempts)
+			failure := contextAttemptFailure(err)
+			return result, newForwardError(failure, result, router.FailoverDecisionNotRetryable)
 		}
 
 		endpoint, err := f.selector.Select(ctx, attempted)
 		if err != nil {
-			if lastErr != nil {
-				return lastResult, lastErr
+			if lastFailure != nil {
+				return lastResult, newForwardError(lastFailure, lastResult, router.FailoverDecisionNoAlternate)
 			}
-			return nil, err
+			result := annotateForwardResult(nil, "", 0, f.maxAttempts)
+			failure := preAttemptFailure(err)
+			decision := router.FailoverDecisionNoAlternate
+			if failure.class == router.FailureClassCanceled || failure.class == router.FailureClassTimeout {
+				decision = router.FailoverDecisionNotRetryable
+			}
+			return result, newForwardError(failure, result, decision)
 		}
 		attempted[endpoint] = struct{}{}
 
-		result, err := f.forwardTo(ctx, endpoint, packet, body)
-		if result != nil {
+		result, failure := f.forwardTo(ctx, endpoint, packet, body)
+		result = annotateForwardResult(result, endpoint, attempt, f.maxAttempts)
+		if failure == nil {
 			f.selector.MarkSuccess(endpoint)
-			return result, err
+			return result, nil
 		}
-		if err == nil {
-			f.selector.MarkSuccess(endpoint)
-			return nil, nil
-		}
-		if ctx.Err() != nil || errors.Is(err, context.Canceled) {
-			return nil, err
+		if !failure.retryable {
+			if failure.class == router.FailureClassResponse {
+				f.selector.MarkSuccess(endpoint)
+			}
+			return result, newForwardError(failure, result, router.FailoverDecisionNotRetryable)
 		}
 
 		f.selector.MarkFailure(endpoint)
 		lastResult = result
-		lastErr = err
+		lastFailure = failure
+		if attempt == f.maxAttempts {
+			decision := router.FailoverDecisionExhausted
+			if f.maxAttempts == 1 {
+				decision = router.FailoverDecisionDisabled
+			}
+			return result, newForwardError(failure, result, decision)
+		}
 	}
 
-	return lastResult, lastErr
+	return lastResult, newForwardError(lastFailure, lastResult, router.FailoverDecisionExhausted)
 }
 
-func (f *Forwarder) forwardTo(ctx context.Context, endpoint string, packet *protocol.Packet, body []byte) (*router.ForwardResult, error) {
+func (f *Forwarder) forwardTo(ctx context.Context, endpoint string, packet *protocol.Packet, body []byte) (*router.ForwardResult, *attemptFailure) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
-		return nil, err
+		return nil, &attemptFailure{class: router.FailureClassRequest, cause: err}
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if f.requestHost != "" {
@@ -196,22 +248,28 @@ func (f *Forwarder) forwardTo(ctx context.Context, endpoint string, packet *prot
 				_ = resp.Body.Close()
 			}
 			return &router.ForwardResult{
-				TargetType: TargetType,
-				Status:     resp.Status,
-				StatusCode: resp.StatusCode,
-			}, err
+					TargetType: TargetType,
+					Status:     resp.Status,
+					StatusCode: resp.StatusCode,
+				}, &attemptFailure{
+					class: router.FailureClassResponse,
+					cause: err,
+				}
 		}
-		return nil, err
+		return nil, classifyTransportFailure(ctx, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
 		return &router.ForwardResult{
-			TargetType: TargetType,
-			Status:     resp.Status,
-			StatusCode: resp.StatusCode,
-		}, fmt.Errorf("http forwarder: status %s: %s", resp.Status, string(data))
+				TargetType: TargetType,
+				Status:     resp.Status,
+				StatusCode: resp.StatusCode,
+			}, &attemptFailure{
+				class: router.FailureClassResponse,
+				cause: fmt.Errorf("http forwarder: status %s", resp.Status),
+			}
 	}
 
 	return &router.ForwardResult{
@@ -219,6 +277,86 @@ func (f *Forwarder) forwardTo(ctx context.Context, endpoint string, packet *prot
 		Status:     resp.Status,
 		StatusCode: resp.StatusCode,
 	}, nil
+}
+
+func classifyTransportFailure(ctx context.Context, err error) *attemptFailure {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return contextAttemptFailure(ctxErr)
+	}
+	if errors.Is(err, context.Canceled) {
+		return contextAttemptFailure(context.Canceled)
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return &attemptFailure{class: router.FailureClassTimeout, retryable: true, cause: err}
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return &attemptFailure{class: router.FailureClassTimeout, retryable: true, cause: err}
+	}
+	return &attemptFailure{class: router.FailureClassTransport, retryable: true, cause: err}
+}
+
+func contextAttemptFailure(err error) *attemptFailure {
+	failureClass := router.FailureClassCanceled
+	if errors.Is(err, context.DeadlineExceeded) {
+		failureClass = router.FailureClassTimeout
+	}
+	return &attemptFailure{class: failureClass, cause: err}
+}
+
+func preAttemptFailure(err error) *attemptFailure {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return contextAttemptFailure(err)
+	}
+	return &attemptFailure{class: router.FailureClassDiscovery, cause: err}
+}
+
+func annotateForwardResult(result *router.ForwardResult, endpoint string, attempts, maxAttempts int) *router.ForwardResult {
+	if result == nil {
+		result = &router.ForwardResult{}
+	}
+	result.TargetType = TargetType
+	result.Endpoint = safeEndpoint(endpoint)
+	result.Attempts = attempts
+	result.MaxAttempts = maxAttempts
+	return result
+}
+
+func resultEndpoint(result *router.ForwardResult) string {
+	if result == nil {
+		return ""
+	}
+	return result.Endpoint
+}
+
+func newForwardError(failure *attemptFailure, result *router.ForwardResult, decision router.FailoverDecision) error {
+	if failure == nil {
+		return nil
+	}
+	forwardErr := &router.ForwardError{
+		Class:     failure.class,
+		Retryable: failure.retryable,
+		Decision:  decision,
+		Cause:     failure.cause,
+	}
+	if result != nil {
+		forwardErr.Endpoint = result.Endpoint
+		forwardErr.Attempts = result.Attempts
+		forwardErr.MaxAttempts = result.MaxAttempts
+	}
+	return forwardErr
+}
+
+func safeEndpoint(raw string) string {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return ""
+	}
+	parsed.User = nil
+	parsed.RawQuery = ""
+	parsed.ForceQuery = false
+	parsed.Fragment = ""
+	return parsed.String()
 }
 
 func (f *Forwarder) Close() error {

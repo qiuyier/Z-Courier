@@ -874,7 +874,7 @@ HTTP target fields:
   Packets above this limit are rejected quickly instead of waiting behind a
   slow backend.
 
-### HTTP Discovery Configuration (V15.1-V15.2.2)
+### HTTP Discovery Configuration (V15.1-V15.3.1)
 
 V15.1 defines and validates the configuration contract for HTTP endpoint
 discovery. V15.2.1 makes static discovery operational with immutable endpoint
@@ -968,6 +968,21 @@ Validation rules and defaults:
 - A received HTTP response, including `5xx`, is not replayed automatically.
   Backends should use `MessageID` as an idempotency key where duplicate
   processing is unsafe.
+
+V15.3.1 reports the final forwarding decision without exposing an internal URL,
+response body, or network error through the client ACK:
+
+- `failure_class` is one of `encoding`, `discovery`, `request`, `transport`,
+  `timeout`, `canceled`, or `response`.
+- `failover_decision` is `disabled`, `not_retryable`, `exhausted`, or
+  `no_alternate`.
+- Structured gateway logs include the route, target type, sanitized endpoint,
+  `attempt_count`, `max_attempts`, and whether failover was attempted. Endpoint
+  user information, query parameters, and fragments are removed.
+- A rejected upstream packet receives the stable ACK reason
+  `upstream_failed`. This does not prove that a backend never observed an
+  earlier attempt. A client retry must reuse the same `MessageID`, and the
+  backend remains responsible for business idempotency.
 
 NSQ target example:
 

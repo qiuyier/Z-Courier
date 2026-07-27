@@ -253,23 +253,25 @@ func (r *IngressRouter) forwardUpstream(request ziface.IRequest, packet *protoco
 		metrics.RecordUpstreamForward(resultRouteName(result), resultTargetType(result), upstreamForwardResult(err), duration)
 		metrics.RecordIngressPacket(packet.MsgID, "rejected")
 		metrics.RecordIngressRejected(packet.MsgID, protocol.AckRejected)
-		r.logger.Warn(
-			"failed to forward upstream packet",
+		fields := []zap.Field{
 			zap.Uint32("msg_id", packet.MsgID),
+			zap.String("route", resultRouteName(result)),
+			zap.String("target_type", resultTargetType(result)),
 			zap.String("client_id", packet.ClientID),
 			zap.String("device_id", packet.DeviceID),
 			zap.String("message_id", packet.MessageID),
 			zap.String("trace_id", packet.TraceID),
 			zap.String("upstream_result", upstreamForwardResult(err)),
 			zap.Error(err),
-		)
+		}
+		fields = append(fields, upstreamForwardMetadataFields(result, err)...)
+		r.logger.Warn("failed to forward upstream packet", fields...)
 		r.sendAck(request, packet, protocol.AckRejected, upstreamAckReason(err))
 		return false
 	}
 
 	metrics.RecordUpstreamForward(result.RouteName, result.TargetType, "success", duration)
-	r.logger.Info(
-		"forwarded upstream packet",
+	fields := []zap.Field{
 		zap.Uint32("msg_id", packet.MsgID),
 		zap.String("route", result.RouteName),
 		zap.String("target_type", result.TargetType),
@@ -279,7 +281,9 @@ func (r *IngressRouter) forwardUpstream(request ziface.IRequest, packet *protoco
 		zap.String("device_id", packet.DeviceID),
 		zap.String("message_id", packet.MessageID),
 		zap.String("trace_id", packet.TraceID),
-	)
+	}
+	fields = append(fields, upstreamForwardMetadataFields(result, nil)...)
+	r.logger.Info("forwarded upstream packet", fields...)
 	return true
 }
 
@@ -310,7 +314,35 @@ func upstreamAckReason(err error) string {
 	if errors.Is(err, router.ErrOverloaded) {
 		return resilience.ReasonOverloaded
 	}
-	return err.Error()
+	return resilience.ReasonUpstreamFailed
+}
+
+func upstreamForwardMetadataFields(result *router.ForwardResult, err error) []zap.Field {
+	fields := make([]zap.Field, 0, 8)
+	if result != nil {
+		if result.Endpoint != "" {
+			fields = append(fields, zap.String("endpoint", result.Endpoint))
+		}
+		if result.Attempts > 0 {
+			fields = append(fields, zap.Int("attempt_count", result.Attempts))
+		}
+		if result.MaxAttempts > 0 {
+			fields = append(fields, zap.Int("max_attempts", result.MaxAttempts))
+		}
+		if result.Attempts > 1 {
+			fields = append(fields, zap.Bool("failover_attempted", true))
+		}
+	}
+
+	var forwardErr *router.ForwardError
+	if errors.As(err, &forwardErr) && forwardErr != nil {
+		fields = append(fields,
+			zap.String("failure_class", string(forwardErr.Class)),
+			zap.Bool("retryable", forwardErr.Retryable),
+			zap.String("failover_decision", string(forwardErr.Decision)),
+		)
+	}
+	return fields
 }
 
 func (r *IngressRouter) stopReplacedConnection(currentConnID uint64, replaced *session.Session) {

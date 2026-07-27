@@ -18,6 +18,10 @@ semantic versioning after the first public MVP tag.
 - V15.2.2 refreshable DNS A/AAAA discovery with immutable endpoint snapshots,
   last-known-good retention, retired-endpoint cleanup, logical HTTP Host and
   TLS SNI preservation, and lifecycle-aware resolver cancellation.
+- V15.3.1 explicit forwarding failure classes and typed audit-safe metadata,
+  bounded failover decisions, sanitized endpoint and attempt fields in
+  structured logs, stable `upstream_failed` client ACKs, and prompt
+  timeout/cancellation handling.
 
 ## [v0.14.0] - 2026-07-24
 

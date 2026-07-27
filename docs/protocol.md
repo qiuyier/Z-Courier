@@ -132,6 +132,10 @@ Common `reason` values when `code = "rejected"`:
 - `rate_limited`: the ingress rate limiter rejected the packet.
 - `overloaded`: an upstream route or internal gateway capacity limiter rejected
   work; clients or backends may retry with backoff.
+- `upstream_failed`: the selected upstream route did not complete
+  successfully. Internal endpoints, response bodies, and network causes are
+  intentionally hidden. A retry must reuse the same `MessageID` because an
+  earlier attempt may already have reached the backend.
 
 ## Downlink Push
 

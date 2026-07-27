@@ -572,7 +572,7 @@ upstream:
 
 同一个 `MsgID` 只能匹配一个启用的 route。配置校验会拦截 route 重叠和保留 MsgID。
 
-### HTTP 服务发现配置（V15.1-V15.2.2）
+### HTTP 服务发现配置（V15.1-V15.3.1）
 
 原有 `target.url` 仍是当前可运行的单端点模式。V15.1 先确定并严格校验 HTTP
 服务发现的配置契约；V15.2.1 已让静态发现可以运行，包括不可变端点快照、并发安全
@@ -650,6 +650,20 @@ target:
   端点变化速度和 DNS 负载进行设置。
 - 只要已经收到 HTTP 响应，包括 `5xx`，默认就不自动重放；重要业务仍应在
   backend 端用 `MessageID` 做幂等。
+
+V15.3.1 会记录最终转发决策，但不会通过客户端 ACK 暴露内部 URL、响应内容或
+底层网络错误：
+
+- `failure_class` 包括 `encoding`、`discovery`、`request`、`transport`、
+  `timeout`、`canceled` 和 `response`。
+- `failover_decision` 包括 `disabled`、`not_retryable`、`exhausted` 和
+  `no_alternate`。
+- gateway 结构化日志会记录 route、target type、脱敏后的 endpoint、
+  `attempt_count`、`max_attempts` 以及是否发生切换；endpoint 中的用户信息、
+  查询参数和 fragment 会被移除。
+- 上行转发被拒绝时，客户端只收到稳定的 `upstream_failed` 原因。它不代表
+  backend 一定没有看到之前的请求；客户端重试必须复用同一个 `MessageID`，
+  业务幂等仍由 backend 负责。
 
 ## Pipeline
 

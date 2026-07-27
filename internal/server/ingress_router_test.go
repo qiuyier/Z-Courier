@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/qiuyier/Z-Courier/internal/router"
 	"github.com/qiuyier/Z-Courier/internal/session"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 func TestIngressRouterHandlesDownlinkAckWithoutForwarding(t *testing.T) {
@@ -199,6 +201,60 @@ func TestIngressRouterReturnsStableOverloadReason(t *testing.T) {
 	}
 	if ack.Reason != resilience.ReasonOverloaded {
 		t.Fatalf("Ack reason = %q, want %q", ack.Reason, resilience.ReasonOverloaded)
+	}
+}
+
+func TestUpstreamForwardMetadataIsStructuredAndAckSafe(t *testing.T) {
+	cause := errors.New("dial http://10.0.0.2:8080/gateway/upstream?token=secret failed")
+	forwardErr := &router.ForwardError{
+		Class:       router.FailureClassTransport,
+		Endpoint:    "http://10.0.0.2:8080/gateway/upstream",
+		Attempts:    2,
+		MaxAttempts: 2,
+		Retryable:   true,
+		Decision:    router.FailoverDecisionExhausted,
+		Cause:       cause,
+	}
+	result := &router.ForwardResult{
+		RouteName:   "orders",
+		TargetType:  "http",
+		Endpoint:    forwardErr.Endpoint,
+		Attempts:    forwardErr.Attempts,
+		MaxAttempts: forwardErr.MaxAttempts,
+	}
+
+	core, logs := observer.New(zap.InfoLevel)
+	logger := zap.New(core)
+	fields := upstreamForwardMetadataFields(result, forwardErr)
+	fields = append(fields, zap.Error(forwardErr))
+	logger.Warn("failed to forward upstream packet", fields...)
+
+	if logs.Len() != 1 {
+		t.Fatalf("logs = %d, want 1", logs.Len())
+	}
+	contextMap := logs.All()[0].ContextMap()
+	for key, want := range map[string]any{
+		"endpoint":           forwardErr.Endpoint,
+		"attempt_count":      int64(2),
+		"max_attempts":       int64(2),
+		"failover_attempted": true,
+		"failure_class":      "transport",
+		"retryable":          true,
+		"failover_decision":  "exhausted",
+	} {
+		if got := contextMap[key]; got != want {
+			t.Fatalf("log field %q = %#v, want %#v", key, got, want)
+		}
+	}
+	if got := contextMap["error"]; strings.Contains(got.(string), "token=secret") ||
+		strings.Contains(got.(string), "10.0.0.2") {
+		t.Fatalf("error log field exposes cause or endpoint: %q", got)
+	}
+	if got := upstreamAckReason(forwardErr); got != resilience.ReasonUpstreamFailed {
+		t.Fatalf("upstreamAckReason() = %q, want %q", got, resilience.ReasonUpstreamFailed)
+	}
+	if got := safeUpstreamFailureReason(result, forwardErr); got != "transport" {
+		t.Fatalf("safeUpstreamFailureReason() = %q, want transport", got)
 	}
 }
 
