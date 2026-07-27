@@ -11,8 +11,9 @@ A high-performance message push gateway based on the `zinx` network framework.
 - Structured logging based on Zap
 - Pluggable static, remote HTTP, or local JWT/JWKS authentication with bounded
   verification caching, timeout, key rotation, and in-flight protection
-- Built-in HTTP and NSQ upstream adapters, with adapter interfaces for gRPC,
-  Kafka, NATS, and custom targets
+- Built-in HTTP upstream routing with static or refreshable DNS endpoint
+  discovery and bounded transport failover, plus NSQ and adapter interfaces
+  for gRPC, Kafka, NATS, and custom targets
 - Reliable downlink delivery with ACK, retry, and idempotency hooks
 - Two-node cluster delivery with Redis online routes and gateway peer push
 - Reconnect-safe delivery: disconnected clients keep messages pending until the

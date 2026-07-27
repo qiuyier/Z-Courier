@@ -3,8 +3,10 @@ package server
 import (
 	"context"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -57,15 +59,55 @@ func TestNewRouteForwarderRunsStaticDiscoveryFailover(t *testing.T) {
 	}
 }
 
-func TestNewRouteForwarderRejectsDNSDiscoveryWithoutRuntime(t *testing.T) {
-	_, err := newRouteForwarder(UpstreamRouteConfig{
+func TestNewRouteForwarderRunsDNSDiscovery(t *testing.T) {
+	requestHost := make(chan string, 1)
+	requestPath := make(chan string, 1)
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestHost <- r.Host
+		requestPath <- r.URL.Path
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer backend.Close()
+	address := backend.Listener.Addr().(*net.TCPAddr)
+
+	forwarder, err := newRouteForwarder(UpstreamRouteConfig{
 		Name: "orders",
 		HTTP: &HTTPUpstreamConfig{
-			Discovery: HTTPUpstreamDiscoveryConfig{Type: "dns"},
+			Path: "/gateway/upstream",
+			Discovery: HTTPUpstreamDiscoveryConfig{
+				Type:            "dns",
+				Scheme:          "http",
+				Hostname:        "orders.internal",
+				Port:            address.Port,
+				RefreshInterval: time.Hour,
+				LookupTimeout:   time.Second,
+				Lookup: dnsHostLookupFunc(func(context.Context, string) ([]string, error) {
+					return []string{address.IP.String()}, nil
+				}),
+			},
 		},
 	})
-	if err == nil || err.Error() != `upstream route "orders": HTTP discovery type "dns" runtime is not initialized` {
+	if err != nil {
 		t.Fatalf("newRouteForwarder() error = %v", err)
+	}
+	defer func() {
+		if closer, ok := forwarder.(interface{ Close() error }); ok {
+			_ = closer.Close()
+		}
+	}()
+
+	result, err := forwarder.Forward(context.Background(), protocol.NewPacket(1001, []byte("hello")))
+	if err != nil {
+		t.Fatalf("Forward() error = %v", err)
+	}
+	if result == nil || result.StatusCode != http.StatusNoContent {
+		t.Fatalf("result = %+v", result)
+	}
+	if got := <-requestHost; got != net.JoinHostPort("orders.internal", strconv.Itoa(address.Port)) {
+		t.Fatalf("request host = %q", got)
+	}
+	if got := <-requestPath; got != "/gateway/upstream" {
+		t.Fatalf("request path = %q", got)
 	}
 }
 
@@ -77,6 +119,21 @@ func TestPrimaryHTTPUpstreamURLUsesStaticEndpoint(t *testing.T) {
 		},
 	}
 	if got := primaryHTTPUpstreamURL(config); got != config.Discovery.Endpoints[0] {
+		t.Fatalf("primaryHTTPUpstreamURL() = %q", got)
+	}
+}
+
+func TestPrimaryHTTPUpstreamURLBuildsDNSLogicalURL(t *testing.T) {
+	config := &HTTPUpstreamConfig{
+		Path: "/gateway/upstream",
+		Discovery: HTTPUpstreamDiscoveryConfig{
+			Type:     "dns",
+			Scheme:   "https",
+			Hostname: "orders.internal",
+			Port:     8443,
+		},
+	}
+	if got := primaryHTTPUpstreamURL(config); got != "https://orders.internal:8443/gateway/upstream" {
 		t.Fatalf("primaryHTTPUpstreamURL() = %q", got)
 	}
 }
@@ -192,6 +249,12 @@ func TestHTTPUpstreamRouteTracksDegradedState(t *testing.T) {
 type blockingForwarder struct {
 	entered chan<- struct{}
 	release <-chan struct{}
+}
+
+type dnsHostLookupFunc func(context.Context, string) ([]string, error)
+
+func (f dnsHostLookupFunc) LookupHost(ctx context.Context, hostname string) ([]string, error) {
+	return f(ctx, hostname)
 }
 
 func (f blockingForwarder) Forward(context.Context, *protocol.Packet) (*router.ForwardResult, error) {

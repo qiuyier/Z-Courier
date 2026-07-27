@@ -21,8 +21,9 @@ Implementation status:
 - V15.2.1 makes static discovery operational with immutable snapshots,
   round-robin selection, process-local cooldown, and bounded transport
   failover.
-- DNS runtime initialization remains intentionally blocked until the
-  refreshable resolver lands in V15.2.2.
+- V15.2.2 makes DNS A/AAAA discovery operational with periodic immutable
+  snapshots, last-known-good retention, retired-endpoint cleanup, preserved
+  logical Host/SNI, and lifecycle-aware cancellation.
 
 ## Product Direction
 

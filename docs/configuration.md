@@ -874,14 +874,13 @@ HTTP target fields:
   Packets above this limit are rejected quickly instead of waiting behind a
   slow backend.
 
-### HTTP Discovery Configuration (V15.1-V15.2.1)
+### HTTP Discovery Configuration (V15.1-V15.2.2)
 
 V15.1 defines and validates the configuration contract for HTTP endpoint
 discovery. V15.2.1 makes static discovery operational with immutable endpoint
-snapshots, concurrent round-robin selection, and process-local cooldown. DNS
-configuration is still rejected during runtime initialization until the
-refreshable resolver lands in V15.2.2. Existing `url` routes remain fully
-operational.
+snapshots, concurrent round-robin selection, and process-local cooldown.
+V15.2.2 makes DNS A/AAAA discovery operational with periodic refresh and
+last-known-good retention. Existing `url` routes remain fully operational.
 
 Static discovery lists complete backend URLs:
 
@@ -935,6 +934,18 @@ Validation rules and defaults:
 - DNS requires `scheme`, `hostname`, and a port from `1` through `65535`.
   `path` defaults to `/`; `refresh_interval` defaults to `30s` and accepts
   values from `1s` through `1h`.
+- Each gateway process performs an immediate initial lookup in the background.
+  The first message waits for that bounded lookup if it is still running. Until
+  the first lookup succeeds, forwarding returns a clear no-available-endpoint
+  error.
+- A successful refresh atomically replaces the immutable endpoint snapshot.
+  A failed or empty refresh retains the last-known-good snapshot; addresses
+  removed by a later successful lookup are also removed from selector cooldown
+  state.
+- DNS results are used as connection addresses, while the configured logical
+  hostname remains the HTTP `Host` header and HTTPS TLS SNI value. This keeps
+  virtual hosting and certificate verification correct for both IPv4 and IPv6
+  results.
 - `failover` is available only with discovery. When enabled,
   `max_attempts` defaults to `2` and is bounded from `2` through `4`;
   `unhealthy_cooldown` defaults to `15s` and is bounded from `1s` through
@@ -950,7 +961,10 @@ Validation rules and defaults:
   gateway's request budget.
 - A regular Kubernetes Service normally resolves to its virtual ClusterIP. A
   headless Service can return Pod addresses and therefore exposes multiple
-  candidates to endpoint selection.
+  candidates to endpoint selection. Resolution and refresh state are
+  process-local, so every gateway instance resolves independently.
+- `refresh_interval` is the gateway refresh cadence, not an authoritative DNS
+  TTL. Choose it according to expected endpoint churn and DNS load.
 - A received HTTP response, including `5xx`, is not replayed automatically.
   Backends should use `MessageID` as an idempotency key where duplicate
   processing is unsafe.

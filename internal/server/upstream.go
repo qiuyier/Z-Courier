@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"strconv"
 	"time"
 
@@ -72,26 +73,25 @@ func newRouteForwarder(routeConfig UpstreamRouteConfig) (router.Forwarder, error
 			if err != nil {
 				return nil, fmt.Errorf("upstream route %q: %w", routeConfig.Name, err)
 			}
-			maxAttempts := 1
-			var unhealthyCooldown time.Duration
-			if routeConfig.HTTP.Failover.Enabled {
-				maxAttempts = routeConfig.HTTP.Failover.MaxAttempts
-				unhealthyCooldown = routeConfig.HTTP.Failover.UnhealthyCooldown
-			}
-			forwarder, err := httpforwarder.NewDiscovered(httpforwarder.DiscoveryConfig{
-				Resolver:          resolver,
-				Token:             routeConfig.HTTP.Token,
-				Timeout:           routeConfig.HTTP.Timeout,
-				MaxAttempts:       maxAttempts,
-				UnhealthyCooldown: unhealthyCooldown,
+			return newDiscoveredHTTPForwarder(routeConfig, resolver, "", "")
+		case "dns":
+			discovery := routeConfig.HTTP.Discovery
+			resolver, err := httpforwarder.NewDNSResolver(httpforwarder.DNSResolverConfig{
+				Scheme:          discovery.Scheme,
+				Hostname:        discovery.Hostname,
+				Port:            discovery.Port,
+				Path:            routeConfig.HTTP.Path,
+				RefreshInterval: discovery.RefreshInterval,
+				LookupTimeout:   discovery.LookupTimeout,
+				Lookup:          discovery.Lookup,
 			})
 			if err != nil {
-				_ = resolver.Close()
 				return nil, fmt.Errorf("upstream route %q: %w", routeConfig.Name, err)
 			}
-			return forwarder, nil
+			requestHost := net.JoinHostPort(discovery.Hostname, strconv.Itoa(discovery.Port))
+			return newDiscoveredHTTPForwarder(routeConfig, resolver, requestHost, discovery.Hostname)
 		default:
-			return nil, fmt.Errorf("upstream route %q: HTTP discovery type %q runtime is not initialized", routeConfig.Name, routeConfig.HTTP.Discovery.Type)
+			return nil, fmt.Errorf("upstream route %q: unsupported HTTP discovery type %q", routeConfig.Name, routeConfig.HTTP.Discovery.Type)
 		}
 	}
 
@@ -114,6 +114,29 @@ func newRouteForwarder(routeConfig UpstreamRouteConfig) (router.Forwarder, error
 	}
 
 	return nil, nil
+}
+
+func newDiscoveredHTTPForwarder(routeConfig UpstreamRouteConfig, resolver httpforwarder.Resolver, requestHost, serverName string) (router.Forwarder, error) {
+	maxAttempts := 1
+	var unhealthyCooldown time.Duration
+	if routeConfig.HTTP.Failover.Enabled {
+		maxAttempts = routeConfig.HTTP.Failover.MaxAttempts
+		unhealthyCooldown = routeConfig.HTTP.Failover.UnhealthyCooldown
+	}
+	forwarder, err := httpforwarder.NewDiscovered(httpforwarder.DiscoveryConfig{
+		Resolver:          resolver,
+		Token:             routeConfig.HTTP.Token,
+		Timeout:           routeConfig.HTTP.Timeout,
+		MaxAttempts:       maxAttempts,
+		UnhealthyCooldown: unhealthyCooldown,
+		RequestHost:       requestHost,
+		ServerName:        serverName,
+	})
+	if err != nil {
+		_ = resolver.Close()
+		return nil, fmt.Errorf("upstream route %q: %w", routeConfig.Name, err)
+	}
+	return forwarder, nil
 }
 
 func routeTargetType(routeConfig UpstreamRouteConfig) string {

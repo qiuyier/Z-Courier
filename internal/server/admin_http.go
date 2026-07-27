@@ -733,6 +733,14 @@ func httpUpstreamURLs(config *HTTPUpstreamConfig) []string {
 	if config.Discovery.Type == "static" && len(config.Discovery.Endpoints) > 0 {
 		return append([]string(nil), config.Discovery.Endpoints...)
 	}
+	if config.Discovery.Type == "dns" {
+		pathValue := config.Path
+		if pathValue == "" {
+			pathValue = "/"
+		}
+		host := net.JoinHostPort(config.Discovery.Hostname, strconv.Itoa(config.Discovery.Port))
+		return []string{config.Discovery.Scheme + "://" + host + pathValue}
+	}
 	return nil
 }
 

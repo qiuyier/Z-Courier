@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"time"
 
 	"github.com/qiuyier/Z-Courier/internal/adminaudit"
@@ -142,6 +143,12 @@ type HTTPUpstreamDiscoveryConfig struct {
 	Hostname        string
 	Port            int
 	RefreshInterval time.Duration
+	LookupTimeout   time.Duration
+	Lookup          DNSHostLookup
+}
+
+type DNSHostLookup interface {
+	LookupHost(context.Context, string) ([]string, error)
 }
 
 type HTTPUpstreamFailoverConfig struct {

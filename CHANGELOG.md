@@ -15,8 +15,9 @@ semantic versioning after the first public MVP tag.
 - V15.2.1 immutable static endpoint snapshots, concurrent round-robin
   selection, process-local unhealthy cooldown, and bounded opt-in transport
   failover that never replays a received HTTP response.
-- Explicit gateway initialization rejection remains in place for DNS discovery
-  until its refreshable resolver runtime is connected in V15.2.2.
+- V15.2.2 refreshable DNS A/AAAA discovery with immutable endpoint snapshots,
+  last-known-good retention, retired-endpoint cleanup, logical HTTP Host and
+  TLS SNI preservation, and lifecycle-aware resolver cancellation.
 
 ## [v0.14.0] - 2026-07-24
 

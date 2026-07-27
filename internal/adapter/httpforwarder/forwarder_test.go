@@ -270,6 +270,94 @@ func TestDiscoveredForwarderDoesNotReplayRedirectPolicyError(t *testing.T) {
 	}
 }
 
+func TestDiscoveredForwarderPreservesDNSRequestHost(t *testing.T) {
+	resolver, err := NewStaticResolver([]string{"http://127.0.0.1:8080/gateway/upstream"})
+	if err != nil {
+		t.Fatalf("NewStaticResolver() error = %v", err)
+	}
+
+	var urlHost string
+	var requestHost string
+	forwarder, err := NewDiscovered(DiscoveryConfig{
+		Resolver:    resolver,
+		MaxAttempts: 1,
+		RequestHost: "backend.internal:8080",
+		Client: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			urlHost = r.URL.Host
+			requestHost = r.Host
+			return response(http.StatusNoContent, ""), nil
+		})},
+	})
+	if err != nil {
+		t.Fatalf("NewDiscovered() error = %v", err)
+	}
+
+	if _, err := forwarder.Forward(context.Background(), protocol.NewPacket(1001, nil)); err != nil {
+		t.Fatalf("Forward() error = %v", err)
+	}
+	if urlHost != "127.0.0.1:8080" || requestHost != "backend.internal:8080" {
+		t.Fatalf("URL host = %q, request host = %q", urlHost, requestHost)
+	}
+}
+
+func TestDiscoveredForwarderConfiguresDNSTLSServerName(t *testing.T) {
+	resolver, err := NewStaticResolver([]string{"https://127.0.0.1:8443/gateway/upstream"})
+	if err != nil {
+		t.Fatalf("NewStaticResolver() error = %v", err)
+	}
+	forwarder, err := NewDiscovered(DiscoveryConfig{
+		Resolver:    resolver,
+		MaxAttempts: 1,
+		RequestHost: "backend.internal:8443",
+		ServerName:  "backend.internal",
+	})
+	if err != nil {
+		t.Fatalf("NewDiscovered() error = %v", err)
+	}
+	defer forwarder.Close()
+
+	transport, ok := forwarder.client.Transport.(*http.Transport)
+	if !ok || transport.TLSClientConfig == nil || transport.TLSClientConfig.ServerName != "backend.internal" {
+		t.Fatalf("transport TLS config = %+v", transport)
+	}
+}
+
+func TestDiscoveredForwarderFollowsDNSResolverSnapshotChange(t *testing.T) {
+	lookup := &mutableHostLookup{addresses: []string{"127.0.0.1"}}
+	resolver := newTestDNSResolver(t, lookup, time.Hour)
+	defer resolver.Close()
+
+	var hosts []string
+	forwarder, err := NewDiscovered(DiscoveryConfig{
+		Resolver:    resolver,
+		MaxAttempts: 1,
+		RequestHost: "backend.internal:8080",
+		Client: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			hosts = append(hosts, r.URL.Host)
+			return response(http.StatusNoContent, ""), nil
+		})},
+	})
+	if err != nil {
+		t.Fatalf("NewDiscovered() error = %v", err)
+	}
+	if _, err := forwarder.Forward(context.Background(), protocol.NewPacket(1001, nil)); err != nil {
+		t.Fatalf("Forward() initial error = %v", err)
+	}
+
+	lookup.Set([]string{"127.0.0.2"}, nil)
+	if err := resolver.refresh(context.Background()); err != nil {
+		t.Fatalf("refresh() error = %v", err)
+	}
+	if _, err := forwarder.Forward(context.Background(), protocol.NewPacket(1001, nil)); err != nil {
+		t.Fatalf("Forward() refreshed error = %v", err)
+	}
+
+	want := []string{"127.0.0.1:8080", "127.0.0.2:8080"}
+	if len(hosts) != len(want) || hosts[0] != want[0] || hosts[1] != want[1] {
+		t.Fatalf("hosts = %v, want %v", hosts, want)
+	}
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {

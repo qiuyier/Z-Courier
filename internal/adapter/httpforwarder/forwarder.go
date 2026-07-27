@@ -3,10 +3,12 @@ package httpforwarder
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/bytedance/sonic"
@@ -34,13 +36,17 @@ type DiscoveryConfig struct {
 	Timeout           time.Duration
 	MaxAttempts       int
 	UnhealthyCooldown time.Duration
+	RequestHost       string
+	ServerName        string
 	Client            *http.Client
 }
 
 type Forwarder struct {
 	url         string
 	token       string
+	requestHost string
 	client      *http.Client
+	ownsClient  bool
 	selector    *endpointSelector
 	maxAttempts int
 }
@@ -48,10 +54,12 @@ type Forwarder struct {
 type UpstreamRequest = upstream.Message
 
 func New(config Config) *Forwarder {
+	client, ownsClient := httpClient(config.Client, config.Timeout, "")
 	return &Forwarder{
 		url:         config.URL,
 		token:       config.Token,
-		client:      httpClient(config.Client, config.Timeout),
+		client:      client,
+		ownsClient:  ownsClient,
 		maxAttempts: 1,
 	}
 }
@@ -66,23 +74,46 @@ func NewDiscovered(config DiscoveryConfig) (*Forwarder, error) {
 	if config.UnhealthyCooldown < 0 {
 		return nil, fmt.Errorf("http forwarder: unhealthy cooldown must be greater than or equal to 0")
 	}
+	if strings.ContainsAny(config.RequestHost, "\r\n") || strings.ContainsAny(config.ServerName, "\r\n") {
+		return nil, fmt.Errorf("http forwarder: DNS host metadata is invalid")
+	}
 
+	client, ownsClient := httpClient(config.Client, config.Timeout, config.ServerName)
 	return &Forwarder{
 		token:       config.Token,
-		client:      httpClient(config.Client, config.Timeout),
+		requestHost: config.RequestHost,
+		client:      client,
+		ownsClient:  ownsClient,
 		selector:    newEndpointSelector(config.Resolver, config.UnhealthyCooldown, nil),
 		maxAttempts: config.MaxAttempts,
 	}, nil
 }
 
-func httpClient(client *http.Client, timeout time.Duration) *http.Client {
+func httpClient(client *http.Client, timeout time.Duration, serverName string) (*http.Client, bool) {
 	if client != nil {
-		return client
+		return client, false
 	}
 	if timeout <= 0 {
 		timeout = 5 * time.Second
 	}
-	return &http.Client{Timeout: timeout}
+	if serverName == "" {
+		return &http.Client{Timeout: timeout}, false
+	}
+
+	baseTransport, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		baseTransport = &http.Transport{Proxy: http.ProxyFromEnvironment}
+	}
+	transport := baseTransport.Clone()
+	tlsConfig := transport.TLSClientConfig
+	if tlsConfig == nil {
+		tlsConfig = &tls.Config{}
+	} else {
+		tlsConfig = tlsConfig.Clone()
+	}
+	tlsConfig.ServerName = serverName
+	transport.TLSClientConfig = tlsConfig
+	return &http.Client{Timeout: timeout, Transport: transport}, true
 }
 
 func (f *Forwarder) Forward(ctx context.Context, packet *protocol.Packet) (*router.ForwardResult, error) {
@@ -148,6 +179,9 @@ func (f *Forwarder) forwardTo(ctx context.Context, endpoint string, packet *prot
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if f.requestHost != "" {
+		req.Host = f.requestHost
+	}
 	if packet.TraceID != "" {
 		req.Header.Set(TraceIDHeader, packet.TraceID)
 	}
@@ -188,10 +222,17 @@ func (f *Forwarder) forwardTo(ctx context.Context, endpoint string, packet *prot
 }
 
 func (f *Forwarder) Close() error {
-	if f == nil || f.selector == nil {
+	if f == nil {
 		return nil
 	}
-	return f.selector.Close()
+	var err error
+	if f.selector != nil {
+		err = f.selector.Close()
+	}
+	if f.ownsClient && f.client != nil {
+		f.client.CloseIdleConnections()
+	}
+	return err
 }
 
 func newUpstreamRequest(packet *protocol.Packet) UpstreamRequest {
