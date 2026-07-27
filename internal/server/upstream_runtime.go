@@ -16,6 +16,7 @@ type upstreamRouteTracker struct {
 	routeName  string
 	targetType string
 	tracker    *resilience.DependencyTracker
+	discovery  *upstreamDiscoveryRuntime
 }
 
 func newUpstreamRuntime(routes []UpstreamRouteConfig) *UpstreamRuntime {
@@ -25,6 +26,9 @@ func newUpstreamRuntime(routes []UpstreamRouteConfig) *UpstreamRuntime {
 			continue
 		}
 		runtime.ensureRoute(route.Name, "http")
+		if route.HTTP.Discovery.Type != "" {
+			runtime.ensureDiscovery(route.Name, route.HTTP.Discovery.Type)
+		}
 	}
 	return runtime
 }
@@ -37,18 +41,38 @@ func (r *UpstreamRuntime) ensureRoute(routeName, targetType string) *resilience.
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	return r.ensureRouteLocked(routeName, targetType).tracker
+}
+
+func (r *UpstreamRuntime) ensureRouteLocked(routeName, targetType string) *upstreamRouteTracker {
 	if existing := r.trackers[routeName]; existing != nil {
-		return existing.tracker
+		return existing
 	}
 	tracker := resilience.NewDependencyTracker(resilience.DependencyTrackerConfig{
 		Name: "http_upstream:" + routeName,
 	})
-	r.trackers[routeName] = &upstreamRouteTracker{
+	entry := &upstreamRouteTracker{
 		routeName:  routeName,
 		targetType: targetType,
 		tracker:    tracker,
 	}
-	return tracker
+	r.trackers[routeName] = entry
+	return entry
+}
+
+func (r *UpstreamRuntime) ensureDiscovery(routeName, discoveryType string) *upstreamDiscoveryRuntime {
+	if r == nil || routeName == "" || discoveryType == "" {
+		return nil
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	entry := r.ensureRouteLocked(routeName, "http")
+	if entry.discovery == nil {
+		entry.discovery = newUpstreamDiscoveryRuntime(discoveryType, nil)
+	}
+	return entry.discovery
 }
 
 func (r *UpstreamRuntime) snapshot(routeName string) (upstreamRouteRuntimeSnapshot, bool) {
@@ -58,15 +82,26 @@ func (r *UpstreamRuntime) snapshot(routeName string) (upstreamRouteRuntimeSnapsh
 
 	r.mu.RLock()
 	entry := r.trackers[routeName]
-	r.mu.RUnlock()
 	if entry == nil || entry.tracker == nil {
+		r.mu.RUnlock()
 		return upstreamRouteRuntimeSnapshot{}, false
 	}
-	return upstreamRouteRuntimeSnapshot{
-		RouteName:  entry.routeName,
-		TargetType: entry.targetType,
-		Snapshot:   entry.tracker.Snapshot(),
-	}, true
+	routeName = entry.routeName
+	targetType := entry.targetType
+	tracker := entry.tracker
+	discovery := entry.discovery
+	r.mu.RUnlock()
+
+	snapshot := upstreamRouteRuntimeSnapshot{
+		RouteName:  routeName,
+		TargetType: targetType,
+		Snapshot:   tracker.Snapshot(),
+	}
+	if discovery != nil {
+		discoverySnapshot := discovery.snapshot()
+		snapshot.Discovery = &discoverySnapshot
+	}
+	return snapshot, true
 }
 
 func (r *UpstreamRuntime) snapshots() []upstreamRouteRuntimeSnapshot {
@@ -96,4 +131,5 @@ type upstreamRouteRuntimeSnapshot struct {
 	RouteName  string
 	TargetType string
 	Snapshot   resilience.DependencySnapshot
+	Discovery  *upstreamDiscoveryRuntimeSnapshot
 }

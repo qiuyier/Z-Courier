@@ -26,6 +26,11 @@ semantic versioning after the first public MVP tag.
   refreshes, active and unhealthy endpoint counts, endpoint selection and
   cooldown behavior, classified attempt failures, per-message attempt counts,
   and terminal failover decisions without endpoint or error-text labels.
+- V15.4.2 sanitized per-route discovery runtime snapshots in admin diagnostics
+  and diagnosis bundles, covering current endpoint counts plus recent refresh,
+  selection, cooldown, classified failure, forwarding, and failover state
+  without placing addresses, hostnames, URLs, secrets, or raw errors in the
+  discovery snapshot.
 
 ## [v0.14.0] - 2026-07-24
 

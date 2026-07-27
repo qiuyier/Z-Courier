@@ -125,7 +125,21 @@ Example:
       {
         "name": "production-http-upstream",
         "target_type": "http",
-        "status": "healthy"
+        "status": "healthy",
+        "discovery": {
+          "type": "dns",
+          "resolved_endpoints": 3,
+          "unhealthy_endpoints": 1,
+          "last_refresh_result": "success",
+          "last_refresh_duration": "2.1ms",
+          "last_refresh_at": "2026-07-27T07:30:00Z",
+          "last_selection_result": "selected",
+          "cooldown_skipped_total": 4,
+          "last_endpoint_failure_class": "transport",
+          "last_forward_result": "success",
+          "last_forward_attempts": 2,
+          "last_failover_decision": "succeeded"
+        }
       }
     ]
   },
@@ -162,6 +176,24 @@ becomes `degraded` after repeated safe-to-classify forwarding failures, becomes
 next successful forward. The `last_reason` field uses sanitized values such as
 `http_status_502`, `timeout`, `canceled`, or `request_failed`; upstream response
 bodies are not exposed.
+
+Discovery-backed HTTP routes also include a read-only `discovery` snapshot for
+the current gateway process:
+
+- `type`, `resolved_endpoints`, and `unhealthy_endpoints` describe the current
+  local resolver and selector state.
+- `last_refresh_*` distinguishes successful, failed, and empty DNS refreshes.
+  Static discovery has no refresh event.
+- `last_selection_*` and `cooldown_skipped_total` show recent endpoint
+  selection and process-lifetime cooldown activity.
+- `last_endpoint_failure_*`, `last_forward_*`, and `last_failover_*` use only
+  bounded failure/result/decision values.
+
+The snapshot is passive: reading diagnostics does not run DNS resolution or
+probe a backend. It never includes endpoint addresses, configured hostnames,
+URLs, tokens, raw network errors, or message bodies. A diagnosis bundle embeds
+the same sanitized diagnostics response; its separate `routes` section retains
+the existing sanitized route-configuration fields.
 
 ### `GET /internal/admin/check`
 

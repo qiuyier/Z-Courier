@@ -30,6 +30,8 @@ Implementation status:
 - V15.4.1 adds low-cardinality route-level metrics for discovery refreshes,
   active and unhealthy endpoint counts, selection/cooldown behavior, classified
   endpoint failures, attempt distributions, and terminal failover decisions.
+- V15.4.2 adds sanitized process-local discovery snapshots to admin diagnostics
+  and diagnosis bundles without exposing endpoint identity or raw errors.
 
 ## Product Direction
 

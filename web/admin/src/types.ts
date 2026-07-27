@@ -288,6 +288,26 @@ export type AuthDiagnostics = {
   verifier_loaded: boolean;
 };
 
+export type UpstreamDiscoveryRuntime = {
+  type: "static" | "dns";
+  resolved_endpoints: number;
+  unhealthy_endpoints: number;
+  last_refresh_result?: "success" | "error" | "empty";
+  last_refresh_duration?: string;
+  last_refresh_at?: string;
+  last_selection_result?: "selected" | "resolver_error" | "no_available";
+  last_selection_at?: string;
+  cooldown_skipped_total: number;
+  last_cooldown_skipped_at?: string;
+  last_endpoint_failure_class?: "encoding" | "discovery" | "request" | "transport" | "timeout" | "canceled" | "response";
+  last_endpoint_failure_at?: string;
+  last_forward_result?: "success" | "failure";
+  last_forward_attempts?: number;
+  last_forward_at?: string;
+  last_failover_decision?: "succeeded" | "disabled" | "not_retryable" | "exhausted" | "no_alternate";
+  last_failover_at?: string;
+};
+
 export type UpstreamRouteRuntime = {
   name: string;
   target_type: string;
@@ -297,6 +317,7 @@ export type UpstreamRouteRuntime = {
   last_failure_at?: string;
   last_success_at?: string;
   updated_at?: string;
+  discovery?: UpstreamDiscoveryRuntime;
 };
 
 export type UpstreamDiagnostics = {

@@ -165,14 +165,35 @@ type adminUpstreamDiagnostics struct {
 }
 
 type adminUpstreamRouteRuntime struct {
-	Name                string    `json:"name"`
-	TargetType          string    `json:"target_type"`
-	Status              string    `json:"status"`
-	ConsecutiveFailures int       `json:"consecutive_failures,omitempty"`
-	LastReason          string    `json:"last_reason,omitempty"`
-	LastFailureAt       time.Time `json:"last_failure_at,omitempty"`
-	LastSuccessAt       time.Time `json:"last_success_at,omitempty"`
-	UpdatedAt           time.Time `json:"updated_at,omitempty"`
+	Name                string                         `json:"name"`
+	TargetType          string                         `json:"target_type"`
+	Status              string                         `json:"status"`
+	ConsecutiveFailures int                            `json:"consecutive_failures,omitempty"`
+	LastReason          string                         `json:"last_reason,omitempty"`
+	LastFailureAt       time.Time                      `json:"last_failure_at,omitempty"`
+	LastSuccessAt       time.Time                      `json:"last_success_at,omitempty"`
+	UpdatedAt           time.Time                      `json:"updated_at,omitempty"`
+	Discovery           *adminUpstreamDiscoveryRuntime `json:"discovery,omitempty"`
+}
+
+type adminUpstreamDiscoveryRuntime struct {
+	Type                     string     `json:"type"`
+	ResolvedEndpoints        int        `json:"resolved_endpoints"`
+	UnhealthyEndpoints       int        `json:"unhealthy_endpoints"`
+	LastRefreshResult        string     `json:"last_refresh_result,omitempty"`
+	LastRefreshDuration      string     `json:"last_refresh_duration,omitempty"`
+	LastRefreshAt            *time.Time `json:"last_refresh_at,omitempty"`
+	LastSelectionResult      string     `json:"last_selection_result,omitempty"`
+	LastSelectionAt          *time.Time `json:"last_selection_at,omitempty"`
+	CooldownSkippedTotal     uint64     `json:"cooldown_skipped_total"`
+	LastCooldownSkippedAt    *time.Time `json:"last_cooldown_skipped_at,omitempty"`
+	LastEndpointFailureClass string     `json:"last_endpoint_failure_class,omitempty"`
+	LastEndpointFailureAt    *time.Time `json:"last_endpoint_failure_at,omitempty"`
+	LastForwardResult        string     `json:"last_forward_result,omitempty"`
+	LastForwardAttempts      *int       `json:"last_forward_attempts,omitempty"`
+	LastForwardAt            *time.Time `json:"last_forward_at,omitempty"`
+	LastFailoverDecision     string     `json:"last_failover_decision,omitempty"`
+	LastFailoverAt           *time.Time `json:"last_failover_at,omitempty"`
 }
 
 type adminCapacityDiagnostics struct {
@@ -597,7 +618,7 @@ func adminUpstreamDiagnosticsFromConfig(config Config) adminUpstreamDiagnostics 
 
 func adminUpstreamRouteRuntimeFromSnapshot(snapshot upstreamRouteRuntimeSnapshot) adminUpstreamRouteRuntime {
 	dependency := snapshot.Snapshot
-	return adminUpstreamRouteRuntime{
+	out := adminUpstreamRouteRuntime{
 		Name:                snapshot.RouteName,
 		TargetType:          snapshot.TargetType,
 		Status:              dependency.Status,
@@ -607,6 +628,44 @@ func adminUpstreamRouteRuntimeFromSnapshot(snapshot upstreamRouteRuntimeSnapshot
 		LastSuccessAt:       dependency.LastSuccessAt.UTC(),
 		UpdatedAt:           dependency.UpdatedAt.UTC(),
 	}
+	if snapshot.Discovery != nil {
+		discovery := snapshot.Discovery
+		lastRefreshDuration := ""
+		if discovery.LastRefreshResult != "" {
+			lastRefreshDuration = discovery.LastRefreshDuration.String()
+		}
+		out.Discovery = &adminUpstreamDiscoveryRuntime{
+			Type:                     discovery.Type,
+			ResolvedEndpoints:        discovery.ResolvedEndpoints,
+			UnhealthyEndpoints:       discovery.UnhealthyEndpoints,
+			LastRefreshResult:        discovery.LastRefreshResult,
+			LastRefreshDuration:      lastRefreshDuration,
+			LastRefreshAt:            optionalAdminTime(discovery.LastRefreshAt),
+			LastSelectionResult:      discovery.LastSelectionResult,
+			LastSelectionAt:          optionalAdminTime(discovery.LastSelectionAt),
+			CooldownSkippedTotal:     discovery.CooldownSkippedTotal,
+			LastCooldownSkippedAt:    optionalAdminTime(discovery.LastCooldownSkippedAt),
+			LastEndpointFailureClass: discovery.LastEndpointFailureClass,
+			LastEndpointFailureAt:    optionalAdminTime(discovery.LastEndpointFailureAt),
+			LastForwardResult:        discovery.LastForwardResult,
+			LastForwardAt:            optionalAdminTime(discovery.LastForwardAt),
+			LastFailoverDecision:     discovery.LastFailoverDecision,
+			LastFailoverAt:           optionalAdminTime(discovery.LastFailoverDecisionAt),
+		}
+		if discovery.LastForwardResult != "" {
+			attempts := discovery.LastForwardAttempts
+			out.Discovery.LastForwardAttempts = &attempts
+		}
+	}
+	return out
+}
+
+func optionalAdminTime(value time.Time) *time.Time {
+	if value.IsZero() {
+		return nil
+	}
+	utc := value.UTC()
+	return &utc
 }
 
 func adminUpstreamStateCounts(states []adminUpstreamRouteRuntime) (unavailable int, degraded int) {

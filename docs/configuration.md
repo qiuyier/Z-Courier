@@ -1009,6 +1009,17 @@ internal URLs, tokens, raw errors, and message identifiers are deliberately
 not metric labels. Keep route names from a bounded configuration set to avoid
 unnecessary Prometheus cardinality.
 
+V15.4.2 also includes a nested `discovery` object for discovery-backed routes
+in `GET /internal/admin/diagnostics` and diagnosis bundles. It reports current
+resolved and unhealthy counts plus the most recent refresh, selection,
+cooldown skip, classified endpoint failure, forwarding result, attempt count,
+and failover decision. These values are process-local observations and the
+endpoint performs no active DNS or backend probe. Endpoint addresses,
+hostnames, URLs, tokens, and raw errors are never returned. Event fields and
+timestamps are omitted until the corresponding event has occurred. A diagnosis
+bundle embeds this same discovery snapshot; its separate route-configuration
+section continues to follow the existing sanitized URL contract.
+
 NSQ target example:
 
 ```yaml

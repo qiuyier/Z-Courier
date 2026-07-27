@@ -117,11 +117,28 @@ message requeue/discard、retry scan、logout 等 JSON `POST` 请求里自动带
 - sessions。
 - auth provider。
 - upstream route runtime state。
+- discovery route 的当前端点计数和最近一次脱敏运行事件。
 - capacity 限制。
 - downlink 配置。
 - warnings。
 
 它不会主动连接外部依赖，只报告进程内已知状态。
+
+使用 `static` 或 `dns` 发现的 HTTP route 会在 runtime state 中额外包含只读
+`discovery` 对象：
+
+- `type`、`resolved_endpoints`、`unhealthy_endpoints` 表示当前节点的发现类型、
+  可用快照大小和进程内不健康端点数。
+- `last_refresh_*` 区分 DNS 最近一次刷新是成功、查询失败还是空结果；静态发现
+  不会产生 refresh 事件。
+- `last_selection_*` 和 `cooldown_skipped_total` 表示最近选择结果以及当前进程
+  启动以来因 cooldown 跳过端点的累计次数。
+- `last_endpoint_failure_*`、`last_forward_*`、`last_failover_*` 只使用有限枚举
+  的失败分类、结果和决策。
+
+读取 diagnostics 不会主动解析 DNS 或探测 backend。响应和 diagnosis bundle
+中的 `discovery` 快照都不会包含端点 IP、配置域名、URL、token、原始网络错误或
+消息 Body；bundle 内独立的 `routes` 分区仍遵循既有 route 配置脱敏规则。
 
 ### `GET /internal/admin/check`
 

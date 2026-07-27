@@ -24,7 +24,7 @@ func newUpstreamEngine(config Config) (*router.Engine, error) {
 
 	routes := make([]router.Route, 0, len(config.UpstreamRoutes))
 	for _, routeConfig := range config.UpstreamRoutes {
-		forwarder, err := newRouteForwarder(routeConfig)
+		forwarder, err := newRouteForwarderWithRuntime(routeConfig, config.UpstreamRuntime)
 		if err != nil {
 			_ = router.NewEngine(routes).Close()
 			return nil, err
@@ -60,6 +60,10 @@ func newUpstreamEngine(config Config) (*router.Engine, error) {
 }
 
 func newRouteForwarder(routeConfig UpstreamRouteConfig) (router.Forwarder, error) {
+	return newRouteForwarderWithRuntime(routeConfig, nil)
+}
+
+func newRouteForwarderWithRuntime(routeConfig UpstreamRouteConfig, runtime *UpstreamRuntime) (router.Forwarder, error) {
 	if routeConfig.HTTP != nil {
 		switch routeConfig.HTTP.Discovery.Type {
 		case "":
@@ -69,7 +73,7 @@ func newRouteForwarder(routeConfig UpstreamRouteConfig) (router.Forwarder, error
 				Timeout: routeConfig.HTTP.Timeout,
 			}), nil
 		case "static":
-			observer := newUpstreamDiscoveryMetricsObserver(routeConfig.Name, routeConfig.HTTP.Discovery.Type)
+			observer := newUpstreamDiscoveryObserver(routeConfig.Name, routeConfig.HTTP.Discovery.Type, runtime)
 			resolver, err := httpforwarder.NewStaticResolverWithObserver(routeConfig.HTTP.Discovery.Endpoints, observer)
 			if err != nil {
 				return nil, fmt.Errorf("upstream route %q: %w", routeConfig.Name, err)
@@ -77,7 +81,7 @@ func newRouteForwarder(routeConfig UpstreamRouteConfig) (router.Forwarder, error
 			return newDiscoveredHTTPForwarder(routeConfig, resolver, "", "", observer)
 		case "dns":
 			discovery := routeConfig.HTTP.Discovery
-			observer := newUpstreamDiscoveryMetricsObserver(routeConfig.Name, discovery.Type)
+			observer := newUpstreamDiscoveryObserver(routeConfig.Name, discovery.Type, runtime)
 			resolver, err := httpforwarder.NewDNSResolver(httpforwarder.DNSResolverConfig{
 				Scheme:          discovery.Scheme,
 				Hostname:        discovery.Hostname,

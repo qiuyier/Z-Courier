@@ -27,7 +27,7 @@ func TestNewRouteForwarderRunsStaticDiscoveryFailover(t *testing.T) {
 	unavailableURL := unavailable.URL
 	unavailable.Close()
 
-	forwarder, err := newRouteForwarder(UpstreamRouteConfig{
+	routeConfig := UpstreamRouteConfig{
 		Name: "orders",
 		HTTP: &HTTPUpstreamConfig{
 			Discovery: HTTPUpstreamDiscoveryConfig{
@@ -40,7 +40,9 @@ func TestNewRouteForwarderRunsStaticDiscoveryFailover(t *testing.T) {
 				UnhealthyCooldown: time.Minute,
 			},
 		},
-	})
+	}
+	runtime := newUpstreamRuntime([]UpstreamRouteConfig{routeConfig})
+	forwarder, err := newRouteForwarderWithRuntime(routeConfig, runtime)
 	if err != nil {
 		t.Fatalf("newRouteForwarder() error = %v", err)
 	}
@@ -57,6 +59,21 @@ func TestNewRouteForwarderRunsStaticDiscoveryFailover(t *testing.T) {
 	if result == nil || result.StatusCode != http.StatusNoContent || received.Load() != 1 {
 		t.Fatalf("result = %+v, received = %d", result, received.Load())
 	}
+	snapshot, ok := runtime.snapshot(routeConfig.Name)
+	if !ok || snapshot.Discovery == nil {
+		t.Fatalf("runtime snapshot = %+v, want discovery state", snapshot)
+	}
+	discovery := snapshot.Discovery
+	if discovery.Type != "static" || discovery.ResolvedEndpoints != 2 || discovery.UnhealthyEndpoints != 1 ||
+		discovery.LastSelectionResult != "selected" ||
+		discovery.LastEndpointFailureClass != string(router.FailureClassTransport) ||
+		discovery.LastForwardResult != "success" || discovery.LastForwardAttempts != 2 ||
+		discovery.LastFailoverDecision != string(router.FailoverDecisionSucceeded) {
+		t.Fatalf("discovery runtime = %+v", discovery)
+	}
+	if discovery.LastEndpointFailureAt.IsZero() || discovery.LastForwardAt.IsZero() || discovery.LastFailoverDecisionAt.IsZero() {
+		t.Fatalf("discovery runtime timestamps = %+v, want observed times", discovery)
+	}
 }
 
 func TestNewRouteForwarderRunsDNSDiscovery(t *testing.T) {
@@ -70,7 +87,7 @@ func TestNewRouteForwarderRunsDNSDiscovery(t *testing.T) {
 	defer backend.Close()
 	address := backend.Listener.Addr().(*net.TCPAddr)
 
-	forwarder, err := newRouteForwarder(UpstreamRouteConfig{
+	routeConfig := UpstreamRouteConfig{
 		Name: "orders",
 		HTTP: &HTTPUpstreamConfig{
 			Path: "/gateway/upstream",
@@ -86,7 +103,9 @@ func TestNewRouteForwarderRunsDNSDiscovery(t *testing.T) {
 				}),
 			},
 		},
-	})
+	}
+	runtime := newUpstreamRuntime([]UpstreamRouteConfig{routeConfig})
+	forwarder, err := newRouteForwarderWithRuntime(routeConfig, runtime)
 	if err != nil {
 		t.Fatalf("newRouteForwarder() error = %v", err)
 	}
@@ -108,6 +127,20 @@ func TestNewRouteForwarderRunsDNSDiscovery(t *testing.T) {
 	}
 	if got := <-requestPath; got != "/gateway/upstream" {
 		t.Fatalf("request path = %q", got)
+	}
+	snapshot, ok := runtime.snapshot(routeConfig.Name)
+	if !ok || snapshot.Discovery == nil {
+		t.Fatalf("runtime snapshot = %+v, want DNS discovery state", snapshot)
+	}
+	discovery := snapshot.Discovery
+	if discovery.Type != "dns" || discovery.ResolvedEndpoints != 1 ||
+		discovery.LastRefreshResult != "success" ||
+		discovery.LastSelectionResult != "selected" ||
+		discovery.LastForwardResult != "success" || discovery.LastForwardAttempts != 1 {
+		t.Fatalf("DNS discovery runtime = %+v", discovery)
+	}
+	if discovery.LastRefreshAt.IsZero() || discovery.LastSelectionAt.IsZero() || discovery.LastForwardAt.IsZero() {
+		t.Fatalf("DNS discovery runtime timestamps = %+v, want observed times", discovery)
 	}
 }
 

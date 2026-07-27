@@ -560,6 +560,80 @@ func TestInternalHTTPAdminDiagnosticsReportsDegradedHTTPUpstream(t *testing.T) {
 	}
 }
 
+func TestInternalHTTPAdminDiagnosticsReportsSanitizedDiscoveryState(t *testing.T) {
+	routes := []UpstreamRouteConfig{{
+		Name:     "orders-discovery",
+		MsgIDMin: 1001,
+		MsgIDMax: 1999,
+		HTTP: &HTTPUpstreamConfig{
+			Token: "upstream-secret",
+			Discovery: HTTPUpstreamDiscoveryConfig{
+				Type:            "dns",
+				Scheme:          "http",
+				Hostname:        "private-backend.internal",
+				Port:            8080,
+				RefreshInterval: time.Minute,
+			},
+		},
+	}}
+	runtime := newUpstreamRuntime(routes)
+	discovery := runtime.ensureDiscovery("orders-discovery", "dns")
+	discovery.recordRefresh("empty", 25*time.Millisecond)
+	discovery.setResolvedEndpoints(0)
+	discovery.setUnhealthyEndpoints(2)
+	discovery.recordSelection("no_available")
+	discovery.recordCooldownSkipped(3)
+	discovery.recordEndpointFailure("timeout")
+	discovery.recordForward(2, "failure", "exhausted")
+
+	config := normalizeConfig(Config{
+		InternalToken:   "internal-secret",
+		UpstreamRoutes:  routes,
+		UpstreamRuntime: runtime,
+	})
+	server := mustInternalHTTPServer(t, config, downlink.NewService(nil, nil), &gatewayHealth{}, nil)
+	req := httptest.NewRequest(http.MethodGet, "/internal/admin/diagnostics", nil)
+	req.Header.Set(downlink.InternalTokenHeader, "internal-secret")
+	rec := httptest.NewRecorder()
+	server.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, secret := range []string{
+		"private-backend.internal",
+		"upstream-secret",
+		"internal-secret",
+	} {
+		if strings.Contains(body, secret) {
+			t.Fatalf("diagnostics leaked %q in body %s", secret, body)
+		}
+	}
+
+	var resp adminDiagnosticsResponse
+	if err := sonic.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if len(resp.Upstream.HTTPRouteStates) != 1 || resp.Upstream.HTTPRouteStates[0].Discovery == nil {
+		t.Fatalf("HTTP route states = %+v, want discovery state", resp.Upstream.HTTPRouteStates)
+	}
+	got := resp.Upstream.HTTPRouteStates[0].Discovery
+	if got.Type != "dns" || got.ResolvedEndpoints != 0 || got.UnhealthyEndpoints != 2 ||
+		got.LastRefreshResult != "empty" || got.LastRefreshDuration != "25ms" ||
+		got.LastSelectionResult != "no_available" || got.CooldownSkippedTotal != 3 ||
+		got.LastEndpointFailureClass != "timeout" || got.LastForwardResult != "failure" ||
+		got.LastForwardAttempts == nil || *got.LastForwardAttempts != 2 ||
+		got.LastFailoverDecision != "exhausted" {
+		t.Fatalf("discovery diagnostics = %+v", got)
+	}
+	if got.LastRefreshAt == nil || got.LastSelectionAt == nil ||
+		got.LastCooldownSkippedAt == nil || got.LastEndpointFailureAt == nil ||
+		got.LastForwardAt == nil || got.LastFailoverAt == nil {
+		t.Fatalf("discovery diagnostics timestamps = %+v, want observed times", got)
+	}
+}
+
 func TestInternalHTTPAdminCheck(t *testing.T) {
 	var gotMethod string
 	var gotToken string

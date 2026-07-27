@@ -688,6 +688,14 @@ V15.4.1 通过 Prometheus 暴露服务发现和故障切换状态：
 解析出的 IP、域名、内部 URL、token、原始错误和消息标识都不会成为指标 label。
 生产配置中的 route 名也应保持为有限集合，避免产生不必要的 Prometheus 高基数。
 
+V15.4.2 还会在 `GET /internal/admin/diagnostics` 和 diagnosis bundle 的发现式
+HTTP route 下返回嵌套的 `discovery` 对象。它包含当前已解析端点数、不健康端点数，
+以及最近一次刷新、选择、cooldown 跳过、端点失败分类、转发结果、尝试次数和
+failover 决策。这些都是当前 gateway 进程内的被动观测；读取 diagnostics 不会主动
+执行 DNS 查询或 backend 探测，也不会返回端点 IP、域名、URL、token 或原始错误。
+某类事件尚未发生时，对应字段和时间戳会被省略。diagnosis bundle 会嵌入同一份
+discovery 快照；其中独立的 route 配置分区仍沿用既有的 URL 脱敏规则。
+
 ## Pipeline
 
 ```yaml
