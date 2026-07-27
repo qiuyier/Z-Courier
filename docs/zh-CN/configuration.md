@@ -696,6 +696,18 @@ failover 决策。这些都是当前 gateway 进程内的被动观测；读取 d
 某类事件尚未发生时，对应字段和时间戳会被省略。diagnosis bundle 会嵌入同一份
 discovery 快照；其中独立的 route 配置分区仍沿用既有的 URL 脱敏规则。
 
+V15.4.4 把同一套配置契约接入部署参考：
+
+- production Compose 配置使用两个明确的静态 backend URL；
+- Helm 提供 `examples/values-static-discovery.yaml` 和
+  `examples/values-dns-discovery.yaml`；
+- `examples/values-production.yaml` 展示 Kubernetes Headless Service DNS；
+- `bash scripts/discovery_deployment_check.sh` 会校验 schema、渲染后的
+  ConfigMap、错误组合，以及两份生成配置能否被真实 gateway 加载。
+
+Docker 镜像 CI 还会改用刚构建的镜像重新执行这项检查，因此示例既对源码中的配置
+加载器负责，也对最终镜像中的 gateway 二进制负责。
+
 ## Pipeline
 
 ```yaml

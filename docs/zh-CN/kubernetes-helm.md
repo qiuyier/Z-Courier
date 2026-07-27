@@ -79,6 +79,40 @@ helm upgrade --install z-courier ./deploy/helm/z-courier \
 
 更推荐把依赖地址写进自己的 values 文件，而不是在命令行里写一长串 `--set`。
 
+## HTTP Upstream 服务发现
+
+chart 保留原有单 `target.url` 写法，同时支持静态端点列表和 DNS A/AAAA 发现，
+三种写法互斥。
+
+固定容器、VM 或服务地址可参考：
+
+```bash
+helm lint deploy/helm/z-courier \
+  -f deploy/helm/z-courier/examples/values-static-discovery.yaml
+```
+
+Kubernetes DNS 可参考：
+
+```bash
+helm lint deploy/helm/z-courier \
+  -f deploy/helm/z-courier/examples/values-dns-discovery.yaml
+```
+
+production values 使用
+`business-backend-headless.z-courier.svc.cluster.local`。普通 Service 通常只返回
+一个 ClusterIP；希望 gateway 直接得到多个 Pod 地址并进行端点选择和有限 failover
+时，应使用 Headless Service。DNS 模式的 `path` 会附加到每一个解析出的地址；
+静态模式则要求每个 endpoint 已包含完整路径。
+
+修改这些示例后运行：
+
+```bash
+bash scripts/discovery_deployment_check.sh
+```
+
+它会校验并渲染两种模式、拒绝互相冲突的 values、抽取 ConfigMap 中的配置，并交给
+真实 gateway 配置加载器验证。
+
 ## 使用 OCI chart 安装
 
 ```bash
@@ -292,6 +326,8 @@ kubectl apply -f deploy/helm/z-courier/examples/networkpolicy.yaml
 
 ```bash
 helm lint deploy/helm/z-courier
+helm lint deploy/helm/z-courier -f deploy/helm/z-courier/examples/values-static-discovery.yaml
+helm lint deploy/helm/z-courier -f deploy/helm/z-courier/examples/values-dns-discovery.yaml
 helm template z-courier deploy/helm/z-courier >/tmp/z-courier-k8s.yaml
 helm package deploy/helm/z-courier --destination /tmp
 ```

@@ -1,0 +1,25 @@
+# Kubernetes DNS discovery example. Use a headless Service when the gateway
+# should resolve multiple backend Pod addresses instead of one ClusterIP.
+
+upstream:
+  routes:
+    - name: kubernetes-dns-http-upstream
+      enabled: true
+      msgIDMin: 1001
+      msgIDMax: 1999
+      target:
+        type: http
+        path: /gateway/upstream
+        discovery:
+          type: dns
+          scheme: http
+          hostname: business-backend-headless.z-courier.svc.cluster.local
+          port: 8080
+          refreshInterval: 10s
+        tokenEnv: ZCOURIER_UPSTREAM_INTERNAL_TOKEN
+        timeout: 5s
+        maxInFlight: 2000
+        failover:
+          enabled: true
+          maxAttempts: 2
+          unhealthyCooldown: 15s

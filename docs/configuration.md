@@ -1020,6 +1020,20 @@ timestamps are omitted until the corresponding event has occurred. A diagnosis
 bundle embeds this same discovery snapshot; its separate route-configuration
 section continues to follow the existing sanitized URL contract.
 
+V15.4.4 carries the same contract into the deployment references:
+
+- production Compose configs use two explicit static backend URLs;
+- Helm includes `examples/values-static-discovery.yaml` and
+  `examples/values-dns-discovery.yaml`;
+- `examples/values-production.yaml` demonstrates Kubernetes headless-Service
+  DNS; and
+- `bash scripts/discovery_deployment_check.sh` validates the schema, rendered
+  ConfigMaps, negative cases, and both generated gateway configs.
+
+The Docker image CI reruns that verifier with the built image as the config
+loader, so the examples are checked against the packaged gateway binary as
+well as the source tree.
+
 NSQ target example:
 
 ```yaml

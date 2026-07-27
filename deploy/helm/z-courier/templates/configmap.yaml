@@ -267,10 +267,40 @@ data:
           target:
             type: {{ .target.type | quote }}
             {{- if eq .target.type "http" }}
-            url: {{ .target.url | quote }}
+            {{- with .target.url }}
+            url: {{ . | quote }}
+            {{- end }}
+            {{- with .target.path }}
+            path: {{ . | quote }}
+            {{- end }}
             token: {{ printf "${%s}" .target.tokenEnv | quote }}
             timeout: {{ .target.timeout | quote }}
             max_in_flight: {{ .target.maxInFlight }}
+            {{- with .target.discovery }}
+            discovery:
+              type: {{ .type | quote }}
+              {{- if eq .type "static" }}
+              endpoints:
+                {{- toYaml .endpoints | nindent 16 }}
+              {{- else if eq .type "dns" }}
+              scheme: {{ .scheme | quote }}
+              hostname: {{ .hostname | quote }}
+              port: {{ .port }}
+              {{- with .refreshInterval }}
+              refresh_interval: {{ . | quote }}
+              {{- end }}
+              {{- end }}
+            {{- end }}
+            {{- with .target.failover }}
+            failover:
+              enabled: {{ .enabled }}
+              {{- with .maxAttempts }}
+              max_attempts: {{ . }}
+              {{- end }}
+              {{- with .unhealthyCooldown }}
+              unhealthy_cooldown: {{ . | quote }}
+              {{- end }}
+            {{- end }}
             {{- else if eq .target.type "nsq" }}
             nsqd_addrs:
               {{- toYaml .target.nsqdAddrs | nindent 14 }}

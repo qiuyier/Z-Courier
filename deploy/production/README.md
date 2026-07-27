@@ -179,7 +179,7 @@ The reference gateway config uses:
   `cluster.registry.type: redis`
 - Admin console disabled by default:
   `admin_console.enabled: false`
-- HTTP upstream for `MsgID 1001-1999`
+- Static-discovery HTTP upstream for `MsgID 1001-1999`
 - NSQ upstream for `MsgID 2000-2999`
 - A basic per-client ingress rate limit
 
@@ -188,8 +188,12 @@ AUTH/BIND will fail. That is intentional: production token semantics should be
 owned by your business backend or identity service. For quick local experiments,
 use the development configs instead.
 
-If you keep `production-http-upstream` enabled, add `business-backend` to the
-same private network or change the route URL to your real backend address.
+If you keep `production-http-upstream` enabled, add `business-backend-a` and
+`business-backend-b` to the same private network or replace the endpoint list
+with your real backend addresses. Static endpoints are active peers selected
+in round-robin order, not a primary/standby pair. The configured failover makes
+at most two attempts and only switches after a transport failure before any
+HTTP response headers arrive; a received `5xx` response is never replayed.
 
 Before enabling the example policy, assign a reviewed MsgID range and make sure
 it does not overlap another enabled policy. Terminal failures can be exported
@@ -292,6 +296,19 @@ docker compose \
   -f deploy/production/docker-compose.terminal-webhook-tls.yml \
   config
 ```
+
+The production and production-cluster gateway configs use the same two-entry
+static discovery route. Their normal Compose config checks plus gateway
+`-check-config` validation are included in CI. Helm users can validate both
+static and Kubernetes DNS rendering with:
+
+```bash
+bash scripts/discovery_deployment_check.sh
+```
+
+The script lints both discovery values examples, renders their ConfigMaps,
+extracts each generated `z-courier.yaml`, checks invalid combinations are
+rejected, and loads both configurations through the real gateway parser.
 
 Build the gateway image:
 

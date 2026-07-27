@@ -36,6 +36,9 @@ Implementation status:
   discovery and failover panels to the operations and production Grafana
   dashboards, and ships readiness-gated availability alerts with promtool
   behavior tests and bilingual response guidance.
+- V15.4.4 wires static discovery into the production Compose references,
+  teaches Helm to render static and Kubernetes DNS discovery, and adds
+  source-tree plus built-image deployment checks with bilingual guidance.
 
 ## Product Direction
 

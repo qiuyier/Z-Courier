@@ -730,14 +730,115 @@
     "httpTarget": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["type", "url", "tokenEnv", "timeout", "maxInFlight"],
+      "required": ["type", "tokenEnv", "timeout", "maxInFlight"],
       "properties": {
         "type": { "type": "string", "enum": ["http"] },
         "url": { "type": "string", "minLength": 1 },
+        "path": {
+          "type": "string",
+          "pattern": "^/([^/?#][^?#]*)?$"
+        },
         "tokenEnv": { "$ref": "#/definitions/envName" },
         "timeout": { "$ref": "#/definitions/duration" },
-        "maxInFlight": { "$ref": "#/definitions/nonNegativeInteger" }
+        "maxInFlight": { "$ref": "#/definitions/nonNegativeInteger" },
+        "discovery": { "$ref": "#/definitions/httpDiscovery" },
+        "failover": { "$ref": "#/definitions/httpFailover" }
+      },
+      "oneOf": [
+        {
+          "required": ["url"],
+          "not": {
+            "anyOf": [
+              { "required": ["path"] },
+              { "required": ["discovery"] },
+              { "required": ["failover"] }
+            ]
+          }
+        },
+        {
+          "required": ["discovery"],
+          "properties": {
+            "discovery": { "$ref": "#/definitions/httpStaticDiscovery" }
+          },
+          "not": {
+            "anyOf": [
+              { "required": ["url"] },
+              { "required": ["path"] }
+            ]
+          }
+        },
+        {
+          "required": ["discovery"],
+          "properties": {
+            "discovery": { "$ref": "#/definitions/httpDNSDiscovery" }
+          },
+          "not": { "required": ["url"] }
+        }
+      ]
+    },
+    "httpDiscovery": {
+      "oneOf": [
+        { "$ref": "#/definitions/httpStaticDiscovery" },
+        { "$ref": "#/definitions/httpDNSDiscovery" }
+      ]
+    },
+    "httpStaticDiscovery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "endpoints"],
+      "properties": {
+        "type": { "type": "string", "enum": ["static"] },
+        "endpoints": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        }
       }
+    },
+    "httpDNSDiscovery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "scheme", "hostname", "port"],
+      "properties": {
+        "type": { "type": "string", "enum": ["dns"] },
+        "scheme": { "type": "string", "enum": ["http", "https"] },
+        "hostname": { "type": "string", "minLength": 1, "maxLength": 253 },
+        "port": { "$ref": "#/definitions/port" },
+        "refreshInterval": { "$ref": "#/definitions/duration" }
+      }
+    },
+    "httpFailover": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "maxAttempts": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 4
+        },
+        "unhealthyCooldown": { "$ref": "#/definitions/duration" }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "enabled": { "enum": [true] }
+          }
+        },
+        {
+          "properties": {
+            "enabled": { "enum": [false] }
+          },
+          "not": {
+            "anyOf": [
+              { "required": ["maxAttempts"] },
+              { "required": ["unhealthyCooldown"] }
+            ]
+          }
+        }
+      ]
     },
     "nsqTarget": {
       "type": "object",

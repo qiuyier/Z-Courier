@@ -183,6 +183,43 @@ HMAC-authenticated login request. Choose the lowest role that fits the operator 
 `readonly` for inspection, `operator` for guarded repair actions, and `admin`
 for the current full console permission set.
 
+## HTTP Upstream Discovery
+
+The chart keeps the legacy single `target.url` form for compatibility and can
+also render static endpoint lists or DNS A/AAAA discovery. These forms are
+mutually exclusive.
+
+For fixed container, VM, or service addresses:
+
+```bash
+helm lint deploy/helm/z-courier \
+  -f deploy/helm/z-courier/examples/values-static-discovery.yaml
+```
+
+For Kubernetes DNS:
+
+```bash
+helm lint deploy/helm/z-courier \
+  -f deploy/helm/z-courier/examples/values-dns-discovery.yaml
+```
+
+The production values use
+`business-backend-headless.z-courier.svc.cluster.local`. A normal Kubernetes
+Service usually resolves to one ClusterIP; use a headless Service when the
+gateway should receive multiple Pod addresses for client-side selection and
+bounded failover. `path` is appended to every DNS-resolved endpoint, while
+static endpoints already contain their complete path.
+
+Run the deployment verifier after changing either example:
+
+```bash
+bash scripts/discovery_deployment_check.sh
+```
+
+It lints and renders both modes, rejects ambiguous values, extracts the
+generated gateway configs, and validates them through the gateway's real
+configuration loader.
+
 ## Required Secrets
 
 By default, the chart references an existing secret. The default key names are:
@@ -298,6 +335,8 @@ When Helm is installed locally:
 
 ```bash
 helm lint deploy/helm/z-courier
+helm lint deploy/helm/z-courier -f deploy/helm/z-courier/examples/values-static-discovery.yaml
+helm lint deploy/helm/z-courier -f deploy/helm/z-courier/examples/values-dns-discovery.yaml
 helm template z-courier deploy/helm/z-courier >/tmp/z-courier-k8s.yaml
 helm package deploy/helm/z-courier --destination /tmp
 ```

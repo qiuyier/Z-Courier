@@ -190,13 +190,16 @@ The reference configs expect these private service names:
 
 ```text
 auth-backend:8080
-business-backend:8080
+business-backend-a:8080
+business-backend-b:8080
 ```
 
 They are not included in this stack because token verification and business
 message handling belong to your application. Add those services to the same
-`zcourier-private` network or replace the URLs with your real private service
-addresses.
+`zcourier-private` network or replace the static endpoint lists with your real
+private service addresses. Both endpoints are active round-robin peers.
+Transport failover is bounded to two attempts and does not replay an HTTP
+response such as `5xx`.
 
 ## Verify
 
@@ -271,4 +274,4 @@ and peer push behavior with deterministic test clients.
 
 CI runs the production cluster smoke verifier as a deployment-reference boot
 check. It does not replace the local cluster E2E; the production reference stack
-does not include real `auth-backend` or `business-backend` services.
+does not include real `auth-backend` or business-backend services.

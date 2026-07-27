@@ -35,6 +35,10 @@ semantic versioning after the first public MVP tag.
   complete discovery/failover panels in both Grafana dashboards, and
   readiness-gated alerts for sustained empty discovery or actively unavailable
   endpoint sets with promtool behavior tests and bilingual runbook guidance.
+- V15.4.4 production Compose static endpoint lists with bounded failover, Helm
+  static and Kubernetes DNS discovery rendering plus strict schema coverage,
+  deterministic source/built-image configuration checks, and bilingual
+  deployment guidance.
 
 ## [v0.14.0] - 2026-07-24
 

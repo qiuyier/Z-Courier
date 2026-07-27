@@ -119,6 +119,7 @@ jobs:
           docker run --rm -v "$PWD:/work" -w /work "$HELM_IMAGE" template z-courier deploy/helm/z-courier -f deploy/helm/z-courier/examples/values-k8s-e2e.yaml >/tmp/z-courier-helm-k8s-e2e.yaml
           bash scripts/helm_terminal_http_check.sh
           bash scripts/helm_hmac_rotation_check.sh
+          bash scripts/discovery_deployment_check.sh
 
       - name: Package Helm chart
         run: |
@@ -239,6 +240,8 @@ jobs:
           docker run --rm --entrypoint /bin/sh z-courier-gateway:ci -c \
             'test -x /usr/local/bin/z-courier-gateway && test -f /app/configs/z-courier.yaml && test -f /app/conf/zinx.json && test -f /app/web/admin/dist/index.html'
           docker run --rm z-courier-gateway:ci -h >/tmp/z-courier-gateway-help.txt 2>&1
+          ZCOURIER_DISCOVERY_CHECK_IMAGE=z-courier-gateway:ci \
+            bash scripts/discovery_deployment_check.sh
 
   production-smoke:
     name: Production Smoke

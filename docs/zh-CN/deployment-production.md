@@ -140,12 +140,18 @@ backend HMAC、peer HMAC 和终态 webhook HMAC 应该使用不同密钥。
 - HMAC internal HTTP：保护 `/internal/*`。
 - PostgreSQL downlink store：保存离线消息和重试状态。
 - Redis cluster registry：保存在线路由。
-- HTTP upstream：`MsgID 1001-1999`。
+- 静态服务发现 HTTP upstream：`MsgID 1001-1999`。
 - NSQ upstream：`MsgID 2000-2999`。
 - admin console 默认关闭。
 
 如果没有 `auth-backend` 服务，客户端 AUTH/BIND 会失败，这是预期行为。生产 token
 验证应该由你的业务后端或身份服务负责。
+
+HTTP upstream 默认列出 `business-backend-a:8080` 和
+`business-backend-b:8080`。它们是 round-robin 的对等活跃端点，不是主备关系。
+请把两个服务加入同一个 `zcourier-private` 网络，或替换为真实私网地址。当前
+failover 最多尝试两个端点，并且只会在收到响应头之前发生传输失败时切换；已经收到
+的 `5xx` 不会自动重放。
 
 ## 可靠下行配置
 
@@ -259,6 +265,15 @@ docker compose \
   -f deploy/production/docker-compose.yml \
   config
 ```
+
+同时验证 Compose 静态发现与 Helm 静态/DNS 示例：
+
+```bash
+bash scripts/discovery_deployment_check.sh
+```
+
+脚本会执行 Helm schema 校验和渲染，抽取生成的 gateway 配置，验证错误组合会被
+拒绝，并用真实 gateway 配置加载器检查静态与 DNS 两种模式。
 
 构建镜像：
 

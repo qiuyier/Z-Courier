@@ -193,6 +193,8 @@ run_docker_checks() {
   run_release_docker_build
   run docker run --rm --entrypoint /bin/sh z-courier-gateway:release-check -c \
     'test -x /usr/local/bin/z-courier-gateway && test -f /app/configs/z-courier.yaml && test -f /app/conf/zinx.json && test -f /app/web/admin/dist/index.html'
+  run env ZCOURIER_DISCOVERY_CHECK_IMAGE=z-courier-gateway:release-check \
+    bash scripts/discovery_deployment_check.sh
 }
 
 run_slow_checks() {
