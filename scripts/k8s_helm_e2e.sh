@@ -13,6 +13,7 @@ HELM_IMAGE="${K8S_HELM_E2E_HELM_IMAGE:-alpine/helm:3.17.3}"
 POSTGRES_IMAGE="${K8S_HELM_E2E_POSTGRES_IMAGE:-postgres:16-alpine}"
 REDIS_IMAGE="${K8S_HELM_E2E_REDIS_IMAGE:-redis:8-alpine}"
 NSQ_IMAGE="${K8S_HELM_E2E_NSQ_IMAGE:-nsqio/nsq:latest}"
+HTTP_ECHO_IMAGE="${K8S_HELM_E2E_HTTP_ECHO_IMAGE:-hashicorp/http-echo:1.0.0}"
 KEEP_CLUSTER="${K8S_HELM_E2E_KEEP_CLUSTER:-0}"
 RENDERED_FILE="${K8S_HELM_E2E_RENDERED_FILE:-/tmp/z-courier-kind-helm-e2e.yaml}"
 CLIENT_LOCAL_PORT="${K8S_HELM_E2E_CLIENT_PORT:-9899}"
@@ -126,6 +127,41 @@ wait_tcp() {
   return 1
 }
 
+send_dns_upstream() {
+  local body="$1"
+
+  go run ./cmd/devclient \
+    -port "$CLIENT_LOCAL_PORT" \
+    -client-id e2e-client \
+    -device-id "k8s-dns-device-$RUN_ID" \
+    -token e2e-token \
+    -upstream-msg-id 1001 \
+    -upstream-body "$body" \
+    -exit-after-bind
+}
+
+wait_for_discovery_metric() {
+  local metric="$1"
+  local minimum="$2"
+  local deadline=$((SECONDS + 45))
+
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    if curl -fsS "http://127.0.0.1:$INTERNAL_B_LOCAL_PORT/metrics" 2>/dev/null | \
+      awk -v metric="$metric" -v minimum="$minimum" '
+        index($0, metric "{") == 1 && $0 ~ /route="k8s-e2e-dns-http-upstream"/ && $0 ~ /discovery_type="dns"/ && $NF >= minimum {
+          found = 1
+        }
+        END { exit !found }
+      '; then
+      return 0
+    fi
+    sleep 1
+  done
+
+  echo "timed out waiting for $metric route=k8s-e2e-dns-http-upstream to reach $minimum" >&2
+  return 1
+}
+
 need_cmd docker
 need_cmd kind
 need_cmd kubectl
@@ -148,6 +184,7 @@ kind load docker-image "$IMAGE" --name "$CLUSTER_NAME"
 load_dependency_image "$POSTGRES_IMAGE"
 load_dependency_image "$REDIS_IMAGE"
 load_dependency_image "$NSQ_IMAGE"
+load_dependency_image "$HTTP_ECHO_IMAGE"
 
 echo "creating namespace: $NAMESPACE"
 kubectl create namespace "$NAMESPACE"
@@ -157,6 +194,7 @@ kubectl -n "$NAMESPACE" apply -f "$DEPS_FILE"
 kubectl -n "$NAMESPACE" rollout status deployment/postgres --timeout=180s
 kubectl -n "$NAMESPACE" rollout status deployment/redis --timeout=180s
 kubectl -n "$NAMESPACE" rollout status deployment/nsqd --timeout=180s
+kubectl -n "$NAMESPACE" rollout status deployment/business-backend --timeout=180s
 kubectl -n "$NAMESPACE" wait \
   --for=condition=ready pod \
   -l "app.kubernetes.io/component=e2e-dependency" \
@@ -177,7 +215,7 @@ kubectl -n "$NAMESPACE" wait \
 
 echo "checking gateway pods and services"
 kubectl -n "$NAMESPACE" get pods -o wide
-kubectl -n "$NAMESPACE" get svc "$RELEASE_NAME-client" "$RELEASE_NAME-internal" "$RELEASE_NAME-headless" postgres redis nsqd
+kubectl -n "$NAMESPACE" get svc "$RELEASE_NAME-client" "$RELEASE_NAME-internal" "$RELEASE_NAME-headless" postgres redis nsqd business-backend-headless
 
 start_port_forward "postgres" "svc/postgres" "$POSTGRES_LOCAL_PORT:5432"
 start_port_forward "nsqd" "svc/nsqd" "$NSQD_LOCAL_PORT:4150"
@@ -215,5 +253,30 @@ go run ./cmd/e2e \
   -expect-terminal-policy k8s-terminal \
   -timeout "$E2E_TIMEOUT" \
   "$@"
+
+echo "checking Kubernetes DNS upstream discovery"
+send_dns_upstream "k8s-dns-initial-$RUN_ID"
+wait_for_discovery_metric "z_courier_upstream_discovery_resolved_endpoints" 2
+wait_for_discovery_metric "z_courier_upstream_endpoint_selection_total" 1
+
+replaced_backend_pod="$(kubectl -n "$NAMESPACE" get pods -l app.kubernetes.io/name=business-backend -o jsonpath='{.items[0].metadata.name}')"
+if [ -z "$replaced_backend_pod" ]; then
+  echo "no business backend pod found to replace" >&2
+  exit 1
+fi
+
+echo "replacing Kubernetes DNS backend pod: $replaced_backend_pod"
+kubectl -n "$NAMESPACE" delete pod "$replaced_backend_pod" --wait=true
+kubectl -n "$NAMESPACE" rollout status deployment/business-backend --timeout=120s
+kubectl -n "$NAMESPACE" wait \
+  --for=condition=ready pod \
+  -l "app.kubernetes.io/name=business-backend" \
+  --timeout=120s
+
+sleep 2
+send_dns_upstream "k8s-dns-replacement-$RUN_ID"
+wait_for_discovery_metric "z_courier_upstream_discovery_resolved_endpoints" 2
+wait_for_discovery_metric "z_courier_upstream_discovery_refresh_total" 2
+wait_for_discovery_metric "z_courier_upstream_endpoint_selection_total" 2
 
 echo "k8s helm e2e passed"

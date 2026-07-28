@@ -44,6 +44,9 @@ semantic versioning after the first public MVP tag.
   transport failover with byte-identical message identity, failed-endpoint
   cooldown, endpoint recovery, and non-replay of received HTTP `500`
   responses; CI and release checks run the same verifier.
+- V15.5.2 Kind Helm E2E coverage for Kubernetes Headless-Service DNS
+  discovery: two backend Pod addresses resolve, one backend is replaced, DNS
+  refreshes, and forwarding continues without restarting the gateway.
 
 ## [v0.14.0] - 2026-07-24
 

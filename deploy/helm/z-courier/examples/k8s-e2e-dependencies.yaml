@@ -170,3 +170,55 @@ spec:
       targetPort: http
   selector:
     app.kubernetes.io/name: nsqd
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: business-backend
+  labels:
+    app.kubernetes.io/name: business-backend
+    app.kubernetes.io/component: e2e-dependency
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: business-backend
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: business-backend
+        app.kubernetes.io/component: e2e-dependency
+    spec:
+      containers:
+        - name: http-echo
+          image: hashicorp/http-echo:1.0.0
+          args:
+            - -listen=:8080
+            - -text=k8s-dns-discovery-backend
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 1
+            periodSeconds: 2
+            timeoutSeconds: 2
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: business-backend-headless
+  labels:
+    app.kubernetes.io/name: business-backend
+    app.kubernetes.io/component: e2e-dependency
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: false
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+  selector:
+    app.kubernetes.io/name: business-backend

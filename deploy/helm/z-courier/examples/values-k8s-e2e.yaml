@@ -132,6 +132,26 @@ pipeline:
 
 upstream:
   routes:
+    - name: k8s-e2e-dns-http-upstream
+      enabled: true
+      msgIDMin: 1001
+      msgIDMax: 1999
+      target:
+        type: http
+        path: /gateway/upstream
+        discovery:
+          type: dns
+          scheme: http
+          hostname: business-backend-headless.z-courier-e2e.svc.cluster.local
+          port: 8080
+          refreshInterval: 1s
+        tokenEnv: ZCOURIER_UPSTREAM_INTERNAL_TOKEN
+        timeout: 2s
+        maxInFlight: 1000
+        failover:
+          enabled: true
+          maxAttempts: 2
+          unhealthyCooldown: 2s
     - name: k8s-e2e-nsq-upstream
       enabled: true
       msgIDMin: 2000

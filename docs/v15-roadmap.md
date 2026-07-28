@@ -44,6 +44,10 @@ Implementation status:
   pre-response connection failure, bounded failover with byte-identical
   message identity, cooldown, recovery, and non-replay of HTTP `500`
   responses in CI and release checks.
+- V15.5.2 extends the Kind Helm E2E with a real two-Pod HTTP backend behind a
+  Kubernetes Headless Service. It verifies DNS resolves two endpoints, then
+  replaces one backend Pod and verifies the gateway refreshes DNS and forwards
+  again without a gateway restart.
 
 ## Product Direction
 
