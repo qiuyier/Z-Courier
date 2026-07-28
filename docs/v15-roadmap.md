@@ -48,6 +48,9 @@ Implementation status:
   Kubernetes Headless Service. It verifies DNS resolves two endpoints, then
   replaces one backend Pod and verifies the gateway refreshes DNS and forwards
   again without a gateway restart.
+- The bilingual release acceptance guides are maintained in
+  [v15-release.md](v15-release.md) and
+  [zh-CN/v15-release.md](zh-CN/v15-release.md).
 
 ## Product Direction
 

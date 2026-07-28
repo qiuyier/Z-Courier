@@ -134,7 +134,9 @@ release acceptance matrix is in [docs/v14-release.md](docs/v14-release.md) and
 V15 upstream service-discovery planning is tracked in
 [docs/v15-roadmap.md](docs/v15-roadmap.md). It defines static and DNS endpoint
 discovery, bounded health-aware failover, and operational visibility without
-changing the opaque client-message protocol.
+changing the opaque client-message protocol. The release acceptance guides are
+[docs/v15-release.md](docs/v15-release.md) and
+[docs/zh-CN/v15-release.md](docs/zh-CN/v15-release.md).
 
 ## Quick Start
 
