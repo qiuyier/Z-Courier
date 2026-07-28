@@ -53,6 +53,50 @@ test("logs in and navigates core console pages", async ({ page }) => {
   await gotoNav(page, "Overview", "Operations Overview");
 });
 
+test("dependency states use consistent icons and issue counts", async ({ page }) => {
+  const dependencies = [
+    { name: "configured-dependency", status: "configured", reason: "ready" },
+    { name: "disabled-dependency", status: "disabled", reason: "intentionally disabled" },
+    { name: "missing-dependency", status: "not_configured", reason: "configuration required" },
+    { name: "failed-dependency", status: "unavailable", reason: "probe failed" },
+  ];
+
+  await page.route("**/internal/admin/overview", async (route) => {
+    const response = await route.fetch();
+    if (!response.ok()) {
+      await route.fulfill({ response });
+      return;
+    }
+    const overview = await response.json();
+    overview.dependencies = dependencies;
+    await route.fulfill({ response, json: overview });
+  });
+  await page.route("**/internal/admin/diagnostics", async (route) => {
+    const response = await route.fetch();
+    const diagnostics = await response.json();
+    diagnostics.dependencies = dependencies;
+    await route.fulfill({ response, json: diagnostics });
+  });
+
+  await login(page);
+  const overviewPanel = page.locator("section").filter({
+    has: page.getByRole("heading", { name: "2 attention needed", exact: true }),
+  });
+  await expect(overviewPanel.getByLabel("configured-dependency: healthy")).toBeVisible();
+  await expect(overviewPanel.getByLabel("disabled-dependency: disabled")).toBeVisible();
+  await expect(overviewPanel.getByLabel("missing-dependency: needs attention")).toBeVisible();
+  await expect(overviewPanel.getByLabel("failed-dependency: unavailable")).toBeVisible();
+
+  await gotoNav(page, "Diagnostics");
+  const diagnosticsPanel = page.locator("article").filter({
+    has: page.getByRole("heading", { name: "2 issues", exact: true }),
+  });
+  await expect(diagnosticsPanel.getByLabel("configured-dependency: healthy")).toBeVisible();
+  await expect(diagnosticsPanel.getByLabel("disabled-dependency: disabled")).toBeVisible();
+  await expect(diagnosticsPanel.getByLabel("missing-dependency: needs attention")).toBeVisible();
+  await expect(diagnosticsPanel.getByLabel("failed-dependency: unavailable")).toBeVisible();
+});
+
 test("renders sanitized discovery runtime diagnostics", async ({ page }) => {
   await login(page);
   await page.route("**/internal/admin/diagnostics", async (route) => {

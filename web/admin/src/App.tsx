@@ -18,6 +18,7 @@ import {
   PlugsConnected,
   LockKey,
   MagnifyingGlass,
+  MinusCircle,
   Pulse,
   RadioButton,
   ShieldCheck,
@@ -1730,8 +1731,8 @@ export default function App() {
 
 function Dashboard({ overview, updatedAt }: { overview: AdminOverview; updatedAt: Date | null }) {
   const dependencies = overview.dependencies ?? [];
-  const unhealthyDependencies = useMemo(
-    () => dependencies.filter((dependency) => dependency.status !== "ok"),
+  const dependencyIssues = useMemo(
+    () => dependencies.filter((dependency) => dependencyNeedsAttention(dependency.status)),
     [dependencies],
   );
 
@@ -1806,7 +1807,7 @@ function Dashboard({ overview, updatedAt }: { overview: AdminOverview; updatedAt
               <div>
                 <p className="text-sm font-medium text-zinc-500">Dependencies</p>
                 <h3 className="mt-1 text-xl font-semibold tracking-tight">
-                  {unhealthyDependencies.length === 0 ? "Healthy" : `${unhealthyDependencies.length} attention needed`}
+                  {dependencyIssues.length === 0 ? "Healthy" : `${dependencyIssues.length} attention needed`}
                 </h3>
               </div>
               <ShieldCheck size={24} className="text-accent" weight="duotone" />
@@ -4378,7 +4379,7 @@ function DiagnosticsPage({
 
   const warnings = diagnostics.warnings ?? [];
   const httpRouteStates = diagnostics.upstream.http_route_states ?? [];
-  const dependencyIssues = diagnostics.dependencies.filter((dependency) => !healthyDependencyStatus(dependency.status)).length;
+  const dependencyIssues = diagnostics.dependencies.filter((dependency) => dependencyNeedsAttention(dependency.status)).length;
 
   return (
     <div className="grid gap-5">
@@ -5105,6 +5106,74 @@ function DiagnosticsConfigPanel({ title, rows }: { title: string; rows: Array<[s
   );
 }
 
+type DependencyVisualState = "healthy" | "neutral" | "warning" | "error";
+
+function dependencyVisualState(status: string): DependencyVisualState {
+  switch (status.trim().toLowerCase()) {
+    case "configured":
+    case "healthy":
+    case "ok":
+      return "healthy";
+    case "disabled":
+      return "neutral";
+    case "degraded":
+    case "not_configured":
+      return "warning";
+    case "error":
+    case "failed":
+    case "unavailable":
+    case "unhealthy":
+      return "error";
+    default:
+      return "warning";
+  }
+}
+
+function dependencyNeedsAttention(status: string): boolean {
+  const state = dependencyVisualState(status);
+  return state === "warning" || state === "error";
+}
+
+function dependencyStatusLabel(state: DependencyVisualState): string {
+  switch (state) {
+    case "healthy":
+      return "healthy";
+    case "neutral":
+      return "disabled";
+    case "warning":
+      return "needs attention";
+    case "error":
+      return "unavailable";
+  }
+}
+
+function DependencyStatusIcon({ dependency, state }: { dependency: Dependency; state: DependencyVisualState }) {
+  const label = `${dependency.name}: ${dependencyStatusLabel(state)}`;
+  const commonProps = { size: 18, weight: "duotone" as const };
+
+  return (
+    <span aria-label={label} className="inline-grid size-[18px] shrink-0 place-items-center" title={label}>
+      {state === "healthy" && <CheckCircle {...commonProps} className="text-emerald-600" />}
+      {state === "neutral" && <MinusCircle {...commonProps} className="text-zinc-400" />}
+      {state === "warning" && <Warning {...commonProps} className="text-amber-600" />}
+      {state === "error" && <XCircle {...commonProps} className="text-rose-600" />}
+    </span>
+  );
+}
+
+function dependencyBadgeClasses(state: DependencyVisualState): string {
+  switch (state) {
+    case "healthy":
+      return "bg-emerald-50 text-emerald-700";
+    case "neutral":
+      return "bg-zinc-100 text-zinc-500";
+    case "warning":
+      return "bg-amber-50 text-amber-700";
+    case "error":
+      return "bg-rose-50 text-rose-700";
+  }
+}
+
 function DependencyList({ dependencies }: { dependencies: Dependency[] }) {
   if (dependencies.length === 0) {
     return (
@@ -5116,24 +5185,31 @@ function DependencyList({ dependencies }: { dependencies: Dependency[] }) {
 
   return (
     <div className="mt-4 divide-y divide-line rounded-lg border border-line bg-white">
-      {dependencies.map((dependency, index) => (
-        <div
-          className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 px-4 py-3 animate-rise"
-          key={`${dependency.name}-${index}`}
-          style={{ animationDelay: `${index * 55}ms` }}
-        >
-          {dependency.status === "ok" ? (
-            <CheckCircle size={18} className="text-accent" weight="duotone" />
-          ) : (
-            <XCircle size={18} className="text-amber-600" weight="duotone" />
-          )}
-          <div className="min-w-0">
-            <p className="truncate text-sm font-medium">{dependency.name}</p>
-            {dependency.reason && <p className="truncate text-xs text-zinc-500">{dependency.reason}</p>}
+      {dependencies.map((dependency, index) => {
+        const state = dependencyVisualState(dependency.status);
+        return (
+          <div
+            className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-2 px-4 py-3 animate-rise sm:grid-cols-[auto_minmax(0,1fr)_auto]"
+            data-dependency-state={state}
+            key={`${dependency.name}-${index}`}
+            style={{ animationDelay: `${index * 55}ms` }}
+          >
+            <DependencyStatusIcon dependency={dependency} state={state} />
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium">{dependency.name}</p>
+              {dependency.reason && <p className="truncate text-xs text-zinc-500">{dependency.reason}</p>}
+            </div>
+            <span
+              className={[
+                "col-start-2 w-fit rounded-md px-2 py-1 font-mono text-xs sm:col-start-3 sm:row-start-1",
+                dependencyBadgeClasses(state),
+              ].join(" ")}
+            >
+              {dependency.status}
+            </span>
           </div>
-          <span className="rounded-md bg-zinc-100 px-2 py-1 font-mono text-xs text-zinc-600">{dependency.status}</span>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -5478,10 +5554,6 @@ function routeDetails(route: AdminRoute): Array<{ label: string; value: string }
     { label: "Target", value: route.target_type || "--" },
     { label: "Range", value: routeRangeLabel(route) },
   ];
-}
-
-function healthyDependencyStatus(status: string): boolean {
-  return status === "configured" || status === "ok" || status === "healthy" || status === "disabled";
 }
 
 type DownlinkTestPushPreflight = {
