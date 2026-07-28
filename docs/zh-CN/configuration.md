@@ -719,9 +719,93 @@ pipeline:
     client_ids: []
     msg_ids: []
   rate_limit:
-    enabled: true
-    max_requests: 1000
+    enabled: false
+    max_requests: 100
     window: 1s
+  traffic_policies:
+    enabled: false
+    mode: local
+    max_keys: 100000
+    idle_ttl: 10m
+    default_policy: ""
+    policies: []
 ```
 
 pipeline 是通用网关能力所在的位置：黑白名单、限流、日志、指标、鉴权状态检查。
+
+入站处理顺序如下：
+
+```text
+鉴权 -> 黑白名单 -> 旧版限流或流量策略 -> Session 绑定 -> 访问日志
+```
+
+`rate_limit` 是为兼容旧配置保留的进程内、按 ClientID 固定窗口限流器。
+`rate_limit` 和 `traffic_policies` 不能同时启用。
+
+### 命名流量策略
+
+流量策略只根据鉴权后的 `client_id`、协议头 MsgID，以及由 MsgID 解析出的上游
+路由选择有界的本地 token bucket，不读取业务 `Body`。
+
+```yaml
+pipeline:
+  rate_limit:
+    enabled: false
+  traffic_policies:
+    enabled: true
+    mode: local
+    max_keys: 100000
+    idle_ttl: 10m
+    default_policy: ""
+    policies:
+      - name: standard-upstream
+        priority: 100
+        match:
+          msg_id_min: 1001
+          msg_id_max: 2999
+        key: client_id
+        token_bucket:
+          capacity: 100
+          refill_tokens: 100
+          refill_interval: 1s
+      - name: orders
+        priority: 200
+        match:
+          client_ids: [priority-client]
+          routes: [orders-http]
+        key: client_id
+        token_bucket:
+          capacity: 20
+          refill_tokens: 20
+          refill_interval: 1s
+```
+
+- `mode`：V16.1 只支持 `local`。在 Redis 原子共享配额实现完成前，
+  `redis` 会被启动校验明确拒绝，不会出现“配置成功但实际未限流”。
+- `max_keys`：当前 gateway 进程最多保留的 `(策略, client_id)` 桶数量。
+  `0` 使用默认值 `100000`，负数非法。
+- `idle_ttl`：桶持续空闲超过该时间后删除，默认 `10m`。
+- `default_policy`：可选兜底策略名。留空时，没有命中任何选择器的包直接放行，
+  不创建桶。
+- `policies[].enabled`：默认 `true`。禁用策略仍接受校验，但不参与选择。
+- `priority`：数字越大优先级越高。同优先级策略只有在确实可能同时命中时，
+  才会因歧义而启动失败。
+- `match`：非空维度之间是 AND 关系。`client_ids` 使用鉴权身份，MsgID
+  范围包含两端，`routes` 必须引用已启用的上游路由。两个 MsgID 边界都省略
+  表示任意 MsgID；只设置 `msg_id_min` 表示仅匹配该单个 MsgID。
+- `key`：V16.1 只支持 `client_id`。Session 绑定前客户端声明的 DeviceID
+  尚未成为可信身份，因此暂不开放设备维度，避免通过更换 DeviceID 绕过配额。
+- `token_bucket`：新 Key 初始拥有 `capacity` 个令牌，并按照每
+  `refill_interval` 补充 `refill_tokens` 的速率连续恢复。
+
+当 `max_keys` 已满时，新 Key 返回 `overloaded`；系统不会淘汰仍活跃的桶，
+否则会导致配额被重置。已存在的桶没有令牌时返回 `rate_limited`。容量判断前
+会先清理已经超过 `idle_ttl` 的桶。
+
+`default_policy` 是真正的兜底，因此也可能限制 AUTH/BIND、下行 ACK 等没有
+命中普通上行路由的协议包。只想限制业务上行时，不要设置 `default_policy`，
+改用 MsgID 或 route 选择器。禁用的策略不会参与选择，但声明过的字段仍会在
+启动时接受严格校验。
+
+本地桶只在单个 gateway 进程内生效。多节点各自拥有一份配额；Redis 模式完成
+前还不提供集群共享配额。

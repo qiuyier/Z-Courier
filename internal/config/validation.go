@@ -92,10 +92,11 @@ func (c *File) validateShape() error {
 	if err := applyDownlinkConfig(&out, c.Downlink); err != nil {
 		return err
 	}
-	if _, err := toPipelineConfig(c.Pipeline); err != nil {
+	routes, err := toUpstreamRoutes(c.Upstream.Routes)
+	if err != nil {
 		return err
 	}
-	if _, err := toUpstreamRoutes(c.Upstream.Routes); err != nil {
+	if _, err := toPipelineConfig(c.Pipeline, routes); err != nil {
 		return err
 	}
 	if err := validateAuthConfigShape(c.Auth); err != nil {

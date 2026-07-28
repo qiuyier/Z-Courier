@@ -214,6 +214,7 @@ func newIngressPipeline(config Config, logger *zap.Logger, registry cluster.Onli
 		pipeline.NewAuthHandler(config.Verifier, logger),
 		pipeline.NewPolicyHandler(config.Pipeline.Policy),
 		pipeline.NewRateLimitHandler(config.Pipeline.RateLimit),
+		pipeline.NewTrafficPolicyHandler(config.Pipeline.TrafficPolicies),
 		pipeline.NewSessionBindHandler(config.Sessions, config.GatewayNode, sessionIDProperty, logger),
 		newClusterBindHandler(config, registry, logger),
 		pipeline.NewAccessLogHandler(logger),

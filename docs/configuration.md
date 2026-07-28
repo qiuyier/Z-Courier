@@ -830,18 +830,102 @@ pipeline:
     enabled: false
     max_requests: 100
     window: 1s
+  traffic_policies:
+    enabled: false
+    mode: local
+    max_keys: 100000
+    idle_ttl: 10m
+    default_policy: ""
+    policies: []
 ```
 
 The ingress pipeline order is:
 
 ```text
-auth -> allowlist/blocklist -> rate limit -> session bind -> access log
+auth -> allowlist/blocklist -> legacy rate limit or traffic policy
+-> session bind -> access log
 ```
 
 If an allowlist is empty, it does not restrict that dimension. Blocklists always
 take priority.
 
-The current rate limiter is a fixed-window per-client limiter.
+`rate_limit` is the legacy process-local fixed-window per-client limiter. It
+retains its existing behavior for compatibility. It and `traffic_policies`
+cannot both be enabled.
+
+### Named Traffic Policies
+
+Traffic policies select a bounded local token bucket from authenticated
+`client_id`, packet MsgID, and the upstream route resolved from that MsgID. They
+never inspect the opaque business body.
+
+```yaml
+pipeline:
+  rate_limit:
+    enabled: false
+  traffic_policies:
+    enabled: true
+    mode: local
+    max_keys: 100000
+    idle_ttl: 10m
+    default_policy: ""
+    policies:
+      - name: standard-upstream
+        priority: 100
+        match:
+          msg_id_min: 1001
+          msg_id_max: 2999
+        key: client_id
+        token_bucket:
+          capacity: 100
+          refill_tokens: 100
+          refill_interval: 1s
+      - name: orders
+        priority: 200
+        match:
+          client_ids: [priority-client]
+          routes: [orders-http]
+        key: client_id
+        token_bucket:
+          capacity: 20
+          refill_tokens: 20
+          refill_interval: 1s
+```
+
+- `mode`: V16.1 supports `local`. `redis` is rejected until the atomic shared
+  quota implementation is available; it is never accepted as a no-op.
+- `max_keys`: maximum live `(policy, client_id)` buckets in this gateway
+  process. Zero selects the default `100000`; negative values are invalid.
+- `idle_ttl`: an idle bucket is removed after this duration. The default is
+  `10m`.
+- `default_policy`: optional policy name used when no selector matches. Leave
+  it empty when unmatched packets should pass without consuming a bucket.
+- `policies[].enabled`: defaults to `true`. A disabled policy is validated but
+  excluded from selection.
+- `priority`: larger values win. Two enabled policies at the same priority are
+  rejected only when a packet could match both.
+- `match`: non-empty dimensions are combined with AND. `client_ids` uses the
+  authenticated identity, MsgID bounds are inclusive, and `routes` must name
+  enabled upstream routes. Omitting both MsgID bounds means any MsgID; setting
+  only `msg_id_min` selects that single MsgID.
+- `key`: V16.1 supports only `client_id`. Device-based keys are intentionally
+  unavailable before session binding establishes a trusted device identity.
+- `token_bucket`: a new key starts with `capacity` tokens and refills
+  continuously at `refill_tokens` per `refill_interval`.
+
+When `max_keys` is full, a new key is rejected with `overloaded`; active buckets
+are not evicted because that would reset their quota. A bucket without a token
+is rejected with `rate_limited`. Existing idle buckets are removed before the
+capacity decision.
+
+`default_policy` is a true fallback. It can therefore apply to AUTH/BIND,
+downlink ACK, and other protocol packets that do not match an upstream route.
+To limit only business upstream traffic, omit `default_policy` and use MsgID or
+route selectors. Disabled policies do not participate in selection, but all
+declared policy fields are still validated at startup.
+
+Local buckets are process-local. Multiple gateway nodes each enforce their own
+quota; cluster-wide quotas are not available until Redis mode is implemented.
 
 ## Upstream Routes
 

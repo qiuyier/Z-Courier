@@ -787,7 +787,8 @@ multi-node producer publishing; `retry_attempts` makes the adapter try the next
 configured `nsqd` when the first publish attempt fails.
 
 The upstream gateway pipeline can be configured with client/MsgID allowlists,
-blocklists, and a fixed-window per-client rate limit:
+blocklists, the legacy fixed-window per-client limiter, or bounded named
+token-bucket traffic policies:
 
 ```yaml
 pipeline:
@@ -801,7 +802,18 @@ pipeline:
     enabled: false
     max_requests: 100
     window: 1s
+  traffic_policies:
+    enabled: false
+    mode: local
+    max_keys: 100000
+    idle_ttl: 10m
+    default_policy: ""
+    policies: []
 ```
+
+The two limiter modes are mutually exclusive. See
+[Configuration](docs/configuration.md#named-traffic-policies) for deterministic
+policy selection, key-capacity behavior, and the current local-mode boundary.
 
 Prometheus metrics are exposed from the internal HTTP server:
 

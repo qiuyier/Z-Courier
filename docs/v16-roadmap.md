@@ -79,6 +79,7 @@ Candidate shape:
 ```yaml
 pipeline:
   traffic_policies:
+    enabled: true
     mode: local
     max_keys: 100000
     idle_ttl: 10m
@@ -100,16 +101,34 @@ pipeline:
         priority: 200
         match:
           routes: [orders-http]
-        key: client_id_device_id
+        key: client_id
         token_bucket:
           capacity: 20
           refill_tokens: 20
           refill_interval: 1s
 ```
 
-The final field names are not locked until V16.1 validation and documentation
-land. Config remains declarative and rollout-owned; the Console can show policy
-state and outcomes but cannot alter quotas.
+These field names are now the V16.1 local-policy contract. Config remains
+declarative and rollout-owned; the Console can show policy state and outcomes
+but cannot alter quotas.
+
+## Current Implementation Status
+
+The current Unreleased implementation completes the V16.1 configuration and
+selection contract together with the bounded local admission core:
+
+- named policies select deterministically by authenticated ClientID, MsgID, and
+  enabled upstream route, with larger priorities winning;
+- ambiguous same-priority overlaps, unknown routes, invalid buckets, missing
+  defaults, and simultaneous legacy/new limiters fail startup;
+- `local` uses a concurrency-safe token bucket bounded by `max_keys`, with
+  `idle_ttl` cleanup and stable `rate_limited`/`overloaded` outcomes;
+- only the authenticated `client_id` key is supported before session binding;
+  device-scoped keys remain deferred until their trust boundary is preserved;
+- `redis` is deliberately rejected rather than accepted as an inactive mode.
+
+Redis quotas, dedicated admission observability, Console views, deployment
+surfaces, and full E2E/release coverage remain later V16 workstreams.
 
 ## Failure And Client Contract
 

@@ -314,9 +314,10 @@ type DownlinkRetentionConfig struct {
 }
 
 type PipelineConfig struct {
-	Allowlist PolicyListConfig `yaml:"allowlist"`
-	Blocklist PolicyListConfig `yaml:"blocklist"`
-	RateLimit RateLimitConfig  `yaml:"rate_limit"`
+	Allowlist       PolicyListConfig      `yaml:"allowlist"`
+	Blocklist       PolicyListConfig      `yaml:"blocklist"`
+	RateLimit       RateLimitConfig       `yaml:"rate_limit"`
+	TrafficPolicies TrafficPoliciesConfig `yaml:"traffic_policies"`
 }
 
 type PolicyListConfig struct {
@@ -328,6 +329,37 @@ type RateLimitConfig struct {
 	Enabled     bool   `yaml:"enabled"`
 	MaxRequests int    `yaml:"max_requests"`
 	Window      string `yaml:"window"`
+}
+
+type TrafficPoliciesConfig struct {
+	Enabled       bool                  `yaml:"enabled"`
+	Mode          string                `yaml:"mode"`
+	MaxKeys       int                   `yaml:"max_keys"`
+	IdleTTL       string                `yaml:"idle_ttl"`
+	DefaultPolicy string                `yaml:"default_policy"`
+	Policies      []TrafficPolicyConfig `yaml:"policies"`
+}
+
+type TrafficPolicyConfig struct {
+	Name        string                         `yaml:"name"`
+	Enabled     *bool                          `yaml:"enabled"`
+	Priority    int                            `yaml:"priority"`
+	Match       TrafficPolicyMatchConfig       `yaml:"match"`
+	Key         string                         `yaml:"key"`
+	TokenBucket TrafficPolicyTokenBucketConfig `yaml:"token_bucket"`
+}
+
+type TrafficPolicyMatchConfig struct {
+	ClientIDs []string `yaml:"client_ids"`
+	MsgIDMin  uint32   `yaml:"msg_id_min"`
+	MsgIDMax  uint32   `yaml:"msg_id_max"`
+	Routes    []string `yaml:"routes"`
+}
+
+type TrafficPolicyTokenBucketConfig struct {
+	Capacity       int    `yaml:"capacity"`
+	RefillTokens   int    `yaml:"refill_tokens"`
+	RefillInterval string `yaml:"refill_interval"`
 }
 
 type UpstreamRouteConfig struct {
@@ -505,17 +537,17 @@ func (c *File) ToServerConfig() (server.Config, error) {
 	if err := applyDownlinkConfig(&out, c.Downlink); err != nil {
 		return server.Config{}, err
 	}
-	pipelineConfig, err := toPipelineConfig(c.Pipeline)
-	if err != nil {
-		return server.Config{}, err
-	}
-	out.Pipeline = pipelineConfig
-
 	routes, err := toUpstreamRoutes(c.Upstream.Routes)
 	if err != nil {
 		return server.Config{}, err
 	}
 	out.UpstreamRoutes = routes
+
+	pipelineConfig, err := toPipelineConfig(c.Pipeline, routes)
+	if err != nil {
+		return server.Config{}, err
+	}
+	out.Pipeline = pipelineConfig
 
 	// JWT verifier construction performs the initial JWKS fetch and starts its
 	// refresh worker, so keep it after every other fallible conversion.
@@ -1786,7 +1818,7 @@ func validateMsgIDRange(route UpstreamRouteConfig) error {
 	return nil
 }
 
-func toPipelineConfig(config PipelineConfig) (pipeline.Config, error) {
+func toPipelineConfig(config PipelineConfig, routes []server.UpstreamRouteConfig) (pipeline.Config, error) {
 	window, err := parseOptionalDuration(config.RateLimit.Window)
 	if err != nil {
 		return pipeline.Config{}, fmt.Errorf("config: pipeline rate_limit window: %w", err)
@@ -1798,6 +1830,14 @@ func toPipelineConfig(config PipelineConfig) (pipeline.Config, error) {
 		if window <= 0 {
 			return pipeline.Config{}, fmt.Errorf("config: pipeline rate_limit window must be greater than 0")
 		}
+	}
+
+	trafficPolicies, err := toTrafficPoliciesConfig(config.TrafficPolicies, routes)
+	if err != nil {
+		return pipeline.Config{}, err
+	}
+	if config.RateLimit.Enabled && trafficPolicies.Enabled {
+		return pipeline.Config{}, fmt.Errorf("config: pipeline rate_limit and traffic_policies cannot both be enabled")
 	}
 
 	return pipeline.Config{
@@ -1812,6 +1852,7 @@ func toPipelineConfig(config PipelineConfig) (pipeline.Config, error) {
 			MaxRequests: config.RateLimit.MaxRequests,
 			Window:      window,
 		},
+		TrafficPolicies: trafficPolicies,
 	}, nil
 }
 

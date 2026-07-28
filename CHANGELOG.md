@@ -12,6 +12,11 @@ semantic versioning after the first public MVP tag.
 - V16 roadmap for named ingress traffic policies, bounded local token-bucket
   admission, optional Redis-backed cluster quotas, explicit overload behavior,
   observability, and production release acceptance.
+- V16.1 deterministic named-policy selection by authenticated ClientID, MsgID,
+  and enabled upstream route, plus a concurrency-safe local token bucket with
+  bounded keys, idle eviction, strict ambiguity/migration validation, stable
+  overload reasons, and bilingual configuration guidance. Redis mode remains
+  explicitly unavailable until shared atomic quotas are implemented.
 
 ## [v0.15.0] - 2026-07-28
 

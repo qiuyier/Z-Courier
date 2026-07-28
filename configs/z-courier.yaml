@@ -132,6 +132,13 @@ pipeline:
     enabled: false
     max_requests: 100
     window: 1s
+  traffic_policies:
+    enabled: false
+    mode: local
+    max_keys: 100000
+    idle_ttl: 10m
+    default_policy: ""
+    policies: []
 
 upstream:
   routes:
