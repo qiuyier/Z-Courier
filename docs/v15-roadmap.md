@@ -39,6 +39,11 @@ Implementation status:
 - V15.4.4 wires static discovery into the production Compose references,
   teaches Helm to render static and Kubernetes DNS discovery, and adds
   source-tree plus built-image deployment checks with bilingual guidance.
+- V15.5.1 adds a Docker-free two-upstream verifier through the public TCP
+  protocol and real gateway process. It covers round-robin selection,
+  pre-response connection failure, bounded failover with byte-identical
+  message identity, cooldown, recovery, and non-replay of HTTP `500`
+  responses in CI and release checks.
 
 ## Product Direction
 

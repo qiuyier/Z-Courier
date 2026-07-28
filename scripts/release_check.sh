@@ -152,6 +152,7 @@ run_fast_checks() {
 
   run go run ./cmd/gateway -config configs/z-courier.yaml -check-config
   run go run ./cmd/gateway -config configs/z-courier.integration.yaml -check-config
+  run go run ./cmd/gateway -config configs/z-courier.discovery-e2e.yaml -check-config
   run go run ./cmd/gateway -config configs/z-courier.cluster-a.yaml -check-config
   run go run ./cmd/gateway -config configs/z-courier.cluster-b.yaml -check-config
   run_production_config_checks
@@ -198,6 +199,7 @@ run_docker_checks() {
 }
 
 run_slow_checks() {
+  run bash scripts/e2e_discovery.sh
   run bash scripts/e2e.sh
   run bash scripts/e2e_cluster.sh
   run npm --prefix web/admin exec -- playwright install chromium

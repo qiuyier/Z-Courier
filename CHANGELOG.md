@@ -39,6 +39,11 @@ semantic versioning after the first public MVP tag.
   static and Kubernetes DNS discovery rendering plus strict schema coverage,
   deterministic source/built-image configuration checks, and bilingual
   deployment guidance.
+- V15.5.1 Docker-free two-upstream integration coverage through the real TCP
+  gateway path, proving initial round-robin selection, bounded pre-response
+  transport failover with byte-identical message identity, failed-endpoint
+  cooldown, endpoint recovery, and non-replay of received HTTP `500`
+  responses; CI and release checks run the same verifier.
 
 ## [v0.14.0] - 2026-07-24
 

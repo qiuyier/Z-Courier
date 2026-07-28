@@ -31,6 +31,18 @@ bytes，也就是一段不解析、不改写的字节。
 bash scripts/e2e.sh
 ```
 
+运行无需 Docker 的双 HTTP 上游服务发现验证：
+
+```bash
+bash scripts/e2e_discovery.sh
+```
+
+脚本会启动两个可控 HTTP backend 和一个真实 gateway 进程，通过公开 Go SDK
+连接 TCP 入口，验证 round-robin、响应头返回前的有界故障切换、两次尝试复用同一
+`MessageID` 和消息体、故障端点 cooldown 与恢复，以及收到 HTTP `500` 后不重放。
+脚本使用 TCP `9931`、内部 HTTP `18191` 和 backend 端口 `18192`、`18193`，
+运行前需要保证这些端口空闲。
+
 运行两节点集群验证：
 
 ```bash

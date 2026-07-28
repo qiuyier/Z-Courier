@@ -144,6 +144,19 @@ Run the single-node integration verifier from the repository root:
 bash scripts/e2e.sh
 ```
 
+Run the Docker-free two-HTTP-upstream discovery verifier:
+
+```bash
+bash scripts/e2e_discovery.sh
+```
+
+It starts two controlled HTTP backends and a real gateway process, connects
+through the public TCP Go SDK, and verifies round-robin selection, bounded
+pre-response failover, stable `MessageID` and body bytes across attempts,
+failed-endpoint cooldown and recovery, and non-replay of received HTTP `500`
+responses. The script uses TCP `9931`, internal HTTP `18191`, and backend
+ports `18192` and `18193`; they must be free.
+
 The script starts PostgreSQL, NSQ, Prometheus, Alertmanager, Grafana, and the
 gateway, then validates:
 
