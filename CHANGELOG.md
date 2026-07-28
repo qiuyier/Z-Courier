@@ -5,6 +5,14 @@ All notable changes to Z-Courier are documented in this file.
 The format follows the spirit of Keep a Changelog, and this project uses
 semantic versioning after the first public MVP tag.
 
+## [Unreleased]
+
+### Added
+
+- V16 roadmap for named ingress traffic policies, bounded local token-bucket
+  admission, optional Redis-backed cluster quotas, explicit overload behavior,
+  observability, and production release acceptance.
+
 ## [v0.15.0] - 2026-07-28
 
 ### Added

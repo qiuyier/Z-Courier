@@ -138,6 +138,11 @@ changing the opaque client-message protocol. The release acceptance guides are
 [docs/v15-release.md](docs/v15-release.md) and
 [docs/zh-CN/v15-release.md](docs/zh-CN/v15-release.md).
 
+V16 traffic-policy planning is tracked in
+[docs/v16-roadmap.md](docs/v16-roadmap.md). It defines bounded local admission,
+optional Redis-backed cluster quotas, explicit overload semantics, and
+operator-facing observability without inspecting business message bodies.
+
 ## Quick Start
 
 Run the single-node integration verifier from the repository root:
