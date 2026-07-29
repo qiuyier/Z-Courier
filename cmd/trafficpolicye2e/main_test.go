@@ -19,12 +19,31 @@ func TestParseConfig(t *testing.T) {
 	}
 	if configuration.GatewayAddress != defaultGatewayAddress ||
 		configuration.BackendAddress != defaultBackendAddress ||
+		configuration.Mode != trafficPolicyE2EModeLocal ||
 		configuration.Timeout != 20*time.Second {
 		t.Fatalf("configuration = %+v", configuration)
 	}
 
 	if _, err := parseConfig([]string{"-timeout", "0s"}, io.Discard); err == nil {
 		t.Fatal("parseConfig() error = nil, want invalid timeout")
+	}
+	if _, err := parseConfig([]string{"-mode", "unknown"}, io.Discard); err == nil {
+		t.Fatal("parseConfig() error = nil, want invalid mode")
+	}
+	if _, err := parseConfig([]string{"-mode", "redis-shared"}, io.Discard); err == nil {
+		t.Fatal("parseConfig() error = nil, want missing gateway-b-address")
+	}
+
+	configuration, err = parseConfig([]string{
+		"-mode", "redis-shared",
+		"-gateway-b-address", "127.0.0.1:9952",
+	}, io.Discard)
+	if err != nil {
+		t.Fatalf("parseConfig(redis-shared) error = %v", err)
+	}
+	if configuration.Mode != trafficPolicyE2EModeRedisShared ||
+		configuration.GatewayBAddress != "127.0.0.1:9952" {
+		t.Fatalf("redis-shared configuration = %+v", configuration)
 	}
 }
 

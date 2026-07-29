@@ -1,0 +1,17 @@
+{
+  "Name": "Z-Courier Redis Traffic Policy E2E Gateway A",
+  "Host": "127.0.0.1",
+  "TCPPort": 9951,
+  "Mode": "tcp",
+  "MaxConn": 64,
+  "MaxPacketSize": 8388608,
+  "WorkerPoolSize": 4,
+  "MaxWorkerTaskLen": 256,
+  "MaxMsgChanLen": 256,
+  "IOReadBuffSize": 8192,
+  "HeartbeatMax": 30,
+  "LogDir": "./log",
+  "LogFile": "zinx-traffic-policy-redis-a.log",
+  "LogCons": true,
+  "LogIsolationLevel": 2
+}

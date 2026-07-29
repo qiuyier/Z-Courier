@@ -134,13 +134,6 @@ func toTrafficPoliciesConfig(config TrafficPoliciesConfig, routes []server.Upstr
 	if err := validateTrafficPolicyAmbiguity(policies, routeByName); err != nil {
 		return pipeline.TrafficPoliciesConfig{}, err
 	}
-	if config.Enabled && mode == pipeline.TrafficPolicyModeRedis {
-		return pipeline.TrafficPoliciesConfig{}, fmt.Errorf(
-			"config: pipeline traffic_policies mode %q is not operational yet; gateway lifecycle wiring is pending",
-			pipeline.TrafficPolicyModeRedis,
-		)
-	}
-
 	return pipeline.TrafficPoliciesConfig{
 		Enabled:       config.Enabled,
 		Mode:          mode,

@@ -745,8 +745,8 @@ pipeline 是通用网关能力所在的位置：黑白名单、限流、日志�
 ### 命名流量策略
 
 流量策略只根据鉴权后的 `client_id`、协议头 MsgID，以及由 MsgID 解析出的上游
-路由选择命名 token bucket，不读取业务 `Body`。目前 gateway 真正可启用的是
-下面展示的有界进程内模式。
+路由选择命名 token bucket，不读取业务 `Body`。单节点可以选择有界进程内
+Store；多个 gateway 需要共享同一份额度时可以选择 Redis。
 
 ```yaml
 pipeline:
@@ -781,9 +781,8 @@ pipeline:
           refill_interval: 1s
 ```
 
-- `mode`：`local` 是当前可运行的进程内 Store。Redis 配置契约和原子 Store
-  已经实现，但在 gateway 生命周期接线完成前，`enabled: true` 与
-  `mode: redis` 的组合仍会启动失败，不会出现“配置成功但实际未限流”。
+- `mode`：`local` 使用进程内 Store；`redis` 让使用相同 Redis database 和
+  `key_prefix` 的 gateway 共享一份原子配额。
 - `max_keys`：当前 gateway 进程最多保留的 `(策略, client_id)` 桶数量。
   仅用于 `local` 模式；`0` 使用默认值 `100000`，负数非法。
 - `idle_ttl`：桶持续空闲超过该时间后删除，默认 `10m`。
@@ -800,16 +799,16 @@ pipeline:
 - `token_bucket`：新 Key 初始拥有 `capacity` 个令牌，并按照每
   `refill_interval` 补充 `refill_tokens` 的速率连续恢复。
 
-当 `max_keys` 已满时，新 Key 返回 `overloaded`；系统不会淘汰仍活跃的桶，
-否则会导致配额被重置。已存在的桶没有令牌时返回 `rate_limited`。容量判断前
-会先清理已经超过 `idle_ttl` 的桶。
+在 local 模式下，当 `max_keys` 已满时，新 Key 返回 `overloaded`；系统不会
+淘汰仍活跃的桶，否则会导致配额被重置。已存在的桶没有令牌时返回
+`rate_limited`。容量判断前会先清理已经超过 `idle_ttl` 的桶。
 
-可以在流量策略关闭时先校验和保存 Redis 配置契约：
+Redis 模式沿用同一份策略和选择器：
 
 ```yaml
 pipeline:
   traffic_policies:
-    enabled: false
+    enabled: true
     mode: redis
     idle_ttl: 10m
     redis:
@@ -823,12 +822,22 @@ pipeline:
       write_timeout: 500ms
       operation_timeout: 250ms
       failure_mode: fail_closed
-    policies: []
+    policies:
+      - name: shared-upstream
+        priority: 100
+        match:
+          msg_id_min: 1001
+          msg_id_max: 2999
+        key: client_id
+        token_bucket:
+          capacity: 100
+          refill_tokens: 100
+          refill_interval: 1s
 ```
 
 `redis.addr` 必填，`redis.db` 不能为负数，Key 前缀不能是空白字符串。连接和
 操作超时必须为正数，默认值就是上面展示的值；Redis 模式的 `idle_ttl`
-不能小于 `1ms`。V16.3.2 只支持 `failure_mode: fail_closed`，不接受本地
+不能小于 `1ms`。Redis 模式只支持 `failure_mode: fail_closed`，不接受本地
 fallback，因为 fallback 会在 Redis 故障时把一份集群共享额度悄悄变成各节点
 独立额度。
 
@@ -839,6 +848,10 @@ TTL。Redis 操作有硬超时且客户端不做隐藏重试；故障时返回
 `admission_unavailable`，Redis 恢复后的下一次请求可以继续共享限流，无需
 重启 Store。
 
+Gateway 构造时会创建 Redis Store，并在开放服务前执行有超时边界的 `PING`。
+启动探活失败时 Gateway 不会开始服务；优雅关闭会先停止 TCP 入站，再关闭
+Redis 客户端。`gateway -check-config` 只校验语法和配置约束，不会连接 Redis。
+
 这些语义同时由内存 Redis 测试和可选的真实 Redis 集成测试覆盖：
 
 ```bash
@@ -848,17 +861,18 @@ ZCOURIER_TEST_REDIS_ADDR=127.0.0.1:16379 \
 ```
 
 配额 Store 契约预留 `admission_unavailable`，表示已选中的 Store 无法安全
-作出准入决定。合法的 `local` 配置不应产生该结果。在 Redis Store 的创建、
-健康检查和关闭接入 gateway 生命周期前，Redis 模式仍会被启动校验拒绝。
+作出准入决定。合法的 `local` 配置不应产生该结果。Redis 模式会在运行时超时、
+连接失败、共享状态非法或 Lua 脚本失败时返回该原因，被拒绝的包不会转发给
+上游。
 
 `default_policy` 是真正的兜底，因此也可能限制 AUTH/BIND、下行 ACK 等没有
 命中普通上行路由的协议包。只想限制业务上行时，不要设置 `default_policy`，
 改用 MsgID 或 route 选择器。禁用的策略不会参与选择，但声明过的字段仍会在
 启动时接受严格校验。
 
-本地桶只在单个 gateway 进程内生效，多节点各自拥有一份配额。Redis Store
-已经通过多实例原子共享额度测试，但在生命周期接线完成前，gateway 集群还
-不会实际使用它。
+本地桶只在单个 gateway 进程内生效，多节点各自拥有一份配额。使用同一 Redis
+database、Key 前缀、策略名、Key 作用域和鉴权 ClientID 的 gateway 会共享
+同一个 Redis 桶。
 
 可通过真实 gateway TCP 连接和公开 Go SDK 验证本地策略链路：
 
@@ -871,3 +885,15 @@ bash scripts/e2e_traffic_policy.sh
 稳定的拒绝 ACK reason，以及被拒绝的包不会到达 HTTP upstream。脚本使用
 TCP `9941`、内部 HTTP `18201` 和测试 backend `18202`，运行前需保证三个
 端口空闲。
+
+可通过两个真实 gateway TCP 监听验证 Redis 模式：
+
+```bash
+bash scripts/e2e_traffic_policy_redis.sh
+```
+
+脚本会启动一个专用、用完即删的 Redis 容器，验证同一 ClientID 在 gateway
+A/B 之间共享容量、Redis 故障时返回 `admission_unavailable` 且不转发，以及
+Redis 重启后无需重启任一 gateway 就能在下一次请求恢复准入。脚本使用 TCP
+`9951`/`9952`、内部 HTTP `18211`/`18213`、backend `18212` 和 Redis
+`16389`，运行前需保证这些端口空闲。

@@ -184,6 +184,47 @@ pipeline:
 	}
 }
 
+func TestLoadServerConfigTrafficPolicyRedisEnabled(t *testing.T) {
+	config, err := LoadServerConfig(writeConfig(t, `
+pipeline:
+  traffic_policies:
+    enabled: true
+    mode: redis
+    idle_ttl: 30s
+    redis:
+      addr: 127.0.0.1:16379
+      key_prefix: zcourier:test:enabled
+      operation_timeout: 200ms
+      failure_mode: fail_closed
+    policies:
+      - name: shared
+        priority: 100
+        match:
+          msg_id_min: 2201
+        key: client_id
+        token_bucket:
+          capacity: 3
+          refill_tokens: 1
+          refill_interval: 1m
+`))
+	if err != nil {
+		t.Fatalf("LoadServerConfig() error = %v", err)
+	}
+
+	traffic := config.Pipeline.TrafficPolicies
+	if !traffic.Enabled || traffic.Mode != pipeline.TrafficPolicyModeRedis {
+		t.Fatalf("TrafficPolicies enabled/mode = %t/%q", traffic.Enabled, traffic.Mode)
+	}
+	if traffic.Redis.Addr != "127.0.0.1:16379" ||
+		traffic.Redis.KeyPrefix != "zcourier:test:enabled" ||
+		traffic.Redis.OperationTimeout != 200*time.Millisecond {
+		t.Fatalf("TrafficPolicies Redis = %+v", traffic.Redis)
+	}
+	if len(traffic.Policies) != 1 || traffic.Policies[0].Name != "shared" {
+		t.Fatalf("TrafficPolicies policies = %+v", traffic.Policies)
+	}
+}
+
 func TestLoadServerConfigTrafficPoliciesRejectInvalidConfig(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -206,22 +247,6 @@ pipeline:
         token_bucket: {capacity: 1, refill_tokens: 1, refill_interval: 1s}
 `,
 			message: "cannot both be enabled",
-		},
-		{
-			name: "redis not operational",
-			config: `
-pipeline:
-  traffic_policies:
-    enabled: true
-    mode: redis
-    redis:
-      addr: 127.0.0.1:16379
-    policies:
-      - name: standard
-        priority: 100
-        token_bucket: {capacity: 1, refill_tokens: 1, refill_interval: 1s}
-`,
-			message: "not operational yet",
 		},
 		{
 			name: "redis addr required",

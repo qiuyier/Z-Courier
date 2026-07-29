@@ -15,8 +15,7 @@ semantic versioning after the first public MVP tag.
 - V16.1 deterministic named-policy selection by authenticated ClientID, MsgID,
   and enabled upstream route, plus a concurrency-safe local token bucket with
   bounded keys, idle eviction, strict ambiguity/migration validation, stable
-  overload reasons, and bilingual configuration guidance. Redis mode remains
-  explicitly unavailable until its gateway lifecycle integration is complete.
+  overload reasons, and bilingual configuration guidance.
 - V16.2 Docker-free real-TCP integration coverage for local policy burst,
   refill, precedence, no-policy pass-through, bounded-key overload, and idle
   eviction, including stable rejected ACKs and proof that rejected packets do
@@ -30,8 +29,12 @@ semantic versioning after the first public MVP tag.
   server time, hashed client identities, bounded key TTL, hard operation
   timeouts, explicit fail-closed behavior without hidden retries, recovery
   without Store restart, and concurrent in-memory plus optional real-Redis
-  shared-quota tests. Enabled Redis gateway mode remains rejected until
-  lifecycle wiring is complete.
+  shared-quota tests, providing the foundation activated by V16.3.3.
+- V16.3.3 operational Redis traffic policies with startup health checking,
+  complete Gateway construction/shutdown ownership, stable fail-closed
+  `admission_unavailable` responses, and Docker-backed two-gateway E2E proving
+  one cross-node quota, rejection-before-forwarding during Redis outages, and
+  recovery without restarting either gateway.
 
 ## [v0.15.0] - 2026-07-28
 

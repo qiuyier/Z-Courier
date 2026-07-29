@@ -174,6 +174,18 @@ It proves burst, refill, policy precedence, bounded-key overload, idle
 eviction, and rejection-before-forwarding through the real TCP gateway path.
 The script uses TCP `9941`, internal HTTP `18201`, and backend port `18202`.
 
+Run the Docker-backed two-gateway Redis traffic-policy verifier:
+
+```bash
+bash scripts/e2e_traffic_policy_redis.sh
+```
+
+It starts a dedicated disposable Redis container and two gateways, then proves
+one ClientID cannot exceed a shared quota by switching nodes, Redis outages
+fail closed without forwarding, and enforcement recovers without restarting
+either gateway. It uses TCP `9951`/`9952`, internal HTTP `18211`/`18213`,
+backend `18212`, and Redis `16389`.
+
 `scripts/e2e.sh` starts PostgreSQL, NSQ, Prometheus, Alertmanager, Grafana, and the
 gateway, then validates:
 

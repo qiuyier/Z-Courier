@@ -115,8 +115,8 @@ but cannot alter quotas.
 ## Current Implementation Status
 
 The current Unreleased implementation completes the V16.1 configuration and
-selection contract, the bounded local admission core, and the V16.3.2 Redis
-store foundation:
+selection contract, the bounded local admission core, and V16.3 Redis shared
+quotas:
 
 - named policies select deterministically by authenticated ClientID, MsgID, and
   enabled upstream route, with larger priorities winning;
@@ -127,8 +127,8 @@ store foundation:
 - only the authenticated `client_id` key is supported before session binding;
   device-scoped keys remain deferred until their trust boundary is preserved;
 - the Redis configuration contract validates address, namespace, timeouts,
-  idle TTL, and explicit fail-closed behavior; enabled Redis mode remains
-  deliberately rejected until gateway lifecycle wiring is complete;
+  idle TTL, and explicit fail-closed behavior; enabled Redis mode constructs
+  and pings its Store before the gateway opens service;
 - a Docker-free real-TCP verifier covers local burst, refill, precedence,
   no-policy pass-through, bounded-key overload, idle eviction, stable client
   rejection, and rejection-before-forwarding; CI and release checks run the
@@ -141,11 +141,15 @@ store foundation:
   using Redis server time, hashes client identities in keys, bounds key
   lifetime, fails closed without hidden retries, and recovers on later
   requests; concurrent in-memory and real-Redis tests share one quota across
-  two Store instances.
+  two Store instances;
+- Gateway construction, startup health checking, shutdown, and every later
+  construction-error path own the Redis client explicitly;
+- a Docker-backed two-gateway E2E proves one shared quota, fail-closed
+  `admission_unavailable` without upstream forwarding, and recovery after a
+  disposable Redis restart without restarting either gateway.
 
-Gateway Redis construction, health checks, and shutdown, dedicated admission
-observability, Console views, deployment surfaces, two-node gateway Redis E2E,
-and full release guidance remain later V16 workstreams.
+Dedicated admission observability, Console views, deployment surfaces, and
+full release guidance remain later V16 workstreams.
 
 ## Failure And Client Contract
 
@@ -161,7 +165,7 @@ No token count, Redis key, endpoint address, raw error, or business body is
 included in the client ACK. Structured logs, audit records, and metrics include
 only policy name, scope, route where known, and low-cardinality result labels.
 
-For Redis mode, the operator explicitly selects failure behavior. V16.3.2
+For Redis mode, the operator explicitly selects failure behavior. V16.3
 supports only the safe `fail_closed` behavior and returns
 `admission_unavailable`; local fallback remains rejected because it would
 temporarily change cluster-wide enforcement into independent per-node quotas.
@@ -211,23 +215,20 @@ Acceptance criteria:
 
 Purpose: enforce one quota across gateway nodes without making Redis mandatory.
 
-Status: in progress. The store contract, local adapter, Redis configuration
-contract, atomic Lua operation, bounded key lifetime, and store-level
-fail-closed/recovery behavior are implemented. Gateway lifecycle wiring and
-two-node gateway E2E remain pending.
+Status: implemented. The store contract, local adapter, Redis configuration,
+atomic Lua operation, bounded key lifetime, explicit lifecycle ownership,
+fail-closed behavior, and two-node gateway E2E are complete.
 
-- Wire Redis Store construction, startup health checks, and shutdown into the
-  gateway without changing local-mode behavior.
-- Prove the real ingress path across two gateway nodes shares one quota.
-- Keep retry behavior explicit and expose stable fail-closed evidence without
-  including Redis details or client identity in low-cardinality surfaces.
+- Redis Store construction, startup health checks, and shutdown are wired into
+  the gateway without changing local-mode behavior.
+- The real ingress path across two gateway nodes shares one quota.
+- Retry behavior is explicit, and stable fail-closed evidence excludes Redis
+  details and client identity from client-facing responses.
 
 Acceptance criteria:
 
-- Concurrent Store requests already cannot exceed a shared quota; the same
-  invariant must be proved through two gateway nodes.
-- Redis recovery already resumes Store-level enforcement without restart; the
-  gateway path must preserve that behavior.
+- Concurrent requests through two gateway nodes cannot exceed a shared quota.
+- Redis recovery resumes shared enforcement without gateway restart.
 - A Redis outage produces the configured stable ACK reason and audit-safe
   evidence.
 

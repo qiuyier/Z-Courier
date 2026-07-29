@@ -40,6 +40,7 @@ type Gateway struct {
 	adminSessionCloser        io.Closer
 	adminAuditCloser          io.Closer
 	authVerifierCloser        io.Closer
+	trafficPolicyCloser       io.Closer
 	internalHTTP              *http.Server
 	upstream                  *router.Engine
 	downlink                  *downlink.Service
@@ -81,9 +82,15 @@ func New(config Config, logger *zap.Logger) (*Gateway, error) {
 		closeWithLog(authVerifierCloser, logger, "authentication verifier")
 		return nil, err
 	}
+	trafficPolicyHandler, trafficPolicyCloser, err := newTrafficPolicyHandler(config.Pipeline.TrafficPolicies)
+	if err != nil {
+		closeWithLog(authVerifierCloser, logger, "authentication verifier")
+		return nil, err
+	}
 	config.UpstreamRuntime = newUpstreamRuntime(config.UpstreamRoutes)
 	upstream, err := newUpstreamEngine(config)
 	if err != nil {
+		closeWithLog(trafficPolicyCloser, logger, "traffic policy quota store")
 		closeWithLog(authVerifierCloser, logger, "authentication verifier")
 		return nil, err
 	}
@@ -92,6 +99,7 @@ func New(config Config, logger *zap.Logger) (*Gateway, error) {
 		if upstream != nil {
 			_ = upstream.Close()
 		}
+		closeWithLog(trafficPolicyCloser, logger, "traffic policy quota store")
 		closeWithLog(authVerifierCloser, logger, "authentication verifier")
 		return nil, err
 	}
@@ -104,6 +112,7 @@ func New(config Config, logger *zap.Logger) (*Gateway, error) {
 		if clusterRegistryCloser != nil {
 			_ = clusterRegistryCloser.Close()
 		}
+		closeWithLog(trafficPolicyCloser, logger, "traffic policy quota store")
 		closeWithLog(authVerifierCloser, logger, "authentication verifier")
 		return nil, err
 	}
@@ -116,6 +125,7 @@ func New(config Config, logger *zap.Logger) (*Gateway, error) {
 		if clusterRegistryCloser != nil {
 			_ = clusterRegistryCloser.Close()
 		}
+		closeWithLog(trafficPolicyCloser, logger, "traffic policy quota store")
 		closeWithLog(authVerifierCloser, logger, "authentication verifier")
 		return nil, err
 	}
@@ -133,6 +143,7 @@ func New(config Config, logger *zap.Logger) (*Gateway, error) {
 			if clusterRegistryCloser != nil {
 				_ = clusterRegistryCloser.Close()
 			}
+			closeWithLog(trafficPolicyCloser, logger, "traffic policy quota store")
 			closeWithLog(authVerifierCloser, logger, "authentication verifier")
 			return nil, err
 		}
@@ -151,6 +162,7 @@ func New(config Config, logger *zap.Logger) (*Gateway, error) {
 		if clusterRegistryCloser != nil {
 			_ = clusterRegistryCloser.Close()
 		}
+		closeWithLog(trafficPolicyCloser, logger, "traffic policy quota store")
 		closeWithLog(authVerifierCloser, logger, "authentication verifier")
 		return nil, err
 	}
@@ -166,6 +178,7 @@ func New(config Config, logger *zap.Logger) (*Gateway, error) {
 		adminSessionCloser:        adminSessionCloser,
 		adminAuditCloser:          adminAuditCloser,
 		authVerifierCloser:        authVerifierCloser,
+		trafficPolicyCloser:       trafficPolicyCloser,
 		internalHTTP:              internalHTTP,
 		upstream:                  upstream,
 		downlink:                  downlinkService,
@@ -191,7 +204,7 @@ func New(config Config, logger *zap.Logger) (*Gateway, error) {
 	router := NewIngressRouter(
 		logger,
 		zServer.GetConnMgr(),
-		newIngressPipeline(config, logger, clusterRegistry),
+		newIngressPipeline(config, logger, clusterRegistry, trafficPolicyHandler),
 		upstream,
 		downlinkService,
 		config.DownlinkDelivery.BindFlushLimit,
@@ -209,12 +222,17 @@ func New(config Config, logger *zap.Logger) (*Gateway, error) {
 	return gateway, nil
 }
 
-func newIngressPipeline(config Config, logger *zap.Logger, registry cluster.OnlineRegistry) *pipeline.Chain {
+func newIngressPipeline(
+	config Config,
+	logger *zap.Logger,
+	registry cluster.OnlineRegistry,
+	trafficPolicyHandler pipeline.Handler,
+) *pipeline.Chain {
 	return pipeline.NewChain(
 		pipeline.NewAuthHandler(config.Verifier, logger),
 		pipeline.NewPolicyHandler(config.Pipeline.Policy),
 		pipeline.NewRateLimitHandler(config.Pipeline.RateLimit),
-		pipeline.NewTrafficPolicyHandler(config.Pipeline.TrafficPolicies),
+		trafficPolicyHandler,
 		pipeline.NewSessionBindHandler(config.Sessions, config.GatewayNode, sessionIDProperty, logger),
 		newClusterBindHandler(config, registry, logger),
 		pipeline.NewAccessLogHandler(logger),
@@ -263,6 +281,7 @@ func (g *Gateway) Shutdown(ctx context.Context) error {
 
 		g.shutdownClusterRouteRefresher()
 		g.shutdownZinxServer()
+		g.shutdownTrafficPolicy()
 		g.shutdownAuthVerifier()
 		unbound := g.unbindAllClusterRoutes(ctx)
 		g.shutdownInternalHTTPWithContext(ctx)
@@ -385,6 +404,16 @@ func (g *Gateway) shutdownAuthVerifier() {
 	if err := g.authVerifierCloser.Close(); err != nil {
 		g.shutdownErr = errors.Join(g.shutdownErr, err)
 		g.logger.Warn("failed to shutdown authentication verifier cleanly", zap.Error(err))
+	}
+}
+
+func (g *Gateway) shutdownTrafficPolicy() {
+	if g.trafficPolicyCloser == nil {
+		return
+	}
+	if err := g.trafficPolicyCloser.Close(); err != nil {
+		g.shutdownErr = errors.Join(g.shutdownErr, err)
+		g.logger.Warn("failed to shutdown traffic policy quota store cleanly", zap.Error(err))
 	}
 }
 

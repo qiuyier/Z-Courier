@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -26,18 +27,26 @@ const (
 	defaultBackendAddress = "127.0.0.1:18202"
 	defaultUpstreamToken  = "traffic-policy-upstream-token"
 
-	standardMsgID  = uint32(2101)
-	priorityMsgID  = uint32(2102)
-	unlimitedMsgID = uint32(2103)
+	trafficPolicyE2EModeLocal            = "local"
+	trafficPolicyE2EModeRedisShared      = "redis-shared"
+	trafficPolicyE2EModeRedisUnavailable = "redis-unavailable"
+	trafficPolicyE2EModeRedisRecovered   = "redis-recovered"
+
+	standardMsgID    = uint32(2101)
+	priorityMsgID    = uint32(2102)
+	unlimitedMsgID   = uint32(2103)
+	redisSharedMsgID = uint32(2201)
 
 	refillWait = 250 * time.Millisecond
 	idleWait   = 5250 * time.Millisecond
 )
 
 type config struct {
-	GatewayAddress string
-	BackendAddress string
-	Timeout        time.Duration
+	GatewayAddress  string
+	GatewayBAddress string
+	BackendAddress  string
+	Mode            string
+	Timeout         time.Duration
 }
 
 type clientFixture struct {
@@ -72,11 +81,19 @@ func parseConfig(arguments []string, output io.Writer) (config, error) {
 	flags := flag.NewFlagSet("trafficpolicye2e", flag.ContinueOnError)
 	flags.SetOutput(output)
 	flags.StringVar(&configuration.GatewayAddress, "gateway-address", defaultGatewayAddress, "gateway TCP address")
+	flags.StringVar(&configuration.GatewayBAddress, "gateway-b-address", "", "second gateway TCP address for redis-shared mode")
 	flags.StringVar(&configuration.BackendAddress, "backend-address", defaultBackendAddress, "fixture HTTP backend address")
+	flags.StringVar(
+		&configuration.Mode,
+		"mode",
+		trafficPolicyE2EModeLocal,
+		"verification mode: local, redis-shared, redis-unavailable, or redis-recovered",
+	)
 	flags.DurationVar(&configuration.Timeout, "timeout", 20*time.Second, "overall verification timeout")
 	if err := flags.Parse(arguments); err != nil {
 		return config{}, err
 	}
+	configuration.Mode = strings.ToLower(strings.TrimSpace(configuration.Mode))
 	if configuration.GatewayAddress == "" {
 		return config{}, errors.New("-gateway-address is required")
 	}
@@ -85,6 +102,17 @@ func parseConfig(arguments []string, output io.Writer) (config, error) {
 	}
 	if configuration.Timeout <= 0 {
 		return config{}, errors.New("-timeout must be greater than zero")
+	}
+	switch configuration.Mode {
+	case trafficPolicyE2EModeLocal,
+		trafficPolicyE2EModeRedisUnavailable,
+		trafficPolicyE2EModeRedisRecovered:
+	case trafficPolicyE2EModeRedisShared:
+		if strings.TrimSpace(configuration.GatewayBAddress) == "" {
+			return config{}, errors.New("-gateway-b-address is required in redis-shared mode")
+		}
+	default:
+		return config{}, fmt.Errorf("unsupported -mode %q", configuration.Mode)
 	}
 	return configuration, nil
 }
@@ -98,26 +126,42 @@ func run(ctx context.Context, configuration config) (runErr error) {
 		runErr = errors.Join(runErr, backend.Close())
 	}()
 
+	switch configuration.Mode {
+	case trafficPolicyE2EModeLocal:
+		return runLocal(ctx, configuration, backend)
+	case trafficPolicyE2EModeRedisShared:
+		return runRedisShared(ctx, configuration, backend)
+	case trafficPolicyE2EModeRedisUnavailable:
+		return runRedisUnavailable(ctx, configuration, backend)
+	case trafficPolicyE2EModeRedisRecovered:
+		return runRedisRecovered(ctx, configuration, backend)
+	default:
+		return fmt.Errorf("unsupported traffic policy E2E mode %q", configuration.Mode)
+	}
+}
+
+func runLocal(
+	ctx context.Context,
+	configuration config,
+	backend *recordingBackend,
+) (runErr error) {
 	fixtures := []*clientFixture{
 		{clientID: "traffic-policy-client-a", token: "traffic-policy-token-a"},
 		{clientID: "traffic-policy-client-b", token: "traffic-policy-token-b"},
 		{clientID: "traffic-policy-client-c", token: "traffic-policy-token-c"},
 	}
 	for _, fixture := range fixtures {
-		client, err := sdkclient.New(sdkclient.Config{
-			Address:    configuration.GatewayAddress,
-			ClientID:   fixture.clientID,
-			DeviceID:   fixture.clientID + "-device",
-			Token:      fixture.token,
-			AckTimeout: 3 * time.Second,
-		})
+		client, err := connectClient(
+			ctx,
+			configuration.GatewayAddress,
+			fixture.clientID,
+			fixture.clientID+"-device",
+			fixture.token,
+		)
 		if err != nil {
-			return fmt.Errorf("create client %s: %w", fixture.clientID, err)
+			return err
 		}
 		fixture.client = client
-		if err := client.Connect(ctx); err != nil {
-			return fmt.Errorf("connect client %s: %w", fixture.clientID, err)
-		}
 		defer func(client *sdkclient.Client) {
 			runErr = errors.Join(runErr, client.Close())
 		}(client)
@@ -131,6 +175,170 @@ func run(ctx context.Context, configuration config) (runErr error) {
 		check.clients[fixture.clientID] = fixture
 	}
 	return check.Run(ctx)
+}
+
+func runRedisShared(
+	ctx context.Context,
+	configuration config,
+	backend *recordingBackend,
+) (runErr error) {
+	const (
+		clientID = "traffic-policy-redis-shared-client"
+		token    = "traffic-policy-redis-shared-token"
+	)
+	clientA, err := connectClient(
+		ctx,
+		configuration.GatewayAddress,
+		clientID,
+		"traffic-policy-redis-shared-device-a",
+		token,
+	)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		runErr = errors.Join(runErr, clientA.Close())
+	}()
+	clientB, err := connectClient(
+		ctx,
+		configuration.GatewayBAddress,
+		clientID,
+		"traffic-policy-redis-shared-device-b",
+		token,
+	)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		runErr = errors.Join(runErr, clientB.Close())
+	}()
+
+	check := &verifier{backend: backend}
+	fixtureA := &clientFixture{clientID: clientID, token: token, client: clientA}
+	fixtureB := &clientFixture{clientID: clientID, token: token, client: clientB}
+
+	fmt.Println("checking shared Redis quota across gateway-a and gateway-b")
+	if err := check.sendAccepted(ctx, fixtureA, redisSharedMsgID, "traffic-redis-shared-1"); err != nil {
+		return err
+	}
+	if err := check.sendAccepted(ctx, fixtureB, redisSharedMsgID, "traffic-redis-shared-2"); err != nil {
+		return err
+	}
+	if err := check.sendAccepted(ctx, fixtureA, redisSharedMsgID, "traffic-redis-shared-3"); err != nil {
+		return err
+	}
+	if err := check.sendRejected(
+		ctx,
+		fixtureB,
+		redisSharedMsgID,
+		"traffic-redis-shared-rate-limited",
+		resilience.ReasonRateLimited,
+	); err != nil {
+		return err
+	}
+	if got := backend.RecordCount(); got != 3 {
+		return fmt.Errorf("backend request count = %d, want 3 shared-quota packets", got)
+	}
+	return nil
+}
+
+func runRedisUnavailable(
+	ctx context.Context,
+	configuration config,
+	backend *recordingBackend,
+) (runErr error) {
+	fixture, err := connectRedisRecoveryClient(ctx, configuration.GatewayAddress)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		runErr = errors.Join(runErr, fixture.client.Close())
+	}()
+
+	fmt.Println("checking fail-closed admission while Redis is unavailable")
+	check := &verifier{backend: backend}
+	if err := check.sendRejected(
+		ctx,
+		fixture,
+		redisSharedMsgID,
+		"traffic-redis-unavailable",
+		resilience.ReasonAdmissionUnavailable,
+	); err != nil {
+		return err
+	}
+	if got := backend.RecordCount(); got != 0 {
+		return fmt.Errorf("backend request count = %d, want 0 while Redis is unavailable", got)
+	}
+	return nil
+}
+
+func runRedisRecovered(
+	ctx context.Context,
+	configuration config,
+	backend *recordingBackend,
+) (runErr error) {
+	fixture, err := connectRedisRecoveryClient(ctx, configuration.GatewayAddress)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		runErr = errors.Join(runErr, fixture.client.Close())
+	}()
+
+	fmt.Println("checking shared admission recovers without restarting the gateway")
+	check := &verifier{backend: backend}
+	if err := check.sendAccepted(ctx, fixture, redisSharedMsgID, "traffic-redis-recovered"); err != nil {
+		return err
+	}
+	if got := backend.RecordCount(); got != 1 {
+		return fmt.Errorf("backend request count = %d, want 1 after Redis recovery", got)
+	}
+	return nil
+}
+
+func connectRedisRecoveryClient(
+	ctx context.Context,
+	address string,
+) (*clientFixture, error) {
+	const (
+		clientID = "traffic-policy-redis-recovery-client"
+		token    = "traffic-policy-redis-recovery-token"
+	)
+	client, err := connectClient(
+		ctx,
+		address,
+		clientID,
+		"traffic-policy-redis-recovery-device",
+		token,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &clientFixture{clientID: clientID, token: token, client: client}, nil
+}
+
+func connectClient(
+	ctx context.Context,
+	address string,
+	clientID string,
+	deviceID string,
+	token string,
+) (*sdkclient.Client, error) {
+	client, err := sdkclient.New(sdkclient.Config{
+		Address:    address,
+		ClientID:   clientID,
+		DeviceID:   deviceID,
+		Token:      token,
+		AckTimeout: 3 * time.Second,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create client %s for %s: %w", clientID, address, err)
+	}
+	if err := client.Connect(ctx); err != nil {
+		_ = client.Close()
+		return nil, fmt.Errorf("connect client %s to %s: %w", clientID, address, err)
+	}
+	return client, nil
 }
 
 func (check *verifier) Run(ctx context.Context) error {

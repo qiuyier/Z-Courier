@@ -1,0 +1,81 @@
+gateway_node: traffic-policy-redis-a
+
+auth:
+  type: static
+  static_tokens:
+    traffic-policy-redis-shared-token:
+      client_id: traffic-policy-redis-shared-client
+      token_id: traffic-policy-redis-shared-token
+      scopes:
+        - gateway:e2e
+    traffic-policy-redis-recovery-token:
+      client_id: traffic-policy-redis-recovery-client
+      token_id: traffic-policy-redis-recovery-token
+      scopes:
+        - gateway:e2e
+
+internal_http:
+  enabled: true
+  addr: 127.0.0.1:18211
+  token: traffic-policy-redis-internal-token
+  auth:
+    mode: token
+  max_request_body_size: 1048576
+  max_in_flight: 100
+
+cluster:
+  enabled: false
+
+downlink:
+  storage:
+    type: memory
+
+pipeline:
+  allowlist:
+    client_ids: []
+    msg_ids: []
+  blocklist:
+    client_ids: []
+    msg_ids: []
+  rate_limit:
+    enabled: false
+  traffic_policies:
+    enabled: true
+    mode: redis
+    idle_ttl: 30s
+    default_policy: ""
+    redis:
+      addr: 127.0.0.1:16389
+      username: ""
+      password: ""
+      db: 0
+      key_prefix: zcourier:e2e:traffic-policy
+      dial_timeout: 200ms
+      read_timeout: 200ms
+      write_timeout: 200ms
+      operation_timeout: 250ms
+      failure_mode: fail_closed
+    policies:
+      - name: shared-upstream
+        enabled: true
+        priority: 100
+        match:
+          msg_id_min: 2201
+        key: client_id
+        token_bucket:
+          capacity: 3
+          refill_tokens: 1
+          refill_interval: 1h
+
+upstream:
+  routes:
+    - name: traffic-policy-redis-http
+      enabled: true
+      msg_id_min: 2201
+      msg_id_max: 2201
+      target:
+        type: http
+        url: http://127.0.0.1:18212/gateway/upstream
+        token: traffic-policy-upstream-token
+        timeout: 2s
+        max_in_flight: 100
