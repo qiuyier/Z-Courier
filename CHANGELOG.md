@@ -35,6 +35,14 @@ semantic versioning after the first public MVP tag.
   `admission_unavailable` responses, and Docker-backed two-gateway E2E proving
   one cross-node quota, rejection-before-forwarding during Redis outages, and
   recovery without restarting either gateway.
+- V16.4.1 low-cardinality Prometheus visibility for policy selection,
+  quota-store outcomes and latency, and local live-key capacity. Metric labels
+  are restricted to fixed enumerations and validated static policy names, with
+  focused handler, Store-lifecycle, cardinality-boundary, and real TCP
+  local/Redis exposition coverage.
+- Bilingual English/Chinese titles and operator-facing legend prefixes across
+  the bundled overview and production-signal Grafana dashboards, without
+  changing panel IDs, PromQL, thresholds, units, or alert behavior.
 
 ## [v0.15.0] - 2026-07-28
 

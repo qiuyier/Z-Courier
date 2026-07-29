@@ -22,7 +22,7 @@
   "links": [
     {
       "targetBlank": true,
-      "title": "Production Runbook",
+      "title": "Production Runbook / 生产运行手册",
       "type": "link",
       "url": "https://github.com/qiuyier/Z-Courier/blob/main/docs/v5-production-runbook.md"
     }
@@ -84,12 +84,12 @@
           },
           "editorMode": "code",
           "expr": "sum(up{job=~\"z-courier.*\"})",
-          "legendFormat": "up",
+          "legendFormat": "up / 正常",
           "range": false,
           "refId": "A"
         }
       ],
-      "title": "Gateway Targets Up",
+      "title": "Gateway Targets Up / 可用网关目标数",
       "type": "stat"
     },
     {
@@ -148,12 +148,12 @@
           },
           "editorMode": "code",
           "expr": "sum(ALERTS{alertname=~\"ZCourier.*\",alertstate=\"firing\"})",
-          "legendFormat": "firing",
+          "legendFormat": "firing / 触发中",
           "range": false,
           "refId": "A"
         }
       ],
-      "title": "Firing Z-Courier Alerts",
+      "title": "Firing Z-Courier Alerts / 触发中的 Z-Courier 告警",
       "type": "stat"
     },
     {
@@ -216,12 +216,12 @@
           },
           "editorMode": "code",
           "expr": "100 * sum(rate(z_courier_auth_verify_total{result!=\"success\"}[5m])) / clamp_min(sum(rate(z_courier_auth_verify_total[5m])), 1e-9)",
-          "legendFormat": "auth failure %",
+          "legendFormat": "auth failure % / 鉴权失败 %",
           "range": false,
           "refId": "A"
         }
       ],
-      "title": "Auth Failure Ratio",
+      "title": "Auth Failure Ratio / 鉴权失败比例",
       "type": "stat"
     },
     {
@@ -246,7 +246,7 @@
         "mode": "markdown"
       },
       "pluginVersion": "11.0.0",
-      "title": "Operator Entry Points",
+      "title": "Operator Entry Points / 运维入口",
       "type": "text"
     },
     {
@@ -328,12 +328,12 @@
           },
           "editorMode": "code",
           "expr": "sum by (route, target_type) (rate(z_courier_upstream_overload_rejected_total[5m]))",
-          "legendFormat": "overload {{route}} {{target_type}}",
+          "legendFormat": "overload / 过载 {{route}} {{target_type}}",
           "range": true,
           "refId": "B"
         }
       ],
-      "title": "Upstream Failures And Overload / sec",
+      "title": "Upstream Failures And Overload / sec / 上行失败与过载速率",
       "type": "timeseries"
     },
     {
@@ -404,7 +404,7 @@
           },
           "editorMode": "code",
           "expr": "sum by (path) (rate(z_courier_internal_http_overload_rejected_total[5m]))",
-          "legendFormat": "internal overload {{path}}",
+          "legendFormat": "internal overload / 内部过载 {{path}}",
           "range": true,
           "refId": "A"
         },
@@ -415,12 +415,12 @@
           },
           "editorMode": "code",
           "expr": "sum(rate(z_courier_rate_limit_rejected_total[5m]))",
-          "legendFormat": "client rate limit",
+          "legendFormat": "client rate limit / 客户端限流",
           "range": true,
           "refId": "B"
         }
       ],
-      "title": "Internal HTTP And Client Limit Rejections / sec",
+      "title": "Internal HTTP And Client Limit Rejections / sec / 内部 HTTP 与客户端限流拒绝速率",
       "type": "timeseries"
     },
     {
@@ -491,7 +491,7 @@
           },
           "editorMode": "code",
           "expr": "sum by (result) (rate(z_courier_downlink_push_total{result!~\"sent|queued\"}[5m]))",
-          "legendFormat": "push {{result}}",
+          "legendFormat": "push / 推送 {{result}}",
           "range": true,
           "refId": "A"
         },
@@ -502,7 +502,7 @@
           },
           "editorMode": "code",
           "expr": "sum by (result) (rate(z_courier_downlink_ack_total{result!=\"delivered\"}[5m]))",
-          "legendFormat": "ack {{result}}",
+          "legendFormat": "ack / 确认 {{result}}",
           "range": true,
           "refId": "B"
         },
@@ -513,12 +513,12 @@
           },
           "editorMode": "code",
           "expr": "sum by (scope) (rate(z_courier_downlink_queue_capacity_rejected_total[5m]))",
-          "legendFormat": "capacity {{scope}}",
+          "legendFormat": "capacity / 容量 {{scope}}",
           "range": true,
           "refId": "C"
         }
       ],
-      "title": "Downlink Push And ACK Problems / sec",
+      "title": "Downlink Push And ACK Problems / sec / 下行推送与 ACK 异常速率",
       "type": "timeseries"
     },
     {
@@ -605,7 +605,7 @@
           "refId": "B"
         }
       ],
-      "title": "Downlink ACK Latency",
+      "title": "Downlink ACK Latency / 下行 ACK 延迟",
       "type": "timeseries"
     },
     {
@@ -676,7 +676,7 @@
           },
           "editorMode": "code",
           "expr": "sum by (result) (rate(z_courier_downlink_retry_scan_total{result!=\"success\"}[5m]))",
-          "legendFormat": "retry scan {{result}}",
+          "legendFormat": "retry scan / 重试扫描 {{result}}",
           "range": true,
           "refId": "A"
         },
@@ -687,7 +687,7 @@
           },
           "editorMode": "code",
           "expr": "sum by (owner, result) (rate(z_courier_downlink_retry_claim_messages_total{result!=\"success\"}[5m]))",
-          "legendFormat": "claim {{owner}} {{result}}",
+          "legendFormat": "claim / 认领 {{owner}} {{result}}",
           "range": true,
           "refId": "B"
         },
@@ -698,12 +698,12 @@
           },
           "editorMode": "code",
           "expr": "sum by (reason) (rate(z_courier_cluster_stale_routes_total[5m]))",
-          "legendFormat": "stale route {{reason}}",
+          "legendFormat": "stale route / 过期路由 {{reason}}",
           "range": true,
           "refId": "C"
         }
       ],
-      "title": "Retry Failures And Stale Routes / sec",
+      "title": "Retry Failures And Stale Routes / sec / 重试失败与过期路由速率",
       "type": "timeseries"
     },
     {
@@ -774,7 +774,7 @@
           },
           "editorMode": "code",
           "expr": "sum by (result) (rate(z_courier_internal_http_signature_total{result!=\"success\"}[5m]))",
-          "legendFormat": "internal {{result}}",
+          "legendFormat": "internal / 内部 {{result}}",
           "range": true,
           "refId": "A"
         },
@@ -785,7 +785,7 @@
           },
           "editorMode": "code",
           "expr": "sum by (result) (rate(z_courier_cluster_peer_signature_total{result!=\"success\"}[5m]))",
-          "legendFormat": "peer {{result}}",
+          "legendFormat": "peer / 节点 {{result}}",
           "range": true,
           "refId": "B"
         },
@@ -796,12 +796,12 @@
           },
           "editorMode": "code",
           "expr": "sum by (result) (rate(z_courier_auth_jwks_refresh_total{result!=\"success\"}[5m]))",
-          "legendFormat": "jwks {{result}}",
+          "legendFormat": "jwks / JWKS {{result}}",
           "range": true,
           "refId": "C"
         }
       ],
-      "title": "HMAC And JWKS Failures / sec",
+      "title": "HMAC And JWKS Failures / sec / HMAC 与 JWKS 失败速率",
       "type": "timeseries"
     },
     {
@@ -877,7 +877,7 @@
           "refId": "A"
         }
       ],
-      "title": "Peer Push Failures / sec",
+      "title": "Peer Push Failures / sec / 节点推送失败速率",
       "type": "timeseries"
     },
     {
@@ -964,7 +964,7 @@
           "refId": "B"
         }
       ],
-      "title": "Peer Push Latency",
+      "title": "Peer Push Latency / 节点推送延迟",
       "type": "timeseries"
     },
     {
@@ -1023,12 +1023,12 @@
           },
           "editorMode": "code",
           "expr": "sum(z_courier_gateway_readiness{status=\"draining\"})",
-          "legendFormat": "draining",
+          "legendFormat": "draining / 排空中",
           "range": false,
           "refId": "A"
         }
       ],
-      "title": "Gateways Draining",
+      "title": "Gateways Draining / 正在排空的网关数",
       "type": "stat"
     },
     {
@@ -1116,7 +1116,7 @@
           },
           "editorMode": "code",
           "expr": "sum by (store, result) (rate(z_courier_admin_audit_write_total{result!=\"success\"}[5m]))",
-          "legendFormat": "audit {{store}} {{result}}",
+          "legendFormat": "audit / 审计 {{store}} {{result}}",
           "range": true,
           "refId": "A"
         },
@@ -1127,7 +1127,7 @@
           },
           "editorMode": "code",
           "expr": "sum by (store, operation, result) (rate(z_courier_admin_session_store_operation_total{result=~\"error|not_configured\"}[5m]))",
-          "legendFormat": "session {{store}} {{operation}} {{result}}",
+          "legendFormat": "session / 会话 {{store}} {{operation}} {{result}}",
           "range": true,
           "refId": "B"
         },
@@ -1138,7 +1138,7 @@
           },
           "editorMode": "code",
           "expr": "sum by (permission) (rate(z_courier_admin_permission_rejected_total[5m]))",
-          "legendFormat": "permission rejected {{permission}}",
+          "legendFormat": "permission rejected / 权限拒绝 {{permission}}",
           "range": true,
           "refId": "C"
         },
@@ -1149,12 +1149,12 @@
           },
           "editorMode": "code",
           "expr": "sum by (reason) (rate(z_courier_admin_csrf_rejected_total[5m]))",
-          "legendFormat": "csrf rejected {{reason}}",
+          "legendFormat": "csrf rejected / CSRF 拒绝 {{reason}}",
           "range": true,
           "refId": "D"
         }
       ],
-      "title": "Admin Control Plane Errors / sec",
+      "title": "Admin Control Plane Errors / sec / 管理控制面错误速率",
       "type": "timeseries"
     },
     {
@@ -1200,7 +1200,7 @@
           },
           "editorMode": "code",
           "expr": "max by (job, instance, route, discovery_type) (z_courier_upstream_discovery_resolved_endpoints)",
-          "legendFormat": "resolved {{instance}} {{route}} {{discovery_type}}",
+          "legendFormat": "resolved / 已解析 {{instance}} {{route}} {{discovery_type}}",
           "range": true,
           "refId": "A"
         },
@@ -1211,12 +1211,12 @@
           },
           "editorMode": "code",
           "expr": "max by (job, instance, route, discovery_type) (z_courier_upstream_endpoint_unhealthy)",
-          "legendFormat": "unhealthy {{instance}} {{route}} {{discovery_type}}",
+          "legendFormat": "unhealthy / 不健康 {{instance}} {{route}} {{discovery_type}}",
           "range": true,
           "refId": "B"
         }
       ],
-      "title": "Discovery Endpoint Availability",
+      "title": "Discovery Endpoint Availability / 服务发现端点可用性",
       "type": "timeseries"
     },
     {
@@ -1262,7 +1262,7 @@
           },
           "editorMode": "code",
           "expr": "sum by (instance, route, discovery_type, result) (rate(z_courier_upstream_discovery_refresh_total{result=~\"error|empty\"}[5m]))",
-          "legendFormat": "refresh {{instance}} {{route}} {{result}}",
+          "legendFormat": "refresh / 刷新 {{instance}} {{route}} {{result}}",
           "range": true,
           "refId": "A"
         },
@@ -1273,7 +1273,7 @@
           },
           "editorMode": "code",
           "expr": "sum by (instance, route, discovery_type, result) (rate(z_courier_upstream_endpoint_selection_total{result=~\"resolver_error|no_available\"}[5m]))",
-          "legendFormat": "selection {{instance}} {{route}} {{result}}",
+          "legendFormat": "selection / 选择 {{instance}} {{route}} {{result}}",
           "range": true,
           "refId": "B"
         },
@@ -1284,7 +1284,7 @@
           },
           "editorMode": "code",
           "expr": "sum by (instance, route, discovery_type, failure_class) (rate(z_courier_upstream_endpoint_failure_total[5m]))",
-          "legendFormat": "endpoint {{instance}} {{route}} {{failure_class}}",
+          "legendFormat": "endpoint / 端点 {{instance}} {{route}} {{failure_class}}",
           "range": true,
           "refId": "C"
         },
@@ -1295,12 +1295,12 @@
           },
           "editorMode": "code",
           "expr": "sum by (instance, route, discovery_type, decision) (rate(z_courier_upstream_failover_total{decision=~\"exhausted|no_alternate\"}[5m]))",
-          "legendFormat": "failover {{instance}} {{route}} {{decision}}",
+          "legendFormat": "failover / 故障转移 {{instance}} {{route}} {{decision}}",
           "range": true,
           "refId": "D"
         }
       ],
-      "title": "Discovery And Failover Problems / sec",
+      "title": "Discovery And Failover Problems / sec / 服务发现与故障转移异常速率",
       "type": "timeseries"
     }
   ],
@@ -1320,8 +1320,8 @@
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "Z-Courier Production Signals",
+  "title": "Z-Courier Production Signals / Z-Courier 生产信号",
   "uid": "z-courier-production-signals",
-  "version": 2,
+  "version": 3,
   "weekStart": ""
 }

@@ -411,6 +411,47 @@ var (
 		[]string{"msg_id"},
 	)
 
+	trafficPolicySelection = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "z_courier_traffic_policy_selection_total",
+			Help: "Total number of named traffic policy selection outcomes.",
+		},
+		[]string{"mode", "policy", "result"},
+	)
+
+	trafficPolicyQuotaStore = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "z_courier_traffic_policy_quota_store_total",
+			Help: "Total number of traffic policy quota store admission decisions.",
+		},
+		[]string{"mode", "policy", "key_scope", "result"},
+	)
+
+	trafficPolicyQuotaStoreDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "z_courier_traffic_policy_quota_store_duration_seconds",
+			Help:    "Duration of traffic policy quota store admission decisions in seconds.",
+			Buckets: []float64{0.00001, 0.00005, 0.0001, 0.0005, 0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1},
+		},
+		[]string{"mode", "policy", "key_scope", "result"},
+	)
+
+	trafficPolicyLocalKeys = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "z_courier_traffic_policy_local_keys",
+			Help: "Current number of live keys in the local traffic policy quota store.",
+		},
+		[]string{"mode"},
+	)
+
+	trafficPolicyLocalKeyLimit = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "z_courier_traffic_policy_local_key_limit",
+			Help: "Configured maximum number of live keys in the local traffic policy quota store.",
+		},
+		[]string{"mode"},
+	)
+
 	clusterRegistryBind = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "z_courier_cluster_registry_bind_total",
@@ -791,6 +832,47 @@ func RecordRateLimitRejected(msgID uint32) {
 	rateLimitRejected.WithLabelValues(formatMsgID(msgID)).Inc()
 }
 
+func RecordTrafficPolicySelection(mode, policy, result string) {
+	trafficPolicySelection.WithLabelValues(
+		trafficPolicyModeLabel(mode),
+		nonEmpty(policy, "none"),
+		trafficPolicySelectionResultLabel(result),
+	).Inc()
+}
+
+func RecordTrafficPolicyQuotaStore(
+	mode string,
+	policy string,
+	keyScope string,
+	result string,
+	duration time.Duration,
+) {
+	labels := []string{
+		trafficPolicyModeLabel(mode),
+		nonEmpty(policy, "unknown"),
+		trafficPolicyKeyScopeLabel(keyScope),
+		trafficPolicyQuotaResultLabel(result),
+	}
+	trafficPolicyQuotaStore.WithLabelValues(labels...).Inc()
+	if duration >= 0 {
+		trafficPolicyQuotaStoreDuration.WithLabelValues(labels...).Observe(duration.Seconds())
+	}
+}
+
+func SetTrafficPolicyLocalKeys(count int) {
+	if count < 0 {
+		count = 0
+	}
+	trafficPolicyLocalKeys.WithLabelValues("local").Set(float64(count))
+}
+
+func SetTrafficPolicyLocalKeyLimit(limit int) {
+	if limit < 0 {
+		limit = 0
+	}
+	trafficPolicyLocalKeyLimit.WithLabelValues("local").Set(float64(limit))
+}
+
 func RecordClusterRegistryBind(result string) {
 	clusterRegistryBind.WithLabelValues(nonEmpty(result, "unknown")).Inc()
 }
@@ -862,6 +944,40 @@ func nonEmpty(value, fallback string) string {
 	}
 
 	return value
+}
+
+func trafficPolicyModeLabel(mode string) string {
+	switch mode {
+	case "local", "redis":
+		return mode
+	default:
+		return "unknown"
+	}
+}
+
+func trafficPolicySelectionResultLabel(result string) string {
+	switch result {
+	case "selected", "no_match":
+		return result
+	default:
+		return "unknown"
+	}
+}
+
+func trafficPolicyKeyScopeLabel(keyScope string) string {
+	if keyScope == "client_id" {
+		return keyScope
+	}
+	return "unknown"
+}
+
+func trafficPolicyQuotaResultLabel(result string) string {
+	switch result {
+	case "allowed", "rate_limited", "overloaded", "admission_unavailable":
+		return result
+	default:
+		return "unknown"
+	}
 }
 
 func addCounter(counter prometheus.Counter, value int) {

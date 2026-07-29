@@ -134,3 +134,7 @@ Z-Courier 暴露：
 - auth/JWKS/HMAC 验证。
 - upstream route degraded/unavailable。
 - capacity limiter 和 rate limiter 拒绝。
+- 流量策略选择、配额 Store 结果与耗时、本地 Key 当前量和容量上限。
+
+流量策略指标只使用配置中的策略名和固定枚举 label，不会暴露 ClientID、
+DeviceID、token、Redis Key、消息正文或原始错误。

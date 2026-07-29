@@ -92,6 +92,86 @@ func TestUpstreamDiscoveryMetrics(t *testing.T) {
 	}
 }
 
+func TestTrafficPolicyMetrics(t *testing.T) {
+	const policy = "metrics-test-traffic-policy"
+
+	RecordTrafficPolicySelection("redis", policy, "selected")
+	if got := gatheredScalar(t, "z_courier_traffic_policy_selection_total", map[string]string{
+		"mode":   "redis",
+		"policy": policy,
+		"result": "selected",
+	}); got != 1 {
+		t.Fatalf("traffic policy selection counter = %v, want 1", got)
+	}
+
+	RecordTrafficPolicyQuotaStore(
+		"redis",
+		policy,
+		"client_id",
+		"rate_limited",
+		25*time.Millisecond,
+	)
+	quotaLabels := map[string]string{
+		"mode":      "redis",
+		"policy":    policy,
+		"key_scope": "client_id",
+		"result":    "rate_limited",
+	}
+	if got := gatheredScalar(t, "z_courier_traffic_policy_quota_store_total", quotaLabels); got != 1 {
+		t.Fatalf("traffic policy quota store counter = %v, want 1", got)
+	}
+	count, sum := gatheredHistogram(
+		t,
+		"z_courier_traffic_policy_quota_store_duration_seconds",
+		quotaLabels,
+	)
+	if count != 1 || sum != 0.025 {
+		t.Fatalf("traffic policy quota duration count=%d sum=%v, want count=1 sum=0.025", count, sum)
+	}
+
+	SetTrafficPolicyLocalKeyLimit(100)
+	SetTrafficPolicyLocalKeys(7)
+	if got := gatheredScalar(t, "z_courier_traffic_policy_local_key_limit", map[string]string{
+		"mode": "local",
+	}); got != 100 {
+		t.Fatalf("traffic policy local key limit = %v, want 100", got)
+	}
+	if got := gatheredScalar(t, "z_courier_traffic_policy_local_keys", map[string]string{
+		"mode": "local",
+	}); got != 7 {
+		t.Fatalf("traffic policy local keys = %v, want 7", got)
+	}
+}
+
+func TestTrafficPolicyMetricsBoundDynamicLabels(t *testing.T) {
+	const policy = "metrics-test-bounded-policy"
+
+	RecordTrafficPolicySelection("tenant-controlled-mode", "", "tenant-controlled-result")
+	if got := gatheredScalar(t, "z_courier_traffic_policy_selection_total", map[string]string{
+		"mode":   "unknown",
+		"policy": "none",
+		"result": "unknown",
+	}); got != 1 {
+		t.Fatalf("bounded traffic policy selection counter = %v, want 1", got)
+	}
+
+	RecordTrafficPolicyQuotaStore(
+		"tenant-controlled-mode",
+		policy,
+		"tenant-controlled-scope",
+		"tenant-controlled-error",
+		-1,
+	)
+	if got := gatheredScalar(t, "z_courier_traffic_policy_quota_store_total", map[string]string{
+		"mode":      "unknown",
+		"policy":    policy,
+		"key_scope": "unknown",
+		"result":    "unknown",
+	}); got != 1 {
+		t.Fatalf("bounded traffic policy quota store counter = %v, want 1", got)
+	}
+}
+
 func gatheredScalar(t *testing.T, metricName string, labels map[string]string) float64 {
 	t.Helper()
 	families, err := prometheus.DefaultGatherer.Gather()

@@ -111,7 +111,7 @@
           "refId": "A"
         }
       ],
-      "title": "Ingress Packets / sec",
+      "title": "Ingress Packets / sec / 入站包速率",
       "type": "timeseries"
     },
     {
@@ -169,12 +169,12 @@
           },
           "editorMode": "code",
           "expr": "sum(z_courier_sessions_online)",
-          "legendFormat": "total",
+          "legendFormat": "total / 总数",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Online Sessions",
+      "title": "Online Sessions / 在线会话数",
       "type": "stat"
     },
     {
@@ -232,12 +232,12 @@
           },
           "editorMode": "code",
           "expr": "sum(z_courier_clients_online)",
-          "legendFormat": "total",
+          "legendFormat": "total / 总数",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Online Clients",
+      "title": "Online Clients / 在线客户端数",
       "type": "stat"
     },
     {
@@ -307,7 +307,7 @@
           "refId": "A"
         }
       ],
-      "title": "Rejected Ingress / sec",
+      "title": "Rejected Ingress / sec / 入站拒绝速率",
       "type": "piechart"
     },
     {
@@ -400,7 +400,7 @@
           "refId": "A"
         }
       ],
-      "title": "Upstream Forward / sec",
+      "title": "Upstream Forward / sec / 上行转发速率",
       "type": "timeseries"
     },
     {
@@ -504,7 +504,7 @@
           "refId": "B"
         }
       ],
-      "title": "Upstream Forward Latency",
+      "title": "Upstream Forward Latency / 上行转发延迟",
       "type": "timeseries"
     },
     {
@@ -597,7 +597,7 @@
           "refId": "A"
         }
       ],
-      "title": "Downlink Push / sec",
+      "title": "Downlink Push / sec / 下行推送速率",
       "type": "timeseries"
     },
     {
@@ -690,7 +690,7 @@
           "refId": "A"
         }
       ],
-      "title": "Downlink ACK / sec",
+      "title": "Downlink ACK / sec / 下行 ACK 速率",
       "type": "timeseries"
     },
     {
@@ -795,7 +795,7 @@
           "refId": "B"
         }
       ],
-      "title": "Downlink ACK Latency",
+      "title": "Downlink ACK Latency / 下行 ACK 延迟",
       "type": "timeseries"
     },
     {
@@ -888,7 +888,7 @@
           "refId": "A"
         }
       ],
-      "title": "Rate Limit Rejects / sec",
+      "title": "Rate Limit Rejects / sec / 限流拒绝速率",
       "type": "timeseries"
     },
     {
@@ -976,7 +976,7 @@
           },
           "editorMode": "code",
           "expr": "sum by (result) (rate(z_courier_cluster_registry_bind_total[1m]))",
-          "legendFormat": "bind {{result}}",
+          "legendFormat": "bind / 绑定 {{result}}",
           "range": true,
           "refId": "A"
         },
@@ -987,7 +987,7 @@
           },
           "editorMode": "code",
           "expr": "sum by (result) (rate(z_courier_cluster_registry_unbind_total[1m]))",
-          "legendFormat": "unbind {{result}}",
+          "legendFormat": "unbind / 解绑 {{result}}",
           "range": true,
           "refId": "B"
         },
@@ -998,7 +998,7 @@
           },
           "editorMode": "code",
           "expr": "sum by (result) (rate(z_courier_cluster_registry_lookup_total[1m]))",
-          "legendFormat": "lookup {{result}}",
+          "legendFormat": "lookup / 查询 {{result}}",
           "range": true,
           "refId": "C"
         },
@@ -1009,12 +1009,12 @@
           },
           "editorMode": "code",
           "expr": "sum by (result) (rate(z_courier_cluster_registry_touch_total[1m]))",
-          "legendFormat": "touch {{result}}",
+          "legendFormat": "touch / 续期 {{result}}",
           "range": true,
           "refId": "D"
         }
       ],
-      "title": "Cluster Registry / sec",
+      "title": "Cluster Registry / sec / 集群注册表操作速率",
       "type": "timeseries"
     },
     {
@@ -1107,7 +1107,7 @@
           "refId": "A"
         }
       ],
-      "title": "Cluster Peer Push / sec",
+      "title": "Cluster Peer Push / sec / 集群节点推送速率",
       "type": "timeseries"
     },
     {
@@ -1211,7 +1211,7 @@
           "refId": "B"
         }
       ],
-      "title": "Cluster Peer Push Latency",
+      "title": "Cluster Peer Push Latency / 集群节点推送延迟",
       "type": "timeseries"
     },
     {
@@ -1304,7 +1304,7 @@
           "refId": "A"
         }
       ],
-      "title": "Downlink Retry Messages / sec",
+      "title": "Downlink Retry Messages / sec / 下行重试消息速率",
       "type": "timeseries"
     },
     {
@@ -1397,7 +1397,7 @@
           "refId": "A"
         }
       ],
-      "title": "Retry Claim Messages / sec",
+      "title": "Retry Claim Messages / sec / 重试认领消息速率",
       "type": "timeseries"
     },
     {
@@ -1501,7 +1501,7 @@
           "refId": "B"
         }
       ],
-      "title": "Retry Claim Latency",
+      "title": "Retry Claim Latency / 重试认领延迟",
       "type": "timeseries"
     },
     {
@@ -1594,7 +1594,7 @@
           "refId": "A"
         }
       ],
-      "title": "Retry Scans / sec",
+      "title": "Retry Scans / sec / 重试扫描速率",
       "type": "timeseries"
     },
     {
@@ -1687,7 +1687,7 @@
           "refId": "A"
         }
       ],
-      "title": "Stale Routes / sec",
+      "title": "Stale Routes / sec / 过期路由速率",
       "type": "timeseries"
     },
     {
@@ -1791,7 +1791,7 @@
           "refId": "B"
         }
       ],
-      "title": "Retry Scan Latency",
+      "title": "Retry Scan Latency / 重试扫描延迟",
       "type": "timeseries"
     },
     {
@@ -1884,7 +1884,7 @@
           "refId": "A"
         }
       ],
-      "title": "Online Sessions by Node",
+      "title": "Online Sessions by Node / 各节点在线会话",
       "type": "timeseries"
     },
     {
@@ -1977,7 +1977,7 @@
           "refId": "A"
         }
       ],
-      "title": "Upstream In-Flight",
+      "title": "Upstream In-Flight / 上行处理中请求数",
       "type": "timeseries"
     },
     {
@@ -2070,7 +2070,7 @@
           "refId": "A"
         }
       ],
-      "title": "Upstream Overload Rejects / sec",
+      "title": "Upstream Overload Rejects / sec / 上行过载拒绝速率",
       "type": "timeseries"
     },
     {
@@ -2163,7 +2163,7 @@
           "refId": "A"
         }
       ],
-      "title": "Internal HTTP In-Flight",
+      "title": "Internal HTTP In-Flight / 内部 HTTP 处理中请求数",
       "type": "timeseries"
     },
     {
@@ -2256,7 +2256,7 @@
           "refId": "A"
         }
       ],
-      "title": "Internal HTTP Overload Rejects / sec",
+      "title": "Internal HTTP Overload Rejects / sec / 内部 HTTP 过载拒绝速率",
       "type": "timeseries"
     },
     {
@@ -2349,7 +2349,7 @@
           "refId": "A"
         }
       ],
-      "title": "Auth Verify / sec",
+      "title": "Auth Verify / sec / 鉴权验证速率",
       "type": "timeseries"
     },
     {
@@ -2444,7 +2444,7 @@
           "refId": "A"
         }
       ],
-      "title": "Auth Success Rate",
+      "title": "Auth Success Rate / 鉴权成功率",
       "type": "timeseries"
     },
     {
@@ -2548,7 +2548,7 @@
           "refId": "B"
         }
       ],
-      "title": "Auth Verify Latency",
+      "title": "Auth Verify Latency / 鉴权验证延迟",
       "type": "timeseries"
     },
     {
@@ -2641,7 +2641,7 @@
           "refId": "A"
         }
       ],
-      "title": "Auth In-Flight",
+      "title": "Auth In-Flight / 鉴权处理中请求数",
       "type": "timeseries"
     },
     {
@@ -2734,7 +2734,7 @@
           "refId": "A"
         }
       ],
-      "title": "Auth Cache / sec",
+      "title": "Auth Cache / sec / 鉴权缓存操作速率",
       "type": "timeseries"
     },
     {
@@ -2795,7 +2795,7 @@
           "refId": "A"
         }
       ],
-      "title": "JWKS Refresh / sec",
+      "title": "JWKS Refresh / sec / JWKS 刷新速率",
       "type": "timeseries"
     },
     {
@@ -2867,7 +2867,7 @@
           "refId": "B"
         }
       ],
-      "title": "JWKS Refresh Latency",
+      "title": "JWKS Refresh Latency / JWKS 刷新延迟",
       "type": "timeseries"
     },
     {
@@ -2928,7 +2928,7 @@
           "refId": "A"
         }
       ],
-      "title": "Internal HTTP HMAC / sec",
+      "title": "Internal HTTP HMAC / sec / 内部 HTTP HMAC 验证速率",
       "type": "timeseries"
     },
     {
@@ -2989,7 +2989,7 @@
           "refId": "A"
         }
       ],
-      "title": "Cluster Peer HMAC / sec",
+      "title": "Cluster Peer HMAC / sec / 集群节点 HMAC 验证速率",
       "type": "timeseries"
     },
     {
@@ -3045,7 +3045,7 @@
           },
           "editorMode": "code",
           "expr": "sum by (permission) (rate(z_courier_admin_permission_rejected_total[1m]))",
-          "legendFormat": "permission rejected {{permission}}",
+          "legendFormat": "permission rejected / 权限拒绝 {{permission}}",
           "range": true,
           "refId": "A"
         },
@@ -3056,7 +3056,7 @@
           },
           "editorMode": "code",
           "expr": "sum by (result) (rate(z_courier_admin_session_disconnect_total[1m]))",
-          "legendFormat": "session disconnect {{result}}",
+          "legendFormat": "session disconnect / 会话断开 {{result}}",
           "range": true,
           "refId": "B"
         },
@@ -3067,7 +3067,7 @@
           },
           "editorMode": "code",
           "expr": "sum by (result) (rate(z_courier_admin_downlink_test_push_total[1m]))",
-          "legendFormat": "test push {{result}}",
+          "legendFormat": "test push / 测试推送 {{result}}",
           "range": true,
           "refId": "C"
         },
@@ -3078,7 +3078,7 @@
           },
           "editorMode": "code",
           "expr": "sum by (result) (rate(z_courier_admin_retry_scan_total[1m]))",
-          "legendFormat": "retry scan {{result}}",
+          "legendFormat": "retry scan / 重试扫描 {{result}}",
           "range": true,
           "refId": "D"
         },
@@ -3100,7 +3100,7 @@
           },
           "editorMode": "code",
           "expr": "sum by (reason) (rate(z_courier_admin_csrf_rejected_total[1m]))",
-          "legendFormat": "csrf rejected {{reason}}",
+          "legendFormat": "csrf rejected / CSRF 拒绝 {{reason}}",
           "range": true,
           "refId": "F"
         },
@@ -3111,7 +3111,7 @@
           },
           "editorMode": "code",
           "expr": "sum by (result) (rate(z_courier_downlink_requeue_total[1m]))",
-          "legendFormat": "requeue {{result}}",
+          "legendFormat": "requeue / 重新入队 {{result}}",
           "range": true,
           "refId": "G"
         },
@@ -3122,7 +3122,7 @@
           },
           "editorMode": "code",
           "expr": "sum by (result) (rate(z_courier_downlink_discard_total[1m]))",
-          "legendFormat": "discard {{result}}",
+          "legendFormat": "discard / 丢弃 {{result}}",
           "range": true,
           "refId": "H"
         },
@@ -3133,12 +3133,12 @@
           },
           "editorMode": "code",
           "expr": "sum by (result) (rate(z_courier_downlink_bulk_requeue_total[1m]))",
-          "legendFormat": "bulk requeue {{result}}",
+          "legendFormat": "bulk requeue / 批量重新入队 {{result}}",
           "range": true,
           "refId": "I"
         }
       ],
-      "title": "Admin Actions / sec",
+      "title": "Admin Actions / sec / 管理操作速率",
       "type": "timeseries"
     },
     {
@@ -3199,7 +3199,7 @@
           "refId": "A"
         }
       ],
-      "title": "Admin Audit Writes / sec",
+      "title": "Admin Audit Writes / sec / 管理审计写入速率",
       "type": "timeseries"
     },
     {
@@ -3271,7 +3271,7 @@
           "refId": "B"
         }
       ],
-      "title": "Admin Audit Write Latency",
+      "title": "Admin Audit Write Latency / 管理审计写入延迟",
       "type": "timeseries"
     },
     {
@@ -3332,7 +3332,7 @@
           "refId": "A"
         }
       ],
-      "title": "Admin Session Store Ops / sec",
+      "title": "Admin Session Store Ops / sec / 管理会话存储操作速率",
       "type": "timeseries"
     },
     {
@@ -3404,7 +3404,7 @@
           "refId": "B"
         }
       ],
-      "title": "Admin Session Store Latency",
+      "title": "Admin Session Store Latency / 管理会话存储延迟",
       "type": "timeseries"
     },
     {
@@ -3455,7 +3455,7 @@
           "refId": "A"
         }
       ],
-      "title": "Downlink Queue Capacity Rejects / sec",
+      "title": "Downlink Queue Capacity Rejects / sec / 下行队列容量拒绝速率",
       "type": "timeseries"
     },
     {
@@ -3501,7 +3501,7 @@
           },
           "editorMode": "code",
           "expr": "max by (instance, route, discovery_type) (z_courier_upstream_discovery_resolved_endpoints)",
-          "legendFormat": "resolved {{instance}} {{route}} {{discovery_type}}",
+          "legendFormat": "resolved / 已解析 {{instance}} {{route}} {{discovery_type}}",
           "range": true,
           "refId": "A"
         },
@@ -3512,12 +3512,12 @@
           },
           "editorMode": "code",
           "expr": "max by (instance, route, discovery_type) (z_courier_upstream_endpoint_unhealthy)",
-          "legendFormat": "unhealthy {{instance}} {{route}} {{discovery_type}}",
+          "legendFormat": "unhealthy / 不健康 {{instance}} {{route}} {{discovery_type}}",
           "range": true,
           "refId": "B"
         }
       ],
-      "title": "Discovery Endpoints",
+      "title": "Discovery Endpoints / 服务发现端点数",
       "type": "timeseries"
     },
     {
@@ -3568,7 +3568,7 @@
           "refId": "A"
         }
       ],
-      "title": "Discovery Refresh / sec",
+      "title": "Discovery Refresh / sec / 服务发现刷新速率",
       "type": "timeseries"
     },
     {
@@ -3630,7 +3630,7 @@
           "refId": "B"
         }
       ],
-      "title": "Discovery Refresh Latency",
+      "title": "Discovery Refresh Latency / 服务发现刷新延迟",
       "type": "timeseries"
     },
     {
@@ -3676,7 +3676,7 @@
           },
           "editorMode": "code",
           "expr": "sum by (instance, route, discovery_type, result) (rate(z_courier_upstream_endpoint_selection_total[5m]))",
-          "legendFormat": "selection {{instance}} {{route}} {{result}}",
+          "legendFormat": "selection / 选择 {{instance}} {{route}} {{result}}",
           "range": true,
           "refId": "A"
         },
@@ -3687,12 +3687,12 @@
           },
           "editorMode": "code",
           "expr": "sum by (instance, route, discovery_type) (rate(z_courier_upstream_endpoint_cooldown_skipped_total[5m]))",
-          "legendFormat": "cooldown {{instance}} {{route}}",
+          "legendFormat": "cooldown / 冷却 {{instance}} {{route}}",
           "range": true,
           "refId": "B"
         }
       ],
-      "title": "Endpoint Selection And Cooldown / sec",
+      "title": "Endpoint Selection And Cooldown / sec / 端点选择与冷却速率",
       "type": "timeseries"
     },
     {
@@ -3754,7 +3754,7 @@
           "refId": "B"
         }
       ],
-      "title": "Forward Attempts",
+      "title": "Forward Attempts / 转发尝试次数",
       "type": "timeseries"
     },
     {
@@ -3800,7 +3800,7 @@
           },
           "editorMode": "code",
           "expr": "sum by (instance, route, discovery_type, failure_class) (rate(z_courier_upstream_endpoint_failure_total[5m]))",
-          "legendFormat": "failure {{instance}} {{route}} {{failure_class}}",
+          "legendFormat": "failure / 失败 {{instance}} {{route}} {{failure_class}}",
           "range": true,
           "refId": "A"
         },
@@ -3811,12 +3811,12 @@
           },
           "editorMode": "code",
           "expr": "sum by (instance, route, discovery_type, decision) (rate(z_courier_upstream_failover_total[5m]))",
-          "legendFormat": "failover {{instance}} {{route}} {{decision}}",
+          "legendFormat": "failover / 故障转移 {{instance}} {{route}} {{decision}}",
           "range": true,
           "refId": "B"
         }
       ],
-      "title": "Endpoint Failures And Failover / sec",
+      "title": "Endpoint Failures And Failover / sec / 端点失败与故障转移速率",
       "type": "timeseries"
     }
   ],
@@ -3835,8 +3835,8 @@
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "Z-Courier Overview",
+  "title": "Z-Courier Overview / Z-Courier 运行概览",
   "uid": "z-courier-overview",
-  "version": 11,
+  "version": 12,
   "weekStart": ""
 }

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/qiuyier/Z-Courier/internal/metrics"
 )
 
 type LocalQuotaStoreConfig struct {
@@ -42,13 +44,16 @@ func NewLocalQuotaStore(config LocalQuotaStoreConfig) *LocalQuotaStore {
 	if now == nil {
 		now = time.Now
 	}
-	return &LocalQuotaStore{
+	store := &LocalQuotaStore{
 		maxKeys: config.MaxKeys,
 		idleTTL: config.IdleTTL,
 		now:     now,
 		buckets: make(map[localQuotaKey]*localQuotaBucket),
 		lru:     list.New(),
 	}
+	metrics.SetTrafficPolicyLocalKeyLimit(config.MaxKeys)
+	metrics.SetTrafficPolicyLocalKeys(0)
+	return store
 }
 
 func (s *LocalQuotaStore) Admit(ctx context.Context, request QuotaRequest) (QuotaDecision, error) {
@@ -80,6 +85,9 @@ func (s *LocalQuotaStore) Admit(ctx context.Context, request QuotaRequest) (Quot
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	defer func() {
+		metrics.SetTrafficPolicyLocalKeys(len(s.buckets))
+	}()
 
 	s.removeIdleBuckets(now)
 	bucket, exists := s.buckets[key]

@@ -865,6 +865,26 @@ ZCOURIER_TEST_REDIS_ADDR=127.0.0.1:16379 \
 连接失败、共享状态非法或 Lua 脚本失败时返回该原因，被拒绝的包不会转发给
 上游。
 
+流量策略准入会暴露以下 Prometheus 指标：
+
+```text
+z_courier_traffic_policy_selection_total
+z_courier_traffic_policy_quota_store_total
+z_courier_traffic_policy_quota_store_duration_seconds
+z_courier_traffic_policy_local_keys
+z_courier_traffic_policy_local_key_limit
+```
+
+`selection_total` 用来区分命中某个已配置策略和 `no_match` 直接放行。
+配额 Store 计数器和耗时直方图使用稳定的 `allowed`、`rate_limited`、
+`overloaded`、`admission_unavailable` 结果。两个 local gauge 分别表示
+当前存活桶数量和该进程配置的桶数量上限。原有
+`z_courier_rate_limit_rejected_total` 会继续作为兼容的聚合拒绝指标保留。
+
+这些指标的 label 受到严格约束：`mode`、`key_scope`、`result` 都是固定枚举，
+`policy` 只来自启动时校验过的静态策略配置。ClientID、DeviceID、token、
+Redis Key、消息正文、原始错误和端点地址都不会成为指标 label。
+
 `default_policy` 是真正的兜底，因此也可能限制 AUTH/BIND、下行 ACK 等没有
 命中普通上行路由的协议包。只想限制业务上行时，不要设置 `default_policy`，
 改用 MsgID 或 route 选择器。禁用的策略不会参与选择，但声明过的字段仍会在
@@ -882,9 +902,9 @@ bash scripts/e2e_traffic_policy.sh
 
 这个无需 Docker 的验证器会检查突发额度耗尽与持续补充、高优先级 route
 策略胜出、未匹配流量不创建桶直接放行、有界 Key 容量过载、空闲桶回收、
-稳定的拒绝 ACK reason，以及被拒绝的包不会到达 HTTP upstream。脚本使用
-TCP `9941`、内部 HTTP `18201` 和测试 backend `18202`，运行前需保证三个
-端口空闲。
+稳定的拒绝 ACK reason、被拒绝的包不会到达 HTTP upstream，以及预期的
+local 准入指标时间序列。脚本使用 TCP `9941`、内部 HTTP `18201` 和测试
+backend `18202`，运行前需保证三个端口空闲。
 
 可通过两个真实 gateway TCP 监听验证 Redis 模式：
 
@@ -896,4 +916,5 @@ bash scripts/e2e_traffic_policy_redis.sh
 A/B 之间共享容量、Redis 故障时返回 `admission_unavailable` 且不转发，以及
 Redis 重启后无需重启任一 gateway 就能在下一次请求恢复准入。脚本使用 TCP
 `9951`/`9952`、内部 HTTP `18211`/`18213`、backend `18212` 和 Redis
-`16389`，运行前需保证这些端口空闲。
+`16389`，同时检查两个 gateway 上预期的 Redis 模式准入指标时间序列。运行前
+需保证这些端口空闲。

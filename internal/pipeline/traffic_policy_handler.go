@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/qiuyier/Z-Courier/internal/metrics"
 	"github.com/qiuyier/Z-Courier/internal/protocol"
@@ -11,6 +12,7 @@ import (
 type TrafficPolicyHandler struct {
 	selector *TrafficPolicySelector
 	store    QuotaStore
+	mode     string
 }
 
 func NewTrafficPolicyHandler(config TrafficPoliciesConfig) *TrafficPolicyHandler {
@@ -37,6 +39,7 @@ func NewTrafficPolicyHandlerWithStore(
 	return &TrafficPolicyHandler{
 		selector: NewTrafficPolicySelector(config),
 		store:    store,
+		mode:     normalizedTrafficPolicyMode(config.Mode),
 	}
 }
 
@@ -56,8 +59,10 @@ func (h *TrafficPolicyHandler) Handle(ctx *Context) error {
 
 	policy, selected := h.selector.Select(ctx.Principal.ClientID, ctx.Packet.MsgID)
 	if !selected {
+		metrics.RecordTrafficPolicySelection(h.mode, "", "no_match")
 		return nil
 	}
+	metrics.RecordTrafficPolicySelection(h.mode, policy.Name, "selected")
 	if policy.Key != TrafficPolicyKeyClientID ||
 		policy.TokenBucket.Capacity <= 0 ||
 		policy.TokenBucket.RefillTokens <= 0 ||
@@ -65,6 +70,7 @@ func (h *TrafficPolicyHandler) Handle(ctx *Context) error {
 		return Reject(protocol.AckRejected, fmt.Errorf("traffic policy %q is misconfigured", policy.Name))
 	}
 
+	startedAt := time.Now()
 	decision, err := h.store.Admit(ctx.Context(), QuotaRequest{
 		PolicyName:  policy.Name,
 		KeyScope:    policy.Key,
@@ -74,6 +80,21 @@ func (h *TrafficPolicyHandler) Handle(ctx *Context) error {
 	if err != nil {
 		decision = QuotaDecisionAdmissionUnavailable
 	}
+	switch decision {
+	case QuotaDecisionAllowed,
+		QuotaDecisionRateLimited,
+		QuotaDecisionOverloaded,
+		QuotaDecisionAdmissionUnavailable:
+	default:
+		decision = QuotaDecisionAdmissionUnavailable
+	}
+	metrics.RecordTrafficPolicyQuotaStore(
+		h.mode,
+		policy.Name,
+		policy.Key,
+		string(decision),
+		time.Since(startedAt),
+	)
 	if decision == QuotaDecisionAllowed {
 		return nil
 	}
@@ -98,5 +119,14 @@ func (h *TrafficPolicyHandler) Handle(ctx *Context) error {
 			resilience.ReasonAdmissionUnavailable,
 			fmt.Errorf("traffic policy %q admission is unavailable", policy.Name),
 		)
+	}
+}
+
+func normalizedTrafficPolicyMode(mode string) string {
+	switch mode {
+	case TrafficPolicyModeLocal, TrafficPolicyModeRedis:
+		return mode
+	default:
+		return "unknown"
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/qiuyier/Z-Courier/internal/auth"
 	"github.com/qiuyier/Z-Courier/internal/protocol"
 	"github.com/qiuyier/Z-Courier/internal/resilience"
@@ -187,6 +188,38 @@ func TestTrafficPolicyHandlerMapsQuotaDecisions(t *testing.T) {
 	}
 }
 
+func TestTrafficPolicyHandlerRecordsSelectionAndQuotaMetrics(t *testing.T) {
+	const policyName = "pipeline-metrics-rate-limited"
+	config := testTrafficPolicyConfig()
+	config.Mode = TrafficPolicyModeRedis
+	config.DefaultPolicy = policyName
+	config.Policies[0].Name = policyName
+	store := &stubQuotaStore{decision: QuotaDecisionRateLimited}
+	handler := NewTrafficPolicyHandlerWithStore(config, store)
+
+	assertTrafficPolicyReason(
+		t,
+		handler.Handle(trafficPolicyContext("metrics-client", 1001)),
+		resilience.ReasonRateLimited,
+	)
+
+	if got := gatheredPipelineScalar(t, "z_courier_traffic_policy_selection_total", map[string]string{
+		"mode":   TrafficPolicyModeRedis,
+		"policy": policyName,
+		"result": "selected",
+	}); got != 1 {
+		t.Fatalf("traffic policy selection counter = %v, want 1", got)
+	}
+	if got := gatheredPipelineScalar(t, "z_courier_traffic_policy_quota_store_total", map[string]string{
+		"mode":      TrafficPolicyModeRedis,
+		"policy":    policyName,
+		"key_scope": TrafficPolicyKeyClientID,
+		"result":    string(QuotaDecisionRateLimited),
+	}); got != 1 {
+		t.Fatalf("traffic policy quota store counter = %v, want 1", got)
+	}
+}
+
 func TestNewTrafficPolicyHandlerUsesLocalStore(t *testing.T) {
 	config := testTrafficPolicyConfig()
 	config.Policies[0].TokenBucket = TokenBucketConfig{
@@ -265,4 +298,38 @@ func assertTrafficPolicyReason(t *testing.T, err error, want string) {
 	if reason != want {
 		t.Fatalf("AckError() reason = %q, want %q", reason, want)
 	}
+}
+
+func gatheredPipelineScalar(t *testing.T, metricName string, labels map[string]string) float64 {
+	t.Helper()
+	families, err := prometheus.DefaultGatherer.Gather()
+	if err != nil {
+		t.Fatalf("Gather() error = %v", err)
+	}
+	for _, family := range families {
+		if family.GetName() != metricName {
+			continue
+		}
+		for _, metric := range family.GetMetric() {
+			matches := 0
+			for _, label := range metric.GetLabel() {
+				if labels[label.GetName()] == label.GetValue() {
+					matches++
+				}
+			}
+			if matches != len(labels) || len(metric.GetLabel()) != len(labels) {
+				continue
+			}
+			switch {
+			case metric.GetCounter() != nil:
+				return metric.GetCounter().GetValue()
+			case metric.GetGauge() != nil:
+				return metric.GetGauge().GetValue()
+			default:
+				t.Fatalf("%s is not a scalar metric", metricName)
+			}
+		}
+	}
+	t.Fatalf("metric %s with labels %v not found", metricName, labels)
+	return 0
 }

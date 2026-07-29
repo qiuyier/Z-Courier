@@ -57,6 +57,47 @@ func TestLocalQuotaStoreBoundsKeysAndExpiresIdleBuckets(t *testing.T) {
 	}
 }
 
+func TestLocalQuotaStoreRecordsKeyMetrics(t *testing.T) {
+	now := time.Date(2026, 7, 29, 10, 0, 0, 0, time.UTC)
+	store := NewLocalQuotaStore(LocalQuotaStoreConfig{
+		MaxKeys: 2,
+		IdleTTL: time.Second,
+		Now:     func() time.Time { return now },
+	})
+	bucket := TokenBucketConfig{
+		Capacity:       1,
+		RefillTokens:   1,
+		RefillInterval: time.Hour,
+	}
+
+	if got := gatheredPipelineScalar(t, "z_courier_traffic_policy_local_key_limit", map[string]string{
+		"mode": TrafficPolicyModeLocal,
+	}); got != 2 {
+		t.Fatalf("local key limit = %v, want 2", got)
+	}
+	if got := gatheredPipelineScalar(t, "z_courier_traffic_policy_local_keys", map[string]string{
+		"mode": TrafficPolicyModeLocal,
+	}); got != 0 {
+		t.Fatalf("initial local keys = %v, want 0", got)
+	}
+
+	assertQuotaDecision(t, store, localQuotaRequest("standard", "client-a", bucket), QuotaDecisionAllowed)
+	assertQuotaDecision(t, store, localQuotaRequest("standard", "client-b", bucket), QuotaDecisionAllowed)
+	if got := gatheredPipelineScalar(t, "z_courier_traffic_policy_local_keys", map[string]string{
+		"mode": TrafficPolicyModeLocal,
+	}); got != 2 {
+		t.Fatalf("local keys = %v, want 2", got)
+	}
+
+	now = now.Add(time.Second)
+	assertQuotaDecision(t, store, localQuotaRequest("standard", "client-c", bucket), QuotaDecisionAllowed)
+	if got := gatheredPipelineScalar(t, "z_courier_traffic_policy_local_keys", map[string]string{
+		"mode": TrafficPolicyModeLocal,
+	}); got != 1 {
+		t.Fatalf("local keys after idle eviction = %v, want 1", got)
+	}
+}
+
 func TestLocalQuotaStorePartitionsPolicyAndScope(t *testing.T) {
 	store := NewLocalQuotaStore(LocalQuotaStoreConfig{
 		MaxKeys: 3,

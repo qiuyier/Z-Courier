@@ -96,6 +96,35 @@ wait_redis() {
   done
 }
 
+assert_metric_series() {
+  local url="$1"
+  local metric="$2"
+  shift 2
+
+  local body
+  body="$(curl -fsS "$url")"
+  local line
+  while IFS= read -r line; do
+    if [[ "$line" != "$metric{"* && "$line" != "$metric "* ]]; then
+      continue
+    fi
+    local matched=true
+    local expected
+    for expected in "$@"; do
+      if [[ "$line" != *"$expected"* ]]; then
+        matched=false
+        break
+      fi
+    done
+    if [[ "$matched" == true ]]; then
+      return 0
+    fi
+  done <<<"$body"
+
+  echo "metric $metric missing expected fragments: $*" >&2
+  return 1
+}
+
 start_redis() {
   docker run \
     --detach \
@@ -187,4 +216,24 @@ go run ./cmd/trafficpolicye2e \
   -timeout 15s
 
 check_gateways_alive
+
+echo "checking Redis traffic policy admission metrics..."
+METRICS_A_URL="http://127.0.0.1:18211/metrics"
+METRICS_B_URL="http://127.0.0.1:18213/metrics"
+assert_metric_series "$METRICS_A_URL" \
+  z_courier_traffic_policy_selection_total \
+  'mode="redis"' 'policy="shared-upstream"' 'result="selected"'
+assert_metric_series "$METRICS_A_URL" \
+  z_courier_traffic_policy_quota_store_total \
+  'mode="redis"' 'policy="shared-upstream"' 'result="allowed"'
+assert_metric_series "$METRICS_A_URL" \
+  z_courier_traffic_policy_quota_store_total \
+  'mode="redis"' 'result="admission_unavailable"'
+assert_metric_series "$METRICS_B_URL" \
+  z_courier_traffic_policy_quota_store_total \
+  'mode="redis"' 'result="rate_limited"'
+assert_metric_series "$METRICS_B_URL" \
+  z_courier_traffic_policy_quota_store_duration_seconds_count \
+  'mode="redis"' 'result="allowed"'
+
 echo "Redis traffic policy e2e passed"

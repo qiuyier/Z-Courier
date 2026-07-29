@@ -147,9 +147,12 @@ quotas:
 - a Docker-backed two-gateway E2E proves one shared quota, fail-closed
   `admission_unavailable` without upstream forwarding, and recovery after a
   disposable Redis restart without restarting either gateway.
+- V16.4.1 adds bounded Prometheus visibility for policy selection, quota-store
+  outcomes and latency, plus local live-key usage and its configured limit;
+  labels contain only fixed enums and validated static policy names.
 
-Dedicated admission observability, Console views, deployment surfaces, and
-full release guidance remain later V16 workstreams.
+Diagnostics, Console views, Grafana dashboards, alerts, deployment surfaces,
+and full release guidance remain later V16 workstreams.
 
 ## Failure And Client Contract
 
@@ -235,6 +238,11 @@ Acceptance criteria:
 ### V16.4 Admission Observability And Operations
 
 Purpose: make rejection understandable without exposing tenant data.
+
+Status: in progress. V16.4.1 implements the low-cardinality Prometheus metric
+foundation for policy selection, quota-store decisions and latency, and local
+key capacity. Diagnostics, diagnosis bundles, dashboards, alerts, Console
+views, and operator guidance remain pending.
 
 - Add low-cardinality metrics for admitted/rejected packets, policy selection,
   token-bucket state class, quota-store results, and local key capacity.

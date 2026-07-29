@@ -55,6 +55,35 @@ wait_gateway() {
   done
 }
 
+assert_metric_series() {
+  local url="$1"
+  local metric="$2"
+  shift 2
+
+  local body
+  body="$(curl -fsS "$url")"
+  local line
+  while IFS= read -r line; do
+    if [[ "$line" != "$metric{"* && "$line" != "$metric "* ]]; then
+      continue
+    fi
+    local matched=true
+    local expected
+    for expected in "$@"; do
+      if [[ "$line" != *"$expected"* ]]; then
+        matched=false
+        break
+      fi
+    done
+    if [[ "$matched" == true ]]; then
+      return 0
+    fi
+  done <<<"$body"
+
+  echo "metric $metric missing expected fragments: $*" >&2
+  return 1
+}
+
 cd "$ROOT_DIR"
 mkdir -p "$ROOT_DIR/log"
 for port in 9941 18201 18202; do
@@ -73,3 +102,30 @@ wait_gateway
 
 echo "running traffic policy integration verifier..."
 go run ./cmd/trafficpolicye2e "$@"
+
+echo "checking traffic policy admission metrics..."
+METRICS_URL="http://127.0.0.1:18201/metrics"
+assert_metric_series "$METRICS_URL" \
+  z_courier_traffic_policy_selection_total \
+  'mode="local"' 'policy="standard"' 'result="selected"'
+assert_metric_series "$METRICS_URL" \
+  z_courier_traffic_policy_selection_total \
+  'mode="local"' 'policy="none"' 'result="no_match"'
+assert_metric_series "$METRICS_URL" \
+  z_courier_traffic_policy_quota_store_total \
+  'key_scope="client_id"' 'mode="local"' 'policy="standard"' 'result="allowed"'
+assert_metric_series "$METRICS_URL" \
+  z_courier_traffic_policy_quota_store_total \
+  'mode="local"' 'result="rate_limited"'
+assert_metric_series "$METRICS_URL" \
+  z_courier_traffic_policy_quota_store_total \
+  'mode="local"' 'result="overloaded"'
+assert_metric_series "$METRICS_URL" \
+  z_courier_traffic_policy_quota_store_duration_seconds_count \
+  'mode="local"' 'result="allowed"'
+assert_metric_series "$METRICS_URL" \
+  z_courier_traffic_policy_local_keys \
+  'mode="local"' '} 1'
+assert_metric_series "$METRICS_URL" \
+  z_courier_traffic_policy_local_key_limit \
+  'mode="local"' '} 2'

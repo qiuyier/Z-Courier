@@ -989,6 +989,28 @@ this result. Redis mode uses it for runtime timeouts, connection failures,
 invalid shared state, or script failures. The rejected packet is not forwarded
 upstream.
 
+Traffic-policy admission exposes these Prometheus metrics:
+
+```text
+z_courier_traffic_policy_selection_total
+z_courier_traffic_policy_quota_store_total
+z_courier_traffic_policy_quota_store_duration_seconds
+z_courier_traffic_policy_local_keys
+z_courier_traffic_policy_local_key_limit
+```
+
+`selection_total` distinguishes a selected configured policy from a
+`no_match` pass-through. The quota-store counter and histogram use the stable
+`allowed`, `rate_limited`, `overloaded`, and `admission_unavailable` results.
+The two local gauges show current live buckets and the configured process
+limit. The existing `z_courier_rate_limit_rejected_total` remains available as
+the aggregate compatibility rejection metric.
+
+Labels are deliberately bounded. `mode`, `key_scope`, and `result` use fixed
+enumerations; `policy` comes only from the validated static policy
+configuration. ClientID, DeviceID, token, Redis key, packet body, raw error,
+and endpoint address are never metric labels.
+
 `default_policy` is a true fallback. It can therefore apply to AUTH/BIND,
 downlink ACK, and other protocol packets that do not match an upstream route.
 To limit only business upstream traffic, omit `default_policy` and use MsgID or
@@ -1009,9 +1031,9 @@ bash scripts/e2e_traffic_policy.sh
 The Docker-free verifier proves burst exhaustion and continuous refill,
 higher-priority route-policy selection, no-policy pass-through without bucket
 allocation, bounded-key overload, idle-bucket eviction, stable rejected ACK
-reasons, and that rejected packets never reach the HTTP upstream. It uses TCP
-`9941`, internal HTTP `18201`, and fixture backend `18202`; all three ports must
-be free.
+reasons, that rejected packets never reach the HTTP upstream, and the expected
+local admission metric series. It uses TCP `9941`, internal HTTP `18201`, and
+fixture backend `18202`; all three ports must be free.
 
 Verify Redis mode through two real gateway TCP listeners:
 
@@ -1022,9 +1044,10 @@ bash scripts/e2e_traffic_policy_redis.sh
 The script starts a dedicated disposable Redis container. It proves that one
 ClientID consumes a single capacity across gateway A and B, an outage returns
 `admission_unavailable` without forwarding, and a new request resumes
-enforcement after Redis restarts without restarting either gateway. It uses
-TCP `9951`/`9952`, internal HTTP `18211`/`18213`, backend `18212`, and Redis
-`16389`; those ports must be free.
+enforcement after Redis restarts without restarting either gateway. It also
+checks the expected Redis-mode admission metric series on both gateways. It
+uses TCP `9951`/`9952`, internal HTTP `18211`/`18213`, backend `18212`, and
+Redis `16389`; those ports must be free.
 
 ## Upstream Routes
 
