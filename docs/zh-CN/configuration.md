@@ -809,3 +809,15 @@ pipeline:
 
 本地桶只在单个 gateway 进程内生效。多节点各自拥有一份配额；Redis 模式完成
 前还不提供集群共享配额。
+
+可通过真实 gateway TCP 连接和公开 Go SDK 验证本地策略链路：
+
+```bash
+bash scripts/e2e_traffic_policy.sh
+```
+
+这个无需 Docker 的验证器会检查突发额度耗尽与持续补充、高优先级 route
+策略胜出、未匹配流量不创建桶直接放行、有界 Key 容量过载、空闲桶回收、
+稳定的拒绝 ACK reason，以及被拒绝的包不会到达 HTTP upstream。脚本使用
+TCP `9941`、内部 HTTP `18201` 和测试 backend `18202`，运行前需保证三个
+端口空闲。

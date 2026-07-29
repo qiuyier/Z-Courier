@@ -144,7 +144,7 @@ run_fast_checks() {
     run go test -race -count=1 -timeout=90s \
       ./pkg/sdk/protocol ./pkg/sdk/client ./pkg/sdk/backend ./pkg/sdk/signing \
       ./internal/auth ./internal/downlink \
-      ./internal/server ./internal/config
+      ./internal/server ./internal/config ./internal/pipeline
   fi
 
   run go vet ./...
@@ -153,6 +153,7 @@ run_fast_checks() {
   run go run ./cmd/gateway -config configs/z-courier.yaml -check-config
   run go run ./cmd/gateway -config configs/z-courier.integration.yaml -check-config
   run go run ./cmd/gateway -config configs/z-courier.discovery-e2e.yaml -check-config
+  run go run ./cmd/gateway -config configs/z-courier.traffic-policy-e2e.yaml -check-config
   run go run ./cmd/gateway -config configs/z-courier.cluster-a.yaml -check-config
   run go run ./cmd/gateway -config configs/z-courier.cluster-b.yaml -check-config
   run_production_config_checks
@@ -166,6 +167,7 @@ run_fast_checks() {
     run bash -n "$shell_script"
   done
 
+  run bash scripts/e2e_traffic_policy.sh
   run git diff --check
 }
 

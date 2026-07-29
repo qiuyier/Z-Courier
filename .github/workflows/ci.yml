@@ -65,6 +65,7 @@ jobs:
           go run ./cmd/gateway -config configs/z-courier.yaml -check-config
           go run ./cmd/gateway -config configs/z-courier.integration.yaml -check-config
           go run ./cmd/gateway -config configs/z-courier.discovery-e2e.yaml -check-config
+          go run ./cmd/gateway -config configs/z-courier.traffic-policy-e2e.yaml -check-config
           go run ./cmd/gateway -config configs/z-courier.cluster-a.yaml -check-config
           go run ./cmd/gateway -config configs/z-courier.cluster-b.yaml -check-config
           go run ./cmd/gateway -config deploy/production/config/z-courier.yaml -check-config
@@ -176,6 +177,9 @@ jobs:
 
       - name: Run HTTP discovery and failover integration verifier
         run: bash scripts/e2e_discovery.sh
+
+      - name: Run local traffic policy integration verifier
+        run: bash scripts/e2e_traffic_policy.sh
 
       - name: Run local, Go SDK, and PHP SDK integration verifiers
         run: bash scripts/e2e.sh

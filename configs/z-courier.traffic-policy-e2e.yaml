@@ -1,0 +1,110 @@
+gateway_node: traffic-policy-e2e
+
+auth:
+  type: static
+  static_tokens:
+    traffic-policy-token-a:
+      client_id: traffic-policy-client-a
+      token_id: traffic-policy-token-a
+      scopes:
+        - gateway:e2e
+    traffic-policy-token-b:
+      client_id: traffic-policy-client-b
+      token_id: traffic-policy-token-b
+      scopes:
+        - gateway:e2e
+    traffic-policy-token-c:
+      client_id: traffic-policy-client-c
+      token_id: traffic-policy-token-c
+      scopes:
+        - gateway:e2e
+
+internal_http:
+  enabled: true
+  addr: 127.0.0.1:18201
+  token: traffic-policy-internal-token
+  auth:
+    mode: token
+  max_request_body_size: 1048576
+  max_in_flight: 100
+
+cluster:
+  enabled: false
+
+downlink:
+  storage:
+    type: memory
+
+pipeline:
+  allowlist:
+    client_ids: []
+    msg_ids: []
+  blocklist:
+    client_ids: []
+    msg_ids: []
+  rate_limit:
+    enabled: false
+    max_requests: 100
+    window: 1s
+  traffic_policies:
+    enabled: true
+    mode: local
+    max_keys: 2
+    idle_ttl: 5s
+    default_policy: ""
+    policies:
+      - name: standard
+        enabled: true
+        priority: 100
+        match:
+          msg_id_min: 2101
+          msg_id_max: 2102
+        key: client_id
+        token_bucket:
+          capacity: 2
+          refill_tokens: 1
+          refill_interval: 200ms
+      - name: priority
+        enabled: true
+        priority: 200
+        match:
+          routes:
+            - traffic-priority-http
+        key: client_id
+        token_bucket:
+          capacity: 1
+          refill_tokens: 1
+          refill_interval: 30s
+
+upstream:
+  routes:
+    - name: traffic-standard-http
+      enabled: true
+      msg_id_min: 2101
+      msg_id_max: 2101
+      target:
+        type: http
+        url: http://127.0.0.1:18202/gateway/upstream
+        token: traffic-policy-upstream-token
+        timeout: 2s
+        max_in_flight: 100
+    - name: traffic-priority-http
+      enabled: true
+      msg_id_min: 2102
+      msg_id_max: 2102
+      target:
+        type: http
+        url: http://127.0.0.1:18202/gateway/upstream
+        token: traffic-policy-upstream-token
+        timeout: 2s
+        max_in_flight: 100
+    - name: traffic-unlimited-http
+      enabled: true
+      msg_id_min: 2103
+      msg_id_max: 2103
+      target:
+        type: http
+        url: http://127.0.0.1:18202/gateway/upstream
+        token: traffic-policy-upstream-token
+        timeout: 2s
+        max_in_flight: 100

@@ -927,6 +927,20 @@ declared policy fields are still validated at startup.
 Local buckets are process-local. Multiple gateway nodes each enforce their own
 quota; cluster-wide quotas are not available until Redis mode is implemented.
 
+Verify the local policy path through a real gateway TCP connection and the
+public Go SDK:
+
+```bash
+bash scripts/e2e_traffic_policy.sh
+```
+
+The Docker-free verifier proves burst exhaustion and continuous refill,
+higher-priority route-policy selection, no-policy pass-through without bucket
+allocation, bounded-key overload, idle-bucket eviction, stable rejected ACK
+reasons, and that rejected packets never reach the HTTP upstream. It uses TCP
+`9941`, internal HTTP `18201`, and fixture backend `18202`; all three ports must
+be free.
+
 ## Upstream Routes
 
 ```yaml

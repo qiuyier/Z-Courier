@@ -164,7 +164,17 @@ failed-endpoint cooldown and recovery, and non-replay of received HTTP `500`
 responses. The script uses TCP `9931`, internal HTTP `18191`, and backend
 ports `18192` and `18193`; they must be free.
 
-The script starts PostgreSQL, NSQ, Prometheus, Alertmanager, Grafana, and the
+Run the Docker-free local traffic-policy verifier:
+
+```bash
+bash scripts/e2e_traffic_policy.sh
+```
+
+It proves burst, refill, policy precedence, bounded-key overload, idle
+eviction, and rejection-before-forwarding through the real TCP gateway path.
+The script uses TCP `9941`, internal HTTP `18201`, and backend port `18202`.
+
+`scripts/e2e.sh` starts PostgreSQL, NSQ, Prometheus, Alertmanager, Grafana, and the
 gateway, then validates:
 
 - offline downlink queueing with PostgreSQL

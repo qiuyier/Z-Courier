@@ -43,6 +43,16 @@ bash scripts/e2e_discovery.sh
 脚本使用 TCP `9931`、内部 HTTP `18191` 和 backend 端口 `18192`、`18193`，
 运行前需要保证这些端口空闲。
 
+运行无需 Docker 的本地流量策略验证：
+
+```bash
+bash scripts/e2e_traffic_policy.sh
+```
+
+脚本通过真实 TCP gateway 链路验证突发额度、令牌补充、策略优先级、有界 Key
+过载、空闲回收，以及拒绝发生在 upstream 转发之前。它使用 TCP `9941`、
+内部 HTTP `18201` 和 backend 端口 `18202`。
+
 运行两节点集群验证：
 
 ```bash

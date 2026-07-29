@@ -126,9 +126,14 @@ selection contract together with the bounded local admission core:
 - only the authenticated `client_id` key is supported before session binding;
   device-scoped keys remain deferred until their trust boundary is preserved;
 - `redis` is deliberately rejected rather than accepted as an inactive mode.
+- a Docker-free real-TCP verifier covers local burst, refill, precedence,
+  no-policy pass-through, bounded-key overload, idle eviction, stable client
+  rejection, and rejection-before-forwarding; CI and release checks run the
+  same scenario.
 
 Redis quotas, dedicated admission observability, Console views, deployment
-surfaces, and full E2E/release coverage remain later V16 workstreams.
+surfaces, two-node Redis E2E, and full release guidance remain later V16
+workstreams.
 
 ## Failure And Client Contract
 
@@ -174,6 +179,9 @@ Acceptance criteria:
 ### V16.2 Bounded Local Admission
 
 Purpose: provide predictable standalone protection without an external store.
+
+Status: implemented with focused unit/concurrency coverage and a real TCP
+single-node integration verifier.
 
 - Implement a concurrency-safe token-bucket limiter with injectable time.
 - Bound live keys with `max_keys` and remove idle buckets after `idle_ttl`.

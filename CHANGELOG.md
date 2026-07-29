@@ -17,6 +17,10 @@ semantic versioning after the first public MVP tag.
   bounded keys, idle eviction, strict ambiguity/migration validation, stable
   overload reasons, and bilingual configuration guidance. Redis mode remains
   explicitly unavailable until shared atomic quotas are implemented.
+- V16.2 Docker-free real-TCP integration coverage for local policy burst,
+  refill, precedence, no-policy pass-through, bounded-key overload, and idle
+  eviction, including stable rejected ACKs and proof that rejected packets do
+  not reach the upstream; CI and release checks run the same verifier.
 
 ## [v0.15.0] - 2026-07-28
 

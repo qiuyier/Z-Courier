@@ -1,0 +1,17 @@
+{
+  "Name": "Z-Courier Traffic Policy E2E Gateway",
+  "Host": "127.0.0.1",
+  "TCPPort": 9941,
+  "Mode": "tcp",
+  "MaxConn": 64,
+  "MaxPacketSize": 8388608,
+  "WorkerPoolSize": 4,
+  "MaxWorkerTaskLen": 256,
+  "MaxMsgChanLen": 256,
+  "IOReadBuffSize": 8192,
+  "HeartbeatMax": 30,
+  "LogDir": "./log",
+  "LogFile": "zinx-traffic-policy-e2e.log",
+  "LogCons": true,
+  "LogIsolationLevel": 2
+}
