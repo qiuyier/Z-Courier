@@ -918,6 +918,11 @@ are not evicted because that would reset their quota. A bucket without a token
 is rejected with `rate_limited`. Existing idle buckets are removed before the
 capacity decision.
 
+The quota-store contract reserves `admission_unavailable` for a selected store
+that cannot safely decide. A valid `local` configuration should not produce
+this result. Redis mode remains rejected at startup until its atomic store and
+outage behavior are implemented.
+
 `default_policy` is a true fallback. It can therefore apply to AUTH/BIND,
 downlink ACK, and other protocol packets that do not match an upstream route.
 To limit only business upstream traffic, omit `default_policy` and use MsgID or

@@ -130,6 +130,10 @@ selection contract together with the bounded local admission core:
   no-policy pass-through, bounded-key overload, idle eviction, stable client
   rejection, and rejection-before-forwarding; CI and release checks run the
   same scenario.
+- admission now uses a narrow quota-store contract with explicit allowed,
+  rate-limited, overloaded, and admission-unavailable decisions; the bounded
+  local implementation preserves its existing LRU, TTL, refill, and
+  concurrency semantics behind that contract.
 
 Redis quotas, dedicated admission observability, Console views, deployment
 surfaces, two-node Redis E2E, and full release guidance remain later V16
@@ -198,6 +202,10 @@ Acceptance criteria:
 ### V16.3 Optional Redis Cluster Quotas
 
 Purpose: enforce one quota across gateway nodes without making Redis mandatory.
+
+Status: in progress. The store contract and local adapter are implemented;
+Redis configuration, atomic operations, lifecycle wiring, and outage behavior
+remain pending.
 
 - Add a narrow quota-store interface and Redis implementation using an atomic,
   time-bounded operation.

@@ -1,8 +1,8 @@
 package pipeline
 
 import (
-	"sync"
-	"sync/atomic"
+	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -79,67 +79,11 @@ func TestTrafficPolicySelectorNoMatchWithoutDefault(t *testing.T) {
 	}
 }
 
-func TestTrafficPolicyHandlerBurstAndRefill(t *testing.T) {
-	now := time.Date(2026, 7, 28, 10, 0, 0, 0, time.UTC)
-	handler := newTestTrafficPolicyHandler(10, time.Minute, TokenBucketConfig{
-		Capacity:       2,
-		RefillTokens:   2,
-		RefillInterval: time.Second,
-	})
-	handler.now = func() time.Time { return now }
-	ctx := trafficPolicyContext("client-a", 1001)
-
-	if err := handler.Handle(ctx); err != nil {
-		t.Fatalf("Handle() first error = %v", err)
-	}
-	if err := handler.Handle(ctx); err != nil {
-		t.Fatalf("Handle() second error = %v", err)
-	}
-	assertTrafficPolicyReason(t, handler.Handle(ctx), resilience.ReasonRateLimited)
-
-	now = now.Add(500 * time.Millisecond)
-	if err := handler.Handle(ctx); err != nil {
-		t.Fatalf("Handle() after refill error = %v", err)
-	}
-	assertTrafficPolicyReason(t, handler.Handle(ctx), resilience.ReasonRateLimited)
-}
-
-func TestTrafficPolicyHandlerBoundsKeysAndExpiresIdleBuckets(t *testing.T) {
-	now := time.Date(2026, 7, 28, 10, 0, 0, 0, time.UTC)
-	handler := newTestTrafficPolicyHandler(1, time.Second, TokenBucketConfig{
-		Capacity:       1,
-		RefillTokens:   1,
-		RefillInterval: time.Second,
-	})
-	handler.now = func() time.Time { return now }
-
-	if err := handler.Handle(trafficPolicyContext("client-a", 1001)); err != nil {
-		t.Fatalf("Handle(client-a) error = %v", err)
-	}
-	assertTrafficPolicyReason(
-		t,
-		handler.Handle(trafficPolicyContext("client-b", 1001)),
-		resilience.ReasonOverloaded,
-	)
-	if got := handler.bucketCount(); got != 1 {
-		t.Fatalf("bucketCount() = %d, want 1", got)
-	}
-
-	now = now.Add(time.Second)
-	if err := handler.Handle(trafficPolicyContext("client-b", 1001)); err != nil {
-		t.Fatalf("Handle(client-b) after idle TTL error = %v", err)
-	}
-	if got := handler.bucketCount(); got != 1 {
-		t.Fatalf("bucketCount() after eviction = %d, want 1", got)
-	}
-}
-
 func TestTrafficPolicyHandlerNoMatchDoesNotCreateBucket(t *testing.T) {
-	handler := NewTrafficPolicyHandler(TrafficPoliciesConfig{
+	store := &stubQuotaStore{decision: QuotaDecisionAllowed}
+	handler := NewTrafficPolicyHandlerWithStore(TrafficPoliciesConfig{
 		Enabled: true,
 		Mode:    TrafficPolicyModeLocal,
-		MaxKeys: 10,
-		IdleTTL: time.Minute,
 		Policies: []TrafficPolicy{{
 			Name:     "upstream",
 			Priority: 100,
@@ -151,56 +95,26 @@ func TestTrafficPolicyHandlerNoMatchDoesNotCreateBucket(t *testing.T) {
 				RefillInterval: time.Second,
 			},
 		}},
-	})
+	}, store)
 
 	if err := handler.Handle(trafficPolicyContext("client-a", 3000)); err != nil {
 		t.Fatalf("Handle() error = %v", err)
 	}
-	if got := handler.bucketCount(); got != 0 {
-		t.Fatalf("bucketCount() = %d, want 0", got)
+	if store.calls != 0 {
+		t.Fatalf("quota store calls = %d, want 0", store.calls)
 	}
 }
 
-func TestTrafficPolicyHandlerConcurrentAdmission(t *testing.T) {
-	handler := newTestTrafficPolicyHandler(10, time.Minute, TokenBucketConfig{
-		Capacity:       10,
-		RefillTokens:   1,
-		RefillInterval: time.Hour,
-	})
-	now := time.Date(2026, 7, 28, 10, 0, 0, 0, time.UTC)
-	handler.now = func() time.Time { return now }
-
-	var accepted atomic.Int64
-	var waitGroup sync.WaitGroup
-	for range 100 {
-		waitGroup.Add(1)
-		go func() {
-			defer waitGroup.Done()
-			if err := handler.Handle(trafficPolicyContext("client-a", 1001)); err == nil {
-				accepted.Add(1)
-				return
-			}
-		}()
+func TestTrafficPolicyHandlerDelegatesSelectedPolicy(t *testing.T) {
+	bucket := TokenBucketConfig{
+		Capacity:       7,
+		RefillTokens:   3,
+		RefillInterval: 2 * time.Second,
 	}
-	waitGroup.Wait()
-
-	if got := accepted.Load(); got != 10 {
-		t.Fatalf("accepted = %d, want 10", got)
-	}
-}
-
-func TestNewTrafficPolicyHandlerDisabled(t *testing.T) {
-	if handler := NewTrafficPolicyHandler(TrafficPoliciesConfig{}); handler != nil {
-		t.Fatalf("NewTrafficPolicyHandler() = %#v, want nil", handler)
-	}
-}
-
-func newTestTrafficPolicyHandler(maxKeys int, idleTTL time.Duration, bucket TokenBucketConfig) *TrafficPolicyHandler {
-	return NewTrafficPolicyHandler(TrafficPoliciesConfig{
+	store := &stubQuotaStore{decision: QuotaDecisionAllowed}
+	handler := NewTrafficPolicyHandlerWithStore(TrafficPoliciesConfig{
 		Enabled:       true,
 		Mode:          TrafficPolicyModeLocal,
-		MaxKeys:       maxKeys,
-		IdleTTL:       idleTTL,
 		DefaultPolicy: "standard",
 		Policies: []TrafficPolicy{{
 			Name:        "standard",
@@ -208,7 +122,131 @@ func newTestTrafficPolicyHandler(maxKeys int, idleTTL time.Duration, bucket Toke
 			Key:         TrafficPolicyKeyClientID,
 			TokenBucket: bucket,
 		}},
-	})
+	}, store)
+	baseContext := context.WithValue(context.Background(), trafficPolicyTestContextKey{}, "request")
+	requestContext := trafficPolicyContext("client-a", 1001)
+	requestContext.BaseContext = baseContext
+
+	if err := handler.Handle(requestContext); err != nil {
+		t.Fatalf("Handle() error = %v", err)
+	}
+	if store.calls != 1 {
+		t.Fatalf("quota store calls = %d, want 1", store.calls)
+	}
+	if store.ctx != baseContext {
+		t.Fatal("quota store did not receive the packet context")
+	}
+	if store.request.PolicyName != "standard" ||
+		store.request.KeyScope != TrafficPolicyKeyClientID ||
+		store.request.KeyValue != "client-a" ||
+		store.request.TokenBucket != bucket {
+		t.Fatalf("quota request = %+v", store.request)
+	}
+}
+
+func TestTrafficPolicyHandlerMapsQuotaDecisions(t *testing.T) {
+	tests := []struct {
+		name       string
+		decision   QuotaDecision
+		storeErr   error
+		wantReason string
+	}{
+		{name: "allowed", decision: QuotaDecisionAllowed},
+		{name: "rate limited", decision: QuotaDecisionRateLimited, wantReason: resilience.ReasonRateLimited},
+		{name: "overloaded", decision: QuotaDecisionOverloaded, wantReason: resilience.ReasonOverloaded},
+		{
+			name:       "admission unavailable",
+			decision:   QuotaDecisionAdmissionUnavailable,
+			wantReason: resilience.ReasonAdmissionUnavailable,
+		},
+		{
+			name:       "store error",
+			decision:   QuotaDecisionAllowed,
+			storeErr:   errors.New("store failed"),
+			wantReason: resilience.ReasonAdmissionUnavailable,
+		},
+		{
+			name:       "unknown decision",
+			decision:   QuotaDecision("unknown"),
+			wantReason: resilience.ReasonAdmissionUnavailable,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			store := &stubQuotaStore{decision: test.decision, err: test.storeErr}
+			handler := NewTrafficPolicyHandlerWithStore(testTrafficPolicyConfig(), store)
+			err := handler.Handle(trafficPolicyContext("client-a", 1001))
+			if test.wantReason == "" {
+				if err != nil {
+					t.Fatalf("Handle() error = %v", err)
+				}
+				return
+			}
+			assertTrafficPolicyReason(t, err, test.wantReason)
+		})
+	}
+}
+
+func TestNewTrafficPolicyHandlerUsesLocalStore(t *testing.T) {
+	config := testTrafficPolicyConfig()
+	config.Policies[0].TokenBucket = TokenBucketConfig{
+		Capacity:       1,
+		RefillTokens:   1,
+		RefillInterval: time.Hour,
+	}
+	handler := NewTrafficPolicyHandler(config)
+	ctx := trafficPolicyContext("client-a", 1001)
+
+	if err := handler.Handle(ctx); err != nil {
+		t.Fatalf("Handle() first error = %v", err)
+	}
+	assertTrafficPolicyReason(t, handler.Handle(ctx), resilience.ReasonRateLimited)
+}
+
+func TestNewTrafficPolicyHandlerDisabled(t *testing.T) {
+	if handler := NewTrafficPolicyHandler(TrafficPoliciesConfig{}); handler != nil {
+		t.Fatalf("NewTrafficPolicyHandler() = %#v, want nil", handler)
+	}
+	if handler := NewTrafficPolicyHandlerWithStore(TrafficPoliciesConfig{}, &stubQuotaStore{}); handler != nil {
+		t.Fatalf("NewTrafficPolicyHandlerWithStore() = %#v, want nil", handler)
+	}
+}
+
+func testTrafficPolicyConfig() TrafficPoliciesConfig {
+	return TrafficPoliciesConfig{
+		Enabled:       true,
+		Mode:          TrafficPolicyModeLocal,
+		MaxKeys:       10,
+		IdleTTL:       time.Minute,
+		DefaultPolicy: "standard",
+		Policies: []TrafficPolicy{{
+			Name:     "standard",
+			Priority: 100,
+			Key:      TrafficPolicyKeyClientID,
+			TokenBucket: TokenBucketConfig{
+				Capacity:       10,
+				RefillTokens:   1,
+				RefillInterval: time.Second,
+			},
+		}},
+	}
+}
+
+type trafficPolicyTestContextKey struct{}
+
+type stubQuotaStore struct {
+	decision QuotaDecision
+	err      error
+	calls    int
+	ctx      context.Context
+	request  QuotaRequest
+}
+
+func (s *stubQuotaStore) Admit(ctx context.Context, request QuotaRequest) (QuotaDecision, error) {
+	s.calls++
+	s.ctx = ctx
+	s.request = request
+	return s.decision, s.err
 }
 
 func trafficPolicyContext(clientID string, msgID uint32) *Context {

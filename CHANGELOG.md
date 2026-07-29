@@ -21,6 +21,11 @@ semantic versioning after the first public MVP tag.
   refill, precedence, no-policy pass-through, bounded-key overload, and idle
   eviction, including stable rejected ACKs and proof that rejected packets do
   not reach the upstream; CI and release checks run the same verifier.
+- V16.3.1 narrow quota-store contract with explicit allowed, rate-limited,
+  overloaded, and admission-unavailable decisions; the existing bounded local
+  token bucket now implements that contract without changing configuration or
+  packet behavior, and handler/store tests cover delegation, failures, key
+  partitioning, cancellation, concurrency, and idle eviction.
 
 ## [v0.15.0] - 2026-07-28
 

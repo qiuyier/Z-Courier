@@ -802,6 +802,10 @@ pipeline:
 否则会导致配额被重置。已存在的桶没有令牌时返回 `rate_limited`。容量判断前
 会先清理已经超过 `idle_ttl` 的桶。
 
+配额 Store 契约预留 `admission_unavailable`，表示已选中的 Store 无法安全
+作出准入决定。合法的 `local` 配置不应产生该结果。在 Redis 原子 Store 和
+故障行为实现前，`redis` 模式仍会在启动时被拒绝。
+
 `default_policy` 是真正的兜底，因此也可能限制 AUTH/BIND、下行 ACK 等没有
 命中普通上行路由的协议包。只想限制业务上行时，不要设置 `default_policy`，
 改用 MsgID 或 route 选择器。禁用的策略不会参与选择，但声明过的字段仍会在
