@@ -332,12 +332,26 @@ type RateLimitConfig struct {
 }
 
 type TrafficPoliciesConfig struct {
-	Enabled       bool                  `yaml:"enabled"`
-	Mode          string                `yaml:"mode"`
-	MaxKeys       int                   `yaml:"max_keys"`
-	IdleTTL       string                `yaml:"idle_ttl"`
-	DefaultPolicy string                `yaml:"default_policy"`
-	Policies      []TrafficPolicyConfig `yaml:"policies"`
+	Enabled       bool                     `yaml:"enabled"`
+	Mode          string                   `yaml:"mode"`
+	MaxKeys       int                      `yaml:"max_keys"`
+	IdleTTL       string                   `yaml:"idle_ttl"`
+	Redis         TrafficPolicyRedisConfig `yaml:"redis"`
+	DefaultPolicy string                   `yaml:"default_policy"`
+	Policies      []TrafficPolicyConfig    `yaml:"policies"`
+}
+
+type TrafficPolicyRedisConfig struct {
+	Addr             string `yaml:"addr"`
+	Username         string `yaml:"username"`
+	Password         string `yaml:"password"`
+	DB               int    `yaml:"db"`
+	KeyPrefix        string `yaml:"key_prefix"`
+	DialTimeout      string `yaml:"dial_timeout"`
+	ReadTimeout      string `yaml:"read_timeout"`
+	WriteTimeout     string `yaml:"write_timeout"`
+	OperationTimeout string `yaml:"operation_timeout"`
+	FailureMode      string `yaml:"failure_mode"`
 }
 
 type TrafficPolicyConfig struct {

@@ -855,9 +855,10 @@ cannot both be enabled.
 
 ### Named Traffic Policies
 
-Traffic policies select a bounded local token bucket from authenticated
-`client_id`, packet MsgID, and the upstream route resolved from that MsgID. They
-never inspect the opaque business body.
+Traffic policies select a named token bucket from authenticated `client_id`,
+packet MsgID, and the upstream route resolved from that MsgID. They never
+inspect the opaque business body. The currently operational gateway mode is
+the bounded process-local store shown below.
 
 ```yaml
 pipeline:
@@ -892,10 +893,13 @@ pipeline:
           refill_interval: 1s
 ```
 
-- `mode`: V16.1 supports `local`. `redis` is rejected until the atomic shared
-  quota implementation is available; it is never accepted as a no-op.
+- `mode`: `local` is the currently operational process-local store. The
+  `redis` configuration contract and atomic store are implemented, but
+  `enabled: true` with `mode: redis` is still rejected until gateway lifecycle
+  wiring is complete. It is never accepted as a no-op.
 - `max_keys`: maximum live `(policy, client_id)` buckets in this gateway
-  process. Zero selects the default `100000`; negative values are invalid.
+  process when using `local`. Zero selects the default `100000`; negative
+  values are invalid.
 - `idle_ttl`: an idle bucket is removed after this duration. The default is
   `10m`.
 - `default_policy`: optional policy name used when no selector matches. Leave
@@ -918,10 +922,57 @@ are not evicted because that would reset their quota. A bucket without a token
 is rejected with `rate_limited`. Existing idle buckets are removed before the
 capacity decision.
 
+The Redis configuration contract can be staged while traffic policies are
+disabled:
+
+```yaml
+pipeline:
+  traffic_policies:
+    enabled: false
+    mode: redis
+    idle_ttl: 10m
+    redis:
+      addr: redis:6379
+      username: ""
+      password: ""
+      db: 0
+      key_prefix: zcourier:traffic-policy
+      dial_timeout: 1s
+      read_timeout: 500ms
+      write_timeout: 500ms
+      operation_timeout: 250ms
+      failure_mode: fail_closed
+    policies: []
+```
+
+`redis.addr` is required and `redis.db` must be non-negative. The key prefix
+must not be blank. Connection and operation timeouts must be positive and use
+the values above as defaults. Redis `idle_ttl` must be at least `1ms`.
+V16.3.2 supports only `failure_mode: fail_closed`; local fallback is rejected
+because it would silently turn one cluster quota into independent per-node
+quotas.
+
+The Redis store executes refill and admission in one Lua script and uses Redis
+server time, so gateway clock skew cannot create extra tokens. Keys are
+partitioned by prefix, policy, and scope; the ClientID portion is SHA-256
+hashed rather than stored in the key. Every decision refreshes the bounded key
+TTL. Redis commands have a hard operation timeout and no hidden client retry.
+An error produces `admission_unavailable`; a later request can resume shared
+enforcement after Redis recovers without restarting the store.
+
+These semantics are covered by in-memory Redis tests and an optional real
+Redis integration test:
+
+```bash
+ZCOURIER_TEST_REDIS_ADDR=127.0.0.1:16379 \
+  go test -count=1 -v ./internal/pipeline \
+  -run TestRedisQuotaStoreRealRedisIntegration
+```
+
 The quota-store contract reserves `admission_unavailable` for a selected store
 that cannot safely decide. A valid `local` configuration should not produce
-this result. Redis mode remains rejected at startup until its atomic store and
-outage behavior are implemented.
+this result. Redis mode remains rejected at gateway startup until construction,
+health checking, and shutdown are wired into the server lifecycle.
 
 `default_policy` is a true fallback. It can therefore apply to AUTH/BIND,
 downlink ACK, and other protocol packets that do not match an upstream route.
@@ -930,7 +981,9 @@ route selectors. Disabled policies do not participate in selection, but all
 declared policy fields are still validated at startup.
 
 Local buckets are process-local. Multiple gateway nodes each enforce their own
-quota; cluster-wide quotas are not available until Redis mode is implemented.
+quota. The Redis store already proves atomic sharing across Store instances,
+but cluster-wide gateway enforcement is not operational until lifecycle wiring
+is completed.
 
 Verify the local policy path through a real gateway TCP connection and the
 public Go SDK:

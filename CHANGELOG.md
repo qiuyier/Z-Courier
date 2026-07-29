@@ -16,7 +16,7 @@ semantic versioning after the first public MVP tag.
   and enabled upstream route, plus a concurrency-safe local token bucket with
   bounded keys, idle eviction, strict ambiguity/migration validation, stable
   overload reasons, and bilingual configuration guidance. Redis mode remains
-  explicitly unavailable until shared atomic quotas are implemented.
+  explicitly unavailable until its gateway lifecycle integration is complete.
 - V16.2 Docker-free real-TCP integration coverage for local policy burst,
   refill, precedence, no-policy pass-through, bounded-key overload, and idle
   eviction, including stable rejected ACKs and proof that rejected packets do
@@ -26,6 +26,12 @@ semantic versioning after the first public MVP tag.
   token bucket now implements that contract without changing configuration or
   packet behavior, and handler/store tests cover delegation, failures, key
   partitioning, cancellation, concurrency, and idle eviction.
+- V16.3.2 staged Redis quota configuration plus an atomic Lua Store using Redis
+  server time, hashed client identities, bounded key TTL, hard operation
+  timeouts, explicit fail-closed behavior without hidden retries, recovery
+  without Store restart, and concurrent in-memory plus optional real-Redis
+  shared-quota tests. Enabled Redis gateway mode remains rejected until
+  lifecycle wiring is complete.
 
 ## [v0.15.0] - 2026-07-28
 

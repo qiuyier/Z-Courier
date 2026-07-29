@@ -22,8 +22,10 @@ type RateLimitConfig struct {
 }
 
 const (
-	TrafficPolicyModeLocal   = "local"
-	TrafficPolicyKeyClientID = "client_id"
+	TrafficPolicyModeLocal             = "local"
+	TrafficPolicyModeRedis             = "redis"
+	TrafficPolicyKeyClientID           = "client_id"
+	TrafficPolicyFailureModeFailClosed = "fail_closed"
 )
 
 type TrafficPoliciesConfig struct {
@@ -31,6 +33,7 @@ type TrafficPoliciesConfig struct {
 	Mode          string
 	MaxKeys       int
 	IdleTTL       time.Duration
+	Redis         RedisQuotaStoreConfig
 	DefaultPolicy string
 	Policies      []TrafficPolicy
 	Routes        []TrafficPolicyRoute

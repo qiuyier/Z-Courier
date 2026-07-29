@@ -10,8 +10,13 @@ import (
 )
 
 const (
-	defaultTrafficPolicyMaxKeys = 100000
-	defaultTrafficPolicyIdleTTL = 10 * time.Minute
+	defaultTrafficPolicyMaxKeys               = 100000
+	defaultTrafficPolicyIdleTTL               = 10 * time.Minute
+	defaultTrafficPolicyRedisKeyPrefix        = "zcourier:traffic-policy"
+	defaultTrafficPolicyRedisDialTimeout      = time.Second
+	defaultTrafficPolicyRedisReadTimeout      = 500 * time.Millisecond
+	defaultTrafficPolicyRedisWriteTimeout     = 500 * time.Millisecond
+	defaultTrafficPolicyRedisOperationTimeout = 250 * time.Millisecond
 )
 
 type trafficPolicyMsgIDInterval struct {
@@ -24,11 +29,14 @@ func toTrafficPoliciesConfig(config TrafficPoliciesConfig, routes []server.Upstr
 	if mode == "" {
 		mode = pipeline.TrafficPolicyModeLocal
 	}
-	if mode != pipeline.TrafficPolicyModeLocal {
+	switch mode {
+	case pipeline.TrafficPolicyModeLocal, pipeline.TrafficPolicyModeRedis:
+	default:
 		return pipeline.TrafficPoliciesConfig{}, fmt.Errorf(
-			"config: pipeline traffic_policies mode %q is not supported yet; use %q",
+			"config: pipeline traffic_policies mode %q is not supported; use %q or %q",
 			mode,
 			pipeline.TrafficPolicyModeLocal,
+			pipeline.TrafficPolicyModeRedis,
 		)
 	}
 
@@ -47,6 +55,23 @@ func toTrafficPoliciesConfig(config TrafficPoliciesConfig, routes []server.Upstr
 			return pipeline.TrafficPoliciesConfig{}, fmt.Errorf("config: pipeline traffic_policies idle_ttl: %w", err)
 		}
 		idleTTL = parsed
+	}
+
+	var redisConfig pipeline.RedisQuotaStoreConfig
+	switch mode {
+	case pipeline.TrafficPolicyModeLocal:
+		if trafficPolicyRedisConfigSet(config.Redis) {
+			return pipeline.TrafficPoliciesConfig{}, fmt.Errorf(
+				"config: pipeline traffic_policies redis settings require mode %q",
+				pipeline.TrafficPolicyModeRedis,
+			)
+		}
+	case pipeline.TrafficPolicyModeRedis:
+		parsed, err := toTrafficPolicyRedisConfig(config.Redis, idleTTL)
+		if err != nil {
+			return pipeline.TrafficPoliciesConfig{}, err
+		}
+		redisConfig = parsed
 	}
 
 	defaultPolicy := strings.TrimSpace(config.DefaultPolicy)
@@ -109,16 +134,141 @@ func toTrafficPoliciesConfig(config TrafficPoliciesConfig, routes []server.Upstr
 	if err := validateTrafficPolicyAmbiguity(policies, routeByName); err != nil {
 		return pipeline.TrafficPoliciesConfig{}, err
 	}
+	if config.Enabled && mode == pipeline.TrafficPolicyModeRedis {
+		return pipeline.TrafficPoliciesConfig{}, fmt.Errorf(
+			"config: pipeline traffic_policies mode %q is not operational yet; gateway lifecycle wiring is pending",
+			pipeline.TrafficPolicyModeRedis,
+		)
+	}
 
 	return pipeline.TrafficPoliciesConfig{
 		Enabled:       config.Enabled,
 		Mode:          mode,
 		MaxKeys:       maxKeys,
 		IdleTTL:       idleTTL,
+		Redis:         redisConfig,
 		DefaultPolicy: defaultPolicy,
 		Policies:      policies,
 		Routes:        policyRoutes,
 	}, nil
+}
+
+func toTrafficPolicyRedisConfig(
+	config TrafficPolicyRedisConfig,
+	idleTTL time.Duration,
+) (pipeline.RedisQuotaStoreConfig, error) {
+	addr := strings.TrimSpace(config.Addr)
+	if addr == "" {
+		return pipeline.RedisQuotaStoreConfig{}, fmt.Errorf(
+			"config: pipeline traffic_policies redis.addr is required",
+		)
+	}
+	if config.DB < 0 {
+		return pipeline.RedisQuotaStoreConfig{}, fmt.Errorf(
+			"config: pipeline traffic_policies redis.db must be greater than or equal to 0",
+		)
+	}
+	if idleTTL < time.Millisecond {
+		return pipeline.RedisQuotaStoreConfig{}, fmt.Errorf(
+			"config: pipeline traffic_policies idle_ttl must be at least 1ms in redis mode",
+		)
+	}
+
+	keyPrefix := defaultTrafficPolicyRedisKeyPrefix
+	if config.KeyPrefix != "" {
+		keyPrefix = strings.TrimSpace(config.KeyPrefix)
+		if keyPrefix == "" {
+			return pipeline.RedisQuotaStoreConfig{}, fmt.Errorf(
+				"config: pipeline traffic_policies redis.key_prefix must not be blank",
+			)
+		}
+	}
+
+	dialTimeout, err := trafficPolicyRedisDuration(
+		config.DialTimeout,
+		defaultTrafficPolicyRedisDialTimeout,
+		"dial_timeout",
+	)
+	if err != nil {
+		return pipeline.RedisQuotaStoreConfig{}, err
+	}
+	readTimeout, err := trafficPolicyRedisDuration(
+		config.ReadTimeout,
+		defaultTrafficPolicyRedisReadTimeout,
+		"read_timeout",
+	)
+	if err != nil {
+		return pipeline.RedisQuotaStoreConfig{}, err
+	}
+	writeTimeout, err := trafficPolicyRedisDuration(
+		config.WriteTimeout,
+		defaultTrafficPolicyRedisWriteTimeout,
+		"write_timeout",
+	)
+	if err != nil {
+		return pipeline.RedisQuotaStoreConfig{}, err
+	}
+	operationTimeout, err := trafficPolicyRedisDuration(
+		config.OperationTimeout,
+		defaultTrafficPolicyRedisOperationTimeout,
+		"operation_timeout",
+	)
+	if err != nil {
+		return pipeline.RedisQuotaStoreConfig{}, err
+	}
+
+	failureMode := strings.ToLower(strings.TrimSpace(config.FailureMode))
+	if failureMode == "" {
+		failureMode = pipeline.TrafficPolicyFailureModeFailClosed
+	}
+	if failureMode != pipeline.TrafficPolicyFailureModeFailClosed {
+		return pipeline.RedisQuotaStoreConfig{}, fmt.Errorf(
+			"config: pipeline traffic_policies redis.failure_mode supports only %q",
+			pipeline.TrafficPolicyFailureModeFailClosed,
+		)
+	}
+
+	return pipeline.RedisQuotaStoreConfig{
+		Addr:             addr,
+		Username:         strings.TrimSpace(config.Username),
+		Password:         config.Password,
+		DB:               config.DB,
+		KeyPrefix:        keyPrefix,
+		IdleTTL:          idleTTL,
+		DialTimeout:      dialTimeout,
+		ReadTimeout:      readTimeout,
+		WriteTimeout:     writeTimeout,
+		OperationTimeout: operationTimeout,
+		FailureMode:      failureMode,
+	}, nil
+}
+
+func trafficPolicyRedisDuration(raw string, defaultValue time.Duration, field string) (time.Duration, error) {
+	parsed, err := parseOptionalPositiveDuration(strings.TrimSpace(raw))
+	if err != nil {
+		return 0, fmt.Errorf(
+			"config: pipeline traffic_policies redis.%s: %w",
+			field,
+			err,
+		)
+	}
+	if parsed == 0 {
+		return defaultValue, nil
+	}
+	return parsed, nil
+}
+
+func trafficPolicyRedisConfigSet(config TrafficPolicyRedisConfig) bool {
+	return config.Addr != "" ||
+		config.Username != "" ||
+		config.Password != "" ||
+		config.DB != 0 ||
+		config.KeyPrefix != "" ||
+		config.DialTimeout != "" ||
+		config.ReadTimeout != "" ||
+		config.WriteTimeout != "" ||
+		config.OperationTimeout != "" ||
+		config.FailureMode != ""
 }
 
 func toTrafficPolicy(

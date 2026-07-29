@@ -116,6 +116,74 @@ pipeline:
 	}
 }
 
+func TestLoadServerConfigTrafficPolicyRedisContractWhenDisabled(t *testing.T) {
+	config, err := LoadServerConfig(writeConfig(t, `
+pipeline:
+  traffic_policies:
+    enabled: false
+    mode: redis
+    idle_ttl: 45s
+    redis:
+      addr: 127.0.0.1:16379
+      username: quota-user
+      password: quota-password
+      db: 4
+      key_prefix: zcourier:test:quota
+      dial_timeout: 700ms
+      read_timeout: 350ms
+      write_timeout: 400ms
+      operation_timeout: 175ms
+      failure_mode: fail_closed
+`))
+	if err != nil {
+		t.Fatalf("LoadServerConfig() error = %v", err)
+	}
+
+	traffic := config.Pipeline.TrafficPolicies
+	if traffic.Enabled || traffic.Mode != pipeline.TrafficPolicyModeRedis {
+		t.Fatalf("TrafficPolicies enabled/mode = %t/%q", traffic.Enabled, traffic.Mode)
+	}
+	redis := traffic.Redis
+	if redis.Addr != "127.0.0.1:16379" ||
+		redis.Username != "quota-user" ||
+		redis.Password != "quota-password" ||
+		redis.DB != 4 ||
+		redis.KeyPrefix != "zcourier:test:quota" ||
+		redis.IdleTTL != 45*time.Second ||
+		redis.DialTimeout != 700*time.Millisecond ||
+		redis.ReadTimeout != 350*time.Millisecond ||
+		redis.WriteTimeout != 400*time.Millisecond ||
+		redis.OperationTimeout != 175*time.Millisecond ||
+		redis.FailureMode != pipeline.TrafficPolicyFailureModeFailClosed {
+		t.Fatalf("TrafficPolicies Redis = %+v", redis)
+	}
+}
+
+func TestLoadServerConfigTrafficPolicyRedisDefaultsWhenDisabled(t *testing.T) {
+	config, err := LoadServerConfig(writeConfig(t, `
+pipeline:
+  traffic_policies:
+    enabled: false
+    mode: redis
+    redis:
+      addr: 127.0.0.1:16379
+`))
+	if err != nil {
+		t.Fatalf("LoadServerConfig() error = %v", err)
+	}
+
+	redis := config.Pipeline.TrafficPolicies.Redis
+	if redis.KeyPrefix != defaultTrafficPolicyRedisKeyPrefix ||
+		redis.IdleTTL != defaultTrafficPolicyIdleTTL ||
+		redis.DialTimeout != defaultTrafficPolicyRedisDialTimeout ||
+		redis.ReadTimeout != defaultTrafficPolicyRedisReadTimeout ||
+		redis.WriteTimeout != defaultTrafficPolicyRedisWriteTimeout ||
+		redis.OperationTimeout != defaultTrafficPolicyRedisOperationTimeout ||
+		redis.FailureMode != pipeline.TrafficPolicyFailureModeFailClosed {
+		t.Fatalf("TrafficPolicies Redis defaults = %+v", redis)
+	}
+}
+
 func TestLoadServerConfigTrafficPoliciesRejectInvalidConfig(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -146,8 +214,101 @@ pipeline:
   traffic_policies:
     enabled: true
     mode: redis
+    redis:
+      addr: 127.0.0.1:16379
+    policies:
+      - name: standard
+        priority: 100
+        token_bucket: {capacity: 1, refill_tokens: 1, refill_interval: 1s}
 `,
-			message: "not supported yet",
+			message: "not operational yet",
+		},
+		{
+			name: "redis addr required",
+			config: `
+pipeline:
+  traffic_policies:
+    enabled: false
+    mode: redis
+`,
+			message: "redis.addr is required",
+		},
+		{
+			name: "redis db invalid",
+			config: `
+pipeline:
+  traffic_policies:
+    enabled: false
+    mode: redis
+    redis:
+      addr: 127.0.0.1:16379
+      db: -1
+`,
+			message: "redis.db",
+		},
+		{
+			name: "redis key prefix blank",
+			config: `
+pipeline:
+  traffic_policies:
+    enabled: false
+    mode: redis
+    redis:
+      addr: 127.0.0.1:16379
+      key_prefix: "   "
+`,
+			message: "redis.key_prefix",
+		},
+		{
+			name: "redis operation timeout invalid",
+			config: `
+pipeline:
+  traffic_policies:
+    enabled: false
+    mode: redis
+    redis:
+      addr: 127.0.0.1:16379
+      operation_timeout: 0s
+`,
+			message: "redis.operation_timeout",
+		},
+		{
+			name: "redis failure mode invalid",
+			config: `
+pipeline:
+  traffic_policies:
+    enabled: false
+    mode: redis
+    redis:
+      addr: 127.0.0.1:16379
+      failure_mode: local_fallback
+`,
+			message: "supports only",
+		},
+		{
+			name: "redis idle ttl below precision",
+			config: `
+pipeline:
+  traffic_policies:
+    enabled: false
+    mode: redis
+    idle_ttl: 500us
+    redis:
+      addr: 127.0.0.1:16379
+`,
+			message: "at least 1ms",
+		},
+		{
+			name: "redis settings conflict with local mode",
+			config: `
+pipeline:
+  traffic_policies:
+    enabled: false
+    mode: local
+    redis:
+      addr: 127.0.0.1:16379
+`,
+			message: "require mode",
 		},
 		{
 			name: "no enabled policy",

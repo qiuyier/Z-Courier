@@ -745,7 +745,8 @@ pipeline 是通用网关能力所在的位置：黑白名单、限流、日志�
 ### 命名流量策略
 
 流量策略只根据鉴权后的 `client_id`、协议头 MsgID，以及由 MsgID 解析出的上游
-路由选择有界的本地 token bucket，不读取业务 `Body`。
+路由选择命名 token bucket，不读取业务 `Body`。目前 gateway 真正可启用的是
+下面展示的有界进程内模式。
 
 ```yaml
 pipeline:
@@ -780,10 +781,11 @@ pipeline:
           refill_interval: 1s
 ```
 
-- `mode`：V16.1 只支持 `local`。在 Redis 原子共享配额实现完成前，
-  `redis` 会被启动校验明确拒绝，不会出现“配置成功但实际未限流”。
+- `mode`：`local` 是当前可运行的进程内 Store。Redis 配置契约和原子 Store
+  已经实现，但在 gateway 生命周期接线完成前，`enabled: true` 与
+  `mode: redis` 的组合仍会启动失败，不会出现“配置成功但实际未限流”。
 - `max_keys`：当前 gateway 进程最多保留的 `(策略, client_id)` 桶数量。
-  `0` 使用默认值 `100000`，负数非法。
+  仅用于 `local` 模式；`0` 使用默认值 `100000`，负数非法。
 - `idle_ttl`：桶持续空闲超过该时间后删除，默认 `10m`。
 - `default_policy`：可选兜底策略名。留空时，没有命中任何选择器的包直接放行，
   不创建桶。
@@ -802,17 +804,61 @@ pipeline:
 否则会导致配额被重置。已存在的桶没有令牌时返回 `rate_limited`。容量判断前
 会先清理已经超过 `idle_ttl` 的桶。
 
+可以在流量策略关闭时先校验和保存 Redis 配置契约：
+
+```yaml
+pipeline:
+  traffic_policies:
+    enabled: false
+    mode: redis
+    idle_ttl: 10m
+    redis:
+      addr: redis:6379
+      username: ""
+      password: ""
+      db: 0
+      key_prefix: zcourier:traffic-policy
+      dial_timeout: 1s
+      read_timeout: 500ms
+      write_timeout: 500ms
+      operation_timeout: 250ms
+      failure_mode: fail_closed
+    policies: []
+```
+
+`redis.addr` 必填，`redis.db` 不能为负数，Key 前缀不能是空白字符串。连接和
+操作超时必须为正数，默认值就是上面展示的值；Redis 模式的 `idle_ttl`
+不能小于 `1ms`。V16.3.2 只支持 `failure_mode: fail_closed`，不接受本地
+fallback，因为 fallback 会在 Redis 故障时把一份集群共享额度悄悄变成各节点
+独立额度。
+
+Redis Store 在一段 Lua 脚本内完成补充令牌和准入判断，并使用 Redis 服务端
+时间，gateway 之间的时钟偏差不会制造额外令牌。Key 按前缀、策略和作用域隔离，
+ClientID 部分使用 SHA-256 摘要，不会以明文进入 Key。每次判断都会刷新有界
+TTL。Redis 操作有硬超时且客户端不做隐藏重试；故障时返回
+`admission_unavailable`，Redis 恢复后的下一次请求可以继续共享限流，无需
+重启 Store。
+
+这些语义同时由内存 Redis 测试和可选的真实 Redis 集成测试覆盖：
+
+```bash
+ZCOURIER_TEST_REDIS_ADDR=127.0.0.1:16379 \
+  go test -count=1 -v ./internal/pipeline \
+  -run TestRedisQuotaStoreRealRedisIntegration
+```
+
 配额 Store 契约预留 `admission_unavailable`，表示已选中的 Store 无法安全
-作出准入决定。合法的 `local` 配置不应产生该结果。在 Redis 原子 Store 和
-故障行为实现前，`redis` 模式仍会在启动时被拒绝。
+作出准入决定。合法的 `local` 配置不应产生该结果。在 Redis Store 的创建、
+健康检查和关闭接入 gateway 生命周期前，Redis 模式仍会被启动校验拒绝。
 
 `default_policy` 是真正的兜底，因此也可能限制 AUTH/BIND、下行 ACK 等没有
 命中普通上行路由的协议包。只想限制业务上行时，不要设置 `default_policy`，
 改用 MsgID 或 route 选择器。禁用的策略不会参与选择，但声明过的字段仍会在
 启动时接受严格校验。
 
-本地桶只在单个 gateway 进程内生效。多节点各自拥有一份配额；Redis 模式完成
-前还不提供集群共享配额。
+本地桶只在单个 gateway 进程内生效，多节点各自拥有一份配额。Redis Store
+已经通过多实例原子共享额度测试，但在生命周期接线完成前，gateway 集群还
+不会实际使用它。
 
 可通过真实 gateway TCP 连接和公开 Go SDK 验证本地策略链路：
 
