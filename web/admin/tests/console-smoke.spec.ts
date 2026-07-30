@@ -50,6 +50,11 @@ test("logs in and navigates core console pages", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Back" })).toBeDisabled();
   await gotoNav(page, "Checks");
   await gotoNav(page, "Diagnostics");
+  const trafficPolicyPanel = page.getByTestId("traffic-policy-diagnostics");
+  await expect(trafficPolicyPanel.getByRole("heading", { name: "Traffic Policies" })).toBeVisible();
+  await expect(trafficPolicyPanel.getByText("1 configured policy")).toBeVisible();
+  await expect(trafficPolicyPanel.getByText("configured", { exact: true }).first()).toBeVisible();
+  await expect(trafficPolicyPanel.getByLabel("Traffic policy console-smoke-upstream")).toBeVisible();
   await gotoNav(page, "Overview", "Operations Overview");
 });
 
@@ -143,6 +148,190 @@ test("renders sanitized discovery runtime diagnostics", async ({ page }) => {
   await expect(routeCard.locator("dl").getByText("transport", { exact: true })).toBeVisible();
   await expect(routeCard.locator("dl").getByText("succeeded", { exact: true })).toBeVisible();
   await expect(routeCard).not.toContainText("10.0.0.1");
+});
+
+test("renders bounded local traffic policy diagnostics", async ({ page }) => {
+  await login(page);
+  await page.route("**/internal/admin/diagnostics", async (route) => {
+    const response = await route.fetch();
+    const diagnostics = await response.json();
+    diagnostics.traffic_policy = {
+      enabled: true,
+      mode: "local",
+      store_status: "degraded",
+      policy_count: 2,
+      policy_names: ["standard-upstream", "priority-orders"],
+      default_policy: "standard-upstream",
+      key_scope: "client_id",
+      idle_ttl: "10m0s",
+      no_match_total: 14,
+      decisions: {
+        allowed: 128,
+        rate_limited: 9,
+        overloaded: 3,
+        admission_unavailable: 0,
+      },
+      last_result: "rate_limited",
+      last_state: "depleted",
+      last_decision_at: "2026-07-30T09:10:00Z",
+      last_success_at: "2026-07-30T09:10:00Z",
+      local: {
+        live_keys: 8,
+        max_keys: 10,
+        utilization: 0.8,
+      },
+      policies: [
+        {
+          name: "standard-upstream",
+          priority: 100,
+          key_scope: "client_id",
+          capacity: 25,
+          refill_tokens: 25,
+          refill_interval: "1s",
+          selection_total: 103,
+          decisions: {
+            allowed: 94,
+            rate_limited: 9,
+            overloaded: 0,
+            admission_unavailable: 0,
+          },
+          last_result: "rate_limited",
+          last_state: "depleted",
+          last_decision_at: "2026-07-30T09:10:00Z",
+        },
+        {
+          name: "priority-orders",
+          priority: 200,
+          key_scope: "client_id",
+          capacity: 8,
+          refill_tokens: 4,
+          refill_interval: "500ms",
+          selection_total: 37,
+          decisions: {
+            allowed: 34,
+            rate_limited: 0,
+            overloaded: 3,
+            admission_unavailable: 0,
+          },
+          last_result: "allowed",
+          last_state: "available",
+          last_decision_at: "2026-07-30T09:09:58Z",
+        },
+      ],
+    };
+    await route.fulfill({ response, json: diagnostics });
+  });
+
+  await gotoNav(page, "Diagnostics");
+  const panel = page.getByTestId("traffic-policy-diagnostics");
+  await expect(panel.getByRole("heading", { name: "Traffic Policies" })).toBeVisible();
+  await expect(panel.getByText("2 configured policies")).toBeVisible();
+  await expect(panel.getByText("degraded", { exact: true }).first()).toBeVisible();
+  await expect(panel.getByText("80.0%")).toBeVisible();
+  await expect(panel.getByRole("meter", { name: "Local quota key usage" })).toHaveAttribute("aria-valuenow", "8");
+
+  const decisions = panel.getByLabel("Aggregate traffic policy decisions");
+  await expect(decisions.getByText("128", { exact: true })).toBeVisible();
+  await expect(decisions.getByText("9", { exact: true })).toBeVisible();
+  await expect(decisions.getByText("3", { exact: true })).toBeVisible();
+
+  const standard = panel.getByLabel("Traffic policy standard-upstream");
+  await expect(standard.getByText("25 / 1s", { exact: true })).toBeVisible();
+  await expect(standard.getByText("rate_limited", { exact: true })).toBeVisible();
+  await expect(standard.getByText("Last state", { exact: true })).toBeVisible();
+  await expect(standard.getByText("Last decision", { exact: true })).toBeVisible();
+  const priority = panel.getByLabel("Traffic policy priority-orders");
+  await expect(priority.getByText("4 / 500ms", { exact: true })).toBeVisible();
+  await expect(priority.getByText("available", { exact: true })).toBeVisible();
+});
+
+test("renders disabled traffic policy diagnostics", async ({ page }) => {
+  await login(page);
+  await page.route("**/internal/admin/diagnostics", async (route) => {
+    const response = await route.fetch();
+    const diagnostics = await response.json();
+    diagnostics.traffic_policy = {
+      enabled: false,
+      store_status: "disabled",
+      policy_count: 0,
+      policy_names: [],
+      no_match_total: 0,
+      decisions: {
+        allowed: 0,
+        rate_limited: 0,
+        overloaded: 0,
+        admission_unavailable: 0,
+      },
+    };
+    await route.fulfill({ response, json: diagnostics });
+  });
+
+  await gotoNav(page, "Diagnostics");
+  const panel = page.getByTestId("traffic-policy-diagnostics");
+  await expect(panel.getByText("Named traffic policies are disabled")).toBeVisible();
+  await expect(panel.getByText("disabled", { exact: true })).toHaveCount(2);
+  await expect(panel.getByText("Policies", { exact: true })).toBeVisible();
+  await expect(panel.getByRole("meter", { name: "Local quota key usage" })).toHaveCount(0);
+});
+
+test("renders unavailable Redis traffic policy diagnostics", async ({ page }) => {
+  await login(page);
+  await page.route("**/internal/admin/diagnostics", async (route) => {
+    const response = await route.fetch();
+    const diagnostics = await response.json();
+    diagnostics.traffic_policy = {
+      enabled: true,
+      mode: "redis",
+      store_status: "unavailable",
+      policy_count: 1,
+      policy_names: ["shared-upstream"],
+      key_scope: "client_id",
+      idle_ttl: "10m0s",
+      failure_mode: "fail_closed",
+      no_match_total: 2,
+      decisions: {
+        allowed: 47,
+        rate_limited: 6,
+        overloaded: 0,
+        admission_unavailable: 4,
+      },
+      last_result: "admission_unavailable",
+      last_state: "store_unavailable",
+      last_decision_at: "2026-07-30T10:15:00Z",
+      last_success_at: "2026-07-30T10:14:58Z",
+      last_unavailable_at: "2026-07-30T10:15:00Z",
+      policies: [
+        {
+          name: "shared-upstream",
+          priority: 100,
+          key_scope: "client_id",
+          capacity: 100,
+          refill_tokens: 100,
+          refill_interval: "1s",
+          selection_total: 57,
+          decisions: {
+            allowed: 47,
+            rate_limited: 6,
+            overloaded: 0,
+            admission_unavailable: 4,
+          },
+          last_result: "admission_unavailable",
+          last_state: "store_unavailable",
+          last_decision_at: "2026-07-30T10:15:00Z",
+        },
+      ],
+    };
+    await route.fulfill({ response, json: diagnostics });
+  });
+
+  await gotoNav(page, "Diagnostics");
+  const panel = page.getByTestId("traffic-policy-diagnostics");
+  await expect(panel.getByText("redis", { exact: true }).first()).toBeVisible();
+  await expect(panel.getByText("unavailable", { exact: true }).first()).toBeVisible();
+  await expect(panel.getByText("Redis failure mode")).toBeVisible();
+  await expect(panel.getByText("fail_closed", { exact: true })).toBeVisible();
+  await expect(panel.getByText("admission_unavailable", { exact: true }).first()).toBeVisible();
+  await expect(panel.getByRole("meter", { name: "Local quota key usage" })).toHaveCount(0);
 });
 
 test("operator mutation actions are guarded by confirmation dialogs", async ({ page }) => {

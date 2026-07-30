@@ -1036,6 +1036,9 @@ is currently reachable. Counters and timestamps reset when the gateway process
 restarts. The snapshot omits selector ClientIDs, Redis connection settings,
 credentials, key prefixes, quota keys, packet bodies, and raw errors. Policy
 names are operator-visible static identifiers and must not contain secrets.
+The Console Diagnostics page renders this same read-only snapshot as store
+status, aggregate outcomes, local capacity, and per-policy bucket summaries;
+it does not add a policy mutation surface.
 
 `default_policy` is a true fallback. It can therefore apply to AUTH/BIND,
 downlink ACK, and other protocol packets that do not match an upstream route.

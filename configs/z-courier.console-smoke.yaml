@@ -100,6 +100,24 @@ pipeline:
     enabled: false
     max_requests: 100
     window: 1s
+  traffic_policies:
+    enabled: true
+    mode: local
+    max_keys: 100
+    idle_ttl: 10m
+    default_policy: ""
+    policies:
+      - name: console-smoke-upstream
+        enabled: true
+        priority: 100
+        match:
+          routes:
+            - console-smoke-static
+        key: client_id
+        token_bucket:
+          capacity: 25
+          refill_tokens: 25
+          refill_interval: 1s
 
 upstream:
   routes:

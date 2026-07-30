@@ -159,6 +159,11 @@ dependencies 会包含 `traffic_policy_store`；warnings 会指出集群中使�
 diagnosis bundle 会在 `sections.diagnostics.body.traffic_policy` 中包含同一份
 快照，但不会包含 Redis 地址、凭据、Key 前缀或真实配额 Key。
 
+Console Diagnostics 会用只读 Traffic Policies 面板展示这份快照，包括 Store
+模式/状态、聚合判断和最近时间、本地 Key 使用率及 80% 阈值，以及每个策略的
+bucket 参数和聚合结果。所有有 diagnostics 读取权限的 Console 角色都能查看，
+面板不会提供策略修改操作。
+
 ### `GET /internal/admin/check`
 
 主动探测依赖：

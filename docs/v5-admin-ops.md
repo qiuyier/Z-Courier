@@ -218,6 +218,12 @@ decision, or local key utilization at or above 80%. Diagnosis bundles contain
 the same data at `sections.diagnostics.body.traffic_policy`. Redis addresses,
 credentials, key prefixes and quota keys are excluded.
 
+Console Diagnostics renders the same snapshot as a read-only Traffic Policies
+panel. It shows Store mode/status, aggregate decisions and recent timestamps,
+local key utilization with the 80% threshold, and each configured policy's
+bucket shape and aggregate outcomes. The panel is available to every Console
+role that can read diagnostics and never exposes mutation controls.
+
 ### `GET /internal/admin/check`
 
 Actively checks configured runtime dependencies for one gateway process. This

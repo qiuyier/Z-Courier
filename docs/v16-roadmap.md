@@ -154,9 +154,13 @@ quotas:
   diagnostics and diagnosis bundles, including aggregate decisions, recent
   fixed-enum state, local key utilization, dependency status, and actionable
   warnings without actively probing Redis.
+- V16.4.3 adds a dedicated read-only Console Diagnostics view for disabled,
+  local, Redis, degraded, and unavailable policy states, including local
+  capacity and per-policy bucket/outcome summaries with responsive smoke
+  coverage for admin and read-only roles.
 
-Dedicated Console views, Grafana dashboards, alerts, deployment surfaces, and
-full release guidance remain later V16 workstreams.
+Grafana dashboards, alerts, deployment surfaces, and full release guidance
+remain later V16 workstreams.
 
 ## Failure And Client Contract
 
@@ -247,8 +251,9 @@ Status: in progress. V16.4.1 implements the low-cardinality Prometheus metric
 foundation for policy selection, quota-store decisions and latency, and local
 key capacity. V16.4.2 adds passive, sanitized policy runtime state to admin
 diagnostics and diagnosis bundles, including dependency health and warning
-derivation. Dashboards, alerts, dedicated Console views, and broader operator
-guidance remain pending.
+derivation. V16.4.3 renders that contract in a dedicated read-only Console
+Diagnostics view. Dashboards, alerts, and broader operator guidance remain
+pending.
 
 - Add low-cardinality metrics for admitted/rejected packets, policy selection,
   token-bucket state class, quota-store results, and local key capacity.

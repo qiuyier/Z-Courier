@@ -45,6 +45,10 @@ semantic versioning after the first public MVP tag.
   local key utilization, dependency status, and actionable warnings without
   exposing selector ClientIDs, Redis connection details, quota keys, packet
   bodies, or raw errors; local and Redis E2E now verify the snapshot boundary.
+- V16.4.3 dedicated read-only Traffic Policies view in Console Diagnostics,
+  covering disabled, local, Redis, degraded, and unavailable states, aggregate
+  decisions, recent runtime events, local key utilization, and per-policy
+  bucket summaries with real-gateway admin/readonly smoke coverage.
 - Bilingual English/Chinese titles and operator-facing legend prefixes across
   the bundled overview and production-signal Grafana dashboards, without
   changing panel IDs, PromQL, thresholds, units, or alert behavior.

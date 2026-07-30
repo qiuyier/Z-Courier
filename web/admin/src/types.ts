@@ -336,6 +336,54 @@ export type CapacityDiagnostics = {
   rate_limit_window?: string;
 };
 
+export type TrafficPolicyDecisionTotals = {
+  allowed: number;
+  rate_limited: number;
+  overloaded: number;
+  admission_unavailable: number;
+};
+
+export type TrafficPolicyLocalDiagnostics = {
+  live_keys: number;
+  max_keys: number;
+  utilization: number;
+};
+
+export type TrafficPolicyPolicyDiagnostics = {
+  name: string;
+  priority: number;
+  key_scope: string;
+  capacity: number;
+  refill_tokens: number;
+  refill_interval: string;
+  selection_total: number;
+  decisions: TrafficPolicyDecisionTotals;
+  last_result?: string;
+  last_state?: string;
+  last_decision_at?: string;
+};
+
+export type TrafficPolicyDiagnostics = {
+  enabled: boolean;
+  mode?: string;
+  store_status: string;
+  policy_count: number;
+  policy_names: string[];
+  default_policy?: string;
+  key_scope?: string;
+  idle_ttl?: string;
+  failure_mode?: string;
+  no_match_total: number;
+  decisions: TrafficPolicyDecisionTotals;
+  last_result?: string;
+  last_state?: string;
+  last_decision_at?: string;
+  last_success_at?: string;
+  last_unavailable_at?: string;
+  local?: TrafficPolicyLocalDiagnostics;
+  policies?: TrafficPolicyPolicyDiagnostics[];
+};
+
 export type DiagnosticWarning = {
   code: string;
   message: string;
@@ -354,6 +402,7 @@ export type AdminDiagnostics = {
   downlink: DownlinkSummary;
   upstream: UpstreamDiagnostics;
   capacity: CapacityDiagnostics;
+  traffic_policy?: TrafficPolicyDiagnostics;
   dependencies: Dependency[];
   warnings?: DiagnosticWarning[];
 };

@@ -906,6 +906,8 @@ diagnosis bundle 会在 `sections.diagnostics.body.traffic_policy` 中包含同�
 探测。计数和时间戳会在 gateway 进程重启后清零。快照不会包含选择器中的
 ClientID、Redis 地址、账号、密码、Key 前缀、真实配额 Key、消息 Body 或原始
 错误。策略名属于运维可见的静态标识，不要在策略名中写入敏感信息。
+Console Diagnostics 会把同一份只读快照展示为 Store 状态、聚合结果、本地容量
+和逐策略 bucket 摘要，不提供修改策略的入口。
 
 `default_policy` 是真正的兜底，因此也可能限制 AUTH/BIND、下行 ACK 等没有
 命中普通上行路由的协议包。只想限制业务上行时，不要设置 `default_policy`，

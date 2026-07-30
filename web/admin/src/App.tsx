@@ -73,6 +73,9 @@ import type {
   MessageStatus,
   MessageStatusResponse,
   RetryScanResponse,
+  TrafficPolicyDecisionTotals,
+  TrafficPolicyDiagnostics,
+  TrafficPolicyPolicyDiagnostics,
   UpstreamDiscoveryRuntime,
 } from "./types";
 
@@ -4464,6 +4467,8 @@ function DiagnosticsPage({
         </article>
       </section>
 
+      <TrafficPolicyDiagnosticsPanel trafficPolicy={diagnostics.traffic_policy} />
+
       <section className="rounded-lg border border-line bg-white p-5 shadow-diffusion">
         <div className="grid gap-5 lg:grid-cols-[0.9fr_1.1fr]">
           <div>
@@ -4878,6 +4883,305 @@ function MetricRow({ label, value }: { label: string; value: string }) {
       <span className="truncate text-right font-mono text-sm font-medium text-ink">{value}</span>
     </div>
   );
+}
+
+function TrafficPolicyDiagnosticsPanel({
+  trafficPolicy,
+}: {
+  trafficPolicy?: TrafficPolicyDiagnostics;
+}) {
+  if (!trafficPolicy) {
+    return (
+      <section
+        aria-labelledby="traffic-policy-diagnostics-heading"
+        className="rounded-lg border border-line bg-white p-5 shadow-diffusion"
+        data-testid="traffic-policy-diagnostics"
+      >
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-sm font-medium text-zinc-500">Ingress Admission</p>
+            <h3 className="mt-1 text-2xl font-semibold tracking-tight" id="traffic-policy-diagnostics-heading">
+              Traffic Policies
+            </h3>
+          </div>
+          <StatusBadge label="not reported" tone="warn" />
+        </div>
+        <div className="mt-5 border-t border-line pt-5">
+          <p className="font-medium text-ink">Runtime snapshot unavailable</p>
+          <p className="mt-1 text-sm text-zinc-500">The connected gateway did not report traffic policy diagnostics.</p>
+        </div>
+      </section>
+    );
+  }
+
+  const policies = trafficPolicy.policies ?? [];
+  const local = trafficPolicy.local;
+  const policyCount = trafficPolicy.policy_count ?? policies.length;
+  const mode = trafficPolicy.mode || "--";
+  const status = trafficPolicy.store_status || "not_configured";
+
+  return (
+    <section
+      aria-labelledby="traffic-policy-diagnostics-heading"
+      className="rounded-lg border border-line bg-white p-5 shadow-diffusion"
+      data-testid="traffic-policy-diagnostics"
+    >
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="flex min-w-0 items-start gap-3">
+          <span className="grid size-10 shrink-0 place-items-center rounded-lg border border-line bg-zinc-50 text-accent">
+            <Circuitry size={20} weight="duotone" />
+          </span>
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-zinc-500">Ingress Admission</p>
+            <h3 className="mt-1 text-2xl font-semibold tracking-tight" id="traffic-policy-diagnostics-heading">
+              Traffic Policies
+            </h3>
+            <p className="mt-1 text-sm text-zinc-500">
+              {trafficPolicy.enabled
+                ? `${policyCount.toLocaleString()} configured ${policyCount === 1 ? "policy" : "policies"}`
+                : "Named traffic policies are disabled"}
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {trafficPolicy.enabled && <StatusBadge label={mode} tone="info" />}
+          <StatusBadge label={status} tone={trafficPolicyStatusTone(status)} />
+        </div>
+      </div>
+
+      {!trafficPolicy.enabled ? (
+        <div className="mt-5 grid gap-4 border-t border-line pt-5 sm:grid-cols-3">
+          <TrafficPolicySummaryStat label="Policies" value={policyCount.toLocaleString()} />
+          <TrafficPolicySummaryStat label="Store" value={status} />
+          <TrafficPolicySummaryStat label="Decisions" value="0" />
+        </div>
+      ) : (
+        <>
+          <div className="mt-5 grid grid-cols-2 gap-x-6 gap-y-4 border-y border-line py-4 lg:grid-cols-4">
+            <TrafficPolicySummaryStat label="Key scope" value={trafficPolicy.key_scope || "--"} />
+            <TrafficPolicySummaryStat label="Default policy" value={trafficPolicy.default_policy || "pass-through"} />
+            <TrafficPolicySummaryStat label="Idle TTL" value={trafficPolicy.idle_ttl || "--"} />
+            <TrafficPolicySummaryStat label="No match" value={trafficPolicy.no_match_total.toLocaleString()} />
+          </div>
+
+          <div className="mt-6 grid gap-6 xl:grid-cols-[0.7fr_1.3fr]">
+            <div className="min-w-0 xl:border-r xl:border-line xl:pr-6">
+              <div className="flex items-center justify-between gap-3">
+                <p className="font-medium text-ink">Store Runtime</p>
+                <StatusBadge label={status} tone={trafficPolicyStatusTone(status)} />
+              </div>
+              <dl className="mt-4 grid gap-3">
+                <TrafficPolicyRuntimeRow label="Mode" value={mode} />
+                <TrafficPolicyRuntimeRow label="Latest result" value={trafficPolicy.last_result || "--"} />
+                <TrafficPolicyRuntimeRow label="Bucket state" value={trafficPolicy.last_state || "--"} />
+                {trafficPolicy.failure_mode && (
+                  <TrafficPolicyRuntimeRow label="Redis failure mode" value={trafficPolicy.failure_mode} />
+                )}
+              </dl>
+              {local && <TrafficPolicyLocalCapacity local={local} status={status} />}
+            </div>
+
+            <div className="min-w-0">
+              <p className="font-medium text-ink">Aggregate Decisions</p>
+              <TrafficPolicyDecisionGrid decisions={trafficPolicy.decisions} />
+              <dl className="mt-5 grid gap-x-6 md:grid-cols-3">
+                <TrafficPolicyRuntimeEvent label="Latest decision" value={trafficPolicy.last_decision_at} />
+                <TrafficPolicyRuntimeEvent label="Latest safe decision" value={trafficPolicy.last_success_at} />
+                <TrafficPolicyRuntimeEvent label="Latest unavailable" value={trafficPolicy.last_unavailable_at} />
+              </dl>
+            </div>
+          </div>
+
+          <div className="mt-6 border-t border-line pt-5">
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <p className="font-medium text-ink">Configured Policies</p>
+                <p className="mt-1 text-sm text-zinc-500">{policies.length.toLocaleString()} runtime summaries</p>
+              </div>
+              <span className="min-w-0 max-w-full break-words text-right font-mono text-xs text-zinc-500">
+                {trafficPolicy.policy_names.join(" · ") || "--"}
+              </span>
+            </div>
+            {policies.length === 0 ? (
+              <div className="mt-4 border-y border-dashed border-line py-5 text-sm text-zinc-500">
+                No policy summaries were reported.
+              </div>
+            ) : (
+              <div className="mt-4 divide-y divide-line border-y border-line">
+                {policies.map((policy, index) => (
+                  <TrafficPolicyRuntimeRowSummary index={index} key={policy.name} policy={policy} />
+                ))}
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
+function TrafficPolicySummaryStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0">
+      <p className="text-xs uppercase tracking-[0.14em] text-zinc-500">{label}</p>
+      <p className="mt-1 break-words font-mono text-sm font-semibold text-ink">{value}</p>
+    </div>
+  );
+}
+
+function TrafficPolicyRuntimeRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex min-w-0 items-baseline justify-between gap-3 border-b border-line pb-2 last:border-0 last:pb-0">
+      <dt className="text-sm text-zinc-500">{label}</dt>
+      <dd className="min-w-0 break-words text-right font-mono text-sm font-medium text-ink">{value}</dd>
+    </div>
+  );
+}
+
+function TrafficPolicyLocalCapacity({
+  local,
+  status,
+}: {
+  local: NonNullable<TrafficPolicyDiagnostics["local"]>;
+  status: string;
+}) {
+  const utilization = Math.min(Math.max(local.utilization || 0, 0), 1);
+  const percentage = utilization * 100;
+  const fillClass = status === "degraded" || status === "unavailable" ? "bg-amber-500" : "bg-accent";
+
+  return (
+    <div className="mt-6 border-t border-line pt-5">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <p className="text-sm font-medium text-ink">Local Key Capacity</p>
+        <p className="font-mono text-sm font-semibold text-ink">{percentage.toFixed(1)}%</p>
+      </div>
+      <div
+        aria-label="Local quota key usage"
+        aria-valuemax={local.max_keys}
+        aria-valuemin={0}
+        aria-valuenow={local.live_keys}
+        className="relative mt-3 h-2 overflow-hidden rounded-full bg-zinc-200"
+        role="meter"
+      >
+        <span
+          className={["absolute inset-0 origin-left rounded-full transition-transform duration-500", fillClass].join(" ")}
+          style={{ transform: `scaleX(${utilization})` }}
+        />
+        <span className="absolute inset-y-0 left-[80%] w-px bg-zinc-700/50" />
+      </div>
+      <div className="mt-2 flex items-center justify-between gap-3 font-mono text-xs text-zinc-500">
+        <span>{local.live_keys.toLocaleString()} live</span>
+        <span>{local.max_keys.toLocaleString()} limit</span>
+      </div>
+    </div>
+  );
+}
+
+function TrafficPolicyDecisionGrid({ decisions }: { decisions: TrafficPolicyDecisionTotals }) {
+  const items = [
+    { label: "Allowed", value: decisions.allowed, border: "border-accent" },
+    { label: "Rate limited", value: decisions.rate_limited, border: "border-amber-500" },
+    { label: "Overloaded", value: decisions.overloaded, border: "border-rose-500" },
+    { label: "Unavailable", value: decisions.admission_unavailable, border: "border-zinc-500" },
+  ];
+
+  return (
+    <dl
+      aria-label="Aggregate traffic policy decisions"
+      className="mt-4 grid grid-cols-2 gap-x-4 gap-y-5 sm:grid-cols-4"
+    >
+      {items.map((item) => (
+        <div className={["min-w-0 border-l-2 pl-3", item.border].join(" ")} key={item.label}>
+          <dt className="text-xs text-zinc-500">{item.label}</dt>
+          <dd className="mt-1 font-mono text-xl font-semibold text-ink">{item.value.toLocaleString()}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+function TrafficPolicyRuntimeEvent({ label, value }: { label: string; value?: string }) {
+  return (
+    <div className="min-w-0 border-b border-line py-3">
+      <dt className="text-xs uppercase tracking-[0.12em] text-zinc-500">{label}</dt>
+      <dd className="mt-1 truncate text-xs text-zinc-400">{formatOptionalDate(value)}</dd>
+    </div>
+  );
+}
+
+function TrafficPolicyRuntimeRowSummary({
+  index,
+  policy,
+}: {
+  index: number;
+  policy: TrafficPolicyPolicyDiagnostics;
+}) {
+  return (
+    <article
+      aria-label={`Traffic policy ${policy.name}`}
+      className="animate-rise grid gap-4 py-4 lg:grid-cols-[0.72fr_1.28fr]"
+      style={{ animationDelay: `${index * 45}ms` }}
+    >
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <h4 className="break-words text-lg font-semibold tracking-tight text-ink">{policy.name}</h4>
+          <StatusBadge
+            label={policy.last_result || "idle"}
+            tone={trafficPolicyDecisionTone(policy.last_result)}
+          />
+        </div>
+        <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2">
+          <TrafficPolicyCompactValue label="Priority" value={policy.priority.toLocaleString()} />
+          <TrafficPolicyCompactValue label="Key" value={policy.key_scope} />
+          <TrafficPolicyCompactValue label="Capacity" value={policy.capacity.toLocaleString()} />
+          <TrafficPolicyCompactValue
+            label="Refill"
+            value={`${policy.refill_tokens.toLocaleString()} / ${policy.refill_interval}`}
+          />
+        </dl>
+      </div>
+      <div className="min-w-0">
+        <dl className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-5">
+          <TrafficPolicyCompactValue label="Selected" value={policy.selection_total.toLocaleString()} />
+          <TrafficPolicyCompactValue label="Allowed" value={policy.decisions.allowed.toLocaleString()} />
+          <TrafficPolicyCompactValue label="Limited" value={policy.decisions.rate_limited.toLocaleString()} />
+          <TrafficPolicyCompactValue label="Overloaded" value={policy.decisions.overloaded.toLocaleString()} />
+          <TrafficPolicyCompactValue label="Unavailable" value={policy.decisions.admission_unavailable.toLocaleString()} />
+        </dl>
+        <dl className="mt-3 grid min-w-0 grid-cols-2 gap-4 border-t border-line pt-3">
+          <TrafficPolicyCompactValue label="Last state" value={policy.last_state || "--"} />
+          <TrafficPolicyCompactValue label="Last decision" value={formatOptionalDate(policy.last_decision_at)} />
+        </dl>
+      </div>
+    </article>
+  );
+}
+
+function TrafficPolicyCompactValue({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-xs text-zinc-500">{label}</dt>
+      <dd className="mt-0.5 break-words font-mono text-sm font-medium text-ink">{value}</dd>
+    </div>
+  );
+}
+
+function trafficPolicyStatusTone(status: string): StatusBadgeTone {
+  switch (status.trim().toLowerCase()) {
+    case "configured":
+      return "ok";
+    case "disabled":
+      return "info";
+    default:
+      return "warn";
+  }
+}
+
+function trafficPolicyDecisionTone(result?: string): StatusBadgeTone {
+  if (!result) {
+    return "info";
+  }
+  return result.trim().toLowerCase() === "allowed" ? "ok" : "warn";
 }
 
 function DiscoveryRuntimePanel({ discovery }: { discovery: UpstreamDiscoveryRuntime }) {
