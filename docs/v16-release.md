@@ -86,6 +86,8 @@ The production references intentionally demonstrate both supported modes:
 - `values-traffic-policy-local.yaml` and
   `values-traffic-policy-redis.yaml` are focused Helm examples;
 - `values-production.yaml` uses Redis because it deploys multiple replicas.
+- Helm chart `0.8.0` recommends gateway image `v0.16.0`; the production values
+  pin the same image, and release workflows reject mismatched metadata.
 
 The included capacity and refill values are reviewable starting points, not
 universal production defaults. Size them from measured ingress bursts,
@@ -120,6 +122,7 @@ Run every required check from the exact commit intended for the tag.
 | Local real path | Burst, refill, priority, pass-through, bounded keys, idle eviction, no upstream forwarding after rejection | `bash scripts/e2e_traffic_policy.sh` |
 | Redis real path | One quota across two gateways, positive PTTL and actual key expiration, fail-closed outage, recovery without restart | `bash scripts/e2e_traffic_policy_redis.sh` |
 | Deployment | Helm default/local/Redis schema and rendering, invalid combinations, Compose references, built-image config loading | `bash scripts/traffic_policy_deployment_check.sh` |
+| Release metadata | Chart `0.8.0`, `appVersion`, production image tag, and release tag agree | `bash scripts/helm_release_metadata_check.sh v0.16.0` |
 | Operations | Sanitized diagnostics/Console, Grafana panels, recording rules and alert behavior | `bash scripts/promtool_check.sh`, `bash scripts/console_smoke.sh` |
 | Regression | HTTP/NSQ upstream, discovery, reliable downlink, cluster peer push, SDKs, production Compose | CI E2E and Production Smoke jobs |
 | Kubernetes | Helm smoke/E2E remain green with the V16 schema and generated ConfigMap | `bash scripts/k8s_helm_smoke.sh`, `bash scripts/k8s_helm_e2e.sh` |
@@ -129,6 +132,7 @@ Run the complete local acceptance suite when Docker, Composer, and Kind are
 available:
 
 ```bash
+ZCOURIER_RELEASE_VERSION=v0.16.0 \
 ZCOURIER_RELEASE_COMPOSER_DOCKER_IMAGE=dnmp8-php82 \
 ZCOURIER_RELEASE_RUN_DOCKER=1 \
 ZCOURIER_RELEASE_RUN_SLOW=1 \

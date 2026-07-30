@@ -162,9 +162,9 @@ quotas:
   Grafana dashboards, recording rules and low-noise alert defaults with
   promtool behavior tests, an equivalent Helm PrometheusRule example, and
   bilingual tuning, canary, Redis outage, and rollback guidance.
-
-Broader deployment examples and full release guidance remain later V16
-workstreams.
+- V16.5 completes production Compose and Helm references, source and built-image
+  deployment validation, real Redis expiration evidence, CI/release-check
+  integration, and bilingual upgrade, rollback, and release guidance.
 
 ## Failure And Client Contract
 

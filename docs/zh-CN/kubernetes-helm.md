@@ -73,7 +73,7 @@ helm upgrade --install z-courier ./deploy/helm/z-courier \
   --namespace z-courier \
   -f deploy/helm/z-courier/examples/values-production.yaml \
   --set image.repository=ghcr.io/qiuyier/z-courier-gateway \
-  --set image.tag=v0.12.0 \
+  --set image.tag=v0.16.0 \
   --set secret.name=z-courier-secret
 ```
 
@@ -117,16 +117,16 @@ bash scripts/discovery_deployment_check.sh
 
 ```bash
 helm upgrade --install z-courier oci://ghcr.io/qiuyier/charts/z-courier \
-  --version 0.7.0 \
+  --version 0.8.0 \
   --namespace z-courier \
   -f values-production.yaml \
-  --set image.tag=v0.12.0
+  --set image.tag=v0.16.0
 ```
 
 注意：
 
-- `--version 0.7.0` 是 Helm chart 版本。
-- `image.tag=v0.12.0` 是 gateway 镜像版本。
+- `--version 0.8.0` 是 Helm chart 版本。
+- `image.tag=v0.16.0` 是 gateway 镜像版本。
 - 两者相关，但不是同一个版本号体系。
 
 ## 命名流量策略

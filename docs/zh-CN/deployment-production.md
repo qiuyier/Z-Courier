@@ -27,7 +27,7 @@ ghcr.io/qiuyier/z-courier-gateway:latest
 生产环境建议固定版本号，不要依赖 `latest`：
 
 ```text
-ghcr.io/qiuyier/z-courier-gateway:v0.12.0
+ghcr.io/qiuyier/z-courier-gateway:v0.16.0
 ```
 
 ## 单节点参考

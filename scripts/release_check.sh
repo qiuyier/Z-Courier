@@ -8,6 +8,7 @@ RUN_SLOW="${ZCOURIER_RELEASE_RUN_SLOW:-0}"
 RUN_K8S="${ZCOURIER_RELEASE_RUN_K8S:-0}"
 RUN_RACE="${ZCOURIER_RELEASE_RUN_RACE:-1}"
 SKIP_PHP="${ZCOURIER_RELEASE_SKIP_PHP:-0}"
+RELEASE_VERSION="${ZCOURIER_RELEASE_VERSION:-}"
 COMPOSER_DOCKER_IMAGE="${ZCOURIER_RELEASE_COMPOSER_DOCKER_IMAGE:-}"
 COMPOSER_DOCKER_CACHE_DIR="${ZCOURIER_RELEASE_COMPOSER_CACHE_DIR:-$HOME/.composer}"
 DOCKER_BUILD_PLATFORM="${ZCOURIER_RELEASE_DOCKER_BUILD_PLATFORM:-}"
@@ -133,6 +134,11 @@ run_fast_checks() {
 
   run_actionlint
   run bash scripts/secret_boundary_check.sh
+  if [[ -n "$RELEASE_VERSION" ]]; then
+    run bash scripts/helm_release_metadata_check.sh "$RELEASE_VERSION"
+  else
+    run bash scripts/helm_release_metadata_check.sh
+  fi
 
   run npm ci --prefix web/admin
   run npm run build --prefix web/admin

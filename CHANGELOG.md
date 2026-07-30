@@ -60,6 +60,9 @@ semantic versioning after the first public MVP tag.
   deployment validation, CI and release-check integration, real Redis
   quota-key expiration evidence, and bilingual upgrade, rollback, and release
   acceptance guidance.
+- Helm chart `0.8.0` aligned with gateway `v0.16.0`, plus automated checks that
+  keep Chart app metadata, production image values, and release tags in sync
+  before GitHub Release assets or GHCR OCI packages are published.
 - Bilingual English/Chinese titles and operator-facing legend prefixes across
   the bundled overview and production-signal Grafana dashboards, without
   changing panel IDs, PromQL, thresholds, units, or alert behavior.

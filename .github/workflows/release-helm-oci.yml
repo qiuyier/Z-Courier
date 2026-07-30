@@ -27,6 +27,11 @@ jobs:
         with:
           ref: ${{ github.event.release.tag_name || inputs.tag }}
 
+      - name: Validate release metadata
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: bash scripts/helm_release_metadata_check.sh "$RELEASE_TAG"
+
       - name: Package and push Helm chart
         env:
           GH_TOKEN: ${{ github.token }}

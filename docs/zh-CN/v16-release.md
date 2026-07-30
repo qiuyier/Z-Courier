@@ -63,6 +63,8 @@ MessageID 的持久化幂等。
 - `deploy/production-cluster/config/` 下两个文件：相同 Redis namespace 和共享策略；
 - `values-traffic-policy-local.yaml`、`values-traffic-policy-redis.yaml`：Helm 专用示例；
 - `values-production.yaml`：多副本部署，因此使用 Redis。
+- Helm chart `0.8.0` 推荐 gateway 镜像 `v0.16.0`；production values 固定同一
+  镜像，release workflow 会拒绝不一致的版本元数据。
 
 示例容量和补充速率只是可审核起点，不是万能生产默认值。应根据真实入口突发、持续
 速率和下游容量调整。
@@ -93,6 +95,7 @@ Redis 故障时不要临时启用 local fallback。它会把一份集群额度�
 | Local 真实链路 | 突发、补充、优先级、未命中放行、Key 上限、空闲回收、拒绝后不转发 | `bash scripts/e2e_traffic_policy.sh` |
 | Redis 真实链路 | 两节点一份额度、正 PTTL 与真实过期、故障关闭、无需重启恢复 | `bash scripts/e2e_traffic_policy_redis.sh` |
 | 部署 | Helm 默认/local/Redis schema 与渲染、非法组合、Compose、构建镜像配置加载 | `bash scripts/traffic_policy_deployment_check.sh` |
+| 发布元数据 | Chart `0.8.0`、`appVersion`、production 镜像 tag 与 release tag 一致 | `bash scripts/helm_release_metadata_check.sh v0.16.0` |
 | 运维 | 脱敏 diagnostics/Console、Grafana、recording rules 与告警行为 | `bash scripts/promtool_check.sh`、`bash scripts/console_smoke.sh` |
 | 回归 | HTTP/NSQ、discovery、可靠下行、cluster peer push、SDK、生产 Compose | CI E2E 与 Production Smoke |
 | Kubernetes | V16 schema/ConfigMap 下 Helm smoke/E2E 继续通过 | `bash scripts/k8s_helm_smoke.sh`、`bash scripts/k8s_helm_e2e.sh` |
@@ -101,6 +104,7 @@ Redis 故障时不要临时启用 local fallback。它会把一份集群额度�
 Docker、Composer、Kind 都可用时执行完整验收：
 
 ```bash
+ZCOURIER_RELEASE_VERSION=v0.16.0 \
 ZCOURIER_RELEASE_COMPOSER_DOCKER_IMAGE=dnmp8-php82 \
 ZCOURIER_RELEASE_RUN_DOCKER=1 \
 ZCOURIER_RELEASE_RUN_SLOW=1 \
