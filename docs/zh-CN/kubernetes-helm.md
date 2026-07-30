@@ -129,6 +129,45 @@ helm upgrade --install z-courier oci://ghcr.io/qiuyier/charts/z-courier \
 - `image.tag=v0.12.0` 是 gateway 镜像版本。
 - 两者相关，但不是同一个版本号体系。
 
+## 命名流量策略
+
+chart 默认保持旧版兼容：`pipeline.rateLimit.enabled=true`，
+`pipeline.trafficPolicies.enabled=false`，两者不能同时启用。
+
+单 gateway 使用有界进程内 token bucket：
+
+```bash
+helm lint deploy/helm/z-courier \
+  -f deploy/helm/z-courier/examples/values-traffic-policy-local.yaml
+```
+
+多个 gateway 需要共享一份额度时使用 Redis：
+
+```bash
+helm lint deploy/helm/z-courier \
+  -f deploy/helm/z-courier/examples/values-traffic-policy-redis.yaml
+```
+
+Redis 密码通过 `passwordEnv` 指向 Kubernetes Secret 注入的环境变量；生成的
+ConfigMap 只会保留 `${ZCOURIER_REDIS_PASSWORD}` 占位符。共享额度的所有 Pod
+必须保持 Redis database、Key 前缀、策略名、选择器、优先级和 bucket 参数一致。
+配置中的 `capacity` 是整个共享配额，不是每个 Pod 各一份。
+
+Redis 模式只支持 `fail_closed`。Store 不可用时，被策略选中的包返回
+`admission_unavailable`，不会偷偷回退为各 Pod 独立 local 配额。production values
+中的数值只是可审核起点，上线前应按真实入口突发、持续速率和 backend 容量调整。
+
+修改后运行完整部署契约校验：
+
+```bash
+bash scripts/traffic_policy_deployment_check.sh
+```
+
+脚本会检查默认兼容、local/Redis 渲染、非法双开、Secret 占位符、生产集群两节点
+配置一致性，并把生成的 YAML 交给真实 gateway 配置加载器。回滚不需要迁移协议或
+数据库：恢复旧 values，或者关闭 `trafficPolicies`、重新启用 `rateLimit`，再正常
+滚动重启。
+
 ## Services
 
 chart 创建三个 Service：

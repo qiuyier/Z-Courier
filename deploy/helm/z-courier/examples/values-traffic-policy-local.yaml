@@ -1,0 +1,24 @@
+# Bounded process-local ingress admission for a standalone gateway.
+# Tune the bucket and key capacity from measured traffic before production use.
+
+pipeline:
+  rateLimit:
+    enabled: false
+  trafficPolicies:
+    enabled: true
+    mode: local
+    maxKeys: 100000
+    idleTTL: 10m
+    defaultPolicy: ""
+    policies:
+      - name: local-standard
+        enabled: true
+        priority: 100
+        match:
+          msgIDMin: 1001
+          msgIDMax: 2999
+        key: client_id
+        tokenBucket:
+          capacity: 1000
+          refillTokens: 1000
+          refillInterval: 1s

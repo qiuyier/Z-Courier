@@ -251,7 +251,7 @@ Acceptance criteria:
 
 Purpose: make rejection understandable without exposing tenant data.
 
-Status: in progress. V16.4.1 implements the low-cardinality Prometheus metric
+Status: complete. V16.4.1 implements the low-cardinality Prometheus metric
 foundation for policy selection, quota-store decisions and latency, and local
 key capacity. V16.4.2 adds passive, sanitized policy runtime state to admin
 diagnostics and diagnosis bundles, including dependency health and warning
@@ -278,6 +278,10 @@ Acceptance criteria:
 ### V16.5 End-To-End And Release Coverage
 
 Purpose: prove admission is bounded and predictable in the real gateway path.
+
+Status: complete. Local and Redis real-path E2E, real Redis key-expiration
+evidence, Compose/Helm deployment references, strict render/config validation,
+CI and release-check integration, and bilingual release guidance are in place.
 
 - Add focused limiter, configuration, and Redis atomicity tests.
 - Add single-node E2E for burst, refill, policy precedence, and bounded-key

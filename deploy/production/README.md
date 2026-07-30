@@ -181,7 +181,7 @@ The reference gateway config uses:
   `admin_console.enabled: false`
 - Static-discovery HTTP upstream for `MsgID 1001-1999`
 - NSQ upstream for `MsgID 2000-2999`
-- A basic per-client ingress rate limit
+- A bounded local `production-client` token-bucket traffic policy
 
 If you do not have an `auth-backend` service on the same Docker network, client
 AUTH/BIND will fail. That is intentional: production token semantics should be
@@ -202,6 +202,41 @@ to NSQ or to a signed HTTPS webhook. For HTTP, set
 the commented `http` block, and keep `allow_insecure_http` disabled in
 production. The receiver must verify `ZCOURIER-HMAC-SHA256` and de-duplicate by
 stable `event_id`. Terminal events contain no business message body.
+
+## Ingress Traffic Policy
+
+The single-node reference disables the legacy fixed-window limiter and enables
+one process-local, per-ClientID token bucket:
+
+```yaml
+pipeline:
+  rate_limit:
+    enabled: false
+  traffic_policies:
+    enabled: true
+    mode: local
+    max_keys: 100000
+    idle_ttl: 10m
+    default_policy: ""
+```
+
+`max_keys` bounds process memory under high-cardinality ClientID traffic, and
+idle buckets expire after `idle_ttl`. The example `1000` token capacity/refill
+is only a starting point. Measure normal burst and sustained ingress, backend
+capacity, and rejection ratios before production rollout.
+
+For multiple gateway nodes, do not copy this local policy and assume the quota
+is shared. Each process would own an independent bucket. Use the
+`deploy/production-cluster` Redis example or an equivalent external shared
+quota. Run this static deployment check after editing either reference:
+
+```bash
+bash scripts/traffic_policy_deployment_check.sh
+```
+
+Rollback is configuration-only: restore the previous image/config, or disable
+`traffic_policies` and re-enable `rate_limit`, then restart the gateway. No
+client protocol, PostgreSQL, NSQ, or Redis online-route migration is involved.
 
 For a private CA or mTLS receiver, place `ca.crt`, `tls.crt`, and `tls.key` in
 the host directory configured by `ZCOURIER_TERMINAL_WEBHOOK_TLS_DIR`, enable the
@@ -309,6 +344,13 @@ bash scripts/discovery_deployment_check.sh
 The script lints both discovery values examples, renders their ConfigMaps,
 extracts each generated `z-courier.yaml`, checks invalid combinations are
 rejected, and loads both configurations through the real gateway parser.
+
+Validate local/Redis traffic-policy deployment rendering and the production
+reference configs:
+
+```bash
+bash scripts/traffic_policy_deployment_check.sh
+```
 
 Build the gateway image:
 

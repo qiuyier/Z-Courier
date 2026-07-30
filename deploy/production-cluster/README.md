@@ -131,6 +131,39 @@ docker compose \
 
 Both mounts are read-only. Never commit `deploy/production-cluster/secrets/`.
 
+## Shared Ingress Quota
+
+Both gateway configs disable the legacy process-local fixed-window limiter and
+use the same Redis-backed `production-shared-client` traffic policy:
+
+```yaml
+pipeline:
+  traffic_policies:
+    enabled: true
+    mode: redis
+    redis:
+      addr: redis:6379
+      key_prefix: zcourier:production-cluster:traffic-policy
+      failure_mode: fail_closed
+```
+
+The configured capacity is shared by the cluster, not multiplied by the number
+of gateway nodes. Keep the Redis database, key prefix, policy names, selectors,
+priorities, and token-bucket parameters byte-for-byte consistent on every
+node. `scripts/traffic_policy_deployment_check.sh` compares both reference
+configs and fails if they drift.
+
+Redis quota keys use bounded idle TTLs and hashed ClientID components. If Redis
+cannot make an atomic decision, selected packets fail closed with
+`admission_unavailable`; the gateway never falls back to independent local
+quotas. Monitor the bundled Traffic Policy Redis Unavailable alert and
+diagnostics before shifting traffic.
+
+To roll back, restore both gateway configs together. Either return to the
+previous image/config or disable `traffic_policies` and re-enable
+`rate_limit`, then roll both nodes. No client packet, PostgreSQL, NSQ, or online
+route migration is required.
+
 ## TLS Edge Proxy
 
 The cluster Nginx overlay removes both plaintext gateway host ports, terminates
@@ -220,6 +253,12 @@ docker compose \
   -f deploy/production-cluster/docker-compose.yml \
   -f deploy/production-cluster/docker-compose.terminal-webhook-tls.yml \
   config
+```
+
+Validate the shared quota configuration and Helm local/Redis examples:
+
+```bash
+bash scripts/traffic_policy_deployment_check.sh
 ```
 
 Build and start the stack:

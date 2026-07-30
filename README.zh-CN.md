@@ -18,6 +18,7 @@ bytes，也就是一段不解析、不改写的字节。
 - 支持可靠下行：ACK、PostgreSQL 存储、重试、离线排队、重连补发。
 - 支持两节点/多节点思路：Redis 在线路由 + gateway peer push。
 - 支持静态 token、HTTP auth provider、JWT/JWKS 鉴权。
+- 支持命名 token bucket 流量策略：单节点有界 local Key，或多节点 Redis 共享额度。
 - 支持内部 HTTP token 或 HMAC 签名认证。
 - 提供 Go SDK、PHP SDK、后端 SDK、admin CLI、Prometheus 指标、
   Grafana dashboard、Alertmanager 示例。
@@ -102,6 +103,7 @@ Readiness:       http://127.0.0.1:18080/readyz
 - [Kubernetes / Helm 部署](docs/zh-CN/kubernetes-helm.md)
 - [管理和运维](docs/zh-CN/admin-ops.md)
 - [生产排障手册](docs/zh-CN/production-runbook.md)
+- [V16 发布验收指南](docs/zh-CN/v16-release.md)
 - [v0.10.0 发布复盘和使用说明](docs/zh-CN/v10-release-retrospective.md)
 
 ## 生产部署

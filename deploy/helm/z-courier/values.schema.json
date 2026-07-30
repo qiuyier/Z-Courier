@@ -358,8 +358,30 @@
             "maxRequests": { "$ref": "#/definitions/nonNegativeInteger" },
             "window": { "$ref": "#/definitions/duration" }
           }
+        },
+        "trafficPolicies": { "$ref": "#/definitions/trafficPolicies" }
+      },
+      "allOf": [
+        {
+          "not": {
+            "properties": {
+              "rateLimit": {
+                "properties": {
+                  "enabled": { "const": true }
+                },
+                "required": ["enabled"]
+              },
+              "trafficPolicies": {
+                "properties": {
+                  "enabled": { "const": true }
+                },
+                "required": ["enabled"]
+              }
+            },
+            "required": ["rateLimit", "trafficPolicies"]
+          }
         }
-      }
+      ]
     },
     "upstream": {
       "type": "object",
@@ -683,6 +705,160 @@
           "type": "array",
           "items": { "$ref": "#/definitions/nonNegativeInteger" }
         }
+      }
+    },
+    "trafficPolicies": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "mode",
+        "maxKeys",
+        "idleTTL",
+        "defaultPolicy",
+        "policies"
+      ],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "mode": {
+          "type": "string",
+          "enum": ["local", "redis"]
+        },
+        "maxKeys": { "$ref": "#/definitions/nonNegativeInteger" },
+        "idleTTL": { "$ref": "#/definitions/duration" },
+        "defaultPolicy": { "type": "string" },
+        "redis": { "$ref": "#/definitions/trafficPolicyRedis" },
+        "policies": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/trafficPolicy" }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "enabled": { "const": true }
+            },
+            "required": ["enabled"]
+          },
+          "then": {
+            "properties": {
+              "policies": { "minItems": 1 }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "mode": { "const": "redis" }
+            },
+            "required": ["mode"]
+          },
+          "then": {
+            "required": ["redis"]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "mode": { "const": "local" }
+            },
+            "required": ["mode"]
+          },
+          "then": {
+            "not": {
+              "required": ["redis"]
+            }
+          }
+        }
+      ]
+    },
+    "trafficPolicyRedis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "addr",
+        "username",
+        "passwordEnv",
+        "db",
+        "keyPrefix",
+        "dialTimeout",
+        "readTimeout",
+        "writeTimeout",
+        "operationTimeout",
+        "failureMode"
+      ],
+      "properties": {
+        "addr": { "type": "string", "minLength": 1 },
+        "username": { "type": "string" },
+        "passwordEnv": { "$ref": "#/definitions/envName" },
+        "db": { "$ref": "#/definitions/nonNegativeInteger" },
+        "keyPrefix": { "type": "string", "minLength": 1 },
+        "dialTimeout": { "$ref": "#/definitions/duration" },
+        "readTimeout": { "$ref": "#/definitions/duration" },
+        "writeTimeout": { "$ref": "#/definitions/duration" },
+        "operationTimeout": { "$ref": "#/definitions/duration" },
+        "failureMode": {
+          "type": "string",
+          "enum": ["fail_closed"]
+        }
+      }
+    },
+    "trafficPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "enabled",
+        "priority",
+        "match",
+        "key",
+        "tokenBucket"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+        },
+        "enabled": { "type": "boolean" },
+        "priority": { "$ref": "#/definitions/positiveInteger" },
+        "match": { "$ref": "#/definitions/trafficPolicyMatch" },
+        "key": {
+          "type": "string",
+          "enum": ["client_id"]
+        },
+        "tokenBucket": { "$ref": "#/definitions/trafficPolicyTokenBucket" }
+      }
+    },
+    "trafficPolicyMatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "clientIDs": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "msgIDMin": { "$ref": "#/definitions/positiveInteger" },
+        "msgIDMax": { "$ref": "#/definitions/positiveInteger" },
+        "routes": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      },
+      "dependencies": {
+        "msgIDMax": ["msgIDMin"]
+      }
+    },
+    "trafficPolicyTokenBucket": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["capacity", "refillTokens", "refillInterval"],
+      "properties": {
+        "capacity": { "$ref": "#/definitions/positiveInteger" },
+        "refillTokens": { "$ref": "#/definitions/positiveInteger" },
+        "refillInterval": { "$ref": "#/definitions/duration" }
       }
     },
     "probe": {

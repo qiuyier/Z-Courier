@@ -142,6 +142,7 @@ backend HMAC、peer HMAC 和终态 webhook HMAC 应该使用不同密钥。
 - Redis cluster registry：保存在线路由。
 - 静态服务发现 HTTP upstream：`MsgID 1001-1999`。
 - NSQ upstream：`MsgID 2000-2999`。
+- 单节点使用有界 local 流量策略；两节点使用 Redis 共享流量策略。
 - admin console 默认关闭。
 
 如果没有 `auth-backend` 服务，客户端 AUTH/BIND 会失败，这是预期行为。生产 token
@@ -152,6 +153,54 @@ HTTP upstream 默认列出 `business-backend-a:8080` 和
 请把两个服务加入同一个 `zcourier-private` 网络，或替换为真实私网地址。当前
 failover 最多尝试两个端点，并且只会在收到响应头之前发生传输失败时切换；已经收到
 的 `5xx` 不会自动重放。
+
+## 入站流量策略
+
+单节点生产参考关闭旧 `rate_limit`，启用进程内
+`production-client` token bucket：
+
+```yaml
+pipeline:
+  rate_limit:
+    enabled: false
+  traffic_policies:
+    enabled: true
+    mode: local
+    max_keys: 100000
+    idle_ttl: 10m
+```
+
+`max_keys` 限制高基数 ClientID 占用的进程内 bucket 数量，空闲 bucket 会在
+`idle_ttl` 后释放。示例中的 `1000` 容量和补充速率不是通用生产参数，必须根据
+真实突发流量、持续速率和 backend 容量重新评估。
+
+两节点参考的 gateway-a/gateway-b 使用完全相同的 Redis 模式：
+
+```yaml
+pipeline:
+  traffic_policies:
+    enabled: true
+    mode: redis
+    redis:
+      addr: redis:6379
+      key_prefix: zcourier:production-cluster:traffic-policy
+      failure_mode: fail_closed
+```
+
+这个额度由整个集群共享，不会按 gateway 数量相乘。所有节点必须保持 Redis
+database、Key 前缀、策略名、选择器、优先级和 bucket 参数一致。Redis 无法完成原子
+判断时会 fail closed，返回 `admission_unavailable`，不会回退成每个节点独立额度。
+
+静态验证部署配置：
+
+```bash
+bash scripts/traffic_policy_deployment_check.sh
+```
+
+上线时先灰度少量流量，对照 Console Diagnostics、Grafana 和 upstream 成功率。
+回滚只需同时恢复 gateway 配置，或关闭 `traffic_policies`、重新打开
+`rate_limit` 后滚动重启；客户端协议、PostgreSQL、NSQ 与 Redis 在线路由都不需要
+迁移。
 
 ## 可靠下行配置
 
@@ -274,6 +323,12 @@ bash scripts/discovery_deployment_check.sh
 
 脚本会执行 Helm schema 校验和渲染，抽取生成的 gateway 配置，验证错误组合会被
 拒绝，并用真实 gateway 配置加载器检查静态与 DNS 两种模式。
+
+验证单节点 local、集群 Redis 与 Helm 流量策略示例：
+
+```bash
+bash scripts/traffic_policy_deployment_check.sh
+```
 
 构建镜像：
 

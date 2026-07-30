@@ -227,6 +227,52 @@ It lints and renders both modes, rejects ambiguous values, extracts the
 generated gateway configs, and validates them through the gateway's real
 configuration loader.
 
+## Named Traffic Policies
+
+The chart defaults preserve the legacy fixed-window limiter:
+`pipeline.rateLimit.enabled=true` and
+`pipeline.trafficPolicies.enabled=false`. They cannot both be enabled.
+
+Use the bounded local token bucket for a standalone gateway:
+
+```bash
+helm lint deploy/helm/z-courier \
+  -f deploy/helm/z-courier/examples/values-traffic-policy-local.yaml
+```
+
+Use Redis when every replica must consume one shared quota:
+
+```bash
+helm lint deploy/helm/z-courier \
+  -f deploy/helm/z-courier/examples/values-traffic-policy-redis.yaml
+```
+
+Redis mode reads its password from `passwordEnv`; the generated ConfigMap
+contains only `${ZCOURIER_REDIS_PASSWORD}`, while the StatefulSet injects that
+environment variable from the chart Secret. Keep the Redis address, database,
+key prefix, policy names, selectors, priorities, and bucket parameters
+identical across all gateway replicas sharing a quota.
+
+The production values enable a Redis-backed `production-shared-client`
+starting point. Its `capacity` and refill rate are examples, not universal
+production defaults. Size them from measured ingress traffic and backend
+capacity, then canary the policy before a full rollout. Redis mode is
+fail-closed: an unavailable quota store rejects selected packets instead of
+silently creating independent per-Pod quotas.
+
+Validate the complete deployment contract after changing these values:
+
+```bash
+bash scripts/traffic_policy_deployment_check.sh
+```
+
+The verifier checks default compatibility, local and Redis rendering, invalid
+combinations, secret placeholders, identical production-cluster policy
+configuration, and each generated config through the real gateway loader.
+Rollback does not require a packet or database migration: restore the previous
+values, or disable `trafficPolicies` and re-enable `rateLimit`, then perform a
+normal rolling restart.
+
 ## Required Secrets
 
 By default, the chart references an existing secret. The default key names are:

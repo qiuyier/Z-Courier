@@ -1,0 +1,35 @@
+# One atomic ingress quota shared by every gateway replica.
+# The referenced Redis must be reachable before gateway Pods start.
+
+pipeline:
+  rateLimit:
+    enabled: false
+  trafficPolicies:
+    enabled: true
+    mode: redis
+    maxKeys: 100000
+    idleTTL: 10m
+    defaultPolicy: ""
+    redis:
+      addr: redis-master.z-courier.svc.cluster.local:6379
+      username: ""
+      passwordEnv: ZCOURIER_REDIS_PASSWORD
+      db: 0
+      keyPrefix: zcourier:production:traffic-policy
+      dialTimeout: 1s
+      readTimeout: 500ms
+      writeTimeout: 500ms
+      operationTimeout: 250ms
+      failureMode: fail_closed
+    policies:
+      - name: shared-standard
+        enabled: true
+        priority: 100
+        match:
+          msgIDMin: 1001
+          msgIDMax: 2999
+        key: client_id
+        tokenBucket:
+          capacity: 1000
+          refillTokens: 1000
+          refillInterval: 1s

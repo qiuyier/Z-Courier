@@ -111,6 +111,37 @@ downlink:
     retryLease: 30s
     scanLimit: 100
 
+pipeline:
+  rateLimit:
+    enabled: false
+  trafficPolicies:
+    enabled: true
+    mode: redis
+    maxKeys: 100000
+    idleTTL: 10m
+    defaultPolicy: ""
+    redis:
+      addr: redis-master.z-courier.svc.cluster.local:6379
+      username: ""
+      passwordEnv: ZCOURIER_REDIS_PASSWORD
+      db: 0
+      keyPrefix: zcourier:production-k8s:traffic-policy
+      dialTimeout: 1s
+      readTimeout: 500ms
+      writeTimeout: 500ms
+      operationTimeout: 250ms
+      failureMode: fail_closed
+    policies:
+      - name: production-shared-client
+        enabled: true
+        priority: 100
+        match: {}
+        key: client_id
+        tokenBucket:
+          capacity: 1000
+          refillTokens: 1000
+          refillInterval: 1s
+
 upstream:
   routes:
     - name: production-http-upstream

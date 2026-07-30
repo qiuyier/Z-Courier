@@ -141,8 +141,42 @@ prepare_config() {
   local destination="$2"
 
   sed \
-    "s/key_prefix: zcourier:e2e:traffic-policy/key_prefix: zcourier:e2e:traffic-policy:$RUN_ID/" \
+    -e "s/idle_ttl: 30s/idle_ttl: 2s/" \
+    -e "s/key_prefix: zcourier:e2e:traffic-policy/key_prefix: zcourier:e2e:traffic-policy:$RUN_ID/" \
     "$source" >"$destination"
+}
+
+verify_redis_key_expiration() {
+  local pattern="zcourier:e2e:traffic-policy:$RUN_ID:*"
+  local key
+  local ttl
+
+  key="$(
+    docker exec "$REDIS_CONTAINER" redis-cli --scan --pattern "$pattern" |
+      tr -d '\r'
+  )"
+  if [[ -z "$key" || "$key" == *$'\n'* ]]; then
+    echo "expected exactly one bounded Redis quota key, got: $key" >&2
+    return 1
+  fi
+
+  ttl="$(docker exec "$REDIS_CONTAINER" redis-cli pttl "$key" | tr -d '\r')"
+  if [[ ! "$ttl" =~ ^[0-9]+$ ]] || ((ttl <= 0 || ttl > 2000)); then
+    echo "Redis quota key PTTL = $ttl, want within (0, 2000] ms" >&2
+    return 1
+  fi
+
+  echo "waiting for Redis traffic policy key to expire..."
+  for attempt in $(seq 1 40); do
+    if [[ "$(docker exec "$REDIS_CONTAINER" redis-cli exists "$key" | tr -d '\r')" == "0" ]]; then
+      return 0
+    fi
+    if [[ "$attempt" == "40" ]]; then
+      echo "Redis traffic policy key did not expire after its idle TTL" >&2
+      return 1
+    fi
+    sleep 0.1
+  done
 }
 
 cd "$ROOT_DIR"
@@ -216,6 +250,7 @@ go run ./cmd/trafficpolicye2e \
   -timeout 15s
 
 check_gateways_alive
+verify_redis_key_expiration
 
 echo "checking Redis traffic policy admission metrics..."
 METRICS_A_URL="http://127.0.0.1:18211/metrics"

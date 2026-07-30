@@ -255,6 +255,51 @@ data:
         enabled: {{ .Values.pipeline.rateLimit.enabled }}
         max_requests: {{ .Values.pipeline.rateLimit.maxRequests }}
         window: {{ .Values.pipeline.rateLimit.window | quote }}
+      traffic_policies:
+        enabled: {{ .Values.pipeline.trafficPolicies.enabled }}
+        mode: {{ .Values.pipeline.trafficPolicies.mode | quote }}
+        max_keys: {{ .Values.pipeline.trafficPolicies.maxKeys }}
+        idle_ttl: {{ .Values.pipeline.trafficPolicies.idleTTL | quote }}
+        default_policy: {{ .Values.pipeline.trafficPolicies.defaultPolicy | quote }}
+        {{- if eq .Values.pipeline.trafficPolicies.mode "redis" }}
+        redis:
+          addr: {{ .Values.pipeline.trafficPolicies.redis.addr | quote }}
+          username: {{ .Values.pipeline.trafficPolicies.redis.username | quote }}
+          password: {{ printf "${%s}" .Values.pipeline.trafficPolicies.redis.passwordEnv | quote }}
+          db: {{ .Values.pipeline.trafficPolicies.redis.db }}
+          key_prefix: {{ .Values.pipeline.trafficPolicies.redis.keyPrefix | quote }}
+          dial_timeout: {{ .Values.pipeline.trafficPolicies.redis.dialTimeout | quote }}
+          read_timeout: {{ .Values.pipeline.trafficPolicies.redis.readTimeout | quote }}
+          write_timeout: {{ .Values.pipeline.trafficPolicies.redis.writeTimeout | quote }}
+          operation_timeout: {{ .Values.pipeline.trafficPolicies.redis.operationTimeout | quote }}
+          failure_mode: {{ .Values.pipeline.trafficPolicies.redis.failureMode | quote }}
+        {{- end }}
+        policies:
+        {{- if .Values.pipeline.trafficPolicies.policies }}
+          {{- range .Values.pipeline.trafficPolicies.policies }}
+          - name: {{ .name | quote }}
+            enabled: {{ .enabled }}
+            priority: {{ .priority }}
+            match:
+              client_ids:
+                {{- toYaml (default (list) .match.clientIDs) | nindent 16 }}
+              {{- with .match.msgIDMin }}
+              msg_id_min: {{ . }}
+              {{- end }}
+              {{- with .match.msgIDMax }}
+              msg_id_max: {{ . }}
+              {{- end }}
+              routes:
+                {{- toYaml (default (list) .match.routes) | nindent 16 }}
+            key: {{ .key | quote }}
+            token_bucket:
+              capacity: {{ .tokenBucket.capacity }}
+              refill_tokens: {{ .tokenBucket.refillTokens }}
+              refill_interval: {{ .tokenBucket.refillInterval | quote }}
+          {{- end }}
+        {{- else }}
+          []
+        {{- end }}
 
     upstream:
       routes:

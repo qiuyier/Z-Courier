@@ -124,6 +124,7 @@ jobs:
           bash scripts/helm_terminal_http_check.sh
           bash scripts/helm_hmac_rotation_check.sh
           bash scripts/discovery_deployment_check.sh
+          bash scripts/traffic_policy_deployment_check.sh
 
       - name: Package Helm chart
         run: |
@@ -256,6 +257,8 @@ jobs:
           docker run --rm z-courier-gateway:ci -h >/tmp/z-courier-gateway-help.txt 2>&1
           ZCOURIER_DISCOVERY_CHECK_IMAGE=z-courier-gateway:ci \
             bash scripts/discovery_deployment_check.sh
+          ZCOURIER_TRAFFIC_POLICY_CHECK_IMAGE=z-courier-gateway:ci \
+            bash scripts/traffic_policy_deployment_check.sh
 
   production-smoke:
     name: Production Smoke

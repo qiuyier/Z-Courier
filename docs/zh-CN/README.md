@@ -41,6 +41,7 @@ roadmap、历史版本文档仍保留在 `docs/` 根目录；这里主要放“�
 | [v0.10.0 发布复盘和使用说明](v10-release-retrospective.md) | 开发、运维、发布负责人 | 发布结果、产物、升级、控制台启用、验证、回滚 |
 | [V12 发布准备与升级回滚](v12-release.md) | 运维、DBA、发布负责人 | PostgreSQL 迁移、混跑边界、回滚与发布验收矩阵 |
 | [V15 发布验收指南](v15-release.md) | 运维、SRE、发布负责人 | HTTP static/DNS discovery、failover 边界、Kind 验收与发布步骤 |
+| [V16 发布验收指南](v16-release.md) | 运维、SRE、发布负责人 | 命名流量策略、local/Redis 配额、灰度、回滚与发布验收 |
 
 ## 版本说明
 

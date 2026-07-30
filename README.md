@@ -11,6 +11,8 @@ A high-performance message push gateway based on the `zinx` network framework.
 - Structured logging based on Zap
 - Pluggable static, remote HTTP, or local JWT/JWKS authentication with bounded
   verification caching, timeout, key rotation, and in-flight protection
+- Named ingress token-bucket policies with bounded local keys or one optional
+  Redis-backed quota shared across gateway nodes
 - Built-in HTTP upstream routing with static or refreshable DNS endpoint
   discovery and bounded transport failover, plus NSQ and adapter interfaces
   for gRPC, Kafka, NATS, and custom targets
@@ -141,7 +143,10 @@ changing the opaque client-message protocol. The release acceptance guides are
 V16 traffic-policy planning is tracked in
 [docs/v16-roadmap.md](docs/v16-roadmap.md). It defines bounded local admission,
 optional Redis-backed cluster quotas, explicit overload semantics, and
-operator-facing observability without inspecting business message bodies.
+operator-facing observability without inspecting business message bodies. The
+upgrade, rollback, and release acceptance guides are
+[docs/v16-release.md](docs/v16-release.md) and
+[docs/zh-CN/v16-release.md](docs/zh-CN/v16-release.md).
 
 ## Quick Start
 

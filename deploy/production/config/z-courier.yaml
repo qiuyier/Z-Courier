@@ -183,9 +183,25 @@ pipeline:
     client_ids: []
     msg_ids: []
   rate_limit:
-    enabled: true
+    enabled: false
     max_requests: 1000
     window: 1s
+  traffic_policies:
+    enabled: true
+    mode: local
+    max_keys: 100000
+    idle_ttl: 10m
+    default_policy: ""
+    policies:
+      - name: production-client
+        enabled: true
+        priority: 100
+        match: {}
+        key: client_id
+        token_bucket:
+          capacity: 1000
+          refill_tokens: 1000
+          refill_interval: 1s
 
 upstream:
   routes:

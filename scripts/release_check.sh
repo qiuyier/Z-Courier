@@ -186,6 +186,7 @@ run_docker_checks() {
   run bash scripts/promtool_check.sh
   run bash scripts/helm_terminal_http_check.sh
   run bash scripts/helm_hmac_rotation_check.sh
+  run bash scripts/traffic_policy_deployment_check.sh
 
   run_helm lint deploy/helm/z-courier
   run_helm lint deploy/helm/z-courier -f deploy/helm/z-courier/examples/values-production.yaml
@@ -200,6 +201,8 @@ run_docker_checks() {
     'test -x /usr/local/bin/z-courier-gateway && test -f /app/configs/z-courier.yaml && test -f /app/conf/zinx.json && test -f /app/web/admin/dist/index.html'
   run env ZCOURIER_DISCOVERY_CHECK_IMAGE=z-courier-gateway:release-check \
     bash scripts/discovery_deployment_check.sh
+  run env ZCOURIER_TRAFFIC_POLICY_CHECK_IMAGE=z-courier-gateway:release-check \
+    bash scripts/traffic_policy_deployment_check.sh
 }
 
 run_slow_checks() {

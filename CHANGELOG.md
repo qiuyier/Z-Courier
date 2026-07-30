@@ -54,6 +54,12 @@ semantic versioning after the first public MVP tag.
   capacity, overload, and high rate-limited ratios, promtool behavior tests,
   a synchronized Helm PrometheusRule example, and bilingual tuning, canary,
   outage, and rollback guidance.
+- V16.5 production delivery closure with complete Helm traffic-policy values,
+  strict schema and local/Redis examples, bounded-local single-node and
+  Redis-shared cluster Compose references, deterministic source/built-image
+  deployment validation, CI and release-check integration, real Redis
+  quota-key expiration evidence, and bilingual upgrade, rollback, and release
+  acceptance guidance.
 - Bilingual English/Chinese titles and operator-facing legend prefixes across
   the bundled overview and production-signal Grafana dashboards, without
   changing panel IDs, PromQL, thresholds, units, or alert behavior.
