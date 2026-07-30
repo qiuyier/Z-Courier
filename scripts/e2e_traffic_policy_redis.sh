@@ -236,4 +236,40 @@ assert_metric_series "$METRICS_B_URL" \
   z_courier_traffic_policy_quota_store_duration_seconds_count \
   'mode="redis"' 'result="allowed"'
 
+echo "checking Redis traffic policy diagnostics..."
+DIAGNOSTICS_A="$(
+  curl -fsS \
+    -H 'X-ZCourier-Internal-Token: traffic-policy-redis-internal-token' \
+    http://127.0.0.1:18211/internal/admin/diagnostics
+)"
+DIAGNOSTICS_B="$(
+  curl -fsS \
+    -H 'X-ZCourier-Internal-Token: traffic-policy-redis-internal-token' \
+    http://127.0.0.1:18213/internal/admin/diagnostics
+)"
+jq -e '
+  .traffic_policy.enabled == true and
+  .traffic_policy.mode == "redis" and
+  .traffic_policy.store_status == "unavailable" and
+  .traffic_policy.failure_mode == "fail_closed" and
+  .traffic_policy.decisions.admission_unavailable >= 1 and
+  .traffic_policy.last_result == "admission_unavailable" and
+  any(.dependencies[]; .name == "traffic_policy_store" and .status == "unavailable") and
+  any(.warnings[]; .code == "traffic_policy_store_unavailable")
+' <<<"$DIAGNOSTICS_A" >/dev/null
+jq -e '
+  .traffic_policy.enabled == true and
+  .traffic_policy.mode == "redis" and
+  .traffic_policy.store_status == "configured" and
+  .traffic_policy.decisions.allowed >= 1 and
+  .traffic_policy.decisions.rate_limited >= 1 and
+  .traffic_policy.last_result == "allowed" and
+  any(.dependencies[]; .name == "traffic_policy_store" and .status == "configured")
+' <<<"$DIAGNOSTICS_B" >/dev/null
+if [[ "$DIAGNOSTICS_A$DIAGNOSTICS_B" == *"127.0.0.1:16389"* ]] ||
+  [[ "$DIAGNOSTICS_A$DIAGNOSTICS_B" == *"zcourier:e2e:traffic-policy"* ]]; then
+  echo "Redis traffic policy diagnostics leaked Redis connection details" >&2
+  exit 1
+fi
+
 echo "Redis traffic policy e2e passed"

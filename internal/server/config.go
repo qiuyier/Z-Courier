@@ -40,6 +40,7 @@ type Config struct {
 	UpstreamRoutes             []UpstreamRouteConfig
 	UpstreamRuntime            *UpstreamRuntime
 	Pipeline                   pipeline.Config
+	TrafficPolicyRuntime       *pipeline.TrafficPolicyRuntime
 	DownlinkStore              downlink.Store
 	DownlinkStorage            DownlinkStorageConfig
 	DownlinkDelivery           DownlinkDeliveryConfig

@@ -12,6 +12,7 @@ import (
 	"github.com/qiuyier/Z-Courier/internal/auth"
 	"github.com/qiuyier/Z-Courier/internal/cluster"
 	"github.com/qiuyier/Z-Courier/internal/downlink"
+	"github.com/qiuyier/Z-Courier/internal/pipeline"
 	"github.com/qiuyier/Z-Courier/internal/resilience"
 )
 
@@ -128,20 +129,21 @@ type adminUpstreamSummary struct {
 }
 
 type adminDiagnosticsResponse struct {
-	Code         string                   `json:"code"`
-	GatewayNode  string                   `json:"gateway_node"`
-	Runtime      adminRuntimeDiagnostics  `json:"runtime"`
-	Readiness    adminReadiness           `json:"readiness"`
-	Sessions     adminSessionSummary      `json:"sessions"`
-	Auth         adminAuthDiagnostics     `json:"auth"`
-	InternalHTTP adminInternalHTTPSummary `json:"internal_http"`
-	AdminConsole adminConsoleSummary      `json:"admin_console"`
-	Cluster      adminClusterSummary      `json:"cluster"`
-	Downlink     adminDownlinkSummary     `json:"downlink"`
-	Upstream     adminUpstreamDiagnostics `json:"upstream"`
-	Capacity     adminCapacityDiagnostics `json:"capacity"`
-	Dependencies []adminDependency        `json:"dependencies"`
-	Warnings     []adminDiagnosticWarning `json:"warnings,omitempty"`
+	Code          string                        `json:"code"`
+	GatewayNode   string                        `json:"gateway_node"`
+	Runtime       adminRuntimeDiagnostics       `json:"runtime"`
+	Readiness     adminReadiness                `json:"readiness"`
+	Sessions      adminSessionSummary           `json:"sessions"`
+	Auth          adminAuthDiagnostics          `json:"auth"`
+	InternalHTTP  adminInternalHTTPSummary      `json:"internal_http"`
+	AdminConsole  adminConsoleSummary           `json:"admin_console"`
+	Cluster       adminClusterSummary           `json:"cluster"`
+	Downlink      adminDownlinkSummary          `json:"downlink"`
+	Upstream      adminUpstreamDiagnostics      `json:"upstream"`
+	Capacity      adminCapacityDiagnostics      `json:"capacity"`
+	TrafficPolicy adminTrafficPolicyDiagnostics `json:"traffic_policy"`
+	Dependencies  []adminDependency             `json:"dependencies"`
+	Warnings      []adminDiagnosticWarning      `json:"warnings,omitempty"`
 }
 
 type adminRuntimeDiagnostics struct {
@@ -202,6 +204,54 @@ type adminCapacityDiagnostics struct {
 	RateLimitEnabled        bool   `json:"rate_limit_enabled"`
 	RateLimitMaxRequests    int    `json:"rate_limit_max_requests,omitempty"`
 	RateLimitWindow         string `json:"rate_limit_window,omitempty"`
+}
+
+type adminTrafficPolicyDiagnostics struct {
+	Enabled           bool                                  `json:"enabled"`
+	Mode              string                                `json:"mode,omitempty"`
+	StoreStatus       string                                `json:"store_status"`
+	PolicyCount       int                                   `json:"policy_count"`
+	PolicyNames       []string                              `json:"policy_names"`
+	DefaultPolicy     string                                `json:"default_policy,omitempty"`
+	KeyScope          string                                `json:"key_scope,omitempty"`
+	IdleTTL           string                                `json:"idle_ttl,omitempty"`
+	FailureMode       string                                `json:"failure_mode,omitempty"`
+	NoMatchTotal      uint64                                `json:"no_match_total"`
+	Decisions         adminTrafficPolicyDecisionTotals      `json:"decisions"`
+	LastResult        string                                `json:"last_result,omitempty"`
+	LastState         string                                `json:"last_state,omitempty"`
+	LastDecisionAt    *time.Time                            `json:"last_decision_at,omitempty"`
+	LastSuccessAt     *time.Time                            `json:"last_success_at,omitempty"`
+	LastUnavailableAt *time.Time                            `json:"last_unavailable_at,omitempty"`
+	Local             *adminTrafficPolicyLocalDiagnostics   `json:"local,omitempty"`
+	Policies          []adminTrafficPolicyPolicyDiagnostics `json:"policies,omitempty"`
+}
+
+type adminTrafficPolicyDecisionTotals struct {
+	Allowed              uint64 `json:"allowed"`
+	RateLimited          uint64 `json:"rate_limited"`
+	Overloaded           uint64 `json:"overloaded"`
+	AdmissionUnavailable uint64 `json:"admission_unavailable"`
+}
+
+type adminTrafficPolicyLocalDiagnostics struct {
+	LiveKeys    int     `json:"live_keys"`
+	MaxKeys     int     `json:"max_keys"`
+	Utilization float64 `json:"utilization"`
+}
+
+type adminTrafficPolicyPolicyDiagnostics struct {
+	Name           string                           `json:"name"`
+	Priority       int                              `json:"priority"`
+	KeyScope       string                           `json:"key_scope"`
+	Capacity       int                              `json:"capacity"`
+	RefillTokens   int                              `json:"refill_tokens"`
+	RefillInterval string                           `json:"refill_interval"`
+	SelectionTotal uint64                           `json:"selection_total"`
+	Decisions      adminTrafficPolicyDecisionTotals `json:"decisions"`
+	LastResult     string                           `json:"last_result,omitempty"`
+	LastState      string                           `json:"last_state,omitempty"`
+	LastDecisionAt *time.Time                       `json:"last_decision_at,omitempty"`
 }
 
 type adminDiagnosticWarning struct {
@@ -361,21 +411,23 @@ func (h *adminDiagnosticsHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 
 	config := h.config.config
 	now := time.Now()
+	trafficPolicy := adminTrafficPolicyFromConfig(config)
 	resp := adminDiagnosticsResponse{
-		Code:         "ok",
-		GatewayNode:  h.config.gatewayNode,
-		Runtime:      adminRuntimeFromRuntime(h.runtime, now),
-		Readiness:    adminReadinessFromHealth(h.config.health, now),
-		Sessions:     adminSessionsFromConfig(config),
-		Auth:         adminAuthFromConfig(config),
-		InternalHTTP: adminInternalHTTPFromConfig(config),
-		AdminConsole: adminConsoleFromConfig(config),
-		Cluster:      adminClusterFromConfig(config),
-		Downlink:     adminDownlinkFromConfig(config),
-		Upstream:     adminUpstreamDiagnosticsFromConfig(config),
-		Capacity:     adminCapacityFromConfig(config),
-		Dependencies: adminDiagnosticDependencies(config, h.config.registry, h.config.clusterEnabled, h.downlinkHasStore),
-		Warnings:     adminDiagnosticWarnings(config, h.config.registry, h.downlinkHasStore),
+		Code:          "ok",
+		GatewayNode:   h.config.gatewayNode,
+		Runtime:       adminRuntimeFromRuntime(h.runtime, now),
+		Readiness:     adminReadinessFromHealth(h.config.health, now),
+		Sessions:      adminSessionsFromConfig(config),
+		Auth:          adminAuthFromConfig(config),
+		InternalHTTP:  adminInternalHTTPFromConfig(config),
+		AdminConsole:  adminConsoleFromConfig(config),
+		Cluster:       adminClusterFromConfig(config),
+		Downlink:      adminDownlinkFromConfig(config),
+		Upstream:      adminUpstreamDiagnosticsFromConfig(config),
+		Capacity:      adminCapacityFromConfig(config),
+		TrafficPolicy: trafficPolicy,
+		Dependencies:  adminDiagnosticDependencies(config, h.config.registry, h.config.clusterEnabled, h.downlinkHasStore, trafficPolicy),
+		Warnings:      adminDiagnosticWarnings(config, h.config.registry, h.downlinkHasStore, trafficPolicy),
 	}
 	writeAdminJSON(w, http.StatusOK, resp)
 }
@@ -524,7 +576,13 @@ func adminDependencies(config Config, registry cluster.OnlineRegistry, clusterEn
 	return append(dependencies, clusterStatus)
 }
 
-func adminDiagnosticDependencies(config Config, registry cluster.OnlineRegistry, clusterEnabled bool, downlinkHasStore bool) []adminDependency {
+func adminDiagnosticDependencies(
+	config Config,
+	registry cluster.OnlineRegistry,
+	clusterEnabled bool,
+	downlinkHasStore bool,
+	trafficPolicy adminTrafficPolicyDiagnostics,
+) []adminDependency {
 	dependencies := []adminDependency{
 		{Name: "auth_verifier", Status: "configured", Reason: auth.ProviderName(config.Verifier)},
 		{Name: "downlink_store", Status: "configured", Reason: config.DownlinkStorage.Type},
@@ -586,7 +644,31 @@ func adminDiagnosticDependencies(config Config, registry cluster.OnlineRegistry,
 		dependencies[6].Status = "configured"
 		dependencies[6].Reason = "configured routes: " + intString(upstream.NSQRoutes)
 	}
-	return dependencies
+	return append(dependencies, adminTrafficPolicyDependency(trafficPolicy))
+}
+
+func adminTrafficPolicyDependency(trafficPolicy adminTrafficPolicyDiagnostics) adminDependency {
+	dependency := adminDependency{
+		Name:   "traffic_policy_store",
+		Status: trafficPolicy.StoreStatus,
+		Reason: trafficPolicy.Mode,
+	}
+	switch trafficPolicy.StoreStatus {
+	case "disabled":
+		dependency.Reason = ""
+	case "not_configured":
+		dependency.Reason = "traffic policy runtime is not attached"
+	case "degraded":
+		if trafficPolicy.Local != nil {
+			dependency.Reason = "local keys: " +
+				intString(trafficPolicy.Local.LiveKeys) +
+				"/" +
+				intString(trafficPolicy.Local.MaxKeys)
+		}
+	case "unavailable":
+		dependency.Reason = "last admission decision: admission_unavailable"
+	}
+	return dependency
 }
 
 func adminStorageType(raw string) string {
@@ -690,7 +772,124 @@ func adminCapacityFromConfig(config Config) adminCapacityDiagnostics {
 	}
 }
 
-func adminDiagnosticWarnings(config Config, registry cluster.OnlineRegistry, downlinkHasStore bool) []adminDiagnosticWarning {
+func adminTrafficPolicyFromConfig(config Config) adminTrafficPolicyDiagnostics {
+	trafficConfig := config.Pipeline.TrafficPolicies
+	out := adminTrafficPolicyDiagnostics{
+		Enabled:     trafficConfig.Enabled,
+		StoreStatus: "disabled",
+		PolicyCount: len(trafficConfig.Policies),
+		PolicyNames: make([]string, 0, len(trafficConfig.Policies)),
+	}
+	if !trafficConfig.Enabled {
+		return out
+	}
+
+	out.Mode = normalizedAdminTrafficPolicyMode(trafficConfig.Mode)
+	out.StoreStatus = "not_configured"
+	out.DefaultPolicy = trafficConfig.DefaultPolicy
+	out.IdleTTL = durationString(trafficConfig.IdleTTL)
+	if out.Mode == pipeline.TrafficPolicyModeRedis {
+		out.FailureMode = trafficConfig.Redis.FailureMode
+	}
+
+	var snapshot pipeline.TrafficPolicyRuntimeSnapshot
+	runtimeAttached := config.TrafficPolicyRuntime != nil
+	if runtimeAttached {
+		snapshot = config.TrafficPolicyRuntime.Snapshot()
+		out.StoreStatus = "configured"
+		out.NoMatchTotal = snapshot.NoMatchTotal
+		out.Decisions = adminTrafficPolicyDecisionTotalsFromSnapshot(snapshot.Decisions)
+		out.LastResult = string(snapshot.LastResult)
+		out.LastState = snapshot.LastState
+		out.LastDecisionAt = optionalAdminTime(snapshot.LastDecisionAt)
+		out.LastSuccessAt = optionalAdminTime(snapshot.LastSuccessAt)
+		out.LastUnavailableAt = optionalAdminTime(snapshot.LastUnavailableAt)
+		if snapshot.LastResult == pipeline.QuotaDecisionAdmissionUnavailable {
+			out.StoreStatus = "unavailable"
+		}
+	}
+
+	if out.Mode == pipeline.TrafficPolicyModeLocal {
+		liveKeys := snapshot.LocalKeys
+		maxKeys := trafficConfig.MaxKeys
+		if runtimeAttached && snapshot.LocalKeyLimit > 0 {
+			maxKeys = snapshot.LocalKeyLimit
+		}
+		out.Local = &adminTrafficPolicyLocalDiagnostics{
+			LiveKeys:    liveKeys,
+			MaxKeys:     maxKeys,
+			Utilization: trafficPolicyKeyUtilization(liveKeys, maxKeys),
+		}
+		if out.StoreStatus == "configured" && out.Local.Utilization >= 0.8 {
+			out.StoreStatus = "degraded"
+		}
+	}
+
+	runtimePolicies := make(map[string]pipeline.TrafficPolicyRuntimePolicySnapshot, len(snapshot.Policies))
+	for _, policy := range snapshot.Policies {
+		runtimePolicies[policy.Name] = policy
+	}
+	out.Policies = make([]adminTrafficPolicyPolicyDiagnostics, 0, len(trafficConfig.Policies))
+	for _, configured := range trafficConfig.Policies {
+		if out.KeyScope == "" {
+			out.KeyScope = configured.Key
+		} else if out.KeyScope != configured.Key {
+			out.KeyScope = "mixed"
+		}
+		out.PolicyNames = append(out.PolicyNames, configured.Name)
+		runtime := runtimePolicies[configured.Name]
+		out.Policies = append(out.Policies, adminTrafficPolicyPolicyDiagnostics{
+			Name:           configured.Name,
+			Priority:       configured.Priority,
+			KeyScope:       configured.Key,
+			Capacity:       configured.TokenBucket.Capacity,
+			RefillTokens:   configured.TokenBucket.RefillTokens,
+			RefillInterval: durationString(configured.TokenBucket.RefillInterval),
+			SelectionTotal: runtime.SelectionTotal,
+			Decisions:      adminTrafficPolicyDecisionTotalsFromSnapshot(runtime.Decisions),
+			LastResult:     string(runtime.LastResult),
+			LastState:      runtime.LastState,
+			LastDecisionAt: optionalAdminTime(runtime.LastDecisionAt),
+		})
+	}
+	return out
+}
+
+func normalizedAdminTrafficPolicyMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "", pipeline.TrafficPolicyModeLocal:
+		return pipeline.TrafficPolicyModeLocal
+	case pipeline.TrafficPolicyModeRedis:
+		return pipeline.TrafficPolicyModeRedis
+	default:
+		return "unknown"
+	}
+}
+
+func adminTrafficPolicyDecisionTotalsFromSnapshot(
+	totals pipeline.TrafficPolicyDecisionTotals,
+) adminTrafficPolicyDecisionTotals {
+	return adminTrafficPolicyDecisionTotals{
+		Allowed:              totals.Allowed,
+		RateLimited:          totals.RateLimited,
+		Overloaded:           totals.Overloaded,
+		AdmissionUnavailable: totals.AdmissionUnavailable,
+	}
+}
+
+func trafficPolicyKeyUtilization(keys, limit int) float64 {
+	if keys <= 0 || limit <= 0 {
+		return 0
+	}
+	return min(float64(keys)/float64(limit), 1)
+}
+
+func adminDiagnosticWarnings(
+	config Config,
+	registry cluster.OnlineRegistry,
+	downlinkHasStore bool,
+	trafficPolicy adminTrafficPolicyDiagnostics,
+) []adminDiagnosticWarning {
 	warnings := make([]adminDiagnosticWarning, 0)
 	if auth.ProviderName(config.Verifier) == auth.ProviderStatic {
 		warnings = append(warnings, adminDiagnosticWarning{
@@ -734,6 +933,33 @@ func adminDiagnosticWarnings(config Config, registry cluster.OnlineRegistry, dow
 		warnings = append(warnings, adminDiagnosticWarning{
 			Code:    "token_auth_on_wildcard_internal_http",
 			Message: "internal HTTP listens on all interfaces with token auth; prefer HMAC or a private network boundary",
+		})
+	}
+	if trafficPolicy.Enabled && trafficPolicy.Mode == pipeline.TrafficPolicyModeLocal && config.Cluster.Enabled {
+		warnings = append(warnings, adminDiagnosticWarning{
+			Code:    "node_local_traffic_policy_store",
+			Message: "traffic policy quotas are process-local; use redis mode when limits must hold across gateway nodes",
+		})
+	}
+	if trafficPolicy.StoreStatus == "not_configured" {
+		warnings = append(warnings, adminDiagnosticWarning{
+			Code:    "traffic_policy_runtime_not_attached",
+			Message: "traffic policies are enabled but their runtime state is not attached to diagnostics",
+		})
+	}
+	if trafficPolicy.StoreStatus == "unavailable" {
+		warnings = append(warnings, adminDiagnosticWarning{
+			Code:    "traffic_policy_store_unavailable",
+			Message: "the latest traffic policy admission could not obtain a safe quota-store decision",
+		})
+	}
+	if trafficPolicy.Local != nil && trafficPolicy.Local.MaxKeys > 0 && trafficPolicy.Local.Utilization >= 0.8 {
+		warnings = append(warnings, adminDiagnosticWarning{
+			Code: "traffic_policy_local_key_capacity_high",
+			Message: "traffic policy local key usage is " +
+				intString(trafficPolicy.Local.LiveKeys) +
+				"/" +
+				intString(trafficPolicy.Local.MaxKeys),
 		})
 	}
 	return warnings

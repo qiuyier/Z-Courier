@@ -129,3 +129,35 @@ assert_metric_series "$METRICS_URL" \
 assert_metric_series "$METRICS_URL" \
   z_courier_traffic_policy_local_key_limit \
   'mode="local"' '} 2'
+
+echo "checking traffic policy diagnostics..."
+DIAGNOSTICS="$(
+  curl -fsS \
+    -H 'X-ZCourier-Internal-Token: traffic-policy-internal-token' \
+    http://127.0.0.1:18201/internal/admin/diagnostics
+)"
+jq -e '
+  .traffic_policy.enabled == true and
+  .traffic_policy.mode == "local" and
+  .traffic_policy.store_status == "configured" and
+  .traffic_policy.policy_count == 2 and
+  .traffic_policy.key_scope == "client_id" and
+  .traffic_policy.no_match_total >= 1 and
+  .traffic_policy.decisions.allowed >= 1 and
+  .traffic_policy.decisions.rate_limited >= 1 and
+  .traffic_policy.decisions.overloaded >= 1 and
+  .traffic_policy.local.live_keys == 1 and
+  .traffic_policy.local.max_keys == 2 and
+  .traffic_policy.local.utilization == 0.5 and
+  any(.dependencies[]; .name == "traffic_policy_store" and .status == "configured")
+' <<<"$DIAGNOSTICS" >/dev/null
+
+DIAGNOSE="$(
+  curl -fsS \
+    -H 'X-ZCourier-Internal-Token: traffic-policy-internal-token' \
+    http://127.0.0.1:18201/internal/admin/diagnose
+)"
+jq -e '
+  .sections.diagnostics.body.traffic_policy.mode == "local" and
+  .sections.diagnostics.body.traffic_policy.local.live_keys == 1
+' <<<"$DIAGNOSE" >/dev/null

@@ -87,6 +87,9 @@ func New(config Config, logger *zap.Logger) (*Gateway, error) {
 		closeWithLog(authVerifierCloser, logger, "authentication verifier")
 		return nil, err
 	}
+	if trafficPolicyHandler != nil {
+		config.TrafficPolicyRuntime = trafficPolicyHandler.Runtime()
+	}
 	config.UpstreamRuntime = newUpstreamRuntime(config.UpstreamRoutes)
 	upstream, err := newUpstreamEngine(config)
 	if err != nil {

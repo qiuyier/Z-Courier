@@ -14,6 +14,7 @@ type LocalQuotaStoreConfig struct {
 	MaxKeys int
 	IdleTTL time.Duration
 	Now     func() time.Time
+	Runtime *TrafficPolicyRuntime
 }
 
 type LocalQuotaStore struct {
@@ -24,6 +25,7 @@ type LocalQuotaStore struct {
 	mu      sync.Mutex
 	buckets map[localQuotaKey]*localQuotaBucket
 	lru     *list.List
+	runtime *TrafficPolicyRuntime
 }
 
 type localQuotaKey struct {
@@ -50,9 +52,11 @@ func NewLocalQuotaStore(config LocalQuotaStoreConfig) *LocalQuotaStore {
 		now:     now,
 		buckets: make(map[localQuotaKey]*localQuotaBucket),
 		lru:     list.New(),
+		runtime: config.Runtime,
 	}
 	metrics.SetTrafficPolicyLocalKeyLimit(config.MaxKeys)
 	metrics.SetTrafficPolicyLocalKeys(0)
+	store.runtime.setLocalKeyState(0, config.MaxKeys)
 	return store
 }
 
@@ -86,7 +90,9 @@ func (s *LocalQuotaStore) Admit(ctx context.Context, request QuotaRequest) (Quot
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	defer func() {
-		metrics.SetTrafficPolicyLocalKeys(len(s.buckets))
+		count := len(s.buckets)
+		metrics.SetTrafficPolicyLocalKeys(count)
+		s.runtime.setLocalKeyState(count, s.maxKeys)
 	}()
 
 	s.removeIdleBuckets(now)

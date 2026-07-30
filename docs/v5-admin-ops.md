@@ -202,6 +202,22 @@ URLs, tokens, raw network errors, or message bodies. A diagnosis bundle embeds
 the same sanitized diagnostics response; its separate `routes` section retains
 the existing sanitized route-configuration fields.
 
+Enabled named traffic policies add a `traffic_policy` snapshot:
+
+- `store_status` derives `configured`, `degraded`, or `unavailable` from the
+  latest process-local admission evidence. It is not an active Redis probe.
+- aggregate `no_match_total` and `decisions` counters, plus recent
+  result/state timestamps, reset when the process restarts;
+- local mode reports current live keys, the configured limit, and utilization;
+- each configured policy reports its static bucket shape and bounded aggregate
+  outcomes, but not selector ClientIDs.
+
+The dependency list includes `traffic_policy_store`, and warnings call out
+node-local cluster quotas, missing runtime state, a latest unavailable
+decision, or local key utilization at or above 80%. Diagnosis bundles contain
+the same data at `sections.diagnostics.body.traffic_policy`. Redis addresses,
+credentials, key prefixes and quota keys are excluded.
+
 ### `GET /internal/admin/check`
 
 Actively checks configured runtime dependencies for one gateway process. This

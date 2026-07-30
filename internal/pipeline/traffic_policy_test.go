@@ -104,6 +104,10 @@ func TestTrafficPolicyHandlerNoMatchDoesNotCreateBucket(t *testing.T) {
 	if store.calls != 0 {
 		t.Fatalf("quota store calls = %d, want 0", store.calls)
 	}
+	snapshot := handler.Runtime().Snapshot()
+	if snapshot.NoMatchTotal != 1 || snapshot.Decisions != (TrafficPolicyDecisionTotals{}) {
+		t.Fatalf("runtime snapshot = %+v, want one no-match selection", snapshot)
+	}
 }
 
 func TestTrafficPolicyHandlerDelegatesSelectedPolicy(t *testing.T) {
@@ -234,6 +238,16 @@ func TestNewTrafficPolicyHandlerUsesLocalStore(t *testing.T) {
 		t.Fatalf("Handle() first error = %v", err)
 	}
 	assertTrafficPolicyReason(t, handler.Handle(ctx), resilience.ReasonRateLimited)
+
+	snapshot := handler.Runtime().Snapshot()
+	if snapshot.Mode != TrafficPolicyModeLocal ||
+		snapshot.LocalKeys != 1 ||
+		snapshot.LocalKeyLimit != config.MaxKeys ||
+		snapshot.Decisions.Allowed != 1 ||
+		snapshot.Decisions.RateLimited != 1 ||
+		snapshot.LastState != TrafficPolicyBucketStateDepleted {
+		t.Fatalf("local runtime snapshot = %+v", snapshot)
+	}
 }
 
 func TestNewTrafficPolicyHandlerDisabled(t *testing.T) {

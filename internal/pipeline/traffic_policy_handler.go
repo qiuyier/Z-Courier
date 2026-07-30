@@ -13,20 +13,23 @@ type TrafficPolicyHandler struct {
 	selector *TrafficPolicySelector
 	store    QuotaStore
 	mode     string
+	runtime  *TrafficPolicyRuntime
 }
 
 func NewTrafficPolicyHandler(config TrafficPoliciesConfig) *TrafficPolicyHandler {
 	if !config.Enabled {
 		return nil
 	}
+	runtime := newTrafficPolicyRuntime(config, nil)
 	var store QuotaStore
 	if config.Mode == TrafficPolicyModeLocal {
 		store = NewLocalQuotaStore(LocalQuotaStoreConfig{
 			MaxKeys: config.MaxKeys,
 			IdleTTL: config.IdleTTL,
+			Runtime: runtime,
 		})
 	}
-	return NewTrafficPolicyHandlerWithStore(config, store)
+	return newTrafficPolicyHandlerWithRuntime(config, store, runtime)
 }
 
 func NewTrafficPolicyHandlerWithStore(
@@ -36,11 +39,31 @@ func NewTrafficPolicyHandlerWithStore(
 	if !config.Enabled {
 		return nil
 	}
+	return newTrafficPolicyHandlerWithRuntime(
+		config,
+		store,
+		newTrafficPolicyRuntime(config, nil),
+	)
+}
+
+func newTrafficPolicyHandlerWithRuntime(
+	config TrafficPoliciesConfig,
+	store QuotaStore,
+	runtime *TrafficPolicyRuntime,
+) *TrafficPolicyHandler {
 	return &TrafficPolicyHandler{
 		selector: NewTrafficPolicySelector(config),
 		store:    store,
 		mode:     normalizedTrafficPolicyMode(config.Mode),
+		runtime:  runtime,
 	}
+}
+
+func (h *TrafficPolicyHandler) Runtime() *TrafficPolicyRuntime {
+	if h == nil {
+		return nil
+	}
+	return h.runtime
 }
 
 func (h *TrafficPolicyHandler) Handle(ctx *Context) error {
@@ -60,9 +83,11 @@ func (h *TrafficPolicyHandler) Handle(ctx *Context) error {
 	policy, selected := h.selector.Select(ctx.Principal.ClientID, ctx.Packet.MsgID)
 	if !selected {
 		metrics.RecordTrafficPolicySelection(h.mode, "", "no_match")
+		h.runtime.recordNoMatch()
 		return nil
 	}
 	metrics.RecordTrafficPolicySelection(h.mode, policy.Name, "selected")
+	h.runtime.recordSelection(policy.Name)
 	if policy.Key != TrafficPolicyKeyClientID ||
 		policy.TokenBucket.Capacity <= 0 ||
 		policy.TokenBucket.RefillTokens <= 0 ||
@@ -80,14 +105,7 @@ func (h *TrafficPolicyHandler) Handle(ctx *Context) error {
 	if err != nil {
 		decision = QuotaDecisionAdmissionUnavailable
 	}
-	switch decision {
-	case QuotaDecisionAllowed,
-		QuotaDecisionRateLimited,
-		QuotaDecisionOverloaded,
-		QuotaDecisionAdmissionUnavailable:
-	default:
-		decision = QuotaDecisionAdmissionUnavailable
-	}
+	decision = normalizedQuotaDecision(decision)
 	metrics.RecordTrafficPolicyQuotaStore(
 		h.mode,
 		policy.Name,
@@ -95,6 +113,7 @@ func (h *TrafficPolicyHandler) Handle(ctx *Context) error {
 		string(decision),
 		time.Since(startedAt),
 	)
+	h.runtime.recordDecision(policy.Name, decision)
 	if decision == QuotaDecisionAllowed {
 		return nil
 	}

@@ -1011,6 +1011,32 @@ enumerations; `policy` comes only from the validated static policy
 configuration. ClientID, DeviceID, token, Redis key, packet body, raw error,
 and endpoint address are never metric labels.
 
+Traffic-policy runtime state is also available in
+`GET /internal/admin/diagnostics` under `traffic_policy`. The same sanitized
+snapshot is included in a diagnosis bundle at
+`sections.diagnostics.body.traffic_policy`.
+
+- `store_status` is `disabled`, `not_configured`, `configured`, `degraded`, or
+  `unavailable`. Local mode becomes `degraded` when live-key utilization is at
+  least 80%. Redis mode becomes `unavailable` when the latest observed
+  admission returned `admission_unavailable`, and returns to `configured`
+  after a later safe decision.
+- `no_match_total` and `decisions` are process-lifetime aggregate counters.
+  `last_result`, `last_state`, and the bounded timestamps describe the latest
+  observed decision, not a new dependency probe.
+- `local` reports live keys, the configured limit, and utilization. `policies`
+  reports static bucket parameters plus bounded aggregate selection and
+  decision state for each configured policy.
+- The dependency list contains `traffic_policy_store`. Warnings identify
+  node-local quotas in a cluster, a missing runtime attachment, a latest
+  unavailable decision, or local key utilization at or above 80%.
+
+Reading diagnostics never sends a Redis command and does not prove that Redis
+is currently reachable. Counters and timestamps reset when the gateway process
+restarts. The snapshot omits selector ClientIDs, Redis connection settings,
+credentials, key prefixes, quota keys, packet bodies, and raw errors. Policy
+names are operator-visible static identifiers and must not contain secrets.
+
 `default_policy` is a true fallback. It can therefore apply to AUTH/BIND,
 downlink ACK, and other protocol packets that do not match an upstream route.
 To limit only business upstream traffic, omit `default_policy` and use MsgID or
@@ -1032,8 +1058,9 @@ The Docker-free verifier proves burst exhaustion and continuous refill,
 higher-priority route-policy selection, no-policy pass-through without bucket
 allocation, bounded-key overload, idle-bucket eviction, stable rejected ACK
 reasons, that rejected packets never reach the HTTP upstream, and the expected
-local admission metric series. It uses TCP `9941`, internal HTTP `18201`, and
-fixture backend `18202`; all three ports must be free.
+local admission metric and sanitized diagnostics series. It uses TCP `9941`,
+internal HTTP `18201`, and fixture backend `18202`; all three ports must be
+free.
 
 Verify Redis mode through two real gateway TCP listeners:
 
@@ -1045,9 +1072,10 @@ The script starts a dedicated disposable Redis container. It proves that one
 ClientID consumes a single capacity across gateway A and B, an outage returns
 `admission_unavailable` without forwarding, and a new request resumes
 enforcement after Redis restarts without restarting either gateway. It also
-checks the expected Redis-mode admission metric series on both gateways. It
-uses TCP `9951`/`9952`, internal HTTP `18211`/`18213`, backend `18212`, and
-Redis `16389`; those ports must be free.
+checks the expected Redis-mode admission metrics, unavailable/recovered
+diagnostics, and Redis-detail redaction on both gateways. It uses TCP
+`9951`/`9952`, internal HTTP `18211`/`18213`, backend `18212`, and Redis
+`16389`; those ports must be free.
 
 ## Upstream Routes
 

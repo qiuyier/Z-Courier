@@ -40,6 +40,11 @@ semantic versioning after the first public MVP tag.
   are restricted to fixed enumerations and validated static policy names, with
   focused handler, Store-lifecycle, cardinality-boundary, and real TCP
   local/Redis exposition coverage.
+- V16.4.2 sanitized process-local traffic-policy snapshots in admin diagnostics
+  and diagnosis bundles, covering aggregate decisions, recent fixed-enum state,
+  local key utilization, dependency status, and actionable warnings without
+  exposing selector ClientIDs, Redis connection details, quota keys, packet
+  bodies, or raw errors; local and Redis E2E now verify the snapshot boundary.
 - Bilingual English/Chinese titles and operator-facing legend prefixes across
   the bundled overview and production-signal Grafana dashboards, without
   changing panel IDs, PromQL, thresholds, units, or alert behavior.

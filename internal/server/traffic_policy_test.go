@@ -3,11 +3,15 @@ package server
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
+	"github.com/bytedance/sonic"
+	"github.com/qiuyier/Z-Courier/internal/downlink"
 	"github.com/qiuyier/Z-Courier/internal/pipeline"
 	"go.uber.org/zap"
 )
@@ -132,6 +136,45 @@ func TestGatewayNewAndShutdownRedisTrafficPolicy(t *testing.T) {
 	}
 	if err := store.Ping(context.Background()); err == nil {
 		t.Fatal("Ping() after Gateway.Shutdown error = nil, want closed error")
+	}
+}
+
+func TestGatewayNewAttachesTrafficPolicyRuntimeToDiagnostics(t *testing.T) {
+	trafficPolicies := testServerTrafficPolicyConfig(pipeline.TrafficPolicyModeLocal)
+	trafficPolicies.MaxKeys = 10
+	trafficPolicies.IdleTTL = time.Minute
+
+	gateway, err := New(Config{
+		InternalHTTPAddr: "127.0.0.1:18080",
+		InternalToken:    "internal-secret",
+		Pipeline: pipeline.Config{
+			TrafficPolicies: trafficPolicies,
+		},
+	}, zap.NewNop())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if gateway.internalHTTP == nil {
+		t.Fatal("Gateway internal HTTP server = nil")
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/internal/admin/diagnostics", nil)
+	req.Header.Set(downlink.InternalTokenHeader, "internal-secret")
+	rec := httptest.NewRecorder()
+	gateway.internalHTTP.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var response adminDiagnosticsResponse
+	if err := sonic.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if !response.TrafficPolicy.Enabled ||
+		response.TrafficPolicy.Mode != pipeline.TrafficPolicyModeLocal ||
+		response.TrafficPolicy.StoreStatus != "configured" ||
+		response.TrafficPolicy.Local == nil ||
+		response.TrafficPolicy.Local.MaxKeys != 10 {
+		t.Fatalf("traffic policy diagnostics = %+v", response.TrafficPolicy)
 	}
 }
 

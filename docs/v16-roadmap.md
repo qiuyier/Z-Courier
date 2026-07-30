@@ -150,9 +150,13 @@ quotas:
 - V16.4.1 adds bounded Prometheus visibility for policy selection, quota-store
   outcomes and latency, plus local live-key usage and its configured limit;
   labels contain only fixed enums and validated static policy names.
+- V16.4.2 adds sanitized process-local policy runtime snapshots to admin
+  diagnostics and diagnosis bundles, including aggregate decisions, recent
+  fixed-enum state, local key utilization, dependency status, and actionable
+  warnings without actively probing Redis.
 
-Diagnostics, Console views, Grafana dashboards, alerts, deployment surfaces,
-and full release guidance remain later V16 workstreams.
+Dedicated Console views, Grafana dashboards, alerts, deployment surfaces, and
+full release guidance remain later V16 workstreams.
 
 ## Failure And Client Contract
 
@@ -241,8 +245,10 @@ Purpose: make rejection understandable without exposing tenant data.
 
 Status: in progress. V16.4.1 implements the low-cardinality Prometheus metric
 foundation for policy selection, quota-store decisions and latency, and local
-key capacity. Diagnostics, diagnosis bundles, dashboards, alerts, Console
-views, and operator guidance remain pending.
+key capacity. V16.4.2 adds passive, sanitized policy runtime state to admin
+diagnostics and diagnosis bundles, including dependency health and warning
+derivation. Dashboards, alerts, dedicated Console views, and broader operator
+guidance remain pending.
 
 - Add low-cardinality metrics for admitted/rejected packets, policy selection,
   token-bucket state class, quota-store results, and local key capacity.

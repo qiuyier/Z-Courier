@@ -138,3 +138,9 @@ Z-Courier 暴露：
 
 流量策略指标只使用配置中的策略名和固定枚举 label，不会暴露 ClientID、
 DeviceID、token、Redis Key、消息正文或原始错误。
+
+`GET /internal/admin/diagnostics` 会用一份有界、当前进程内的
+`traffic_policy` 快照补充这些指标，包含聚合选择/判断次数、最近一次有限枚举
+结果、本地 Key 容量和派生的 `traffic_policy_store` 依赖状态。diagnosis
+bundle 会嵌入同一份快照。读取它们不会主动探测 Redis，也不会包含选择器
+ClientID、Redis 连接信息、真实配额 Key、凭据、消息 Body 或原始错误。

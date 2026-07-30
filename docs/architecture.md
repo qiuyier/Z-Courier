@@ -429,6 +429,14 @@ z_courier_auth_jwks_refresh_total
 z_courier_auth_jwks_refresh_duration_seconds
 ```
 
+Traffic-policy diagnostics complement these metrics with a bounded,
+process-local runtime snapshot. `GET /internal/admin/diagnostics` exposes
+aggregate policy selections and decisions, recent fixed-enum outcomes,
+local-key capacity, and a derived `traffic_policy_store` dependency state. A
+diagnosis bundle embeds the same snapshot. Reading either surface does not
+probe Redis, and neither surface includes selector ClientIDs, Redis connection
+details, quota keys, credentials, packet bodies, or raw errors.
+
 The first Prometheus scrape endpoint is exposed on the internal HTTP server at
 `/metrics`.
 

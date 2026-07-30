@@ -146,6 +146,19 @@ message requeue/discard、retry scan、logout 等 JSON `POST` 请求里自动带
 中的 `discovery` 快照都不会包含端点 IP、配置域名、URL、token、原始网络错误或
 消息 Body；bundle 内独立的 `routes` 分区仍遵循既有 route 配置脱敏规则。
 
+启用命名流量策略后，diagnostics 还会返回 `traffic_policy`：
+
+- `store_status` 根据当前进程最近一次准入结果派生
+  `configured`、`degraded` 或 `unavailable`，不是 Redis 主动探活；
+- `no_match_total`、`decisions` 和最近结果/状态时间戳都只覆盖当前进程生命周期；
+- local 模式会展示当前 Key 数、上限和使用率；
+- 每个策略只展示静态 bucket 参数和有限聚合结果，不展示选择器 ClientID。
+
+dependencies 会包含 `traffic_policy_store`；warnings 会指出集群中使用节点本地
+配额、runtime 未挂载、最近一次 Store 不可用，或 local Key 使用率达到 80%。
+diagnosis bundle 会在 `sections.diagnostics.body.traffic_policy` 中包含同一份
+快照，但不会包含 Redis 地址、凭据、Key 前缀或真实配额 Key。
+
 ### `GET /internal/admin/check`
 
 主动探测依赖：
