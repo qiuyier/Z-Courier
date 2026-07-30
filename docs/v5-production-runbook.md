@@ -585,6 +585,77 @@ Check whether the bottleneck is:
 
 Raise limits only after confirming dependencies can absorb the traffic.
 
+### Traffic Policy Admission
+
+Named traffic policies split ingress admission into four stable outcomes:
+
+- `allowed`: the selected policy admitted the packet.
+- `rate_limited`: the selected bucket did not have a token. A modest rate can
+  be expected traffic shaping.
+- `overloaded`: bounded local key capacity could not admit a new key.
+- `admission_unavailable`: the Redis Store could not safely decide and
+  fail-closed behavior rejected the packet.
+
+Start with the `Traffic Policies` section in Console Diagnostics, then compare
+these PromQL queries:
+
+```promql
+sum by (instance, mode, policy, result) (rate(z_courier_traffic_policy_selection_total[5m]))
+sum by (instance, mode, policy, key_scope, result) (rate(z_courier_traffic_policy_quota_store_total[5m]))
+histogram_quantile(0.99, sum by (instance, mode, policy, key_scope, result, le) (rate(z_courier_traffic_policy_quota_store_duration_seconds_bucket[5m])))
+100 * max by (instance) (z_courier_traffic_policy_local_keys{mode="local"}) / clamp_min(max by (instance) (z_courier_traffic_policy_local_key_limit{mode="local"}), 1)
+```
+
+The bundled alerts deliberately avoid paging on a single normal quota
+rejection:
+
+| Alert | Default condition | First interpretation |
+| --- | --- | --- |
+| `ZCourierTrafficPolicyStoreUnavailable` | Redis `admission_unavailable` for 2m | Shared admission is failing closed |
+| `ZCourierTrafficPolicyLocalKeyCapacityHigh` | Local key utilization >=80% for 10m | `max_keys` headroom is low |
+| `ZCourierTrafficPolicyOverloaded` | `overloaded` for 5m | New local keys are being rejected |
+| `ZCourierTrafficPolicyRateLimitedRatioHigh` | More than 20% limited at more than 1 decision/sec for 10m | Policy demand persistently exceeds its configured rate |
+
+These are example defaults. A policy intentionally used for strict traffic
+shaping may need a different ratio threshold or notification route.
+
+For tuning and canary rollout:
+
+1. Record the current ingress rate, upstream latency, failure rate, and unique
+   active ClientID count before enabling a policy.
+2. Start with one narrowly matched route or MsgID. Avoid a broad
+   `default_policy` until AUTH/BIND and ACK traffic impact is understood.
+3. Set refill rate no higher than the sustained capacity of the protected
+   backend or MQ. Use capacity only for the burst the dependency can absorb.
+4. In local mode, set `max_keys` above expected concurrent active keys while
+   preserving a hard memory bound. Watch each gateway `instance`, not a
+   cluster sum.
+5. Use Redis mode when the quota must be shared across gateway nodes. Keep
+   database, key prefix, policy names, and policy configuration consistent
+   during rollout.
+6. Run `scripts/e2e_traffic_policy.sh` or
+   `scripts/e2e_traffic_policy_redis.sh`, then shift a small traffic slice and
+   compare policy outcomes with upstream success and latency.
+
+For a Redis outage:
+
+1. Confirm `admission_unavailable` and Store latency on the dashboard, plus
+   `store_status=unavailable` in Diagnostics.
+2. Check Redis reachability, authentication, latency, connection limits, and
+   the gateway operation timeout. Do not log or paste credentials or quota
+   keys into incident notes.
+3. Do not switch only some nodes to local mode as an emergency fallback. That
+   changes one shared quota into independent per-node quotas.
+4. Restore Redis and send a controlled request. A later safe decision returns
+   Diagnostics to `configured`; the rate-based alert resolves after its
+   lookback window no longer contains unavailable decisions.
+
+For rollback, restore the previously reviewed complete pipeline configuration
+on every gateway. Disable or remove `traffic_policies` before re-enabling the
+legacy `pipeline.rate_limit`; both cannot be enabled together. Verify
+`selection_total` stops growing for the retired policy, rejection reasons
+return to the expected baseline, and upstream load remains within capacity.
+
 ## Graceful Shutdown
 
 Before planned restart:

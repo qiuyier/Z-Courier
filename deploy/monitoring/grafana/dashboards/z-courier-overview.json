@@ -3818,6 +3818,236 @@
       ],
       "title": "Endpoint Failures And Failover / sec / 端点失败与故障转移速率",
       "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Shows whether ingress selected a named policy or passed through because no policy matched. / 展示入站流量命中命名策略或因无匹配策略而直接放行。",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 192
+      },
+      "id": 46,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (instance, mode, policy, result) (rate(z_courier_traffic_policy_selection_total[5m]))",
+          "legendFormat": "{{instance}} {{mode}} {{policy}} {{result}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Traffic Policy Selection / sec / 流量策略选择速率",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Separates allowed, rate-limited, overloaded, and admission-unavailable quota decisions. / 区分放行、限流、过载和准入不可用决策。",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 192
+      },
+      "id": 47,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (instance, mode, policy, key_scope, result) (rate(z_courier_traffic_policy_quota_store_total[5m]))",
+          "legendFormat": "{{instance}} {{mode}} {{policy}} {{result}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Traffic Policy Decisions / sec / 流量策略准入决策速率",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Quota-store decision latency by mode, policy, and result. / 按模式、策略和结果展示配额 Store 决策延迟。",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 200
+      },
+      "id": 48,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.95, sum by (instance, mode, policy, key_scope, result, le) (rate(z_courier_traffic_policy_quota_store_duration_seconds_bucket[5m])))",
+          "legendFormat": "p95 {{instance}} {{mode}} {{policy}} {{result}}",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.99, sum by (instance, mode, policy, key_scope, result, le) (rate(z_courier_traffic_policy_quota_store_duration_seconds_bucket[5m])))",
+          "legendFormat": "p99 {{instance}} {{mode}} {{policy}} {{result}}",
+          "range": true,
+          "refId": "B"
+        }
+      ],
+      "title": "Traffic Policy Store Latency / 流量策略配额 Store 延迟",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Compares live process-local quota keys with the configured hard limit. / 对比进程内存活配额 Key 与配置的硬上限。",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 200
+      },
+      "id": 49,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "max by (instance) (z_courier_traffic_policy_local_keys{mode=\"local\"})",
+          "legendFormat": "live / 存活 {{instance}}",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "max by (instance) (z_courier_traffic_policy_local_key_limit{mode=\"local\"})",
+          "legendFormat": "limit / 上限 {{instance}}",
+          "range": true,
+          "refId": "B"
+        }
+      ],
+      "title": "Local Traffic Policy Keys / 本地流量策略 Key 容量",
+      "type": "timeseries"
     }
   ],
   "refresh": "5s",
@@ -3837,6 +4067,6 @@
   "timezone": "browser",
   "title": "Z-Courier Overview / Z-Courier 运行概览",
   "uid": "z-courier-overview",
-  "version": 12,
+  "version": 13,
   "weekStart": ""
 }

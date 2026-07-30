@@ -63,3 +63,98 @@ tests:
               summary: "Z-Courier upstream discovery cannot select an endpoint"
               description: "Ready gateway gateway-a cannot select an endpoint for route orders because every resolved endpoint remains unavailable."
               runbook_url: "https://github.com/qiuyier/Z-Courier/blob/main/docs/v5-production-runbook.md#upstream-discovery-unavailable"
+
+  - name: redis traffic policy store failures trigger fail-closed alert
+    interval: 1m
+    input_series:
+      - series: 'z_courier_traffic_policy_quota_store_total{job="z-courier",instance="gateway-a",mode="redis",policy="shared-ingress",key_scope="client_id",result="admission_unavailable"}'
+        values: "0 60 120 180 240 300 360 420"
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: ZCourierTrafficPolicyStoreUnavailable
+        exp_alerts:
+          - exp_labels:
+              component: traffic-policy
+              instance: gateway-a
+              job: z-courier
+              mode: redis
+              severity: critical
+            exp_annotations:
+              summary: "Z-Courier traffic policy store is unavailable"
+              description: "Gateway gateway-a cannot make Redis traffic policy decisions and is failing closed."
+              runbook_url: "https://github.com/qiuyier/Z-Courier/blob/main/docs/v5-production-runbook.md#traffic-policy-admission"
+
+  - name: local traffic policy key capacity requires sustained high utilization
+    interval: 1m
+    input_series:
+      - series: 'z_courier_traffic_policy_local_keys{job="z-courier",instance="gateway-a",mode="local"}'
+        values: "85 85 85 85 85 85 85 85 85 85 85 85 85"
+      - series: 'z_courier_traffic_policy_local_key_limit{job="z-courier",instance="gateway-a",mode="local"}'
+        values: "100 100 100 100 100 100 100 100 100 100 100 100 100"
+      - series: 'z_courier_traffic_policy_local_keys{job="z-courier",instance="gateway-b",mode="local"}'
+        values: "79 79 79 79 79 79 79 79 79 79 79 79 79"
+      - series: 'z_courier_traffic_policy_local_key_limit{job="z-courier",instance="gateway-b",mode="local"}'
+        values: "100 100 100 100 100 100 100 100 100 100 100 100 100"
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: ZCourierTrafficPolicyLocalKeyCapacityHigh
+        exp_alerts:
+          - exp_labels:
+              component: traffic-policy
+              instance: gateway-a
+              job: z-courier
+              severity: warning
+            exp_annotations:
+              summary: "Z-Courier local traffic policy key capacity is high"
+              description: "Gateway gateway-a local traffic policy key usage has remained at or above 80% of its configured limit."
+              runbook_url: "https://github.com/qiuyier/Z-Courier/blob/main/docs/v5-production-runbook.md#traffic-policy-admission"
+
+  - name: sustained traffic policy overload is separated from rate limiting
+    interval: 1m
+    input_series:
+      - series: 'z_courier_traffic_policy_quota_store_total{job="z-courier",instance="gateway-a",mode="local",policy="standard-upstream",key_scope="client_id",result="overloaded"}'
+        values: "0 30 60 90 120 150 180 210 240"
+      - series: 'z_courier_traffic_policy_quota_store_total{job="z-courier",instance="gateway-b",mode="local",policy="standard-upstream",key_scope="client_id",result="rate_limited"}'
+        values: "0 30 60 90 120 150 180 210 240"
+    alert_rule_test:
+      - eval_time: 7m
+        alertname: ZCourierTrafficPolicyOverloaded
+        exp_alerts:
+          - exp_labels:
+              component: traffic-policy
+              instance: gateway-a
+              job: z-courier
+              mode: local
+              severity: warning
+            exp_annotations:
+              summary: "Z-Courier traffic policy admission is overloaded"
+              description: "Gateway gateway-a is returning overloaded decisions from the local traffic policy store."
+              runbook_url: "https://github.com/qiuyier/Z-Courier/blob/main/docs/v5-production-runbook.md#traffic-policy-admission"
+
+  - name: traffic policy rate-limit ratio requires meaningful traffic
+    interval: 1m
+    input_series:
+      - series: 'z_courier_traffic_policy_quota_store_total{job="z-courier",instance="gateway-a",mode="redis",policy="shared-ingress",key_scope="client_id",result="allowed"}'
+        values: "0 60 120 180 240 300 360 420 480 540 600 660 720 780 840 900"
+      - series: 'z_courier_traffic_policy_quota_store_total{job="z-courier",instance="gateway-a",mode="redis",policy="shared-ingress",key_scope="client_id",result="rate_limited"}'
+        values: "0 30 60 90 120 150 180 210 240 270 300 330 360 390 420 450"
+      - series: 'z_courier_traffic_policy_quota_store_total{job="z-courier",instance="gateway-b",mode="redis",policy="low-volume",key_scope="client_id",result="allowed"}'
+        values: "0 30 60 90 120 150 180 210 240 270 300 330 360 390 420 450"
+      - series: 'z_courier_traffic_policy_quota_store_total{job="z-courier",instance="gateway-b",mode="redis",policy="low-volume",key_scope="client_id",result="rate_limited"}'
+        values: "0 10 20 30 40 50 60 70 80 90 100 110 120 130 140 150"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: ZCourierTrafficPolicyRateLimitedRatioHigh
+        exp_alerts:
+          - exp_labels:
+              component: traffic-policy
+              instance: gateway-a
+              job: z-courier
+              key_scope: client_id
+              mode: redis
+              policy: shared-ingress
+              severity: warning
+            exp_annotations:
+              summary: "Z-Courier traffic policy rate-limited ratio is high"
+              description: "Policy shared-ingress on gateway gateway-a has rejected more than 20% of decisions while decision traffic exceeds 1/sec."
+              runbook_url: "https://github.com/qiuyier/Z-Courier/blob/main/docs/v5-production-runbook.md#traffic-policy-admission"

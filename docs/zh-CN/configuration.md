@@ -909,6 +909,10 @@ ClientID、Redis 地址、账号、密码、Key 前缀、真实配额 Key、消�
 Console Diagnostics 会把同一份只读快照展示为 Store 状态、聚合结果、本地容量
 和逐策略 bucket 摘要，不提供修改策略的入口。
 
+内置 Grafana dashboard 会展示对应的策略选择、准入结果、Store 延迟和本地
+Key 容量指标。Prometheus 默认告警，以及调参、灰度、Redis 故障与回滚流程见
+[流量策略准入](production-runbook.md#52-流量策略准入)。
+
 `default_policy` 是真正的兜底，因此也可能限制 AUTH/BIND、下行 ACK 等没有
 命中普通上行路由的协议包。只想限制业务上行时，不要设置 `default_policy`，
 改用 MsgID 或 route 选择器。禁用的策略不会参与选择，但声明过的字段仍会在

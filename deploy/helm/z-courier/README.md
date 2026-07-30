@@ -131,6 +131,13 @@ notification routing before using it for production paging. The Compose
 monitoring stack uses the equivalent Prometheus rule file at
 `deploy/monitoring/prometheus/rules/z-courier-alerts.yml`.
 
+The example includes traffic-policy alerts for Redis fail-closed decisions,
+sustained local-key utilization at or above 80%, overload decisions, and a
+high rate-limited ratio under meaningful traffic. Review
+`docs/v5-production-runbook.md#traffic-policy-admission` before enabling paging;
+normal quota shaping should not page solely because one request was
+rate-limited.
+
 The embedded admin console can link operators to Prometheus, Grafana, and a
 preferred dashboard when `adminConsole.monitoring` values are set:
 

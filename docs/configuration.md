@@ -1040,6 +1040,11 @@ The Console Diagnostics page renders this same read-only snapshot as store
 status, aggregate outcomes, local capacity, and per-policy bucket summaries;
 it does not add a policy mutation surface.
 
+The bundled Grafana dashboards visualize the corresponding selection,
+decision, latency, and local-capacity metrics. Prometheus alert defaults and
+the tuning, canary, Redis outage, and rollback procedure are documented in
+[Traffic Policy Admission](v5-production-runbook.md#traffic-policy-admission).
+
 `default_policy` is a true fallback. It can therefore apply to AUTH/BIND,
 downlink ACK, and other protocol packets that do not match an upstream route.
 To limit only business upstream traffic, omit `default_policy` and use MsgID or

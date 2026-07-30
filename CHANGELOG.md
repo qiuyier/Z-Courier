@@ -49,6 +49,11 @@ semantic versioning after the first public MVP tag.
   covering disabled, local, Redis, degraded, and unavailable states, aggregate
   decisions, recent runtime events, local key utilization, and per-policy
   bucket summaries with real-gateway admin/readonly smoke coverage.
+- V16.4.4 traffic-policy panels in both bundled Grafana dashboards, recording
+  rules, low-noise alerts for Redis fail-closed decisions, sustained local-key
+  capacity, overload, and high rate-limited ratios, promtool behavior tests,
+  a synchronized Helm PrometheusRule example, and bilingual tuning, canary,
+  outage, and rollback guidance.
 - Bilingual English/Chinese titles and operator-facing legend prefixes across
   the bundled overview and production-signal Grafana dashboards, without
   changing panel IDs, PromQL, thresholds, units, or alert behavior.

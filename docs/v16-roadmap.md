@@ -158,9 +158,13 @@ quotas:
   local, Redis, degraded, and unavailable policy states, including local
   capacity and per-policy bucket/outcome summaries with responsive smoke
   coverage for admin and read-only roles.
+- V16.4.4 adds raw and incident-oriented traffic-policy panels to both bundled
+  Grafana dashboards, recording rules and low-noise alert defaults with
+  promtool behavior tests, an equivalent Helm PrometheusRule example, and
+  bilingual tuning, canary, Redis outage, and rollback guidance.
 
-Grafana dashboards, alerts, deployment surfaces, and full release guidance
-remain later V16 workstreams.
+Broader deployment examples and full release guidance remain later V16
+workstreams.
 
 ## Failure And Client Contract
 
@@ -252,8 +256,8 @@ foundation for policy selection, quota-store decisions and latency, and local
 key capacity. V16.4.2 adds passive, sanitized policy runtime state to admin
 diagnostics and diagnosis bundles, including dependency health and warning
 derivation. V16.4.3 renders that contract in a dedicated read-only Console
-Diagnostics view. Dashboards, alerts, and broader operator guidance remain
-pending.
+Diagnostics view. V16.4.4 completes the bundled Grafana, alert, Helm example,
+and bilingual first-response guidance for these signals.
 
 - Add low-cardinality metrics for admitted/rejected packets, policy selection,
   token-bucket state class, quota-store results, and local key capacity.

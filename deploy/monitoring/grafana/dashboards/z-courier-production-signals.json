@@ -1302,6 +1302,231 @@
       ],
       "title": "Discovery And Failover Problems / sec / 服务发现与故障转移异常速率",
       "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Incident-oriented view of rate-limited, overloaded, and admission-unavailable policy decisions. / 面向事故排查展示限流、过载和准入不可用决策。",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 52
+      },
+      "id": 17,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (instance, mode, policy, result) (rate(z_courier_traffic_policy_quota_store_total{result=~\"rate_limited|overloaded|admission_unavailable\"}[5m]))",
+          "legendFormat": "{{instance}} {{mode}} {{policy}} {{result}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Traffic Policy Rejections / sec / 流量策略拒绝速率",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Tail latency for quota-store decisions, including Redis failure outcomes. / 配额 Store 决策尾延迟，包括 Redis 失败结果。",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 52
+      },
+      "id": 18,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.99, sum by (instance, mode, policy, key_scope, result, le) (rate(z_courier_traffic_policy_quota_store_duration_seconds_bucket[5m])))",
+          "legendFormat": "p99 {{instance}} {{mode}} {{policy}} {{result}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Traffic Policy Store p99 / 流量策略配额 Store p99",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Process-local live-key utilization against max_keys; 80% matches the bundled warning threshold. / 进程内存活 Key 相对 max_keys 的使用率，80% 与内置预警阈值一致。",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 80
+              },
+              {
+                "color": "red",
+                "value": 95
+              }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 60
+      },
+      "id": 19,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "100 * max by (instance) (z_courier_traffic_policy_local_keys{mode=\"local\"}) / clamp_min(max by (instance) (z_courier_traffic_policy_local_key_limit{mode=\"local\"}), 1)",
+          "legendFormat": "{{instance}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Local Traffic Policy Key Utilization / 本地流量策略 Key 使用率",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Shows traffic that matched no named or default policy and passed through without quota admission. / 展示未命中命名策略或默认策略、未经过配额准入而直接放行的流量。",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 60
+      },
+      "id": 20,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (instance, mode) (rate(z_courier_traffic_policy_selection_total{result=\"no_match\"}[5m]))",
+          "legendFormat": "{{instance}} {{mode}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Traffic Policy No-Match / sec / 流量策略未匹配速率",
+      "type": "timeseries"
     }
   ],
   "refresh": "10s",
@@ -1322,6 +1547,6 @@
   "timezone": "browser",
   "title": "Z-Courier Production Signals / Z-Courier 生产信号",
   "uid": "z-courier-production-signals",
-  "version": 3,
+  "version": 4,
   "weekStart": ""
 }

@@ -132,6 +132,67 @@ sum by (instance, route, discovery_type, decision) (rate(z_courier_upstream_fail
 
 确认 backend 网络和业务幂等之前，不要直接增加 failover attempts。
 
+## 5.2 流量策略准入
+
+命名流量策略会把入口准入结果稳定分成四类：
+
+- `allowed`：命中的策略允许该数据包继续处理。
+- `rate_limited`：当前 bucket 没有 token；少量出现可能只是正常的流量整形。
+- `overloaded`：local 模式的有界 Key 容量无法接纳新的 Key。
+- `admission_unavailable`：Redis Store 无法安全判断，fail-closed 拒绝了该包。
+
+先看 Console Diagnostics 的 `Traffic Policies`，再对照以下 PromQL：
+
+```promql
+sum by (instance, mode, policy, result) (rate(z_courier_traffic_policy_selection_total[5m]))
+sum by (instance, mode, policy, key_scope, result) (rate(z_courier_traffic_policy_quota_store_total[5m]))
+histogram_quantile(0.99, sum by (instance, mode, policy, key_scope, result, le) (rate(z_courier_traffic_policy_quota_store_duration_seconds_bucket[5m])))
+100 * max by (instance) (z_courier_traffic_policy_local_keys{mode="local"}) / clamp_min(max by (instance) (z_courier_traffic_policy_local_key_limit{mode="local"}), 1)
+```
+
+内置告警不会因为单次正常限流就触发：
+
+| 告警 | 默认条件 | 第一判断 |
+| --- | --- | --- |
+| `ZCourierTrafficPolicyStoreUnavailable` | Redis `admission_unavailable` 持续 2 分钟 | 共享准入正在 fail-closed |
+| `ZCourierTrafficPolicyLocalKeyCapacityHigh` | local Key 使用率 >=80% 持续 10 分钟 | `max_keys` 余量不足 |
+| `ZCourierTrafficPolicyOverloaded` | `overloaded` 持续 5 分钟 | 新的 local Key 正在被拒绝 |
+| `ZCourierTrafficPolicyRateLimitedRatioHigh` | 决策速率大于 1/s 时，限流比例超过 20% 并持续 10 分钟 | 策略需求长期超过配置速率 |
+
+这些阈值是生产示例。若某个策略本来就用于严格整形，应根据基线调整比例阈值或
+通知路由。
+
+调参与灰度步骤：
+
+1. 启用前记录入口速率、upstream 延迟与失败率，以及唯一活跃 ClientID 数量。
+2. 先只匹配一条 route 或一段 MsgID。没有评估 AUTH/BIND 与 ACK 影响之前，
+   不要直接启用范围很大的 `default_policy`。
+3. refill rate 不要超过被保护 backend 或 MQ 的持续处理能力；capacity 只承担
+   依赖能够吸收的突发量。
+4. local 模式的 `max_keys` 应高于预期并发活跃 Key，同时保留明确内存上限。
+   必须按每个 gateway `instance` 看使用率，不能只看集群总和。
+5. 多节点需要共享配额时使用 Redis，并在灰度期间保持 database、Key 前缀、
+   策略名与策略配置一致。
+6. 先运行 `scripts/e2e_traffic_policy.sh` 或
+   `scripts/e2e_traffic_policy_redis.sh`，再导入少量真实流量，对比策略结果、
+   upstream 成功率和延迟。
+
+Redis 故障处理：
+
+1. 在 dashboard 确认 `admission_unavailable` 和 Store 延迟，并在 Diagnostics
+   确认 `store_status=unavailable`。
+2. 检查 Redis 网络、认证、延迟、连接上限和 gateway 操作超时。事故记录中
+   不要粘贴凭据或真实配额 Key。
+3. 不要只把部分节点临时切换为 local；这会把一个共享配额变成多个节点独立
+   配额。
+4. 恢复 Redis 后发送一个受控请求。后续安全决策会让 Diagnostics 回到
+   `configured`；基于 rate 的告警会在回看窗口不再包含不可用结果后恢复。
+
+回滚时，在全部 gateway 上恢复上一份已审核的完整 pipeline 配置。重新启用
+旧版 `pipeline.rate_limit` 前，必须先禁用或移除 `traffic_policies`，两者不能
+同时启用。最后确认退役策略的 `selection_total` 不再增长、拒绝原因回到基线，
+且 upstream 负载仍处于安全范围。
+
 ## 6. 下行消息没有到客户端
 
 先确认后端 push 返回：

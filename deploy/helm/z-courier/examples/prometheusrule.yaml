@@ -133,6 +133,57 @@ spec:
             description: "Internal HTTP or upstream capacity limits are rejecting requests. Check backend push rate and max_in_flight settings."
             runbook_url: "https://github.com/qiuyier/Z-Courier/blob/main/docs/v5-production-runbook.md#capacity-or-overload-rejections"
 
+        - alert: ZCourierTrafficPolicyStoreUnavailable
+          expr: sum by (job, instance, mode) (rate(z_courier_traffic_policy_quota_store_total{mode="redis",result="admission_unavailable"}[5m])) > 0
+          for: 2m
+          labels:
+            severity: critical
+            component: traffic-policy
+          annotations:
+            summary: "Z-Courier traffic policy store is unavailable"
+            description: "Gateway {{ $labels.instance }} cannot make Redis traffic policy decisions and is failing closed."
+            runbook_url: "https://github.com/qiuyier/Z-Courier/blob/main/docs/v5-production-runbook.md#traffic-policy-admission"
+
+        - alert: ZCourierTrafficPolicyLocalKeyCapacityHigh
+          expr: max by (job, instance) (z_courier_traffic_policy_local_keys{mode="local"}) / clamp_min(max by (job, instance) (z_courier_traffic_policy_local_key_limit{mode="local"}), 1) >= 0.8
+          for: 10m
+          labels:
+            severity: warning
+            component: traffic-policy
+          annotations:
+            summary: "Z-Courier local traffic policy key capacity is high"
+            description: "Gateway {{ $labels.instance }} local traffic policy key usage has remained at or above 80% of its configured limit."
+            runbook_url: "https://github.com/qiuyier/Z-Courier/blob/main/docs/v5-production-runbook.md#traffic-policy-admission"
+
+        - alert: ZCourierTrafficPolicyOverloaded
+          expr: sum by (job, instance, mode) (rate(z_courier_traffic_policy_quota_store_total{result="overloaded"}[5m])) > 0
+          for: 5m
+          labels:
+            severity: warning
+            component: traffic-policy
+          annotations:
+            summary: "Z-Courier traffic policy admission is overloaded"
+            description: "Gateway {{ $labels.instance }} is returning overloaded decisions from the {{ $labels.mode }} traffic policy store."
+            runbook_url: "https://github.com/qiuyier/Z-Courier/blob/main/docs/v5-production-runbook.md#traffic-policy-admission"
+
+        - alert: ZCourierTrafficPolicyRateLimitedRatioHigh
+          expr: |
+            (
+              sum by (job, instance, mode, policy, key_scope) (rate(z_courier_traffic_policy_quota_store_total{result="rate_limited"}[5m]))
+              /
+              clamp_min(sum by (job, instance, mode, policy, key_scope) (rate(z_courier_traffic_policy_quota_store_total[5m])), 1e-9)
+            ) > 0.2
+            and
+            sum by (job, instance, mode, policy, key_scope) (rate(z_courier_traffic_policy_quota_store_total[5m])) > 1
+          for: 10m
+          labels:
+            severity: warning
+            component: traffic-policy
+          annotations:
+            summary: "Z-Courier traffic policy rate-limited ratio is high"
+            description: "Policy {{ $labels.policy }} on gateway {{ $labels.instance }} has rejected more than 20% of decisions while decision traffic exceeds 1/sec."
+            runbook_url: "https://github.com/qiuyier/Z-Courier/blob/main/docs/v5-production-runbook.md#traffic-policy-admission"
+
         - alert: ZCourierDownlinkPushFailures
           expr: sum(rate(z_courier_downlink_push_total{result!~"sent|queued"}[5m])) > 0.1
           for: 5m

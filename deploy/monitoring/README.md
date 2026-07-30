@@ -68,6 +68,10 @@ sum by (route, target_type, result) (rate(z_courier_upstream_forward_total[1m]))
 histogram_quantile(0.95, sum by (le, route, target_type) (rate(z_courier_upstream_forward_duration_seconds_bucket[5m])))
 sum by (route, target_type) (z_courier_upstream_inflight)
 sum by (route, target_type) (rate(z_courier_upstream_overload_rejected_total[1m]))
+sum by (instance, mode, policy, result) (rate(z_courier_traffic_policy_selection_total[5m]))
+sum by (instance, mode, policy, key_scope, result) (rate(z_courier_traffic_policy_quota_store_total[5m]))
+histogram_quantile(0.99, sum by (instance, mode, policy, key_scope, result, le) (rate(z_courier_traffic_policy_quota_store_duration_seconds_bucket[5m])))
+100 * max by (instance) (z_courier_traffic_policy_local_keys{mode="local"}) / clamp_min(max by (instance) (z_courier_traffic_policy_local_key_limit{mode="local"}), 1)
 sum by (route, target_type) (z_courier_upstream_route_degraded)
 sum by (route, discovery_type, result) (rate(z_courier_upstream_discovery_refresh_total[5m]))
 histogram_quantile(0.95, sum by (le, route, discovery_type, result) (rate(z_courier_upstream_discovery_refresh_duration_seconds_bucket[5m])))
@@ -108,6 +112,12 @@ snapshots or unhealthy state across gateway nodes. The discovery metrics never
 use endpoint addresses, hostnames, internal URLs, raw errors, tokens, or
 message identifiers as labels; route names and all result labels are bounded.
 
+Traffic-policy local-key gauges are also process-local. Redis decision counters
+still retain the gateway `instance` that observed each decision, while quota is
+shared by Redis. Policy names come only from validated static configuration;
+ClientID, DeviceID, token, Redis key, body, and raw error are never metric
+labels.
+
 Open Grafana:
 
 ```text
@@ -141,6 +151,11 @@ Production Signals dashboard keeps the smaller incident view: resolved versus
 unhealthy endpoints and only refresh, selection, endpoint, or failover problem
 rates.
 
+Both dashboards also include traffic-policy panels. Overview shows selection
+outcomes, every quota decision, Store p95/p99 latency, and local live keys
+against their configured limit. Production Signals focuses on policy
+rejections, Store p99 latency, local-key utilization, and no-match traffic.
+
 ## Alert Rules
 
 Prometheus loads:
@@ -160,6 +175,8 @@ The rule file includes:
 - ingress rejection spike alerts
 - auth and HMAC failure alerts
 - upstream failure and overload alerts
+- Redis traffic-policy Store unavailability, sustained local-key capacity,
+  overload, and high rate-limited-ratio alerts
 - readiness-gated empty-discovery and actively unavailable-endpoint alerts
 - downlink push, ACK latency, retry, and stale-route alerts
 - peer push and JWKS refresh failure alerts
@@ -168,6 +185,22 @@ Alert annotations link to the production runbook for first-response actions.
 `scripts/promtool_check.sh` also runs the behavior cases in
 `deploy/monitoring/prometheus/tests/z-courier-alerts.test.yml`, including the
 readiness and active-selection gates used by the discovery alerts.
+
+The bundled traffic-policy defaults intentionally distinguish normal shaping
+from incidents:
+
+- `admission_unavailable` in Redis mode is critical after 2 minutes because
+  fail-closed admission is rejecting traffic.
+- local-key utilization at or above 80% is a warning after 10 minutes.
+- sustained `overloaded` decisions are a warning after 5 minutes.
+- `rate_limited` is a warning only when it exceeds 20% of one policy's
+  decisions, decision traffic is above 1/sec, and both conditions persist for
+  10 minutes.
+
+Tune these examples against production baselines before routing them to paging.
+See the
+[traffic-policy runbook](../../docs/v5-production-runbook.md#traffic-policy-admission)
+for canary, Redis outage, tuning, and rollback guidance.
 
 ## Alertmanager
 
