@@ -43,6 +43,9 @@ type Gateway struct {
 	trafficPolicyCloser       io.Closer
 	internalHTTP              *http.Server
 	upstream                  *router.Engine
+	upstreamRuntime           *UpstreamRuntime
+	upstreamMetrics           routeMutableMetrics
+	routes                    *routeManager
 	downlink                  *downlink.Service
 	downlinkCloser            io.Closer
 	downlinkRetryInterval     time.Duration
@@ -90,18 +93,43 @@ func New(config Config, logger *zap.Logger) (*Gateway, error) {
 	if trafficPolicyHandler != nil {
 		config.TrafficPolicyRuntime = trafficPolicyHandler.Runtime()
 	}
-	config.UpstreamRuntime = newUpstreamRuntime(config.UpstreamRoutes)
-	upstream, err := newUpstreamEngine(config)
-	if err != nil {
-		closeWithLog(trafficPolicyCloser, logger, "traffic policy quota store")
-		closeWithLog(authVerifierCloser, logger, "authentication verifier")
-		return nil, err
+	var upstream *router.Engine
+	var upstreamRuntime *UpstreamRuntime
+	var upstreamMetrics routeMutableMetrics
+	var generationManager *routeManager
+	if config.UpstreamRoutesFile.Reload.Enabled {
+		initialGeneration, buildErr := buildRouteGeneration(config.UpstreamRoutes)
+		if buildErr != nil {
+			closeWithLog(trafficPolicyCloser, logger, "traffic policy quota store")
+			closeWithLog(authVerifierCloser, logger, "authentication verifier")
+			return nil, buildErr
+		}
+		generationManager, err = newRouteManager(
+			initialGeneration,
+			config.UpstreamRoutesFile.Reload.DrainTimeout,
+			logger,
+		)
+		if err != nil {
+			closeWithLog(trafficPolicyCloser, logger, "traffic policy quota store")
+			closeWithLog(authVerifierCloser, logger, "authentication verifier")
+			return nil, err
+		}
+		config.UpstreamRuntime = generationManager.activeRuntime()
+	} else {
+		upstreamRuntime = newUpstreamRuntime(config.UpstreamRoutes)
+		config.UpstreamRuntime = upstreamRuntime
+		upstream, err = newUpstreamEngine(config)
+		if err != nil {
+			closeWithLog(trafficPolicyCloser, logger, "traffic policy quota store")
+			closeWithLog(authVerifierCloser, logger, "authentication verifier")
+			return nil, err
+		}
+		upstreamRuntime.activateMetrics()
+		upstreamMetrics = mutableMetricsForRoutes(config.UpstreamRoutes)
 	}
 	clusterRegistry, clusterRegistryCloser, err := newClusterRegistry(config)
 	if err != nil {
-		if upstream != nil {
-			_ = upstream.Close()
-		}
+		closeUpstreamAfterConstruction(upstream, upstreamRuntime, generationManager, config.UpstreamRoutes, logger)
 		closeWithLog(trafficPolicyCloser, logger, "traffic policy quota store")
 		closeWithLog(authVerifierCloser, logger, "authentication verifier")
 		return nil, err
@@ -109,9 +137,7 @@ func New(config Config, logger *zap.Logger) (*Gateway, error) {
 	zServer := znet.NewServer()
 	downlinkService, downlinkCloser, err := newDownlinkService(config, zServer.GetConnMgr(), clusterRegistry, deliveryPolicies)
 	if err != nil {
-		if upstream != nil {
-			_ = upstream.Close()
-		}
+		closeUpstreamAfterConstruction(upstream, upstreamRuntime, generationManager, config.UpstreamRoutes, logger)
 		if clusterRegistryCloser != nil {
 			_ = clusterRegistryCloser.Close()
 		}
@@ -122,9 +148,7 @@ func New(config Config, logger *zap.Logger) (*Gateway, error) {
 	adminAudit, adminAuditCloser, err := newAdminAuditStore(config)
 	if err != nil {
 		closeWithLog(downlinkCloser, logger, "downlink store")
-		if upstream != nil {
-			_ = upstream.Close()
-		}
+		closeUpstreamAfterConstruction(upstream, upstreamRuntime, generationManager, config.UpstreamRoutes, logger)
 		if clusterRegistryCloser != nil {
 			_ = clusterRegistryCloser.Close()
 		}
@@ -140,9 +164,7 @@ func New(config Config, logger *zap.Logger) (*Gateway, error) {
 		if err != nil {
 			closeWithLog(adminAuditCloser, logger, "admin audit store")
 			closeWithLog(downlinkCloser, logger, "downlink store")
-			if upstream != nil {
-				_ = upstream.Close()
-			}
+			closeUpstreamAfterConstruction(upstream, upstreamRuntime, generationManager, config.UpstreamRoutes, logger)
 			if clusterRegistryCloser != nil {
 				_ = clusterRegistryCloser.Close()
 			}
@@ -159,9 +181,7 @@ func New(config Config, logger *zap.Logger) (*Gateway, error) {
 		closeWithLog(adminSessionCloser, logger, "admin session store")
 		closeWithLog(adminAuditCloser, logger, "admin audit store")
 		closeWithLog(downlinkCloser, logger, "downlink store")
-		if upstream != nil {
-			_ = upstream.Close()
-		}
+		closeUpstreamAfterConstruction(upstream, upstreamRuntime, generationManager, config.UpstreamRoutes, logger)
 		if clusterRegistryCloser != nil {
 			_ = clusterRegistryCloser.Close()
 		}
@@ -184,6 +204,9 @@ func New(config Config, logger *zap.Logger) (*Gateway, error) {
 		trafficPolicyCloser:       trafficPolicyCloser,
 		internalHTTP:              internalHTTP,
 		upstream:                  upstream,
+		upstreamRuntime:           upstreamRuntime,
+		upstreamMetrics:           upstreamMetrics,
+		routes:                    generationManager,
 		downlink:                  downlinkService,
 		downlinkCloser:            downlinkCloser,
 		downlinkRetryInterval:     config.DownlinkDelivery.RetryInterval,
@@ -209,6 +232,7 @@ func New(config Config, logger *zap.Logger) (*Gateway, error) {
 		zServer.GetConnMgr(),
 		newIngressPipeline(config, logger, clusterRegistry, trafficPolicyHandler),
 		upstream,
+		generationManager,
 		downlinkService,
 		config.DownlinkDelivery.BindFlushLimit,
 	)
@@ -284,6 +308,7 @@ func (g *Gateway) Shutdown(ctx context.Context) error {
 
 		g.shutdownClusterRouteRefresher()
 		g.shutdownZinxServer()
+		g.shutdownUpstream(ctx)
 		g.shutdownTrafficPolicy()
 		g.shutdownAuthVerifier()
 		unbound := g.unbindAllClusterRoutes(ctx)
@@ -293,7 +318,6 @@ func (g *Gateway) Shutdown(ctx context.Context) error {
 		g.shutdownDownlinkCleanupWorker()
 		g.shutdownDownlinkTerminalWorker()
 		g.shutdownDownlinkRetryWorker()
-		g.shutdownUpstream()
 		g.shutdownDownlink()
 		g.shutdownClusterRegistry()
 		metrics.SetSessionsOnline(g.sessions.Len())
@@ -390,14 +414,44 @@ func (g *Gateway) shutdownZinxServer() {
 	g.server.Stop()
 }
 
-func (g *Gateway) shutdownUpstream() {
-	if g.upstream == nil {
+func (g *Gateway) shutdownUpstream(ctx context.Context) {
+	if g.routes != nil {
+		if err := g.routes.Shutdown(ctx); err != nil {
+			g.shutdownErr = errors.Join(g.shutdownErr, err)
+			g.logger.Warn("failed to shutdown upstream routes cleanly", zap.Error(err))
+		}
 		return
 	}
-
-	if err := g.upstream.Close(); err != nil {
-		g.logger.Warn("failed to shutdown upstream routes cleanly", zap.Error(err))
+	if g.upstreamRuntime != nil {
+		g.upstreamRuntime.deactivateMetrics()
 	}
+	if g.upstream != nil {
+		if err := g.upstream.Close(); err != nil {
+			g.shutdownErr = errors.Join(g.shutdownErr, err)
+			g.logger.Warn("failed to shutdown upstream routes cleanly", zap.Error(err))
+		}
+	}
+	g.upstreamMetrics.delete()
+}
+
+func closeUpstreamAfterConstruction(
+	upstream *router.Engine,
+	runtime *UpstreamRuntime,
+	manager *routeManager,
+	routes []UpstreamRouteConfig,
+	logger *zap.Logger,
+) {
+	if manager != nil {
+		closeWithLog(manager, logger, "upstream route manager")
+		return
+	}
+	if runtime != nil {
+		runtime.deactivateMetrics()
+	}
+	if upstream != nil {
+		closeWithLog(upstream, logger, "upstream routes")
+	}
+	mutableMetricsForRoutes(routes).delete()
 }
 
 func (g *Gateway) shutdownAuthVerifier() {

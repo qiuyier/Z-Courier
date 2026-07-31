@@ -4,12 +4,16 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/qiuyier/Z-Courier/internal/metrics"
 	"github.com/qiuyier/Z-Courier/internal/resilience"
 )
 
 type UpstreamRuntime struct {
 	mu       sync.RWMutex
 	trackers map[string]*upstreamRouteTracker
+
+	metricsMu     sync.RWMutex
+	metricsActive bool
 }
 
 type upstreamRouteTracker struct {
@@ -125,6 +129,60 @@ func (r *UpstreamRuntime) snapshots() []upstreamRouteRuntimeSnapshot {
 		}
 	}
 	return out
+}
+
+func (r *UpstreamRuntime) activateMetrics() {
+	if r == nil {
+		return
+	}
+
+	r.metricsMu.Lock()
+	defer r.metricsMu.Unlock()
+	r.metricsActive = true
+	for _, snapshot := range r.snapshots() {
+		metrics.SetUpstreamRouteDegraded(
+			snapshot.RouteName,
+			snapshot.TargetType,
+			snapshot.Snapshot.Status != resilience.DependencyStatusHealthy,
+		)
+		if snapshot.Discovery != nil {
+			metrics.SetUpstreamDiscoveryResolvedEndpoints(
+				snapshot.RouteName,
+				snapshot.Discovery.Type,
+				snapshot.Discovery.ResolvedEndpoints,
+			)
+			metrics.SetUpstreamEndpointUnhealthy(
+				snapshot.RouteName,
+				snapshot.Discovery.Type,
+				snapshot.Discovery.UnhealthyEndpoints,
+			)
+		}
+	}
+}
+
+func (r *UpstreamRuntime) deactivateMetrics() {
+	if r == nil {
+		return
+	}
+	r.metricsMu.Lock()
+	r.metricsActive = false
+	r.metricsMu.Unlock()
+}
+
+func (r *UpstreamRuntime) recordActiveMetrics(record func()) {
+	if record == nil {
+		return
+	}
+	if r == nil {
+		record()
+		return
+	}
+
+	r.metricsMu.RLock()
+	defer r.metricsMu.RUnlock()
+	if r.metricsActive {
+		record()
+	}
 }
 
 type upstreamRouteRuntimeSnapshot struct {

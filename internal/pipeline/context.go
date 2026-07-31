@@ -19,6 +19,10 @@ type Context struct {
 	Principal  *auth.Principal
 	BindResult *session.BindResult
 	Session    *session.Session
+
+	RouteResolutionSet bool
+	RouteFound         bool
+	RouteName          string
 }
 
 func NewContext(request ziface.IRequest, packet *protocol.Packet, logger *zap.Logger) *Context {
@@ -57,6 +61,15 @@ func (c *Context) ConnID() uint64 {
 	}
 
 	return conn.GetConnID()
+}
+
+func (c *Context) SetRouteResolution(routeName string, found bool) {
+	if c == nil {
+		return
+	}
+	c.RouteResolutionSet = true
+	c.RouteFound = found
+	c.RouteName = routeName
 }
 
 func requestContext(request ziface.IRequest) context.Context {

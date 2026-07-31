@@ -624,8 +624,18 @@ Traffic Policy 校验，并额外保证：
 这些接纳范围会在 Zinx TCP 服务启动前注册，后续不需要并发修改 Zinx 内部的 MsgID
 路由 map，同时为未来的路由代际预留可用 MsgID。
 
-V17.1 **还没有提供运行时热切换**。这个阶段不要发送 `SIGHUP` 来尝试切换路由。
-原子代际切换、请求租约和 reload 触发器会在后续 V17 工作流实现。
+V17.2 已在 `reload.enabled: true` 时启用原子 generation manager。每个普通上行
+请求会在 route-aware Traffic Policy 选择之前取得一个不可变 generation 的 lease，
+并一直持有到转发和 ACK 处理结束。旧 generation 只有在最后一个 lease 归还后才会
+关闭；`drain_timeout` 只记录运维告警，不会强制中断请求。只要还有一个 generation
+处于 retiring 状态，下一次切换就会被拒绝，从而限制保留资源的数量。
+
+内联路由以及没有开启 reload 的路由文件仍走原来的 `router.Engine` 静态快路径，
+不会为每个请求增加 generation lease。
+
+V17.2 **仍未提供运维触发入口**。修改文件不会改变正在运行的路由表，`SIGHUP`、
+管理 HTTP、CLI 和 Console 触发会在 V17.3 实现。在此之前修改路由文件后仍需重启
+网关。
 
 可运行的源码示例：
 

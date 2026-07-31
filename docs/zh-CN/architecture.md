@@ -66,6 +66,13 @@ flowchart LR
 上行路由只看元数据，不看 body 内容。这样 Z-Courier 可以作为通用中间件，而不是
 绑定某个业务协议。
 
+开启路由文件 reload 后，`RouteManager` 会把整张 Route Engine 放进一个不可变
+generation。普通上行请求在 route-aware Traffic Policy 选择之前取得 generation
+lease，路由解析和实际转发都固定使用这一代。原子切换后，新请求进入新 generation，
+已经持有 lease 的请求继续在旧 generation 完成；最后一个 lease 归还后，旧 Engine、
+HTTP/DNS/NSQ 资源才会关闭。没有开启 reload 的配置仍走静态 Engine 快路径。
+V17.2 只提供这套安全生命周期内核，运维触发入口将在 V17.3 接入。
+
 ## 下行消息
 
 下行指后端推给客户端的消息。

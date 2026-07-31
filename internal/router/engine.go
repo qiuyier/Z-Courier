@@ -54,6 +54,20 @@ func NewEngine(routes []Route) *Engine {
 	return &Engine{routes: copied}
 }
 
+func (e *Engine) ResolveRoute(msgID uint32) (string, bool) {
+	if e == nil {
+		return "", false
+	}
+
+	for _, route := range e.routes {
+		if route.Matches(msgID) && route.Forwarder != nil {
+			return route.Name, true
+		}
+	}
+
+	return "", false
+}
+
 func (e *Engine) Forward(ctx context.Context, packet *protocol.Packet) (*ForwardResult, error) {
 	if e == nil || packet == nil {
 		return nil, ErrRouteNotFound

@@ -66,6 +66,19 @@ func (s *TrafficPolicySelector) Select(clientID string, msgID uint32) (TrafficPo
 	}
 
 	routeName, routeFound := s.resolveRoute(msgID)
+	return s.SelectResolved(clientID, msgID, routeName, routeFound)
+}
+
+func (s *TrafficPolicySelector) SelectResolved(
+	clientID string,
+	msgID uint32,
+	routeName string,
+	routeFound bool,
+) (TrafficPolicySelection, bool) {
+	if s == nil {
+		return TrafficPolicySelection{}, false
+	}
+
 	for _, policy := range s.policies {
 		if policy.matches(clientID, msgID, routeName, routeFound) {
 			return policy.selection, true

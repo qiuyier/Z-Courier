@@ -58,6 +58,25 @@ func TestEngineForwardRouteNotFound(t *testing.T) {
 	}
 }
 
+func TestEngineResolveRouteUsesImmutableLookupTable(t *testing.T) {
+	routes := []Route{{
+		Name:      "orders",
+		MsgIDMin:  1000,
+		MsgIDMax:  1999,
+		Forwarder: &fakeForwarder{},
+	}}
+	engine := NewEngine(routes)
+	routes[0].Name = "mutated"
+
+	name, found := engine.ResolveRoute(1500)
+	if !found || name != "orders" {
+		t.Fatalf("ResolveRoute() = %q/%v, want orders/true", name, found)
+	}
+	if name, found := engine.ResolveRoute(2000); found || name != "" {
+		t.Fatalf("ResolveRoute() miss = %q/%v, want empty/false", name, found)
+	}
+}
+
 type fakeForwarder struct {
 	packet *protocol.Packet
 	result *ForwardResult

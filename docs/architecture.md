@@ -145,6 +145,15 @@ The route engine maps packet metadata to a target adapter. `MsgID` is the
 primary routing key, but routes should also be able to match tenant, client
 type, protocol version, or flags later.
 
+When route-file reload is enabled, a `RouteManager` owns the engine inside an
+immutable generation. An upstream request acquires one generation lease before
+route-aware traffic-policy selection, resolves its route from that generation,
+and forwards through the same generation. Atomic activation directs later
+requests to the candidate generation while existing leases finish against the
+previous one. The old engine and its forwarders close only after the final
+lease returns. Configurations without reload keep the direct static-engine
+path. V17.2 provides this lifecycle core but no operator reload trigger yet.
+
 Example:
 
 ```yaml

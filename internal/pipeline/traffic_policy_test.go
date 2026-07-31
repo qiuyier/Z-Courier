@@ -80,6 +80,52 @@ func TestTrafficPolicySelectorNoMatchWithoutDefault(t *testing.T) {
 	}
 }
 
+func TestTrafficPolicyHandlerUsesPinnedRouteResolution(t *testing.T) {
+	store := &stubQuotaStore{decision: QuotaDecisionAllowed}
+	handler := NewTrafficPolicyHandlerWithStore(TrafficPoliciesConfig{
+		Enabled: true,
+		Mode:    TrafficPolicyModeLocal,
+		Routes: []TrafficPolicyRoute{{
+			Name:     "orders-v1",
+			MsgIDMin: 1001,
+			MsgIDMax: 1001,
+		}},
+		Policies: []TrafficPolicy{
+			{
+				Name:     "old-route-policy",
+				Priority: 200,
+				Match:    TrafficPolicyMatch{Routes: []string{"orders-v1"}},
+				Key:      TrafficPolicyKeyClientID,
+				TokenBucket: TokenBucketConfig{
+					Capacity:       10,
+					RefillTokens:   1,
+					RefillInterval: time.Second,
+				},
+			},
+			{
+				Name:     "new-route-policy",
+				Priority: 300,
+				Match:    TrafficPolicyMatch{Routes: []string{"orders-v2"}},
+				Key:      TrafficPolicyKeyClientID,
+				TokenBucket: TokenBucketConfig{
+					Capacity:       10,
+					RefillTokens:   1,
+					RefillInterval: time.Second,
+				},
+			},
+		},
+	}, store)
+	ctx := trafficPolicyContext("client-a", 1001)
+	ctx.SetRouteResolution("orders-v2", true)
+
+	if err := handler.Handle(ctx); err != nil {
+		t.Fatalf("Handle() error = %v", err)
+	}
+	if store.request.PolicyName != "new-route-policy" {
+		t.Fatalf("selected policy = %q, want new-route-policy", store.request.PolicyName)
+	}
+}
+
 func TestTrafficPolicyHandlerNoMatchDoesNotCreateBucket(t *testing.T) {
 	store := &stubQuotaStore{decision: QuotaDecisionAllowed}
 	handler := NewTrafficPolicyHandlerWithStore(TrafficPoliciesConfig{

@@ -17,6 +17,12 @@ semantic versioning after the first public MVP tag.
   exclusion, startup-time reload MsgID admission ranges, real config examples,
   CI/release validation, and bilingual configuration guidance. Runtime route
   activation remains deferred to the next V17 workstream.
+- V17.2 atomic route-generation manager with request leases spanning
+  generation-aware policy selection and forwarding, serialized activation,
+  one-retiring-generation bounds, non-forcing drain warnings, exactly-once
+  resource and mutable-metric cleanup, graceful shutdown integration, a
+  no-reload static fast path, and race-enabled controlled-forwarder coverage.
+  Operator reload triggers remain deferred to V17.3.
 
 ## [v0.16.0] - 2026-07-31
 

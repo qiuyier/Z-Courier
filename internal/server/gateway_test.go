@@ -1,9 +1,12 @@
 package server
 
 import (
+	"context"
 	"testing"
+	"time"
 
 	"github.com/qiuyier/Z-Courier/internal/protocol"
+	"go.uber.org/zap"
 )
 
 func TestRegisteredMsgIDsIncludesUpstreamRanges(t *testing.T) {
@@ -109,4 +112,68 @@ func TestCompactMsgIDRanges(t *testing.T) {
 			t.Fatalf("compactMsgIDRanges() = %v, want %v", got, want)
 		}
 	}
+}
+
+func TestNewGatewayKeepsStaticFastPathWhenReloadDisabled(t *testing.T) {
+	config := testGatewayRouteLifecycleConfig(false)
+	gateway, err := New(config, zap.NewNop())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer func() {
+		if err := gateway.Shutdown(context.Background()); err != nil {
+			t.Errorf("Shutdown() error = %v", err)
+		}
+	}()
+
+	if gateway.upstream == nil || gateway.routes != nil {
+		t.Fatalf("static upstream/manager = %T/%T, want engine/non-manager", gateway.upstream, gateway.routes)
+	}
+}
+
+func TestNewGatewayUsesGenerationManagerWhenReloadEnabled(t *testing.T) {
+	config := testGatewayRouteLifecycleConfig(true)
+	gateway, err := New(config, zap.NewNop())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer func() {
+		if err := gateway.Shutdown(context.Background()); err != nil {
+			t.Errorf("Shutdown() error = %v", err)
+		}
+	}()
+
+	if gateway.upstream != nil || gateway.routes == nil {
+		t.Fatalf("reload upstream/manager = %T/%T, want nil engine/generation manager", gateway.upstream, gateway.routes)
+	}
+	snapshot := gateway.routes.Snapshot()
+	if snapshot.Active == nil || snapshot.Active.Number != 1 || snapshot.Active.RouteCount != 1 {
+		t.Fatalf("initial route generation = %+v", snapshot)
+	}
+}
+
+func testGatewayRouteLifecycleConfig(reload bool) Config {
+	config := DefaultConfig()
+	config.DisableInternalHTTP = true
+	config.UpstreamRoutes = []UpstreamRouteConfig{{
+		Name:        "orders",
+		MsgIDMin:    1001,
+		MsgIDMax:    1001,
+		MaxInFlight: 10,
+		HTTP: &HTTPUpstreamConfig{
+			URL:     "http://127.0.0.1:1/upstream",
+			Timeout: time.Second,
+		},
+	}}
+	if reload {
+		config.UpstreamRoutesFile.Reload = UpstreamRouteReloadConfig{
+			Enabled:      true,
+			DrainTimeout: time.Second,
+			AcceptedMsgIDRanges: []MsgIDRange{{
+				Min: 1001,
+				Max: 1001,
+			}},
+		}
+	}
+	return config
 }

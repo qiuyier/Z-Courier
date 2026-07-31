@@ -58,7 +58,7 @@ func TestIngressRouterHandlesDownlinkAckWithoutForwarding(t *testing.T) {
 		ctx.Packet.SessionID = "session-1"
 		return nil
 	}))
-	ingress := NewIngressRouter(zap.NewNop(), nil, chain, upstream, service, 100)
+	ingress := NewIngressRouter(zap.NewNop(), nil, chain, nil, newTestRouteManager(t, upstream), service, 100)
 
 	body, err := sonic.Marshal(downlink.ClientAckRequest{
 		MessageID: "message-1",
@@ -127,7 +127,7 @@ func TestIngressRouterHandlesBindWithoutForwarding(t *testing.T) {
 		ctx.Packet.SessionID = "session-1"
 		return nil
 	}))
-	ingress := NewIngressRouter(zap.NewNop(), nil, chain, upstream, nil, 100)
+	ingress := NewIngressRouter(zap.NewNop(), nil, chain, upstream, nil, nil, 100)
 
 	packet := protocol.NewPacket(protocol.MsgIDBind, []byte("bind"))
 	packet.Token = "token"
@@ -174,7 +174,7 @@ func TestIngressRouterReturnsStableOverloadReason(t *testing.T) {
 		}
 		return nil
 	}))
-	ingress := NewIngressRouter(zap.NewNop(), nil, chain, upstream, nil, 100)
+	ingress := NewIngressRouter(zap.NewNop(), nil, chain, upstream, nil, nil, 100)
 
 	packet := protocol.NewPacket(1001, []byte("hello"))
 	packet.ClientID = "client-1"
@@ -201,6 +201,49 @@ func TestIngressRouterReturnsStableOverloadReason(t *testing.T) {
 	}
 	if ack.Reason != resilience.ReasonOverloaded {
 		t.Fatalf("Ack reason = %q, want %q", ack.Reason, resilience.ReasonOverloaded)
+	}
+}
+
+func TestIngressRouterPinsGenerationRouteBeforePipeline(t *testing.T) {
+	forwarder := &testForwarder{}
+	upstream := router.NewEngine([]router.Route{{
+		Name:      "generation-route",
+		MsgIDMin:  1001,
+		MsgIDMax:  1001,
+		Forwarder: forwarder,
+	}})
+	manager := newTestRouteManager(t, upstream)
+	chain := pipeline.NewChain(pipeline.HandlerFunc(func(ctx *pipeline.Context) error {
+		if !ctx.RouteResolutionSet || !ctx.RouteFound || ctx.RouteName != "generation-route" {
+			t.Fatalf("pipeline route resolution = %q/%v/%v", ctx.RouteName, ctx.RouteFound, ctx.RouteResolutionSet)
+		}
+		ctx.Session = &session.Session{
+			SessionID: "session-1",
+			ConnID:    ctx.ConnID(),
+			ClientID:  "client-1",
+			DeviceID:  "device-1",
+		}
+		return nil
+	}))
+	ingress := NewIngressRouter(zap.NewNop(), nil, chain, nil, manager, nil, 100)
+
+	packet := protocol.NewPacket(1001, []byte("hello"))
+	packet.ClientID = "client-1"
+	packet.DeviceID = "device-1"
+	packet.SessionID = "session-1"
+	packet.MessageID = "message-1"
+	encoded, err := protocol.Encode(packet)
+	if err != nil {
+		t.Fatalf("Encode packet error = %v", err)
+	}
+	conn := &testZinxConnection{connID: 7}
+	ingress.Handle(&testZinxRequest{conn: conn, msgID: 1001, data: encoded})
+
+	if forwarder.packet == nil || forwarder.packet.MessageID != "message-1" {
+		t.Fatalf("forwarded packet = %+v", forwarder.packet)
+	}
+	if snapshot := manager.Snapshot(); snapshot.Active == nil || snapshot.Active.InFlight != 0 {
+		t.Fatalf("route manager after request = %+v, want no in-flight leases", snapshot)
 	}
 }
 
@@ -274,6 +317,24 @@ type testForwarder struct {
 	packet *protocol.Packet
 	result *router.ForwardResult
 	err    error
+}
+
+func newTestRouteManager(t *testing.T, engine *router.Engine) *routeManager {
+	t.Helper()
+	manager, err := newRouteManager(
+		makeRouteGeneration(nil, engine, nil, "test-generation"),
+		0,
+		zap.NewNop(),
+	)
+	if err != nil {
+		t.Fatalf("newRouteManager() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := manager.Close(); err != nil {
+			t.Errorf("route manager Close() error = %v", err)
+		}
+	})
+	return manager
 }
 
 func (f *testForwarder) Forward(_ context.Context, packet *protocol.Packet) (*router.ForwardResult, error) {

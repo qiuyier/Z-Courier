@@ -172,6 +172,36 @@ func TestTrafficPolicyMetricsBoundDynamicLabels(t *testing.T) {
 	}
 }
 
+func TestDeleteUpstreamMutableMetricsRemovesGaugeSeries(t *testing.T) {
+	const (
+		route         = "metrics-cleanup-route"
+		targetType    = "http"
+		discoveryType = "dns"
+	)
+	AddUpstreamInFlight(route, targetType, 1)
+	SetUpstreamRouteDegraded(route, targetType, true)
+	SetUpstreamDiscoveryResolvedEndpoints(route, discoveryType, 2)
+	SetUpstreamEndpointUnhealthy(route, discoveryType, 1)
+
+	DeleteUpstreamRouteMutableMetrics(route, targetType)
+	DeleteUpstreamDiscoveryMutableMetrics(route, discoveryType)
+
+	checks := []struct {
+		name   string
+		labels map[string]string
+	}{
+		{name: "z_courier_upstream_inflight", labels: map[string]string{"route": route, "target_type": targetType}},
+		{name: "z_courier_upstream_route_degraded", labels: map[string]string{"route": route, "target_type": targetType}},
+		{name: "z_courier_upstream_discovery_resolved_endpoints", labels: map[string]string{"route": route, "discovery_type": discoveryType}},
+		{name: "z_courier_upstream_endpoint_unhealthy", labels: map[string]string{"route": route, "discovery_type": discoveryType}},
+	}
+	for _, check := range checks {
+		if gatheredMetricExists(t, check.name, check.labels) {
+			t.Fatalf("mutable metric %s with labels %v still exists", check.name, check.labels)
+		}
+	}
+}
+
 func gatheredScalar(t *testing.T, metricName string, labels map[string]string) float64 {
 	t.Helper()
 	families, err := prometheus.DefaultGatherer.Gather()
@@ -206,6 +236,31 @@ func gatheredScalar(t *testing.T, metricName string, labels map[string]string) f
 	}
 	t.Fatalf("metric %s with labels %v not found", metricName, labels)
 	return 0
+}
+
+func gatheredMetricExists(t *testing.T, metricName string, labels map[string]string) bool {
+	t.Helper()
+	families, err := prometheus.DefaultGatherer.Gather()
+	if err != nil {
+		t.Fatalf("Gather() error = %v", err)
+	}
+	for _, family := range families {
+		if family.GetName() != metricName {
+			continue
+		}
+		for _, metric := range family.GetMetric() {
+			matches := 0
+			for _, label := range metric.GetLabel() {
+				if labels[label.GetName()] == label.GetValue() {
+					matches++
+				}
+			}
+			if matches == len(labels) && len(metric.GetLabel()) == len(labels) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func gatheredHistogram(t *testing.T, metricName string, labels map[string]string) (uint64, float64) {

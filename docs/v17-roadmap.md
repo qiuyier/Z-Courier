@@ -44,17 +44,21 @@ The first release should support:
 
 ## Current Boundary
 
-The current gateway constructs routing once during startup:
+The current gateway has two routing paths:
 
-- `server.New` converts the configured routes into one `router.Engine`;
-- `IngressRouter` holds a fixed pointer to that engine;
-- each route owns an HTTP forwarder, DNS resolver, NSQ producer, capacity
-  limiter, dependency tracker, and related metric state;
-- `Gateway.Shutdown` closes the engine and all route-owned resources once;
-- admin route and diagnostic handlers read a startup-time `server.Config`;
-- traffic-policy selectors compile route names and MsgID ranges at startup;
-- Zinx registers every accepted outer MsgID in an internal map before service
-  starts.
+- existing inline routes and route files with reload disabled retain the direct,
+  startup-only `router.Engine` fast path;
+- a route file with reload enabled is owned by one `RouteManager` with an
+  immutable active generation;
+- `IngressRouter` acquires one generation lease before route-aware policy
+  admission and releases it after forwarding and ACK handling finish;
+- activation atomically replaces the complete route table while the previous
+  generation drains its existing leases;
+- HTTP forwarders, DNS resolvers, NSQ producers, capacity limiters, dependency
+  trackers, and mutable metric cleanup are generation-owned;
+- admin route and diagnostic handlers still read a startup-time `server.Config`;
+- explicit reload triggers and operator status contracts are not connected yet;
+- Zinx still registers every accepted outer MsgID before service starts.
 
 Zinx `v1.2.7` does not provide a concurrency-safe remove or replace operation
 for its MsgID router map. V17 must not mutate that map while requests are being
@@ -63,7 +67,9 @@ bounded startup-time admission range.
 
 ## Current Implementation Status
 
-V17.1 is implemented:
+V17.1 and V17.2 are implemented.
+
+V17.1 provides:
 
 - `upstream.routes_file` is mutually exclusive with inline `upstream.routes`;
 - relative route paths resolve against the main gateway config directory;
@@ -78,8 +84,22 @@ V17.1 is implemented:
 - source examples, focused tests, CI/release config validation, and bilingual
   configuration documentation cover the startup contract.
 
-Runtime generation switching, request leases, and reload triggers are not part
-of V17.1 and remain intentionally inactive.
+V17.2 provides:
+
+- immutable route generations with sanitized fingerprints, activation times,
+  process-local generation numbers, and bounded lifecycle state;
+- one request lease spanning generation route lookup, route-aware traffic
+  policy selection, forwarding, and ACK completion;
+- serialized candidate construction, expected-generation checks, atomic
+  activation, and one-retiring-generation enforcement;
+- drain-timeout warnings without force-closing in-flight forwarding;
+- exactly-once failed-candidate and retired-generation cleanup, including
+  generation-owned mutable Prometheus gauges;
+- graceful shutdown integration and race-enabled controlled-forwarder tests;
+- a static fast path for configurations that do not enable reload.
+
+SIGHUP, admin/CLI/Console triggers, active-generation admin responses, and
+operator audit records remain intentionally inactive until V17.3 and V17.4.
 
 ## Non-Goals
 
@@ -382,6 +402,12 @@ Acceptance criteria:
 ### V17.2 Atomic Generation Manager
 
 Purpose: switch complete route tables without disrupting in-flight forwarding.
+
+Status: implemented. The manager, immutable generations, request leases,
+serialized activation, one-retiring-generation bound, non-forcing drain
+warning, generation-owned runtime/metric cleanup, static compatibility path,
+graceful shutdown integration, and race-enabled controlled-forwarder tests are
+complete. Operator reload triggers remain a V17.3 concern.
 
 - Introduce immutable generations, request leases, atomic activation, and
   serialized reloads.

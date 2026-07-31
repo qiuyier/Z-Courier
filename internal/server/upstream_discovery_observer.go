@@ -12,6 +12,7 @@ type upstreamDiscoveryObserver struct {
 	routeName     string
 	discoveryType string
 	runtime       *upstreamDiscoveryRuntime
+	metrics       *UpstreamRuntime
 }
 
 func newUpstreamDiscoveryObserver(routeName, discoveryType string, runtime *UpstreamRuntime) *upstreamDiscoveryObserver {
@@ -23,43 +24,58 @@ func newUpstreamDiscoveryObserver(routeName, discoveryType string, runtime *Upst
 		routeName:     routeName,
 		discoveryType: discoveryType,
 		runtime:       discoveryRuntime,
+		metrics:       runtime,
 	}
 }
 
 func (o *upstreamDiscoveryObserver) ObserveDiscoveryRefresh(result httpforwarder.DiscoveryRefreshResult, duration time.Duration) {
-	metrics.RecordUpstreamDiscoveryRefresh(o.routeName, o.discoveryType, string(result), duration)
 	o.runtime.recordRefresh(string(result), duration)
+	o.metrics.recordActiveMetrics(func() {
+		metrics.RecordUpstreamDiscoveryRefresh(o.routeName, o.discoveryType, string(result), duration)
+	})
 }
 
 func (o *upstreamDiscoveryObserver) SetResolvedEndpoints(count int) {
-	metrics.SetUpstreamDiscoveryResolvedEndpoints(o.routeName, o.discoveryType, count)
 	o.runtime.setResolvedEndpoints(count)
+	o.metrics.recordActiveMetrics(func() {
+		metrics.SetUpstreamDiscoveryResolvedEndpoints(o.routeName, o.discoveryType, count)
+	})
 }
 
 func (o *upstreamDiscoveryObserver) RecordEndpointSelection(result httpforwarder.EndpointSelectionResult) {
-	metrics.RecordUpstreamEndpointSelection(o.routeName, o.discoveryType, string(result))
 	o.runtime.recordSelection(string(result))
+	o.metrics.recordActiveMetrics(func() {
+		metrics.RecordUpstreamEndpointSelection(o.routeName, o.discoveryType, string(result))
+	})
 }
 
 func (o *upstreamDiscoveryObserver) RecordCooldownSkipped(count int) {
-	metrics.RecordUpstreamEndpointCooldownSkipped(o.routeName, o.discoveryType, count)
 	o.runtime.recordCooldownSkipped(count)
+	o.metrics.recordActiveMetrics(func() {
+		metrics.RecordUpstreamEndpointCooldownSkipped(o.routeName, o.discoveryType, count)
+	})
 }
 
 func (o *upstreamDiscoveryObserver) SetUnhealthyEndpoints(count int) {
-	metrics.SetUpstreamEndpointUnhealthy(o.routeName, o.discoveryType, count)
 	o.runtime.setUnhealthyEndpoints(count)
+	o.metrics.recordActiveMetrics(func() {
+		metrics.SetUpstreamEndpointUnhealthy(o.routeName, o.discoveryType, count)
+	})
 }
 
 func (o *upstreamDiscoveryObserver) RecordEndpointFailure(failureClass router.FailureClass) {
-	metrics.RecordUpstreamEndpointFailure(o.routeName, o.discoveryType, string(failureClass))
 	o.runtime.recordEndpointFailure(string(failureClass))
+	o.metrics.recordActiveMetrics(func() {
+		metrics.RecordUpstreamEndpointFailure(o.routeName, o.discoveryType, string(failureClass))
+	})
 }
 
 func (o *upstreamDiscoveryObserver) ObserveForward(attempts int, result httpforwarder.ForwardObservationResult, decision router.FailoverDecision) {
-	metrics.ObserveUpstreamDiscoveryAttempts(o.routeName, o.discoveryType, string(result), attempts)
-	if decision != "" {
-		metrics.RecordUpstreamFailoverDecision(o.routeName, o.discoveryType, string(decision))
-	}
 	o.runtime.recordForward(attempts, string(result), string(decision))
+	o.metrics.recordActiveMetrics(func() {
+		metrics.ObserveUpstreamDiscoveryAttempts(o.routeName, o.discoveryType, string(result), attempts)
+		if decision != "" {
+			metrics.RecordUpstreamFailoverDecision(o.routeName, o.discoveryType, string(decision))
+		}
+	})
 }

@@ -1171,9 +1171,21 @@ The accepted ranges are registered in Zinx before the TCP server starts. This
 avoids unsafe runtime mutation of Zinx's MsgID router map and reserves space for
 future route generations.
 
-V17.1 does **not** activate runtime reload yet. Do not send `SIGHUP` expecting a
-route switch in this stage. Atomic generation switching, request leases, and
-reload triggers are delivered by the following V17 workstreams.
+V17.2 now installs the atomic generation manager when `reload.enabled` is true.
+Each ordinary upstream request leases one immutable generation before
+route-aware traffic-policy selection and keeps it through forwarding and ACK
+completion. A retired generation closes only after its final lease returns;
+`drain_timeout` records an operational warning and never force-closes that
+request. While one generation is retiring, another activation is rejected so
+retained route resources remain bounded.
+
+Inline routes and route files with reload disabled keep the original direct
+`router.Engine` fast path without per-request generation leases.
+
+There is still no operator reload trigger in V17.2. Editing the file does not
+change the running route table, and `SIGHUP`, admin HTTP, CLI, and Console
+activation arrive in V17.3. Restart the gateway when changing this file until
+those trigger contracts are implemented.
 
 Runnable source examples:
 

@@ -669,6 +669,12 @@ func SetUpstreamRouteDegraded(route, targetType string, degraded bool) {
 	upstreamRouteDegraded.WithLabelValues(nonEmpty(route, "unknown"), nonEmpty(targetType, "unknown")).Set(value)
 }
 
+func DeleteUpstreamRouteMutableMetrics(route, targetType string) {
+	labels := []string{nonEmpty(route, "unknown"), nonEmpty(targetType, "unknown")}
+	upstreamInFlight.DeleteLabelValues(labels...)
+	upstreamRouteDegraded.DeleteLabelValues(labels...)
+}
+
 func RecordUpstreamDiscoveryRefresh(route, discoveryType, result string, duration time.Duration) {
 	labels := []string{
 		nonEmpty(route, "unknown"),
@@ -714,6 +720,12 @@ func SetUpstreamEndpointUnhealthy(route, discoveryType string, count int) {
 		nonEmpty(route, "unknown"),
 		nonEmpty(discoveryType, "unknown"),
 	).Set(float64(count))
+}
+
+func DeleteUpstreamDiscoveryMutableMetrics(route, discoveryType string) {
+	labels := []string{nonEmpty(route, "unknown"), nonEmpty(discoveryType, "unknown")}
+	upstreamDiscoveryResolvedEndpoints.DeleteLabelValues(labels...)
+	upstreamEndpointUnhealthy.DeleteLabelValues(labels...)
 }
 
 func RecordUpstreamEndpointFailure(route, discoveryType, failureClass string) {

@@ -80,7 +80,18 @@ func (h *TrafficPolicyHandler) Handle(ctx *Context) error {
 		return Reject(protocol.AckUnauthorized, fmt.Errorf("traffic policy requires an authenticated client"))
 	}
 
-	policy, selected := h.selector.Select(ctx.Principal.ClientID, ctx.Packet.MsgID)
+	var policy TrafficPolicySelection
+	var selected bool
+	if ctx.RouteResolutionSet {
+		policy, selected = h.selector.SelectResolved(
+			ctx.Principal.ClientID,
+			ctx.Packet.MsgID,
+			ctx.RouteName,
+			ctx.RouteFound,
+		)
+	} else {
+		policy, selected = h.selector.Select(ctx.Principal.ClientID, ctx.Packet.MsgID)
+	}
 	if !selected {
 		metrics.RecordTrafficPolicySelection(h.mode, "", "no_match")
 		h.runtime.recordNoMatch()

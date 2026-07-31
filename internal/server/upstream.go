@@ -38,6 +38,7 @@ func newUpstreamEngine(config Config) (*router.Engine, error) {
 				routeConfig.Name,
 				targetType,
 				config.UpstreamRuntime.ensureRoute(routeConfig.Name, targetType),
+				config.UpstreamRuntime,
 				forwarder,
 			)
 		}
@@ -215,6 +216,7 @@ type dependencyTrackingForwarder struct {
 	routeName  string
 	targetType string
 	tracker    dependencyTracker
+	runtime    *UpstreamRuntime
 	next       router.Forwarder
 }
 
@@ -223,12 +225,18 @@ type dependencyTracker interface {
 	MarkFailure(string) resilience.DependencySnapshot
 }
 
-func newDependencyTrackingForwarder(routeName, targetType string, tracker dependencyTracker, next router.Forwarder) router.Forwarder {
-	metrics.SetUpstreamRouteDegraded(routeName, targetType, false)
+func newDependencyTrackingForwarder(
+	routeName,
+	targetType string,
+	tracker dependencyTracker,
+	runtime *UpstreamRuntime,
+	next router.Forwarder,
+) router.Forwarder {
 	return &dependencyTrackingForwarder{
 		routeName:  routeName,
 		targetType: targetType,
 		tracker:    tracker,
+		runtime:    runtime,
 		next:       next,
 	}
 }
@@ -252,7 +260,9 @@ func (f *dependencyTrackingForwarder) markSuccess() {
 	if f.tracker != nil {
 		f.tracker.MarkSuccess()
 	}
-	metrics.SetUpstreamRouteDegraded(f.routeName, f.targetType, false)
+	f.runtime.recordActiveMetrics(func() {
+		metrics.SetUpstreamRouteDegraded(f.routeName, f.targetType, false)
+	})
 }
 
 func (f *dependencyTrackingForwarder) markFailure(reason string) {
@@ -261,7 +271,9 @@ func (f *dependencyTrackingForwarder) markFailure(reason string) {
 		snapshot := f.tracker.MarkFailure(reason)
 		degraded = snapshot.Status != resilience.DependencyStatusHealthy
 	}
-	metrics.SetUpstreamRouteDegraded(f.routeName, f.targetType, degraded)
+	f.runtime.recordActiveMetrics(func() {
+		metrics.SetUpstreamRouteDegraded(f.routeName, f.targetType, degraded)
+	})
 }
 
 func (f *dependencyTrackingForwarder) Close() error {

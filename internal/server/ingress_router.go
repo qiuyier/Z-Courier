@@ -25,6 +25,7 @@ type IngressRouter struct {
 	connManager ziface.IConnManager
 	chain       *pipeline.Chain
 	upstream    *router.Engine
+	routes      *routeManager
 	downlink    *downlink.Service
 	flushLimit  int
 }
@@ -36,6 +37,7 @@ func NewIngressRouter(
 	connManager ziface.IConnManager,
 	chain *pipeline.Chain,
 	upstream *router.Engine,
+	routes *routeManager,
 	downlinkService *downlink.Service,
 	flushLimit int,
 ) *IngressRouter {
@@ -48,6 +50,7 @@ func NewIngressRouter(
 		connManager: connManager,
 		chain:       chain,
 		upstream:    upstream,
+		routes:      routes,
 		downlink:    downlinkService,
 		flushLimit:  flushLimit,
 	}
@@ -79,6 +82,28 @@ func (r *IngressRouter) Handle(request ziface.IRequest) {
 	}
 
 	pipelineContext := pipeline.NewContext(request, packet, r.logger)
+	var routeLease *routeLease
+	if packet.MsgID != protocol.MsgIDBind && packet.MsgID != protocol.MsgIDDownlinkAck && r.routes != nil {
+		routeLease, err = r.routes.Acquire()
+		if err != nil {
+			r.logger.Warn(
+				"failed to acquire upstream route generation",
+				zap.Uint32("msg_id", packet.MsgID),
+				zap.String("client_id", packet.ClientID),
+				zap.String("device_id", packet.DeviceID),
+				zap.String("message_id", packet.MessageID),
+				zap.String("trace_id", packet.TraceID),
+				zap.Error(err),
+			)
+			metrics.RecordIngressPacket(packet.MsgID, "rejected")
+			metrics.RecordIngressRejected(packet.MsgID, protocol.AckRejected)
+			r.sendAck(request, packet, protocol.AckRejected, resilience.ReasonUpstreamFailed)
+			return
+		}
+		defer routeLease.Release()
+		routeName, found := routeLease.ResolveRoute(packet.MsgID)
+		pipelineContext.SetRouteResolution(routeName, found)
+	}
 	if err := r.chain.Run(pipelineContext); err != nil {
 		code, reason := pipeline.AckError(err)
 		metrics.RecordIngressPacket(packet.MsgID, "rejected")
@@ -103,7 +128,7 @@ func (r *IngressRouter) Handle(request ziface.IRequest) {
 		return
 	}
 
-	if !r.forwardUpstream(request, packet) {
+	if !r.forwardUpstream(request, packet, routeLease) {
 		return
 	}
 
@@ -230,13 +255,21 @@ func (r *IngressRouter) flushDownlinkPending(bindResult *session.BindResult) {
 	}()
 }
 
-func (r *IngressRouter) forwardUpstream(request ziface.IRequest, packet *protocol.Packet) bool {
-	if r.upstream == nil {
+func (r *IngressRouter) forwardUpstream(request ziface.IRequest, packet *protocol.Packet, lease *routeLease) bool {
+	if lease == nil && r.upstream == nil {
 		return true
 	}
 
 	startedAt := time.Now()
-	result, err := r.upstream.Forward(connectionContext(request.GetConnection()), packet)
+	var result *router.ForwardResult
+	var err error
+	var generation uint64
+	if lease != nil {
+		result, err = lease.Forward(connectionContext(request.GetConnection()), packet)
+		generation = lease.Generation()
+	} else {
+		result, err = r.upstream.Forward(connectionContext(request.GetConnection()), packet)
+	}
 	duration := time.Since(startedAt)
 	if errors.Is(err, router.ErrRouteNotFound) {
 		r.logger.Debug(
@@ -264,6 +297,9 @@ func (r *IngressRouter) forwardUpstream(request ziface.IRequest, packet *protoco
 			zap.String("upstream_result", upstreamForwardResult(err)),
 			zap.Error(err),
 		}
+		if generation > 0 {
+			fields = append(fields, zap.Uint64("route_generation", generation))
+		}
 		fields = append(fields, upstreamForwardMetadataFields(result, err)...)
 		r.logger.Warn("failed to forward upstream packet", fields...)
 		r.sendAck(request, packet, protocol.AckRejected, upstreamAckReason(err))
@@ -281,6 +317,9 @@ func (r *IngressRouter) forwardUpstream(request ziface.IRequest, packet *protoco
 		zap.String("device_id", packet.DeviceID),
 		zap.String("message_id", packet.MessageID),
 		zap.String("trace_id", packet.TraceID),
+	}
+	if generation > 0 {
+		fields = append(fields, zap.Uint64("route_generation", generation))
 	}
 	fields = append(fields, upstreamForwardMetadataFields(result, nil)...)
 	r.logger.Info("forwarded upstream packet", fields...)
