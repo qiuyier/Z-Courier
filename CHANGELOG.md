@@ -5,6 +5,14 @@ All notable changes to Z-Courier are documented in this file.
 The format follows the spirit of Keep a Changelog, and this project uses
 semantic versioning after the first public MVP tag.
 
+## [Unreleased]
+
+### Added
+
+- V17 roadmap for bounded route-file hot reload, immutable route generations,
+  in-flight request leases, failure-safe activation and retirement,
+  node-local canary rollout, and operator-facing reload controls.
+
 ## [v0.16.0] - 2026-07-31
 
 ### Added

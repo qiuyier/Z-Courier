@@ -148,6 +148,12 @@ upgrade, rollback, and release acceptance guides are
 [docs/v16-release.md](docs/v16-release.md) and
 [docs/zh-CN/v16-release.md](docs/zh-CN/v16-release.md).
 
+V17 route hot-reload planning is tracked in
+[docs/v17-roadmap.md](docs/v17-roadmap.md). It defines bounded startup-time
+MsgID admission, immutable route generations, in-flight request leases,
+failure-safe atomic activation, node-local canary rollout, and operator-facing
+reload controls without restarting the TCP gateway.
+
 ## Quick Start
 
 Run the single-node integration verifier from the repository root:
