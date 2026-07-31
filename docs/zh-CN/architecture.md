@@ -71,7 +71,10 @@ generation。普通上行请求在 route-aware Traffic Policy 选择之前取得
 lease，路由解析和实际转发都固定使用这一代。原子切换后，新请求进入新 generation，
 已经持有 lease 的请求继续在旧 generation 完成；最后一个 lease 归还后，旧 Engine、
 HTTP/DNS/NSQ 资源才会关闭。没有开启 reload 的配置仍走静态 Engine 快路径。
-V17.2 只提供这套安全生命周期内核，运维触发入口将在 V17.3 接入。
+V17.3 已让 `SIGHUP`、认证后的管理 API、`cmd/admin` 和有权限的 Console 共用同一个
+固定文件 Loader。Dry Run 完整构建后会关闭候选 generation，不会激活；reload 只有
+在候选完整构建成功后才原子切换。所有入口都通过同一个 Manager 串行执行，并记录
+脱敏后的审计结果。
 
 ## 下行消息
 

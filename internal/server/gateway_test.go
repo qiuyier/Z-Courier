@@ -152,6 +152,14 @@ func TestNewGatewayUsesGenerationManagerWhenReloadEnabled(t *testing.T) {
 	}
 }
 
+func TestNewGatewayRejectsReloadWithoutRouteLoader(t *testing.T) {
+	config := testGatewayRouteLifecycleConfig(true)
+	config.UpstreamRoutesFile.Loader = nil
+	if _, err := New(config, zap.NewNop()); err == nil {
+		t.Fatal("New() error = nil, want missing route loader error")
+	}
+}
+
 func testGatewayRouteLifecycleConfig(reload bool) Config {
 	config := DefaultConfig()
 	config.DisableInternalHTTP = true
@@ -166,6 +174,10 @@ func testGatewayRouteLifecycleConfig(reload bool) Config {
 		},
 	}}
 	if reload {
+		routes := cloneUpstreamRoutes(config.UpstreamRoutes)
+		config.UpstreamRoutesFile.Loader = func(context.Context) (UpstreamRouteSnapshot, error) {
+			return UpstreamRouteSnapshot{Routes: cloneUpstreamRoutes(routes)}, nil
+		}
 		config.UpstreamRoutesFile.Reload = UpstreamRouteReloadConfig{
 			Enabled:      true,
 			DrainTimeout: time.Second,

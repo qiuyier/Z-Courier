@@ -1216,6 +1216,63 @@ func TestInternalHTTPAdminSessionReadonlyDeniesMessageRepair(t *testing.T) {
 	}
 }
 
+func TestInternalHTTPAdminSessionRouteDryRunRequiresCSRF(t *testing.T) {
+	service := downlink.NewService(testSessionFinder{}, testConnectionFinder{})
+	config := normalizeConfig(Config{
+		GatewayNode:      "gateway-a",
+		InternalHTTPAddr: "127.0.0.1:18080",
+		InternalToken:    "secret",
+		AdminConsole: AdminConsoleConfig{
+			Session: AdminConsoleSessionConfig{
+				Enabled:        true,
+				TTL:            time.Hour,
+				CookieName:     "zcourier_admin_session",
+				CookieSameSite: "lax",
+				Role:           adminSessionRoleAdmin,
+			},
+		},
+	})
+	manager := mustRouteManager(
+		t,
+		controlledRouteGeneration("active", newControlledGenerationForwarder(false), "active-fingerprint"),
+		0,
+		zap.NewNop(),
+	)
+	config.UpstreamRoutesFile.Loader = testRouteSnapshotLoader("candidate", "http://candidate.internal/upstream")
+	config.routeControl = newRouteControl(config, manager, nil, zap.NewNop())
+
+	server := mustInternalHTTPServer(t, config, service, &gatewayHealth{}, nil)
+	cookie, csrfToken := loginAdminSessionCredentials(t, server, config, "secret")
+	body := `{"dry_run":true,"expected_generation":1}`
+
+	missingCSRFReq := httptest.NewRequest(http.MethodPost, adminRouteReloadPath, strings.NewReader(body))
+	missingCSRFReq.AddCookie(cookie)
+	missingCSRFReq.Header.Set("Content-Type", "application/json")
+	missingCSRFRec := httptest.NewRecorder()
+	server.Handler.ServeHTTP(missingCSRFRec, missingCSRFReq)
+	if missingCSRFRec.Code != http.StatusForbidden {
+		t.Fatalf("missing CSRF status = %d, want %d, body = %s", missingCSRFRec.Code, http.StatusForbidden, missingCSRFRec.Body.String())
+	}
+
+	dryRunReq := httptest.NewRequest(http.MethodPost, adminRouteReloadPath, strings.NewReader(body))
+	addAdminSessionMutationHeaders(dryRunReq, cookie, csrfToken)
+	dryRunRec := httptest.NewRecorder()
+	server.Handler.ServeHTTP(dryRunRec, dryRunReq)
+	if dryRunRec.Code != http.StatusOK {
+		t.Fatalf("dry-run status = %d, want %d, body = %s", dryRunRec.Code, http.StatusOK, dryRunRec.Body.String())
+	}
+	var response adminRouteReloadResponse
+	if err := sonic.Unmarshal(dryRunRec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("Unmarshal(dry-run) error = %v", err)
+	}
+	if response.Result != "validated" || response.Active == nil || response.Active.Number != 1 {
+		t.Fatalf("dry-run response = %+v, want active generation 1", response)
+	}
+	if active := manager.Snapshot().Active; active == nil || active.Number != 1 {
+		t.Fatalf("active generation after dry-run = %+v, want generation 1", active)
+	}
+}
+
 func TestInternalHTTPAdminAuditListsLoginAndPermissionDenied(t *testing.T) {
 	service := downlink.NewService(testSessionFinder{}, testConnectionFinder{}, downlink.WithStore(downlink.NewMemoryStore()))
 	config := normalizeConfig(Config{

@@ -39,6 +39,8 @@ test("logs in and navigates core console pages", async ({ page }) => {
 
   await expect(page.getByRole("heading", { name: "Operations Overview" })).toBeVisible();
   await gotoNav(page, "Routes");
+  await expect(page.getByTestId("route-reload-control")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Dry Run" })).toBeDisabled();
   await gotoNav(page, "Sessions");
   await gotoNav(page, "Messages");
   await expect(page.getByText("Message Cursor")).toBeVisible();
@@ -56,6 +58,87 @@ test("logs in and navigates core console pages", async ({ page }) => {
   await expect(trafficPolicyPanel.getByText("configured", { exact: true }).first()).toBeVisible();
   await expect(trafficPolicyPanel.getByLabel("Traffic policy console-smoke-upstream")).toBeVisible();
   await gotoNav(page, "Overview", "Operations Overview");
+});
+
+test("route file dry-run and activation use the displayed generation", async ({ page }) => {
+  test.skip(expectedRole === "readonly", "readonly role has a dedicated disabled-actions smoke test");
+
+  let activeGeneration = 7;
+  const generation = () => ({
+    number: activeGeneration,
+    fingerprint: `fingerprint-${activeGeneration}`,
+    activated_at: "2026-07-31T08:30:00Z",
+    route_count: 1,
+    in_flight: 0,
+    state: "active",
+  });
+  await page.route("**/internal/admin/routes/status", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      json: {
+        code: "ok",
+        gateway_node: "console-smoke-node",
+        reload_enabled: true,
+        active: generation(),
+      },
+      status: 200,
+    });
+  });
+  await page.route("**/internal/admin/routes/reload", async (route) => {
+    const request = route.request().postDataJSON() as { dry_run: boolean; expected_generation: number };
+    expect(request.expected_generation).toBe(activeGeneration);
+    if (request.dry_run) {
+      await route.fulfill({
+        contentType: "application/json",
+        json: {
+          code: "ok",
+          result: "validated",
+          gateway_node: "console-smoke-node",
+          reload_enabled: true,
+          trigger: "admin_api",
+          dry_run: true,
+          changed: true,
+          duration_ms: 4,
+          active: generation(),
+          candidate: { ...generation(), number: 0, fingerprint: "candidate-fingerprint" },
+        },
+        status: 200,
+      });
+      return;
+    }
+
+    activeGeneration += 1;
+    await route.fulfill({
+      contentType: "application/json",
+      json: {
+        code: "ok",
+        result: "reloaded",
+        gateway_node: "console-smoke-node",
+        reload_enabled: true,
+        trigger: "admin_api",
+        changed: true,
+        duration_ms: 6,
+        active: generation(),
+        candidate: generation(),
+      },
+      status: 200,
+    });
+  });
+
+  await login(page);
+  await gotoNav(page, "Routes");
+  const panel = page.getByTestId("route-reload-control");
+  await expect(panel.getByRole("heading", { name: "#7" })).toBeVisible();
+
+  await panel.getByRole("button", { name: "Dry Run" }).click();
+  await expect(panel.getByText("Candidate validated")).toBeVisible();
+
+  await panel.getByRole("button", { name: "Activate File" }).click();
+  const dialog = page.getByRole("dialog", { name: "Replace Generation #7" });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "Activate Route File" }).click();
+  await expect(panel.getByText("Generation activated")).toBeVisible();
+  await expect(panel.getByRole("heading", { name: "#8" })).toBeVisible();
 });
 
 test("dependency states use consistent icons and issue counts", async ({ page }) => {
@@ -428,6 +511,26 @@ test("bulk requeue confirms selection and reports partial results", async ({ pag
 test("readonly sessions keep mutation actions disabled", async ({ page }) => {
   test.skip(expectedRole !== "readonly", "operator/admin role has a dedicated mutation-dialog smoke test");
 
+  await page.route("**/internal/admin/routes/status", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      json: {
+        code: "ok",
+        gateway_node: "console-smoke-readonly",
+        reload_enabled: true,
+        active: {
+          number: 7,
+          fingerprint: "readonly-fingerprint",
+          activated_at: "2026-07-31T08:30:00Z",
+          route_count: 1,
+          in_flight: 0,
+          state: "active",
+        },
+      },
+      status: 200,
+    });
+  });
+
   await login(page);
   await gotoNav(page, "Messages");
 
@@ -436,4 +539,10 @@ test("readonly sessions keep mutation actions disabled", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Send Test Push" })).toBeDisabled();
   await expect(page.getByLabel("Select eligible failed messages")).toBeDisabled();
   await expect(page.getByRole("button", { name: "Requeue selected" })).toBeDisabled();
+
+  await gotoNav(page, "Routes");
+  const routeReloadPanel = page.getByTestId("route-reload-control");
+  await expect(routeReloadPanel.getByText("route:reload", { exact: true })).toBeVisible();
+  await expect(routeReloadPanel.getByRole("button", { name: "Dry Run" })).toBeDisabled();
+  await expect(routeReloadPanel.getByRole("button", { name: "Activate File" })).toBeDisabled();
 });

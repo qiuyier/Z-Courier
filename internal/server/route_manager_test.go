@@ -176,6 +176,50 @@ func TestRouteManagerRejectsStaleExpectedGenerationBeforeBuild(t *testing.T) {
 	}
 }
 
+func TestRouteManagerDryRunBuildsAndClosesCandidateWithoutActivation(t *testing.T) {
+	manager := mustRouteManager(
+		t,
+		controlledRouteGeneration("active", newControlledGenerationForwarder(false), "active-fingerprint"),
+		0,
+		zap.NewNop(),
+	)
+	candidateForwarder := newControlledGenerationForwarder(false)
+	snapshot, err := manager.DryRun(context.Background(), 1, func(context.Context) (*routeGeneration, error) {
+		return controlledRouteGeneration("candidate", candidateForwarder, "candidate-fingerprint"), nil
+	})
+	if err != nil {
+		t.Fatalf("DryRun() error = %v", err)
+	}
+	if snapshot.Number != 0 || snapshot.Fingerprint != "candidate-fingerprint" || snapshot.State != "candidate" {
+		t.Fatalf("DryRun() snapshot = %+v, want unnumbered candidate", snapshot)
+	}
+	waitForGenerationClose(t, candidateForwarder)
+	active := manager.Snapshot().Active
+	if active == nil || active.Number != 1 || active.Fingerprint != "active-fingerprint" {
+		t.Fatalf("active generation after dry-run = %+v", active)
+	}
+}
+
+func TestRouteManagerDryRunRejectsStaleGenerationBeforeBuild(t *testing.T) {
+	manager := mustRouteManager(
+		t,
+		controlledRouteGeneration("active", newControlledGenerationForwarder(false), "active-fingerprint"),
+		0,
+		zap.NewNop(),
+	)
+	var built atomic.Bool
+	_, err := manager.DryRun(context.Background(), 9, func(context.Context) (*routeGeneration, error) {
+		built.Store(true)
+		return controlledRouteGeneration("candidate", newControlledGenerationForwarder(false), "candidate-fingerprint"), nil
+	})
+	if !errors.Is(err, errRouteGenerationConflict) {
+		t.Fatalf("DryRun() error = %v, want %v", err, errRouteGenerationConflict)
+	}
+	if built.Load() {
+		t.Fatal("DryRun() built a candidate after generation conflict")
+	}
+}
+
 func TestRouteManagerCanceledReloadClosesCandidateWithoutActivation(t *testing.T) {
 	manager := mustRouteManager(
 		t,

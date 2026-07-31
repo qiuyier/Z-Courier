@@ -56,8 +56,10 @@ The current gateway has two routing paths:
   generation drains its existing leases;
 - HTTP forwarders, DNS resolvers, NSQ producers, capacity limiters, dependency
   trackers, and mutable metric cleanup are generation-owned;
-- admin route and diagnostic handlers still read a startup-time `server.Config`;
-- explicit reload triggers and operator status contracts are not connected yet;
+- admin route listing reads the active generation while broader diagnostics
+  still use their V17.2 startup-oriented snapshot;
+- `SIGHUP`, admin HTTP, CLI, and basic Console controls now share one serialized
+  loader, generation check, permission, and audit path;
 - Zinx still registers every accepted outer MsgID before service starts.
 
 Zinx `v1.2.7` does not provide a concurrency-safe remove or replace operation
@@ -67,7 +69,7 @@ bounded startup-time admission range.
 
 ## Current Implementation Status
 
-V17.1 and V17.2 are implemented.
+V17.1, V17.2, and V17.3 are implemented.
 
 V17.1 provides:
 
@@ -98,8 +100,23 @@ V17.2 provides:
 - graceful shutdown integration and race-enabled controlled-forwarder tests;
 - a static fast path for configurations that do not enable reload.
 
-SIGHUP, admin/CLI/Console triggers, active-generation admin responses, and
-operator audit records remain intentionally inactive until V17.3 and V17.4.
+V17.3 provides:
+
+- `SIGHUP` activation without changing SIGINT/SIGTERM graceful shutdown;
+- read-only status plus strict dry-run and activation admin contracts that
+  never accept route documents or source overrides;
+- stale expected-generation rejection before candidate file loading;
+- `cmd/admin routes status|validate|reload`, with explicit activation
+  confirmation;
+- `route:reload` permission for operator/admin Console sessions, CSRF mutation
+  protection, and read-only denial before candidate loading;
+- sanitized success, rejection, and failure audit evidence across API, CLI,
+  Console, and signal triggers;
+- active-generation route listing and basic responsive Console dry-run/status/
+  confirmation controls.
+
+Fixed-label reload metrics, richer diagnostics and diagnosis-bundle history,
+Grafana/alerts, and retirement-focused Console detail remain V17.4 work.
 
 ## Non-Goals
 
@@ -431,6 +448,11 @@ Acceptance criteria:
 
 Purpose: make reload controlled, scriptable, and attributable.
 
+Status: implemented. `SIGHUP`, status/dry-run/reload admin APIs, expected
+generation checks, CLI commands, Console permissions and confirmation, active
+route listing, serialized operation handling, and sanitized audit evidence are
+connected to the shared fixed-file loader and generation manager.
+
 - Add `SIGHUP` handling without interfering with SIGINT/SIGTERM shutdown.
 - Add dry-run, compare-generation, reload, and status admin contracts.
 - Extend `cmd/admin` with route validation, reload, and status commands.
@@ -449,12 +471,16 @@ Acceptance criteria:
 Purpose: make rollout state and failures understandable without high-cardinality
 telemetry.
 
+Status: planned. Active-generation route listing and the basic authorized
+Console controls landed with V17.3; metrics, history-rich diagnostics,
+diagnosis bundles, dashboards, alerts, and retirement detail remain here.
+
 - Add fixed-label metrics, runtime snapshots, diagnostics, diagnosis bundles,
   warnings, and recording/alert rules.
-- Make admin route responses read from the active generation rather than the
-  startup config copy.
-- Extend the Console Routes view with generation, candidate, retirement,
-  dry-run, reload, and rollback-oriented status.
+- Extend active-generation admin responses with runtime reload history and
+  retirement diagnostics.
+- Extend the existing Console Routes controls with richer candidate,
+  retirement, failure-history, and rollback-oriented status.
 - Add bilingual first-response guidance for failed reloads, slow retirement,
   mixed cluster generations, and metric cleanup.
 

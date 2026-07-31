@@ -1116,7 +1116,7 @@ HTTP target fields:
   Packets above this limit are rejected quickly instead of waiting behind a
   slow backend.
 
-### Route File Startup Mode (V17.1)
+### Route File And Hot Reload (V17.1-V17.3)
 
 V17.1 can load the complete upstream route table from a separate, bounded YAML
 file. This is mutually exclusive with inline `upstream.routes`.
@@ -1182,10 +1182,60 @@ retained route resources remain bounded.
 Inline routes and route files with reload disabled keep the original direct
 `router.Engine` fast path without per-request generation leases.
 
-There is still no operator reload trigger in V17.2. Editing the file does not
-change the running route table, and `SIGHUP`, admin HTTP, CLI, and Console
-activation arrive in V17.3. Restart the gateway when changing this file until
-those trigger contracts are implemented.
+V17.3 connects explicit hot-reload triggers. Editing the file alone never
+changes the active route table. A candidate can be inspected and activated with
+the operator CLI:
+
+```bash
+go run ./cmd/admin routes status \
+  -internal-url http://127.0.0.1:18182 \
+  -internal-token dev-internal-token
+
+go run ./cmd/admin routes validate \
+  -internal-url http://127.0.0.1:18182 \
+  -internal-token dev-internal-token \
+  -expected-generation 1
+
+go run ./cmd/admin routes reload \
+  -internal-url http://127.0.0.1:18182 \
+  -internal-token dev-internal-token \
+  -expected-generation 1 \
+  -confirm
+```
+
+`validate` reads, validates, and constructs the fixed configured file, then
+closes the candidate without activation. `reload` repeats that complete process
+and atomically activates the candidate. `-expected-generation` is optional, but
+is recommended because it rejects a stale operation before the file is read.
+The Console Routes page exposes the same dry-run and confirmed activation to
+`operator` and `admin` sessions; `readonly` sessions can inspect status only.
+
+The internal contracts are:
+
+```text
+GET  /internal/admin/routes/status
+POST /internal/admin/routes/reload
+```
+
+The POST body is either
+`{"dry_run":true,"expected_generation":1}` or
+`{"dry_run":false,"expected_generation":1}`. It never accepts a route
+document, path, or target override. Stable failures include
+`reload_disabled`, `reload_busy`, `generation_conflict`, `invalid_candidate`,
+`candidate_build_failed`, and `reload_failed`.
+
+After a successful dry run, `SIGHUP` can activate the configured file directly:
+
+```bash
+kill -HUP <gateway-pid>
+```
+
+`SIGHUP` does not interfere with SIGINT/SIGTERM shutdown. Every API, CLI, or
+signal attempt is serialized and audited without route credentials, raw file
+paths, or endpoint URLs. Activation is node-local: repeat dry-run and reload on
+each gateway during a canary or rolling cluster rollout. A wider accepted MsgID
+range, changed traffic-policy definitions, or any non-route setting still
+requires a restart.
 
 Runnable source examples:
 

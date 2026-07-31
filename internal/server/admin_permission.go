@@ -21,6 +21,7 @@ const (
 	adminPermissionRetryScan         = "message:retry_scan"
 	adminPermissionSessionDisconnect = "session:disconnect"
 	adminPermissionDownlinkTestPush  = "downlink:test_push"
+	adminPermissionRouteReload       = "route:reload"
 )
 
 type adminPermissionDeniedResponse struct {
@@ -125,7 +126,8 @@ func adminRoleAllows(role string, permission string) bool {
 			permission == adminPermissionMessageRepair ||
 			permission == adminPermissionRetryScan ||
 			permission == adminPermissionSessionDisconnect ||
-			permission == adminPermissionDownlinkTestPush
+			permission == adminPermissionDownlinkTestPush ||
+			permission == adminPermissionRouteReload
 	case adminSessionRoleReadonly:
 		return permission == adminPermissionRead
 	default:
@@ -136,9 +138,9 @@ func adminRoleAllows(role string, permission string) bool {
 func adminPermissionsForRole(role string) []string {
 	switch normalizeAdminRole(role) {
 	case adminSessionRoleAdmin:
-		return []string{adminPermissionRead, adminPermissionMessageRepair, adminPermissionRetryScan, adminPermissionSessionDisconnect, adminPermissionDownlinkTestPush}
+		return []string{adminPermissionRead, adminPermissionMessageRepair, adminPermissionRetryScan, adminPermissionSessionDisconnect, adminPermissionDownlinkTestPush, adminPermissionRouteReload}
 	case adminSessionRoleOperator:
-		return []string{adminPermissionRead, adminPermissionMessageRepair, adminPermissionRetryScan, adminPermissionSessionDisconnect, adminPermissionDownlinkTestPush}
+		return []string{adminPermissionRead, adminPermissionMessageRepair, adminPermissionRetryScan, adminPermissionSessionDisconnect, adminPermissionDownlinkTestPush, adminPermissionRouteReload}
 	default:
 		return []string{adminPermissionRead}
 	}

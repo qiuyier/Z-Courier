@@ -130,6 +130,8 @@ func newInternalHTTPServer(config Config, logger *zap.Logger, service *downlink.
 	}
 	mux.Handle("/internal/admin/overview", withConsolePermission(newAdminOverviewHandler(handlerConfig, health, registry), adminPermissionRead))
 	mux.Handle("/internal/admin/routes", withConsolePermission(newAdminRoutesHandler(handlerConfig), adminPermissionRead))
+	mux.Handle(adminRouteStatusPath, withConsolePermission(newAdminRouteStatusHandler(handlerConfig), adminPermissionRead))
+	mux.Handle(adminRouteReloadPath, withConsolePermission(newAdminRouteReloadHandler(handlerConfig), adminPermissionRouteReload))
 	mux.Handle("/internal/admin/audit", withConsolePermission(newAdminAuditHandler(handlerConfig, adminAudit), adminPermissionRead))
 	mux.Handle("/internal/admin/diagnostics", withConsolePermission(newAdminDiagnosticsHandler(handlerConfig, health, registry, runtime, service.HasStore()), adminPermissionRead))
 	mux.Handle("/internal/admin/check", withConsolePermission(newAdminCheckHandler(handlerConfig, service, registry), adminPermissionRead))

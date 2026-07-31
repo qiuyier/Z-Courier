@@ -46,6 +46,10 @@ type Gateway struct {
 	upstreamRuntime           *UpstreamRuntime
 	upstreamMetrics           routeMutableMetrics
 	routes                    *routeManager
+	routeControl              *routeControl
+	routeReloadSignal         chan os.Signal
+	routeReloadCancel         context.CancelFunc
+	routeReloadCompleted      chan struct{}
 	downlink                  *downlink.Service
 	downlinkCloser            io.Closer
 	downlinkRetryInterval     time.Duration
@@ -75,6 +79,10 @@ func New(config Config, logger *zap.Logger) (*Gateway, error) {
 
 	config = normalizeConfig(config)
 	authVerifierCloser, _ := config.Verifier.(io.Closer)
+	if config.UpstreamRoutesFile.Reload.Enabled && config.UpstreamRoutesFile.Loader == nil {
+		closeWithLog(authVerifierCloser, logger, "authentication verifier")
+		return nil, fmt.Errorf("upstream route reload requires a configured route loader")
+	}
 	deliveryPolicies, err := newDownlinkPolicySet(config)
 	if err != nil {
 		closeWithLog(authVerifierCloser, logger, "authentication verifier")
@@ -157,6 +165,8 @@ func New(config Config, logger *zap.Logger) (*Gateway, error) {
 		return nil, err
 	}
 	config.AdminAudit = adminAudit
+	routeControl := newRouteControl(config, generationManager, adminAudit, logger)
+	config.routeControl = routeControl
 	var adminSessions *adminSessionManager
 	var adminSessionCloser io.Closer
 	if !config.DisableInternalHTTP && config.InternalHTTPAddr != "" {
@@ -207,6 +217,7 @@ func New(config Config, logger *zap.Logger) (*Gateway, error) {
 		upstreamRuntime:           upstreamRuntime,
 		upstreamMetrics:           upstreamMetrics,
 		routes:                    generationManager,
+		routeControl:              routeControl,
 		downlink:                  downlinkService,
 		downlinkCloser:            downlinkCloser,
 		downlinkRetryInterval:     config.DownlinkDelivery.RetryInterval,
@@ -293,6 +304,7 @@ func (g *Gateway) Start() {
 	g.startDownlinkTerminalWorker()
 	g.startDownlinkCleanupWorker()
 	g.startClusterRouteRefresher()
+	g.startRouteReloadSignalWorker()
 
 	g.server.Start()
 }
@@ -307,6 +319,7 @@ func (g *Gateway) Shutdown(ctx context.Context) error {
 		metrics.SetGatewayReadiness("draining")
 
 		g.shutdownClusterRouteRefresher()
+		g.shutdownRouteReloadSignalWorker()
 		g.shutdownZinxServer()
 		g.shutdownUpstream(ctx)
 		g.shutdownTrafficPolicy()
@@ -327,6 +340,51 @@ func (g *Gateway) Shutdown(ctx context.Context) error {
 	})
 
 	return g.shutdownErr
+}
+
+func (g *Gateway) startRouteReloadSignalWorker() {
+	if g.routeControl == nil || !g.routeControl.Status().Enabled {
+		return
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	signalCh := make(chan os.Signal, 1)
+	completed := make(chan struct{})
+	g.routeReloadCancel = cancel
+	g.routeReloadSignal = signalCh
+	g.routeReloadCompleted = completed
+	signal.Notify(signalCh, syscall.SIGHUP)
+
+	go func() {
+		defer close(completed)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-signalCh:
+				_, _ = g.routeControl.Execute(ctx, routeReloadOptions{
+					Trigger: routeReloadTriggerSIGHUP,
+				}, routeReloadActor{
+					AuthMode:  "system",
+					Principal: "process",
+					Role:      "system",
+				})
+			}
+		}
+	}()
+}
+
+func (g *Gateway) shutdownRouteReloadSignalWorker() {
+	if g.routeReloadCancel == nil {
+		return
+	}
+	if g.routeReloadSignal != nil {
+		signal.Stop(g.routeReloadSignal)
+	}
+	g.routeReloadCancel()
+	if g.routeReloadCompleted != nil {
+		<-g.routeReloadCompleted
+	}
 }
 
 func (g *Gateway) startClusterRouteRefresher() {

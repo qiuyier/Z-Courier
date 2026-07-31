@@ -23,6 +23,11 @@ semantic versioning after the first public MVP tag.
   resource and mutable-metric cleanup, graceful shutdown integration, a
   no-reload static fast path, and race-enabled controlled-forwarder coverage.
   Operator reload triggers remain deferred to V17.3.
+- V17.3 explicit route reload control through `SIGHUP`, authenticated status,
+  dry-run, and activation admin APIs, `cmd/admin routes status|validate|reload`,
+  stale-generation protection, operator/admin Console permissions and
+  confirmation, active-generation route listing, sanitized audit evidence, and
+  basic responsive Console generation controls.
 
 ## [v0.16.0] - 2026-07-31
 

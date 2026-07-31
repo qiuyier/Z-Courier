@@ -8,6 +8,7 @@ import type {
   AdminMessages,
   AdminOverview,
   AdminRoutes,
+  AdminRouteReload,
   AdminSessionResponse,
   AdminSessionDisconnectRequest,
   AdminSessionDisconnectResponse,
@@ -151,6 +152,26 @@ export async function fetchOverview(signal?: AbortSignal): Promise<AdminOverview
 
 export async function fetchRoutes(signal?: AbortSignal): Promise<AdminRoutes> {
   return fetchAdminJSON<AdminRoutes>("/internal/admin/routes", signal);
+}
+
+export async function fetchRouteReloadStatus(signal?: AbortSignal): Promise<AdminRouteReload> {
+  return fetchAdminJSON<AdminRouteReload>("/internal/admin/routes/status", signal);
+}
+
+export async function validateRouteReload(expectedGeneration: number, signal?: AbortSignal): Promise<AdminRouteReload> {
+  return postAdminJSON<AdminRouteReload>(
+    "/internal/admin/routes/reload",
+    { dry_run: true, expected_generation: expectedGeneration },
+    signal,
+  );
+}
+
+export async function activateRouteReload(expectedGeneration: number, signal?: AbortSignal): Promise<AdminRouteReload> {
+  return postAdminJSON<AdminRouteReload>(
+    "/internal/admin/routes/reload",
+    { dry_run: false, expected_generation: expectedGeneration },
+    signal,
+  );
 }
 
 export async function fetchAudit(params: AuditListParams, signal?: AbortSignal): Promise<AdminAudit> {

@@ -9,6 +9,10 @@ Console. For incident-oriented command sequences and Prometheus queries, see the
 ## Web Admin Console
 
 The embedded Console is available at `/console/` on the internal HTTP listener.
+When bounded route-file reload is enabled, its Routes page shows the active
+generation and offers dry-run plus confirmed node-local activation to
+`operator` and `admin` sessions. `readonly` sessions can inspect the same
+status without mutation controls.
 Its Diagnostics page renders a read-only discovery section for each
 discovery-backed HTTP route. The view shows only process-local endpoint counts
 and bounded refresh, selection, cooldown, failure, forward, and failover
@@ -281,7 +285,8 @@ bodies.
 
 ### `GET /internal/admin/routes`
 
-Returns enabled upstream route ranges and sanitized target metadata.
+Returns enabled upstream route ranges and sanitized target metadata from the
+currently active generation when route reload is enabled.
 
 Sensitive values are not returned:
 
@@ -327,6 +332,45 @@ Example:
   ]
 }
 ```
+
+### Route Generation Status And Reload
+
+V17.3 adds two node-local route generation endpoints:
+
+```text
+GET  /internal/admin/routes/status
+POST /internal/admin/routes/reload
+```
+
+Status is read-only and reports whether reload is enabled plus sanitized active
+and retiring generation metadata. Reload accepts only a control envelope; the
+route document and source path always come from startup configuration:
+
+```json
+{
+  "dry_run": true,
+  "expected_generation": 3
+}
+```
+
+`dry_run` is required. `expected_generation` is optional, but callers should
+send the generation they just inspected so a concurrent operator change is
+rejected before the candidate file is read. `dry_run: true` parses, validates,
+and constructs the candidate, then closes it without activation.
+`dry_run: false` atomically activates a completely built candidate.
+
+Browser `operator` and `admin` sessions have `route:reload`; `readonly`
+sessions do not. Existing internal token and HMAC callers remain trusted
+internal operators. Browser requests retain the existing CSRF mutation guard.
+Every accepted or rejected operation emits `route_reload_validate` or
+`route_reload` audit evidence with fixed result/reason values and sanitized
+generation metadata. It never records route tokens, file paths, environment
+values, or full endpoint URLs.
+
+The operation affects only the gateway node receiving the request. Cluster
+rollouts should dry-run every node, activate a canary, then activate bounded
+batches. `SIGHUP` uses the same serialized activation path for the current
+process.
 
 ### Existing Route And Session Inspection
 
@@ -570,6 +614,21 @@ go run ./cmd/admin routes \
   -internal-url http://127.0.0.1:18182 \
   -internal-token dev-internal-token
 
+go run ./cmd/admin routes status \
+  -internal-url http://127.0.0.1:18182 \
+  -internal-token dev-internal-token
+
+go run ./cmd/admin routes validate \
+  -internal-url http://127.0.0.1:18182 \
+  -internal-token dev-internal-token \
+  -expected-generation 1
+
+go run ./cmd/admin routes reload \
+  -internal-url http://127.0.0.1:18182 \
+  -internal-token dev-internal-token \
+  -expected-generation 1 \
+  -confirm
+
 go run ./cmd/admin route \
   -internal-url http://127.0.0.1:18182 \
   -internal-token dev-internal-token \
@@ -662,7 +721,8 @@ message status, list, requeue, discard, route, and sessions endpoints.
 - diagnostics
 - dependency check
 - diagnosis bundle collection
-- routes
+- active routes and route generation status
+- route-file dry-run and confirmed activation
 - route lookup
 - local session listing
 - message status lookup

@@ -122,6 +122,8 @@ func TestDiagnoseCollectsBundle(t *testing.T) {
 			return http.StatusOK, `{"code":"ok","status":"ok","checks":[]}`
 		case "/internal/admin/routes":
 			return http.StatusOK, `{"code":"ok","routes":[]}`
+		case "/internal/admin/routes/status":
+			return http.StatusOK, `{"code":"ok","reload_enabled":false}`
 		case "/internal/messages":
 			return http.StatusOK, `{"code":"ok","total":0,"messages":[]}`
 		case "/internal/debug/sessions":
@@ -170,7 +172,7 @@ func TestDiagnoseCollectsBundle(t *testing.T) {
 	if bundle.Code != "ok" || bundle.CollectionStatus != "complete" || bundle.TargetURL != "http://gateway-a:18182" {
 		t.Fatalf("bundle = %+v, want complete sanitized target", bundle)
 	}
-	for _, section := range []string{"overview", "diagnostics", "check", "routes", "failed_messages", "sessions", "route"} {
+	for _, section := range []string{"overview", "diagnostics", "check", "routes", "route_reload_status", "failed_messages", "sessions", "route"} {
 		if _, ok := bundle.Sections[section]; !ok {
 			t.Fatalf("missing section %q in %+v", section, bundle.Sections)
 		}
@@ -229,6 +231,81 @@ func TestRoutesSignsAdminRequestWithHMAC(t *testing.T) {
 	}
 	if gotReq.Header.Get(signing.HeaderKeyID) != "backend-1" || gotReq.Header.Get(signing.HeaderSignature) == "" {
 		t.Fatalf("missing HMAC headers: key=%q signature=%q", gotReq.Header.Get(signing.HeaderKeyID), gotReq.Header.Get(signing.HeaderSignature))
+	}
+}
+
+func TestRouteStatusSendsStatusRequest(t *testing.T) {
+	var gotReq *http.Request
+	stubAdminHTTPClient(t, http.StatusOK, `{"code":"ok","reload_enabled":true}`, &gotReq)
+
+	if err := routeStatus(validCommonConfig(t)); err != nil {
+		t.Fatalf("routeStatus() error = %v", err)
+	}
+	if gotReq == nil || gotReq.Method != http.MethodGet || gotReq.URL.Path != "/internal/admin/routes/status" {
+		t.Fatalf("request = %+v, want GET /internal/admin/routes/status", gotReq)
+	}
+}
+
+func TestRouteValidateSendsDryRunWithExpectedGeneration(t *testing.T) {
+	var gotReq *http.Request
+	var gotBody []byte
+	stubAdminHTTPClientWithBody(t, http.StatusOK, `{"code":"ok","result":"validated"}`, &gotReq, &gotBody)
+
+	if err := routeValidate(routeReloadConfig{
+		commonConfig:       validCommonConfig(t),
+		ExpectedGeneration: 7,
+	}); err != nil {
+		t.Fatalf("routeValidate() error = %v", err)
+	}
+	if gotReq == nil || gotReq.Method != http.MethodPost || gotReq.URL.Path != "/internal/admin/routes/reload" {
+		t.Fatalf("request = %+v, want POST /internal/admin/routes/reload", gotReq)
+	}
+	var body struct {
+		DryRun             bool   `json:"dry_run"`
+		ExpectedGeneration uint64 `json:"expected_generation"`
+	}
+	if err := sonic.Unmarshal(gotBody, &body); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if !body.DryRun || body.ExpectedGeneration != 7 {
+		t.Fatalf("body = %+v, want dry-run generation 7", body)
+	}
+}
+
+func TestRouteReloadRequiresConfirmation(t *testing.T) {
+	var called bool
+	stubFailingAdminHTTPClient(t, &called)
+
+	err := routeReload(routeReloadConfig{commonConfig: validCommonConfig(t), ExpectedGeneration: 3})
+	if err == nil || !strings.Contains(err.Error(), "without -confirm") {
+		t.Fatalf("routeReload() error = %v, want confirmation error", err)
+	}
+	if called {
+		t.Fatal("routeReload() sent a request without confirmation")
+	}
+}
+
+func TestRouteReloadSendsConfirmedActivation(t *testing.T) {
+	var gotReq *http.Request
+	var gotBody []byte
+	stubAdminHTTPClientWithBody(t, http.StatusOK, `{"code":"ok","result":"reloaded"}`, &gotReq, &gotBody)
+
+	if err := routeReload(routeReloadConfig{
+		commonConfig:       validCommonConfig(t),
+		ExpectedGeneration: 3,
+		Confirm:            true,
+	}); err != nil {
+		t.Fatalf("routeReload() error = %v", err)
+	}
+	var body struct {
+		DryRun             bool   `json:"dry_run"`
+		ExpectedGeneration uint64 `json:"expected_generation"`
+	}
+	if err := sonic.Unmarshal(gotBody, &body); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if body.DryRun || body.ExpectedGeneration != 3 {
+		t.Fatalf("body = %+v, want activation generation 3", body)
 	}
 }
 

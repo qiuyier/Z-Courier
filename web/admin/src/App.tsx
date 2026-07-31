@@ -27,6 +27,7 @@ import {
 } from "@phosphor-icons/react";
 import {
   APIError,
+  activateRouteReload,
   disconnectSession,
   discardMessage,
   fetchAudit,
@@ -40,6 +41,7 @@ import {
   fetchMessages,
   fetchOverview,
   fetchRoutes,
+  fetchRouteReloadStatus,
   fetchSessions,
   loginAdminSession,
   logoutAdminSession,
@@ -48,6 +50,7 @@ import {
   runRetryScan,
   sendDownlinkTestPush,
   setAdminCSRFToken,
+  validateRouteReload,
 } from "./api";
 import type {
   AdminAudit,
@@ -64,6 +67,7 @@ import type {
   AdminMessages,
   AdminOverview,
   AdminRoute,
+  AdminRouteReload,
   AdminRoutes,
   AdminSession,
   AdminSessions,
@@ -84,6 +88,7 @@ const messageRepairPermission = "message:repair";
 const retryScanPermission = "message:retry_scan";
 const sessionDisconnectPermission = "session:disconnect";
 const downlinkTestPushPermission = "downlink:test_push";
+const routeReloadPermission = "route:reload";
 const maxBulkRequeueMessages = 100;
 
 type MetricContext = {
@@ -237,6 +242,12 @@ type PreparedDownlinkTestPush = {
   error?: string;
 };
 type DownlinkTestPushDialogState = PreparedDownlinkTestPush | null;
+type RouteReloadDialogState = {
+  expectedGeneration: number;
+  fingerprint: string;
+  routeCount: number;
+  error?: string;
+} | null;
 
 const navItems = [
   { id: "overview" as const, label: "Overview", icon: Pulse, disabled: false },
@@ -254,6 +265,8 @@ export default function App() {
   const [loginPending, setLoginPending] = useState(false);
   const [state, setState] = useState<RemoteState<AdminOverview>>({ status: "idle" });
   const [routeState, setRouteState] = useState<RemoteState<AdminRoutes>>({ status: "idle" });
+  const [routeReloadState, setRouteReloadState] = useState<RemoteState<AdminRouteReload>>({ status: "idle" });
+  const [routeReloadResultState, setRouteReloadResultState] = useState<RemoteState<AdminRouteReload>>({ status: "idle" });
   const [sessionsState, setSessionsState] = useState<RemoteState<AdminSessions>>({ status: "idle" });
   const [clusterRoutesState, setClusterRoutesState] = useState<RemoteState<AdminClusterRoutes>>({ status: "idle" });
   const [clientRouteState, setClientRouteState] = useState<RemoteState<AdminClientRouteLookup>>({ status: "idle" });
@@ -305,6 +318,8 @@ export default function App() {
   const [downlinkTestPushDialog, setDownlinkTestPushDialog] = useState<DownlinkTestPushDialogState>(null);
   const [downlinkTestPushPreflightPending, setDownlinkTestPushPreflightPending] = useState(false);
   const [downlinkTestPushPending, setDownlinkTestPushPending] = useState(false);
+  const [routeReloadDialog, setRouteReloadDialog] = useState<RouteReloadDialogState>(null);
+  const [routeReloadPending, setRouteReloadPending] = useState(false);
   const [activePage, setActivePage] = useState<PageID>("overview");
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
   const authenticated = authState.status === "authenticated";
@@ -313,11 +328,14 @@ export default function App() {
   const canTestDownlinkPush = authState.status === "authenticated" && adminSessionAllows(authState.session, downlinkTestPushPermission);
   const canDisconnectSessions =
     authState.status === "authenticated" && adminSessionAllows(authState.session, sessionDisconnectPermission);
+  const canReloadRoutes = authState.status === "authenticated" && adminSessionAllows(authState.session, routeReloadPermission);
 
   const clearConsoleState = useCallback(() => {
     setAdminCSRFToken();
     setState({ status: "idle" });
     setRouteState({ status: "idle" });
+    setRouteReloadState({ status: "idle" });
+    setRouteReloadResultState({ status: "idle" });
     setSessionsState({ status: "idle" });
     setClusterRoutesState({ status: "idle" });
     setClientRouteState({ status: "idle" });
@@ -344,6 +362,8 @@ export default function App() {
     setDownlinkTestPushDialog(null);
     setDownlinkTestPushPreflightPending(false);
     setDownlinkTestPushPending(false);
+    setRouteReloadDialog(null);
+    setRouteReloadPending(false);
     setSelectedSessionID("");
     setCheckRanAt(null);
     setUpdatedAt(null);
@@ -400,6 +420,30 @@ export default function App() {
         }
         const message = requestErrorMessage(error);
         setRouteState((current) => ({ status: "error", data: current.data, error: message }));
+      }
+    },
+    [authenticated, expireSession],
+  );
+
+  const refreshRouteReloadStatus = useCallback(
+    async (signal?: AbortSignal) => {
+      if (!authenticated) {
+        setRouteReloadState({ status: "idle" });
+        return;
+      }
+      setRouteReloadState((current) => ({ status: "loading", data: current.data }));
+      try {
+        const data = await fetchRouteReloadStatus(signal);
+        setRouteReloadState({ status: "ready", data });
+      } catch (error) {
+        if (signal?.aborted) {
+          return;
+        }
+        if (isUnauthorized(error)) {
+          expireSession();
+          return;
+        }
+        setRouteReloadState((current) => ({ status: "error", data: current.data, error: requestErrorMessage(error) }));
       }
     },
     [authenticated, expireSession],
@@ -1192,6 +1236,71 @@ export default function App() {
     }
   }, [authenticated, bulkRequeueDialog, canRepairMessages, expireSession, refreshMessages]);
 
+  const validateRoutesCandidate = useCallback(async () => {
+    const generation = routeReloadState.data?.active?.number ?? 0;
+    if (!authenticated || !canReloadRoutes || !routeReloadState.data?.reload_enabled || generation <= 0) {
+      return;
+    }
+
+    setRouteReloadResultState((current) => ({ status: "loading", data: current.data }));
+    try {
+      const result = await validateRouteReload(generation);
+      setRouteReloadResultState({ status: "ready", data: result });
+      setRouteReloadState({ status: "ready", data: result });
+    } catch (error) {
+      if (isUnauthorized(error)) {
+        expireSession();
+        return;
+      }
+      setRouteReloadResultState((current) => ({ status: "error", data: current.data, error: requestErrorMessage(error) }));
+      await refreshRouteReloadStatus();
+    }
+  }, [authenticated, canReloadRoutes, expireSession, refreshRouteReloadStatus, routeReloadState.data]);
+
+  const openRouteReload = useCallback(() => {
+    const active = routeReloadState.data?.active;
+    if (!authenticated || !canReloadRoutes || !routeReloadState.data?.reload_enabled || !active || active.number <= 0) {
+      return;
+    }
+    setRouteReloadDialog({
+      expectedGeneration: active.number,
+      fingerprint: active.fingerprint,
+      routeCount: active.route_count,
+    });
+  }, [authenticated, canReloadRoutes, routeReloadState.data]);
+
+  const closeRouteReload = useCallback(() => {
+    if (!routeReloadPending) {
+      setRouteReloadDialog(null);
+    }
+  }, [routeReloadPending]);
+
+  const confirmRouteReload = useCallback(async () => {
+    if (!routeReloadDialog || !authenticated || !canReloadRoutes) {
+      return;
+    }
+
+    setRouteReloadPending(true);
+    try {
+      const result = await activateRouteReload(routeReloadDialog.expectedGeneration);
+      setRouteReloadResultState({ status: "ready", data: result });
+      setRouteReloadState({ status: "ready", data: result });
+      setRouteReloadDialog(null);
+      await Promise.all([refreshRoutes(), refreshRouteReloadStatus()]);
+    } catch (error) {
+      if (isUnauthorized(error)) {
+        expireSession();
+        return;
+      }
+      const message = requestErrorMessage(error);
+      setRouteReloadResultState((current) => ({ status: "error", data: current.data, error: message }));
+      setRouteReloadDialog((current) => current ? { ...current, error: message } : current);
+      await refreshRouteReloadStatus();
+    } finally {
+      setRouteReloadPending(false);
+    }
+  }, [authenticated, canReloadRoutes, expireSession, refreshRouteReloadStatus, refreshRoutes, routeReloadDialog]);
+
   useEffect(() => {
     if (!messagesState.data?.messages || messageStatus !== "failed") {
       setSelectedMessageIDs([]);
@@ -1263,15 +1372,17 @@ export default function App() {
     }
     if (!authenticated) {
       setRouteState({ status: "idle" });
+      setRouteReloadState({ status: "idle" });
       return;
     }
 
     const controller = new AbortController();
     void refreshRoutes(controller.signal);
+    void refreshRouteReloadStatus(controller.signal);
     return () => {
       controller.abort();
     };
-  }, [activePage, authenticated, refreshRoutes]);
+  }, [activePage, authenticated, refreshRouteReloadStatus, refreshRoutes]);
 
   useEffect(() => {
     if (activePage !== "sessions") {
@@ -1383,6 +1494,7 @@ export default function App() {
   const refreshCurrentPage = useCallback(() => {
     if (activePage === "routes") {
       void refreshRoutes();
+      void refreshRouteReloadStatus();
       return;
     }
     if (activePage === "sessions") {
@@ -1416,6 +1528,7 @@ export default function App() {
     refreshAudit,
     refreshDiagnostics,
     refreshMessages,
+    refreshRouteReloadStatus,
     refreshRoutes,
     refreshSessions,
     runCheck,
@@ -1565,6 +1678,7 @@ export default function App() {
 
           {activePage === "overview" && state.status === "error" && <ErrorBanner message={state.error} />}
           {activePage === "routes" && routeState.status === "error" && <ErrorBanner message={routeState.error} />}
+          {activePage === "routes" && routeReloadState.status === "error" && <ErrorBanner message={routeReloadState.error} />}
           {activePage === "sessions" && sessionScope === "local" && sessionsState.status === "error" && <ErrorBanner message={sessionsState.error} />}
           {activePage === "sessions" && sessionScope === "cluster" && clusterRoutesState.status === "error" && <ErrorBanner message={clusterRoutesState.error} />}
           {activePage === "sessions" && clientRouteState.status === "error" && <ErrorBanner message={clientRouteState.error} />}
@@ -1578,7 +1692,14 @@ export default function App() {
           ) : activePage === "overview" && state.status === "loading" ? (
             <OverviewSkeleton />
           ) : activePage === "routes" && authenticated && (routeState.status !== "error" || routeState.data) ? (
-            <RoutesPage state={routeState} />
+            <RoutesPage
+              canReload={canReloadRoutes}
+              onActivate={openRouteReload}
+              onValidate={validateRoutesCandidate}
+              reloadResultState={routeReloadResultState}
+              reloadState={routeReloadState}
+              state={routeState}
+            />
           ) : activePage === "sessions" && authenticated ? (
             <SessionsPage
               canDisconnectSessions={canDisconnectSessions}
@@ -1728,6 +1849,14 @@ export default function App() {
           pending={downlinkTestPushPending}
         />
       )}
+      {routeReloadDialog && (
+        <RouteReloadDialog
+          dialog={routeReloadDialog}
+          onClose={closeRouteReload}
+          onConfirm={confirmRouteReload}
+          pending={routeReloadPending}
+        />
+      )}
     </main>
   );
 }
@@ -1846,22 +1975,40 @@ function Dashboard({ overview, updatedAt }: { overview: AdminOverview; updatedAt
   );
 }
 
-function RoutesPage({ state }: { state: RemoteState<AdminRoutes> }) {
+function RoutesPage({
+  canReload,
+  onActivate,
+  onValidate,
+  reloadResultState,
+  reloadState,
+  state,
+}: {
+  canReload: boolean;
+  onActivate: () => void;
+  onValidate: () => void | Promise<void>;
+  reloadResultState: RemoteState<AdminRouteReload>;
+  reloadState: RemoteState<AdminRouteReload>;
+  state: RemoteState<AdminRoutes>;
+}) {
   const routes = state.data?.routes ?? [];
   const httpRoutes = routes.filter((route) => route.target_type === "http").length;
   const nsqRoutes = routes.filter((route) => route.target_type === "nsq").length;
   const limitedRoutes = routes.filter((route) => (route.max_in_flight ?? 0) > 0).length;
 
-  if (state.status === "loading" && !state.data) {
+  if (state.status === "loading" && !state.data && reloadState.status === "loading" && !reloadState.data) {
     return <RoutesSkeleton />;
-  }
-
-  if (state.status !== "loading" && routes.length === 0) {
-    return <RoutesEmptyState />;
   }
 
   return (
     <div className="grid gap-5">
+      <RouteReloadPanel
+        canReload={canReload}
+        onActivate={onActivate}
+        onValidate={onValidate}
+        resultState={reloadResultState}
+        state={reloadState}
+      />
+
       <section className="rounded-lg border border-line bg-white p-5 shadow-diffusion">
         <div className="grid gap-5 lg:grid-cols-[0.85fr_1.15fr]">
           <div>
@@ -1878,12 +2025,138 @@ function RoutesPage({ state }: { state: RemoteState<AdminRoutes> }) {
         </div>
       </section>
 
-      <section className="grid gap-3">
-        {routes.map((route, index) => (
-          <RouteCard key={`${route.name}-${route.msg_id_min}-${route.msg_id_max ?? "single"}`} route={route} index={index} />
-        ))}
-      </section>
+      {state.status !== "loading" && routes.length === 0 ? (
+        <RoutesEmptyState />
+      ) : (
+        <section className="grid gap-3">
+          {routes.map((route, index) => (
+            <RouteCard key={`${route.name}-${route.msg_id_min}-${route.msg_id_max ?? "single"}`} route={route} index={index} />
+          ))}
+        </section>
+      )}
     </div>
+  );
+}
+
+function RouteReloadPanel({
+  canReload,
+  onActivate,
+  onValidate,
+  resultState,
+  state,
+}: {
+  canReload: boolean;
+  onActivate: () => void;
+  onValidate: () => void | Promise<void>;
+  resultState: RemoteState<AdminRouteReload>;
+  state: RemoteState<AdminRouteReload>;
+}) {
+  const status = state.data;
+  const active = status?.active;
+  const retiring = status?.retiring;
+  const enabled = status?.reload_enabled ?? false;
+  const loading = state.status === "loading" && !status;
+  const validating = resultState.status === "loading";
+  const actionDisabled = !canReload || !enabled || !active || validating;
+  const actionTitle = !enabled ? "Route reload is disabled" : !canReload ? "Requires route reload permission" : undefined;
+  const result = resultState.data;
+
+  return (
+    <section className="overflow-hidden rounded-lg border border-line bg-zinc-950 text-white shadow-diffusion" data-testid="route-reload-control">
+      <div className="grid gap-5 p-5 lg:grid-cols-[minmax(0,1.2fr)_minmax(280px,0.8fr)] lg:items-start">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-sm font-medium text-zinc-400">Route Generation</p>
+            <StatusBadge
+              label={loading ? "loading" : enabled ? active?.state ?? "enabled" : "disabled"}
+              tone={enabled ? "ok" : "info"}
+            />
+            {retiring && <StatusBadge label="retiring" tone="warn" />}
+          </div>
+          <div className="mt-3 flex min-w-0 flex-wrap items-end gap-x-4 gap-y-2">
+            <h2 className="font-mono text-4xl font-semibold tracking-tight text-white">
+              {active ? `#${active.number.toLocaleString()}` : "--"}
+            </h2>
+            <p className="min-w-0 break-all pb-1 font-mono text-xs text-zinc-400">
+              {active?.fingerprint ? shortID(active.fingerprint) : "no active fingerprint"}
+            </p>
+          </div>
+          <div className="mt-5 grid gap-x-6 gap-y-3 sm:grid-cols-2">
+            <DarkLineItem label="Routes" value={active?.route_count.toLocaleString() ?? "--"} />
+            <DarkLineItem label="In Flight" value={active?.in_flight.toLocaleString() ?? "--"} />
+            <DarkLineItem label="Activated" value={formatOptionalDate(active?.activated_at)} />
+            <DarkLineItem label="Retiring" value={retiring ? `#${retiring.number} / ${retiring.in_flight} in flight` : "none"} />
+          </div>
+        </div>
+
+        <div className="grid gap-3 border-t border-zinc-800 pt-5 lg:border-l lg:border-t-0 lg:pl-5 lg:pt-0">
+          <div>
+            <p className="text-sm font-semibold text-white">Configured route file</p>
+            <p className="mt-1 text-xs leading-relaxed text-zinc-400">Startup-fixed source · node-local activation</p>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
+            <button
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm font-medium text-white transition duration-300 hover:border-zinc-500 hover:bg-zinc-800 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-45"
+              disabled={actionDisabled}
+              onClick={() => void onValidate()}
+              title={actionTitle}
+              type="button"
+            >
+              <ShieldCheck size={16} weight="bold" />
+              {validating ? "Validating..." : "Dry Run"}
+            </button>
+            <button
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-white px-3 py-2 text-sm font-semibold text-zinc-950 transition duration-300 hover:bg-zinc-200 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-45"
+              disabled={actionDisabled}
+              onClick={onActivate}
+              title={actionTitle}
+              type="button"
+            >
+              <GitBranch size={16} weight="bold" />
+              Activate File
+            </button>
+          </div>
+          {!enabled && !loading && (
+            <p className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs leading-relaxed text-zinc-400">
+              Reload disabled · startup-only route table
+            </p>
+          )}
+          {enabled && !canReload && (
+            <PermissionNotice
+              compact
+              message="Dry-run and activation require route reload permission."
+              permission={routeReloadPermission}
+            />
+          )}
+        </div>
+      </div>
+
+      {(resultState.status === "error" || result) && (
+        <div className="border-t border-zinc-800 bg-zinc-900/80 px-5 py-4">
+          {resultState.status === "error" ? (
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-amber-200">Route operation failed</p>
+                <p className="mt-1 break-words font-mono text-xs text-zinc-400">{resultState.error}</p>
+              </div>
+              <StatusBadge label="not activated" tone="warn" />
+            </div>
+          ) : result ? (
+            <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-center">
+              <div>
+                <p className="text-sm font-semibold text-white">
+                  {result.result === "validated" ? "Candidate validated" : "Generation activated"}
+                </p>
+                <p className="mt-1 text-xs leading-relaxed text-zinc-400">
+                  {result.candidate?.route_count ?? result.active?.route_count ?? 0} routes, {result.changed ? "content changed" : "same fingerprint"}, {formatOperationDuration(result.duration_ms)}
+                </p>
+              </div>
+              <StatusBadge label={result.result ?? result.code} tone={result.code === "ok" ? "ok" : "warn"} />
+            </div>
+          ) : null}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -4033,6 +4306,43 @@ function ConfirmActionDialog({
   );
 }
 
+function RouteReloadDialog({
+  dialog,
+  onClose,
+  onConfirm,
+  pending,
+}: {
+  dialog: NonNullable<RouteReloadDialogState>;
+  onClose: () => void;
+  onConfirm: () => void | Promise<void>;
+  pending: boolean;
+}) {
+  return (
+    <ConfirmActionDialog
+      confirmLabel="Activate Route File"
+      description="The gateway will validate and construct the fixed local route file, then atomically replace this node's complete route generation."
+      error={dialog.error}
+      errorTitle="Activation failed"
+      eyebrow="Route Generation"
+      onClose={onClose}
+      onConfirm={onConfirm}
+      pending={pending}
+      pendingLabel="Activating..."
+      title={`Replace Generation #${dialog.expectedGeneration}`}
+    >
+      <div className="rounded-lg border border-line bg-white px-4 py-3">
+        <LineItem label="Expected Generation" value={`#${dialog.expectedGeneration.toLocaleString()}`} />
+        <LineItem label="Current Routes" value={dialog.routeCount.toLocaleString()} />
+        <LineItem label="Current Fingerprint" value={shortID(dialog.fingerprint)} />
+        <LineItem label="Client Connections" value="preserved" />
+      </div>
+      <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-relaxed text-amber-900">
+        Activation is node-local. A generation conflict or invalid candidate leaves the current generation untouched.
+      </div>
+    </ConfirmActionDialog>
+  );
+}
+
 function MessageActionDialog({
   dialog,
   onClose,
@@ -6080,7 +6390,8 @@ function adminSessionAllows(session: AdminConsoleSession, permission: string): b
     (permission === messageRepairPermission ||
       permission === retryScanPermission ||
       permission === sessionDisconnectPermission ||
-      permission === downlinkTestPushPermission)
+      permission === downlinkTestPushPermission ||
+      permission === routeReloadPermission)
   );
 }
 
@@ -6126,6 +6437,16 @@ function formatMillis(value?: number): string {
   }
   const days = hours / 24;
   return `${days < 10 ? days.toFixed(1) : Math.round(days).toLocaleString()}d`;
+}
+
+function formatOperationDuration(value?: number): string {
+  if (value == null || value < 0) {
+    return "--";
+  }
+  if (value < 1000) {
+    return `${value.toLocaleString()}ms`;
+  }
+  return `${(value / 1000).toFixed(value < 10000 ? 2 : 1)}s`;
 }
 
 function clampMessageLimit(value: string): number {

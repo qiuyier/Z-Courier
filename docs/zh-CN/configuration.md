@@ -573,7 +573,7 @@ upstream:
 
 同一个 `MsgID` 只能匹配一个启用的 route。配置校验会拦截 route 重叠和保留 MsgID。
 
-### 独立路由文件启动模式（V17.1）
+### 独立路由文件与热加载（V17.1-V17.3）
 
 V17.1 可以从一个独立且有大小上限的 YAML 文件加载整张 upstream route 表。它和
 内联的 `upstream.routes` 互斥，不能同时配置。
@@ -633,9 +633,56 @@ V17.2 已在 `reload.enabled: true` 时启用原子 generation manager。每个�
 内联路由以及没有开启 reload 的路由文件仍走原来的 `router.Engine` 静态快路径，
 不会为每个请求增加 generation lease。
 
-V17.2 **仍未提供运维触发入口**。修改文件不会改变正在运行的路由表，`SIGHUP`、
-管理 HTTP、CLI 和 Console 触发会在 V17.3 实现。在此之前修改路由文件后仍需重启
-网关。
+V17.3 已接入显式热加载入口。只修改文件**不会**改变当前生效的路由表。可以先通过
+运维 CLI 检查候选配置，再激活：
+
+```bash
+go run ./cmd/admin routes status \
+  -internal-url http://127.0.0.1:18182 \
+  -internal-token dev-internal-token
+
+go run ./cmd/admin routes validate \
+  -internal-url http://127.0.0.1:18182 \
+  -internal-token dev-internal-token \
+  -expected-generation 1
+
+go run ./cmd/admin routes reload \
+  -internal-url http://127.0.0.1:18182 \
+  -internal-token dev-internal-token \
+  -expected-generation 1 \
+  -confirm
+```
+
+`validate` 会读取、校验并完整构建固定路径里的候选配置，随后关闭候选 generation，
+不会切换流量。`reload` 会重新执行同一套完整流程，并原子激活候选 generation。
+`-expected-generation` 可以省略，但建议始终携带；如果当前 generation 已经变化，
+网关会在读取路由文件前拒绝这次过期操作。Console 的 Routes 页面向 `operator` 和
+`admin` 提供同样的 Dry Run 与确认激活操作，`readonly` 只能查看状态。
+
+内部 HTTP 契约是：
+
+```text
+GET  /internal/admin/routes/status
+POST /internal/admin/routes/reload
+```
+
+POST Body 只能是 `{"dry_run":true,"expected_generation":1}` 或
+`{"dry_run":false,"expected_generation":1}`，不能携带路由正文、文件路径或目标
+覆盖。稳定错误码包括 `reload_disabled`、`reload_busy`、
+`generation_conflict`、`invalid_candidate`、`candidate_build_failed` 和
+`reload_failed`。
+
+Dry Run 通过后，也可以直接向网关进程发送 `SIGHUP` 来激活固定文件：
+
+```bash
+kill -HUP <gateway-pid>
+```
+
+`SIGHUP` 不会影响 SIGINT/SIGTERM 的优雅关闭。API、CLI 和 signal 触发会统一串行，
+每次成功、拒绝或失败都会写审计记录，且不会记录路由凭据、原始文件路径和完整端点
+URL。激活只作用于当前 gateway 节点；集群发布需要逐节点 Dry Run、canary 和分批
+reload。扩大 accepted MsgID 范围、修改 Traffic Policy 定义或任何非路由配置仍然
+需要重启。
 
 可运行的源码示例：
 

@@ -95,6 +95,12 @@ type retryScanConfig struct {
 	Confirm bool
 }
 
+type routeReloadConfig struct {
+	commonConfig
+	ExpectedGeneration uint64
+	Confirm            bool
+}
+
 func main() {
 	switch {
 	case len(os.Args) > 1 && os.Args[1] == "overview":
@@ -135,7 +141,7 @@ func printUsage(out io.Writer) {
 	fmt.Fprintln(out, "  diagnostics  Show runtime diagnostics, capacity summary, dependency summary, and warnings")
 	fmt.Fprintln(out, "  check        Actively check configured runtime dependencies")
 	fmt.Fprintln(out, "  diagnose     Collect a safe diagnosis bundle from one gateway node")
-	fmt.Fprintln(out, "  routes       Show enabled upstream route ranges and sanitized target metadata")
+	fmt.Fprintln(out, "  routes       Show routes or run routes status, validate, and reload operations")
 	fmt.Fprintln(out, "  route        Show where one client/device would be pushed")
 	fmt.Fprintln(out, "  sessions     Show local sessions, optionally filtered by session_id, client_id, or device_id")
 	fmt.Fprintln(out, "  message      Show one stored downlink message by message_id")
@@ -234,6 +240,16 @@ func runDiagnose(args []string) int {
 }
 
 func runRoutes(args []string) int {
+	if len(args) > 0 {
+		switch args[0] {
+		case "status":
+			return runRouteStatus(args[1:])
+		case "validate":
+			return runRouteValidate(args[1:])
+		case "reload":
+			return runRouteReload(args[1:])
+		}
+	}
 	fs := flag.NewFlagSet("routes", flag.ExitOnError)
 	config := defaultCommonConfig()
 	addCommonFlags(fs, &config)
@@ -247,6 +263,63 @@ func runRoutes(args []string) int {
 
 	if err := routes(config); err != nil {
 		fmt.Fprintf(os.Stderr, "routes failed: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+func runRouteStatus(args []string) int {
+	fs := flag.NewFlagSet("routes status", flag.ExitOnError)
+	config := defaultCommonConfig()
+	addCommonFlags(fs, &config)
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: admin routes status [flags]\n")
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if err := routeStatus(config); err != nil {
+		fmt.Fprintf(os.Stderr, "route status failed: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+func runRouteValidate(args []string) int {
+	fs := flag.NewFlagSet("routes validate", flag.ExitOnError)
+	config := routeReloadConfig{commonConfig: defaultCommonConfig()}
+	addCommonFlags(fs, &config.commonConfig)
+	fs.Uint64Var(&config.ExpectedGeneration, "expected-generation", 0, "reject validation if the active generation does not match; 0 disables the check")
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: admin routes validate [flags]\n")
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if err := routeValidate(config); err != nil {
+		fmt.Fprintf(os.Stderr, "route validation failed: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+func runRouteReload(args []string) int {
+	fs := flag.NewFlagSet("routes reload", flag.ExitOnError)
+	config := routeReloadConfig{commonConfig: defaultCommonConfig()}
+	addCommonFlags(fs, &config.commonConfig)
+	fs.Uint64Var(&config.ExpectedGeneration, "expected-generation", 0, "reject reload if the active generation does not match; 0 disables the check")
+	fs.BoolVar(&config.Confirm, "confirm", false, "confirm activation of the configured route file")
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: admin routes reload -confirm [flags]\n")
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if err := routeReload(config); err != nil {
+		fmt.Fprintf(os.Stderr, "route reload failed: %v\n", err)
 		return 1
 	}
 	return 0
@@ -525,6 +598,7 @@ func diagnose(config diagnoseConfig) error {
 	checkQuery.Set("timeout", config.ProbeTimeout.String())
 	collectDiagnoseSection(config.commonConfig, bundle.Sections, "check", "/internal/admin/check?"+checkQuery.Encode())
 	collectDiagnoseSection(config.commonConfig, bundle.Sections, "routes", "/internal/admin/routes")
+	collectDiagnoseSection(config.commonConfig, bundle.Sections, "route_reload_status", "/internal/admin/routes/status")
 
 	messagesQuery := url.Values{}
 	messagesQuery.Set("status", string(sdkbackend.MessageStatusFailed))
@@ -647,6 +721,33 @@ func sanitizeAdminTargetURL(raw string) string {
 
 func routes(config commonConfig) error {
 	return requestAndPrint(config, "/internal/admin/routes")
+}
+
+func routeStatus(config commonConfig) error {
+	return requestAndPrint(config, "/internal/admin/routes/status")
+}
+
+func routeValidate(config routeReloadConfig) error {
+	return requestAndPrintJSON(config.commonConfig, http.MethodPost, "/internal/admin/routes/reload", struct {
+		DryRun             bool   `json:"dry_run"`
+		ExpectedGeneration uint64 `json:"expected_generation,omitempty"`
+	}{
+		DryRun:             true,
+		ExpectedGeneration: config.ExpectedGeneration,
+	})
+}
+
+func routeReload(config routeReloadConfig) error {
+	if !config.Confirm {
+		return fmt.Errorf("refusing to activate the configured route file without -confirm; run routes validate first")
+	}
+	return requestAndPrintJSON(config.commonConfig, http.MethodPost, "/internal/admin/routes/reload", struct {
+		DryRun             bool   `json:"dry_run"`
+		ExpectedGeneration uint64 `json:"expected_generation,omitempty"`
+	}{
+		DryRun:             false,
+		ExpectedGeneration: config.ExpectedGeneration,
+	})
 }
 
 func route(config routeConfig) error {

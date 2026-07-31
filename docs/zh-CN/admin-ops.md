@@ -55,6 +55,25 @@ go run ./cmd/admin diagnose \
   -output reports/diagnose/client-1.json
 ```
 
+查看当前节点的路由 generation、Dry Run 候选文件并确认激活：
+
+```bash
+go run ./cmd/admin routes status \
+  -internal-url http://127.0.0.1:18080 \
+  -internal-token dev-internal-token
+
+go run ./cmd/admin routes validate \
+  -internal-url http://127.0.0.1:18080 \
+  -internal-token dev-internal-token \
+  -expected-generation 1
+
+go run ./cmd/admin routes reload \
+  -internal-url http://127.0.0.1:18080 \
+  -internal-token dev-internal-token \
+  -expected-generation 1 \
+  -confirm
+```
+
 ## Web Admin Console
 
 本地默认地址：
@@ -66,7 +85,8 @@ http://127.0.0.1:18080/console/
 控制台提供：
 
 - Overview：节点状态、readiness、session、downlink、dependency summary。
-- Routes：upstream route、MsgID 范围、目标类型、运行状态。
+- Routes：当前 active generation、upstream route、MsgID 范围、目标类型，以及
+  operator/admin 可用的 Dry Run 和确认激活。
 - Sessions：本机 session、Redis cluster route 查询，以及受权限保护的本机
   session 断开操作。
 - Messages：下行测试推送、消息列表、状态查询、requeue、discard。
@@ -189,6 +209,41 @@ bucket 参数和聚合结果。所有有 diagnostics 读取权限的 Console 角
 - max in-flight。
 
 敏感信息不会返回：token、DSN、Redis 密码、NSQ secret、URL query/user-info。
+
+开启路由热加载时，这个接口读取当前 active generation，而不是启动时配置副本。
+
+### 路由 Generation 状态与热加载
+
+V17.3 增加两个只作用于当前 gateway 节点的接口：
+
+```text
+GET  /internal/admin/routes/status
+POST /internal/admin/routes/reload
+```
+
+status 是只读接口，返回 reload 是否开启，以及脱敏后的 active/retiring generation
+状态。reload 只接受控制参数，路由正文和来源路径始终由启动配置固定：
+
+```json
+{
+  "dry_run": true,
+  "expected_generation": 3
+}
+```
+
+`dry_run` 必填。`expected_generation` 可选，但建议传入刚刚查询到的 generation；
+如果期间另一个管理员已经完成切换，这次操作会在读取候选文件前被拒绝。
+`dry_run: true` 会解析、校验并完整构建候选 generation，然后关闭它而不激活；
+`dry_run: false` 才会原子激活完整候选。
+
+浏览器 `operator` 和 `admin` session 拥有 `route:reload` 权限，`readonly` 没有。
+原有 internal token 和 HMAC 调用方仍按可信内部运维方处理，浏览器请求继续经过 CSRF
+写操作保护。每次成功、拒绝或失败都会写入 `route_reload_validate` 或
+`route_reload` 审计记录，只包含固定结果、原因和脱敏 generation 元数据，不包含
+路由 token、文件路径、环境变量值或完整端点 URL。
+
+集群发布时应逐节点 Dry Run，先激活 canary，再分批激活其余节点。`SIGHUP` 也会走
+当前进程内同一条串行激活路径。
 
 ## 消息修复
 

@@ -49,6 +49,7 @@ type Config struct {
 	DownlinkCapacity           downlink.QueueCapacity
 	DownlinkTerminal           DownlinkTerminalConfig
 	DownlinkRetention          DownlinkRetentionConfig
+	routeControl               *routeControl
 }
 
 type InternalHTTPAuthConfig struct {
@@ -133,7 +134,15 @@ type UpstreamRoutesFileConfig struct {
 	Path         string
 	MaxSizeBytes int64
 	Reload       UpstreamRouteReloadConfig
+	Loader       UpstreamRouteLoader
 }
+
+type UpstreamRouteSnapshot struct {
+	Routes   []UpstreamRouteConfig
+	Warnings []string
+}
+
+type UpstreamRouteLoader func(context.Context) (UpstreamRouteSnapshot, error)
 
 type UpstreamRouteReloadConfig struct {
 	Enabled             bool

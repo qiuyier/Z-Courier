@@ -302,7 +302,10 @@ func newAdminOverviewHandler(config Config, health *gatewayHealth, registry clus
 }
 
 func newAdminRoutesHandler(config Config) http.Handler {
-	return &adminRoutesHandler{config: adminConfig(config, nil, nil)}
+	return &adminRoutesHandler{
+		config:  adminConfig(config, nil, nil),
+		control: config.routeControl,
+	}
 }
 
 func newAdminDiagnosticsHandler(config Config, health *gatewayHealth, registry cluster.OnlineRegistry, runtime *gatewayRuntime, downlinkHasStore bool) http.Handler {
@@ -368,7 +371,8 @@ func (h *adminOverviewHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 }
 
 type adminRoutesHandler struct {
-	config adminHandlerConfig
+	config  adminHandlerConfig
+	control *routeControl
 }
 
 type adminDiagnosticsHandler struct {
@@ -387,8 +391,12 @@ func (h *adminRoutesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	routes := make([]adminRoute, 0, len(h.config.config.UpstreamRoutes))
-	for _, route := range h.config.config.UpstreamRoutes {
+	activeRoutes := h.config.config.UpstreamRoutes
+	if routes := h.control.ActiveRoutes(); routes != nil {
+		activeRoutes = routes
+	}
+	routes := make([]adminRoute, 0, len(activeRoutes))
+	for _, route := range activeRoutes {
 		routes = append(routes, adminRouteFromConfig(route))
 	}
 	writeAdminJSON(w, http.StatusOK, adminRoutesResponse{

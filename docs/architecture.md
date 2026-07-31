@@ -152,7 +152,11 @@ and forwards through the same generation. Atomic activation directs later
 requests to the candidate generation while existing leases finish against the
 previous one. The old engine and its forwarders close only after the final
 lease returns. Configurations without reload keep the direct static-engine
-path. V17.2 provides this lifecycle core but no operator reload trigger yet.
+path. V17.3 lets `SIGHUP`, the authenticated admin API, `cmd/admin`, and the
+authorized Console build from the same fixed file loader. Dry-run closes its
+candidate without activation; reload atomically swaps only after complete
+construction. All trigger paths serialize through the same manager and emit a
+sanitized audit result.
 
 Example:
 

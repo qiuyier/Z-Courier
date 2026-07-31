@@ -285,6 +285,57 @@ func (m *routeManager) Reload(
 	return snapshot, nil
 }
 
+func (m *routeManager) DryRun(
+	ctx context.Context,
+	expectedGeneration uint64,
+	build routeGenerationBuilder,
+) (routeGenerationSnapshot, error) {
+	if m == nil {
+		return routeGenerationSnapshot{}, errRouteManagerClosed
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if build == nil {
+		return routeGenerationSnapshot{}, errRouteCandidateInvalid
+	}
+
+	select {
+	case <-ctx.Done():
+		return routeGenerationSnapshot{}, ctx.Err()
+	case <-m.reloadGate:
+	}
+	defer func() { m.reloadGate <- struct{}{} }()
+
+	reloadDone, _, err := m.beginReload(expectedGeneration)
+	if err != nil {
+		return routeGenerationSnapshot{}, err
+	}
+	defer m.finishReload(reloadDone)
+
+	candidate, buildErr := build(ctx)
+	if buildErr != nil {
+		if candidate != nil {
+			candidate.discard()
+		}
+		return routeGenerationSnapshot{}, fmt.Errorf("build route generation: %w", buildErr)
+	}
+	if candidate == nil || candidate.fingerprint == "" || candidate.state.Load() != routeGenerationCandidate {
+		if candidate != nil {
+			candidate.discard()
+		}
+		return routeGenerationSnapshot{}, errRouteCandidateInvalid
+	}
+	if err := ctx.Err(); err != nil {
+		candidate.discard()
+		return routeGenerationSnapshot{}, err
+	}
+
+	snapshot := snapshotRouteGeneration(candidate)
+	candidate.discard()
+	return snapshot, nil
+}
+
 func (m *routeManager) beginReload(expectedGeneration uint64) (chan struct{}, routeGenerationSnapshot, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -414,6 +465,18 @@ func (m *routeManager) activeRuntime() *UpstreamRuntime {
 		return nil
 	}
 	return m.active.runtime
+}
+
+func (m *routeManager) activeRoutes() []UpstreamRouteConfig {
+	if m == nil {
+		return nil
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.active == nil {
+		return nil
+	}
+	return cloneUpstreamRoutes(m.active.routes)
 }
 
 func (m *routeManager) Shutdown(ctx context.Context) error {

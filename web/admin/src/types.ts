@@ -154,6 +154,31 @@ export type AdminRoutes = {
   routes: AdminRoute[];
 };
 
+export type AdminRouteGeneration = {
+  number: number;
+  fingerprint: string;
+  activated_at?: string;
+  route_count: number;
+  in_flight: number;
+  state: string;
+};
+
+export type AdminRouteReload = {
+  code: string;
+  result?: string;
+  reason?: string;
+  gateway_node: string;
+  reload_enabled: boolean;
+  trigger?: string;
+  dry_run?: boolean;
+  changed?: boolean;
+  warning_count?: number;
+  duration_ms?: number;
+  active?: AdminRouteGeneration;
+  candidate?: AdminRouteGeneration;
+  retiring?: AdminRouteGeneration;
+};
+
 export type AdminAuditEvent = {
   id: number;
   recorded_at: string;

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -75,6 +76,27 @@ upstream:
 		reload.AcceptedMsgIDRanges[1].Min != 2000 ||
 		reload.AcceptedMsgIDRanges[1].Max != 2999 {
 		t.Fatalf("AcceptedMsgIDRanges = %+v, want sorted ranges", reload.AcceptedMsgIDRanges)
+	}
+	if config.UpstreamRoutesFile.Loader == nil {
+		t.Fatal("UpstreamRoutesFile Loader = nil, want reload loader")
+	}
+
+	writeTestFile(t, routesPath, `
+version: 1
+routes:
+  - name: replacement-http
+    msg_id_min: 1001
+    msg_id_max: 1001
+    target:
+      type: http
+      url: http://replacement.local/gateway/upstream
+`)
+	snapshot, err := config.UpstreamRoutesFile.Loader(context.Background())
+	if err != nil {
+		t.Fatalf("UpstreamRoutesFile Loader() error = %v", err)
+	}
+	if len(snapshot.Routes) != 1 || snapshot.Routes[0].Name != "replacement-http" {
+		t.Fatalf("UpstreamRoutesFile Loader() routes = %+v", snapshot.Routes)
 	}
 }
 

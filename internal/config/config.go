@@ -587,6 +587,7 @@ func (c *File) ToServerConfig() (server.Config, error) {
 	}
 	out.UpstreamRoutes = routes
 	out.UpstreamRoutesFile = resolvedRoutes.fileConfig
+	out.UpstreamRoutesFile.Loader = c.newUpstreamRouteLoader(resolvedRoutes.fileConfig)
 
 	pipelineConfig, err := toPipelineConfig(c.Pipeline, routes)
 	if err != nil {

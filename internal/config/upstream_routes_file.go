@@ -2,6 +2,7 @@ package config
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -65,6 +66,44 @@ func (c *File) resolveUpstreamRoutes() (resolvedUpstreamRoutes, error) {
 		routes:     document.Routes,
 		fileConfig: fileConfig,
 	}, nil
+}
+
+func (c *File) newUpstreamRouteLoader(fileConfig server.UpstreamRoutesFileConfig) server.UpstreamRouteLoader {
+	if c == nil || !fileConfig.Reload.Enabled {
+		return nil
+	}
+	configSnapshot := *c
+	fileConfig.Loader = nil
+
+	return func(ctx context.Context) (server.UpstreamRouteSnapshot, error) {
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		if err := ctx.Err(); err != nil {
+			return server.UpstreamRouteSnapshot{}, err
+		}
+
+		document, err := loadUpstreamRoutesDocument(fileConfig.Path, fileConfig.MaxSizeBytes)
+		if err != nil {
+			return server.UpstreamRouteSnapshot{}, err
+		}
+		resolved := resolvedUpstreamRoutes{routes: document.Routes, fileConfig: fileConfig}
+		report, err := configSnapshot.validateResolvedRoutes(resolved)
+		if err != nil {
+			return server.UpstreamRouteSnapshot{}, err
+		}
+		routes, err := toUpstreamRoutes(document.Routes)
+		if err != nil {
+			return server.UpstreamRouteSnapshot{}, err
+		}
+		if err := ctx.Err(); err != nil {
+			return server.UpstreamRouteSnapshot{}, err
+		}
+		return server.UpstreamRouteSnapshot{
+			Routes:   routes,
+			Warnings: append([]string(nil), report.Warnings...),
+		}, nil
+	}
 }
 
 func (c *File) toServerUpstreamRoutesFileConfig() (server.UpstreamRoutesFileConfig, error) {
