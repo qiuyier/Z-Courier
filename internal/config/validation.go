@@ -58,11 +58,20 @@ func (c *File) Validate() (ValidationReport, error) {
 		return ValidationReport{}, fmt.Errorf("config: file is nil")
 	}
 
+	resolvedRoutes, err := c.resolveUpstreamRoutes()
+	if err != nil {
+		return ValidationReport{}, err
+	}
+	return c.validateResolvedRoutes(resolvedRoutes)
+}
+
+func (c *File) validateResolvedRoutes(resolvedRoutes resolvedUpstreamRoutes) (ValidationReport, error) {
 	collector := validationCollector{}
-	if err := c.validateShape(); err != nil {
+	if err := c.validateShape(resolvedRoutes.routes); err != nil {
 		collector.addError(err)
 	}
-	c.validateUpstreamRouteConflicts(&collector)
+	c.validateUpstreamRouteConflicts(resolvedRoutes.routes, &collector)
+	validateRoutesInsideReloadRanges(resolvedRoutes.routes, resolvedRoutes.fileConfig, &collector)
 	c.validateOperationalWarnings(&collector)
 
 	report := ValidationReport{Warnings: collector.warnings()}
@@ -72,7 +81,7 @@ func (c *File) Validate() (ValidationReport, error) {
 	return report, nil
 }
 
-func (c *File) validateShape() error {
+func (c *File) validateShape(routeConfigs []UpstreamRouteConfig) error {
 	out := server.DefaultConfig()
 	if c.GatewayNode != "" {
 		out.GatewayNode = c.GatewayNode
@@ -92,7 +101,7 @@ func (c *File) validateShape() error {
 	if err := applyDownlinkConfig(&out, c.Downlink); err != nil {
 		return err
 	}
-	routes, err := toUpstreamRoutes(c.Upstream.Routes)
+	routes, err := toUpstreamRoutes(routeConfigs)
 	if err != nil {
 		return err
 	}
@@ -216,11 +225,11 @@ func validHTTPHeaderValue(value string) bool {
 	return true
 }
 
-func (c *File) validateUpstreamRouteConflicts(collector *validationCollector) {
-	ranges := make([]validationMsgIDRange, 0, len(c.Upstream.Routes))
+func (c *File) validateUpstreamRouteConflicts(routesConfig []UpstreamRouteConfig, collector *validationCollector) {
+	ranges := make([]validationMsgIDRange, 0, len(routesConfig))
 	routeNames := make(map[string]int)
 
-	for index, route := range c.Upstream.Routes {
+	for index, route := range routesConfig {
 		if !upstreamRouteEnabled(route) {
 			continue
 		}

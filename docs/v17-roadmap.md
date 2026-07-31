@@ -61,6 +61,26 @@ for its MsgID router map. V17 must not mutate that map while requests are being
 dispatched. MsgIDs eligible for future route activation therefore need a
 bounded startup-time admission range.
 
+## Current Implementation Status
+
+V17.1 is implemented:
+
+- `upstream.routes_file` is mutually exclusive with inline `upstream.routes`;
+- relative route paths resolve against the main gateway config directory;
+- bounded file reading, environment expansion, strict known fields, exactly one
+  YAML document, `version: 1`, bounded route count, and unique route names are
+  enforced;
+- validation and `ToServerConfig` consume one parsed route snapshot while
+  reusing the existing HTTP, static/DNS discovery, NSQ, overlap, reserved
+  MsgID, and traffic-policy validation paths;
+- reload admission ranges are normalized, bounded, checked against reserved
+  MsgIDs, and registered in Zinx before service starts;
+- source examples, focused tests, CI/release config validation, and bilingual
+  configuration documentation cover the startup contract.
+
+Runtime generation switching, request leases, and reload triggers are not part
+of V17.1 and remain intentionally inactive.
+
 ## Non-Goals
 
 V17 does not target:
@@ -94,15 +114,13 @@ file mode is enabled, the same file is loaded and validated before the TCP
 listener opens, so startup and later reloads cannot interpret the route schema
 differently.
 
-## Candidate Configuration Shape
-
-The exact field names are finalized in V17.1. The intended shape is:
+## Configuration Shape
 
 ```yaml
 upstream:
   routes_file:
     path: /etc/z-courier/upstream-routes.yaml
-    max_size: 1MiB
+    max_size_bytes: 1048576
     reload:
       enabled: true
       drain_timeout: 30s
@@ -337,6 +355,12 @@ activation. It must remain usable on narrow desktop and mobile viewports.
 ### V17.1 Route Source And Validation Contract
 
 Purpose: define one strict route document and the immutable startup boundary.
+
+Status: implemented. File/inline source exclusivity, relative path resolution,
+bounded one-snapshot loading, strict versioned YAML, environment expansion,
+existing route/policy validation reuse, startup admission ranges, source
+examples, focused tests, CI/release checks, and bilingual configuration
+guidance are complete.
 
 - Add file-source configuration while preserving inline route compatibility.
 - Reuse the existing route conversion and validation rules rather than creating

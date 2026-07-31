@@ -705,6 +705,39 @@ func registeredMsgIDs(config Config) ([]uint32, error) {
 			}
 		}
 	}
+	if config.UpstreamRoutesFile.Reload.Enabled {
+		if len(config.UpstreamRoutesFile.Reload.AcceptedMsgIDRanges) == 0 {
+			return nil, fmt.Errorf("upstream route reload requires accepted msg id ranges")
+		}
+		for index, accepted := range config.UpstreamRoutesFile.Reload.AcceptedMsgIDRanges {
+			msgIDMax := accepted.Max
+			if msgIDMax == 0 {
+				msgIDMax = accepted.Min
+			}
+			if accepted.Min == 0 || msgIDMax < accepted.Min {
+				return nil, fmt.Errorf(
+					"upstream route reload accepted msg id range #%d is invalid: %d-%d",
+					index+1,
+					accepted.Min,
+					accepted.Max,
+				)
+			}
+			if msgIDMax-accepted.Min > 10000 {
+				return nil, fmt.Errorf(
+					"upstream route reload accepted msg id range #%d is too large: %d-%d",
+					index+1,
+					accepted.Min,
+					msgIDMax,
+				)
+			}
+			for msgID := accepted.Min; ; msgID++ {
+				seen[msgID] = struct{}{}
+				if msgID == msgIDMax {
+					break
+				}
+			}
+		}
+	}
 
 	msgIDs := make([]uint32, 0, len(seen))
 	for msgID := range seen {

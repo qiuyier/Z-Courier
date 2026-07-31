@@ -1,0 +1,29 @@
+version: 1
+routes:
+  - name: routes-file-http
+    enabled: true
+    msg_id_min: 1001
+    msg_id_max: 1999
+    target:
+      type: http
+      url: http://127.0.0.1:18081/gateway/upstream
+      token: ""
+      timeout: 5s
+      max_in_flight: 1000
+
+  - name: routes-file-nsq
+    enabled: true
+    msg_id_min: 2000
+    msg_id_max: 2999
+    target:
+      type: nsq
+      nsqd_addrs:
+        - 127.0.0.1:4150
+      topic: message_events
+      auth_secret: ""
+      dial_timeout: 1s
+      read_timeout: 60s
+      write_timeout: 1s
+      publish_mode: round_robin
+      retry_attempts: 1
+      max_in_flight: 1000

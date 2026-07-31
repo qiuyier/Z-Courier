@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -39,6 +40,8 @@ type File struct {
 	Downlink     DownlinkConfig     `yaml:"downlink"`
 	Upstream     UpstreamConfig     `yaml:"upstream"`
 	Pipeline     PipelineConfig     `yaml:"pipeline"`
+
+	sourcePath string
 }
 
 type AuthConfig struct {
@@ -207,7 +210,25 @@ type ClusterPeerHMACConfig struct {
 }
 
 type UpstreamConfig struct {
-	Routes []UpstreamRouteConfig `yaml:"routes"`
+	Routes     []UpstreamRouteConfig     `yaml:"routes"`
+	RoutesFile *UpstreamRoutesFileConfig `yaml:"routes_file"`
+}
+
+type UpstreamRoutesFileConfig struct {
+	Path         string                    `yaml:"path"`
+	MaxSizeBytes int64                     `yaml:"max_size_bytes"`
+	Reload       UpstreamRouteReloadConfig `yaml:"reload"`
+}
+
+type UpstreamRouteReloadConfig struct {
+	Enabled             bool               `yaml:"enabled"`
+	DrainTimeout        string             `yaml:"drain_timeout"`
+	AcceptedMsgIDRanges []MsgIDRangeConfig `yaml:"accepted_msg_id_ranges"`
+}
+
+type MsgIDRangeConfig struct {
+	Min uint32 `yaml:"min"`
+	Max uint32 `yaml:"max"`
 }
 
 type DownlinkConfig struct {
@@ -455,6 +476,11 @@ func Load(path string) (*File, error) {
 	if err := decoder.Decode(&fileConfig); err != nil {
 		return nil, fmt.Errorf("config: parse %s: %w", path, err)
 	}
+	absolutePath, err := filepath.Abs(path)
+	if err != nil {
+		return nil, fmt.Errorf("config: resolve %s: %w", path, err)
+	}
+	fileConfig.sourcePath = absolutePath
 
 	return &fileConfig, nil
 }
@@ -527,7 +553,11 @@ func validEnvPlaceholderName(name string) bool {
 }
 
 func (c *File) ToServerConfig() (server.Config, error) {
-	if _, err := c.Validate(); err != nil {
+	resolvedRoutes, err := c.resolveUpstreamRoutes()
+	if err != nil {
+		return server.Config{}, err
+	}
+	if _, err := c.validateResolvedRoutes(resolvedRoutes); err != nil {
 		return server.Config{}, err
 	}
 
@@ -551,11 +581,12 @@ func (c *File) ToServerConfig() (server.Config, error) {
 	if err := applyDownlinkConfig(&out, c.Downlink); err != nil {
 		return server.Config{}, err
 	}
-	routes, err := toUpstreamRoutes(c.Upstream.Routes)
+	routes, err := toUpstreamRoutes(resolvedRoutes.routes)
 	if err != nil {
 		return server.Config{}, err
 	}
 	out.UpstreamRoutes = routes
+	out.UpstreamRoutesFile = resolvedRoutes.fileConfig
 
 	pipelineConfig, err := toPipelineConfig(c.Pipeline, routes)
 	if err != nil {

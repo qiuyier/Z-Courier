@@ -1,0 +1,38 @@
+gateway_node: routes-file-example
+route_msg_ids:
+  - 1000
+
+auth:
+  type: static
+  static_tokens:
+    dev-token:
+      client_id: dev-client
+      token_id: dev-token
+      scopes:
+        - gateway:dev
+
+internal_http:
+  enabled: true
+  addr: 127.0.0.1:18086
+  token: dev-internal-token
+  auth:
+    mode: token
+
+upstream:
+  routes_file:
+    path: upstream-routes.v17.yaml
+    max_size_bytes: 1048576
+    reload:
+      enabled: true
+      drain_timeout: 30s
+      accepted_msg_id_ranges:
+        - min: 1001
+          max: 1999
+        - min: 2000
+          max: 2999
+
+pipeline:
+  rate_limit:
+    enabled: true
+    max_requests: 1000
+    window: 1s

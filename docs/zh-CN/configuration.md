@@ -82,7 +82,8 @@ route_msg_ids:
 ```
 
 - `gateway_node`：当前网关节点名，会写入 session 和 cluster route。
-- `route_msg_ids`：额外注册到 Zinx 的 MsgID。启用的 upstream route 范围会自动注册。
+- `route_msg_ids`：额外注册到 Zinx 的 MsgID。启用的 upstream route 范围和 V17
+  reload 接纳范围都会在启动时自动注册。
 
 `MsgID = 1000` 是 `AUTH/BIND` 控制消息。`MsgID = 2` 是下行 ACK。它们由网关保留。
 
@@ -571,6 +572,73 @@ upstream:
 ```
 
 同一个 `MsgID` 只能匹配一个启用的 route。配置校验会拦截 route 重叠和保留 MsgID。
+
+### 独立路由文件启动模式（V17.1）
+
+V17.1 可以从一个独立且有大小上限的 YAML 文件加载整张 upstream route 表。它和
+内联的 `upstream.routes` 互斥，不能同时配置。
+
+主网关配置：
+
+```yaml
+upstream:
+  routes_file:
+    path: upstream-routes.v17.yaml
+    max_size_bytes: 1048576
+    reload:
+      enabled: true
+      drain_timeout: 30s
+      accepted_msg_id_ranges:
+        - min: 1001
+          max: 1999
+        - min: 2000
+          max: 2999
+```
+
+相对路径以主网关配置文件所在目录为基准。路由文件是严格的版本化文档：
+
+```yaml
+version: 1
+routes:
+  - name: orders-http
+    enabled: true
+    msg_id_min: 1001
+    msg_id_max: 1999
+    target:
+      type: http
+      url: http://orders.internal:8080/gateway/upstream
+      token: ${ZCOURIER_UPSTREAM_INTERNAL_TOKEN}
+      timeout: 5s
+      max_in_flight: 2000
+```
+
+独立文件继续复用内联路由已有的 HTTP、DNS、NSQ、范围重叠、保留 MsgID 和
+Traffic Policy 校验，并额外保证：
+
+- 只接受一个 `version: 1` 的 YAML 文档；
+- 拒绝未知字段、重复或空路由名、超大文件和缺失的环境变量；
+- `max_size_bytes` 默认 1 MiB，最大 16 MiB；
+- 开启 reload 时，每条已启用路由必须完整落在某一个接纳范围内；
+- 接纳范围最多 64 段，总计最多 20,000 个 MsgID。
+
+这些接纳范围会在 Zinx TCP 服务启动前注册，后续不需要并发修改 Zinx 内部的 MsgID
+路由 map，同时为未来的路由代际预留可用 MsgID。
+
+V17.1 **还没有提供运行时热切换**。这个阶段不要发送 `SIGHUP` 来尝试切换路由。
+原子代际切换、请求租约和 reload 触发器会在后续 V17 工作流实现。
+
+可运行的源码示例：
+
+- `configs/z-courier.routes-file.yaml`
+- `configs/upstream-routes.v17.yaml`
+
+校验命令：
+
+```bash
+go run ./cmd/gateway \
+  -config configs/z-courier.routes-file.yaml \
+  -check-config
+```
 
 ### HTTP 服务发现配置（V15.1-V15.4.1）
 

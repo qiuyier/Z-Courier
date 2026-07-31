@@ -75,8 +75,8 @@ route_msg_ids:
 
 - `gateway_node`: logical node name recorded in session state.
 - `route_msg_ids`: explicit MsgIDs registered on Zinx in addition to enabled
-  upstream route ranges. `MsgID = 1000` AUTH/BIND and `MsgID = 2` downlink ACK
-  are always registered by the gateway.
+  upstream route ranges and any V17 reload admission ranges. `MsgID = 1000`
+  AUTH/BIND and `MsgID = 2` downlink ACK are always registered by the gateway.
 
 `MsgID = 1000` is a gateway control message. It authenticates and binds the TCP
 connection to `client_id + device_id`, returns a gateway ACK, and is not
@@ -1115,6 +1115,78 @@ HTTP target fields:
 - `max_in_flight`: optional per-route upstream forwarding concurrency limit.
   Packets above this limit are rejected quickly instead of waiting behind a
   slow backend.
+
+### Route File Startup Mode (V17.1)
+
+V17.1 can load the complete upstream route table from a separate, bounded YAML
+file. This is mutually exclusive with inline `upstream.routes`.
+
+Main gateway config:
+
+```yaml
+upstream:
+  routes_file:
+    path: upstream-routes.v17.yaml
+    max_size_bytes: 1048576
+    reload:
+      enabled: true
+      drain_timeout: 30s
+      accepted_msg_id_ranges:
+        - min: 1001
+          max: 1999
+        - min: 2000
+          max: 2999
+```
+
+The path is resolved relative to the main gateway config. The route file uses a
+strict, versioned document:
+
+```yaml
+version: 1
+routes:
+  - name: orders-http
+    enabled: true
+    msg_id_min: 1001
+    msg_id_max: 1999
+    target:
+      type: http
+      url: http://orders.internal:8080/gateway/upstream
+      token: ${ZCOURIER_UPSTREAM_INTERNAL_TOKEN}
+      timeout: 5s
+      max_in_flight: 2000
+```
+
+The route file reuses the same HTTP, DNS, NSQ, overlap, reserved-MsgID, and
+traffic-policy validation as inline routes. It additionally:
+
+- accepts exactly one YAML document with `version: 1`;
+- rejects unknown fields, duplicate/blank route names, oversized files, and
+  missing environment variables;
+- defaults `max_size_bytes` to 1 MiB and caps it at 16 MiB;
+- requires every enabled startup route to fit wholly inside one accepted range
+  when reload is enabled;
+- bounds accepted ranges to 64 entries and 20,000 total MsgIDs.
+
+The accepted ranges are registered in Zinx before the TCP server starts. This
+avoids unsafe runtime mutation of Zinx's MsgID router map and reserves space for
+future route generations.
+
+V17.1 does **not** activate runtime reload yet. Do not send `SIGHUP` expecting a
+route switch in this stage. Atomic generation switching, request leases, and
+reload triggers are delivered by the following V17 workstreams.
+
+Runnable source examples:
+
+- `configs/z-courier.routes-file.yaml`;
+- `configs/upstream-routes.v17.yaml`.
+
+Validate them with:
+
+```bash
+go run ./cmd/gateway \
+  -config configs/z-courier.routes-file.yaml \
+  -check-config
+```
 
 ### HTTP Discovery Configuration (V15.1-V15.4.1)
 

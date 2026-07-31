@@ -38,6 +38,7 @@ type Config struct {
 	AdminAudit                 adminaudit.Trail
 	AdminAuditStorage          AdminAuditStorageConfig
 	UpstreamRoutes             []UpstreamRouteConfig
+	UpstreamRoutesFile         UpstreamRoutesFileConfig
 	UpstreamRuntime            *UpstreamRuntime
 	Pipeline                   pipeline.Config
 	TrafficPolicyRuntime       *pipeline.TrafficPolicyRuntime
@@ -126,6 +127,23 @@ type UpstreamRouteConfig struct {
 	MaxInFlight int
 	HTTP        *HTTPUpstreamConfig
 	NSQ         *NSQUpstreamConfig
+}
+
+type UpstreamRoutesFileConfig struct {
+	Path         string
+	MaxSizeBytes int64
+	Reload       UpstreamRouteReloadConfig
+}
+
+type UpstreamRouteReloadConfig struct {
+	Enabled             bool
+	DrainTimeout        time.Duration
+	AcceptedMsgIDRanges []MsgIDRange
+}
+
+type MsgIDRange struct {
+	Min uint32
+	Max uint32
 }
 
 type HTTPUpstreamConfig struct {

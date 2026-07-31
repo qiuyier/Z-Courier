@@ -12,6 +12,11 @@ semantic versioning after the first public MVP tag.
 - V17 roadmap for bounded route-file hot reload, immutable route generations,
   in-flight request leases, failure-safe activation and retirement,
   node-local canary rollout, and operator-facing reload controls.
+- V17.1 strict versioned upstream route-file startup mode with bounded reads,
+  environment expansion, one-snapshot validation, inline/file mutual
+  exclusion, startup-time reload MsgID admission ranges, real config examples,
+  CI/release validation, and bilingual configuration guidance. Runtime route
+  activation remains deferred to the next V17 workstream.
 
 ## [v0.16.0] - 2026-07-31
 

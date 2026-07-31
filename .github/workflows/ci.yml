@@ -63,6 +63,7 @@ jobs:
           ZCOURIER_UPSTREAM_INTERNAL_TOKEN: ci-upstream-token
         run: |
           go run ./cmd/gateway -config configs/z-courier.yaml -check-config
+          go run ./cmd/gateway -config configs/z-courier.routes-file.yaml -check-config
           go run ./cmd/gateway -config configs/z-courier.integration.yaml -check-config
           go run ./cmd/gateway -config configs/z-courier.discovery-e2e.yaml -check-config
           go run ./cmd/gateway -config configs/z-courier.traffic-policy-e2e.yaml -check-config

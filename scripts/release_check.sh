@@ -157,6 +157,7 @@ run_fast_checks() {
   run_php_checks
 
   run go run ./cmd/gateway -config configs/z-courier.yaml -check-config
+  run go run ./cmd/gateway -config configs/z-courier.routes-file.yaml -check-config
   run go run ./cmd/gateway -config configs/z-courier.integration.yaml -check-config
   run go run ./cmd/gateway -config configs/z-courier.discovery-e2e.yaml -check-config
   run go run ./cmd/gateway -config configs/z-courier.traffic-policy-e2e.yaml -check-config
