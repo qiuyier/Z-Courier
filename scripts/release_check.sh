@@ -158,6 +158,9 @@ run_fast_checks() {
 
   run go run ./cmd/gateway -config configs/z-courier.yaml -check-config
   run go run ./cmd/gateway -config configs/z-courier.routes-file.yaml -check-config
+  run env \
+    ZCOURIER_ROUTE_RELOAD_E2E_ROUTE_FILE="$ROOT_DIR/configs/upstream-routes.route-reload-e2e.yaml" \
+    go run ./cmd/gateway -config configs/z-courier.route-reload-e2e.yaml -check-config
   run go run ./cmd/gateway -config configs/z-courier.integration.yaml -check-config
   run go run ./cmd/gateway -config configs/z-courier.discovery-e2e.yaml -check-config
   run go run ./cmd/gateway -config configs/z-courier.traffic-policy-e2e.yaml -check-config
@@ -176,6 +179,7 @@ run_fast_checks() {
     run bash -n "$shell_script"
   done
 
+  run bash scripts/e2e_route_reload.sh
   run bash scripts/e2e_traffic_policy.sh
   run git diff --check
 }

@@ -34,6 +34,10 @@ semantic versioning after the first public MVP tag.
   drain-timeout and mixed-generation alerts, bilingual Grafana panels and
   first-response guidance, plus admin/operator/readonly responsive Console
   coverage for failure history and retirement state.
+- V17.5.1 Docker-free real-TCP route reload verification with one persistent
+  public-SDK client, controlled A/B HTTP backends, failed-candidate isolation,
+  in-flight generation drain, runtime MsgID route add/remove, rollback, and CI
+  plus release-check integration.
 
 ## [v0.16.0] - 2026-07-31
 

@@ -1,0 +1,17 @@
+{
+  "Name": "Z-Courier Route Reload E2E Gateway",
+  "Host": "127.0.0.1",
+  "TCPPort": 9961,
+  "Mode": "tcp",
+  "MaxConn": 256,
+  "MaxPacketSize": 8388608,
+  "WorkerPoolSize": 4,
+  "MaxWorkerTaskLen": 256,
+  "MaxMsgChanLen": 256,
+  "IOReadBuffSize": 8192,
+  "HeartbeatMax": 30,
+  "LogDir": "./log",
+  "LogFile": "zinx-route-reload-e2e.log",
+  "LogCons": true,
+  "LogIsolationLevel": 2
+}

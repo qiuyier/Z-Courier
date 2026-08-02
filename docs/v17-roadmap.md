@@ -499,6 +499,12 @@ Acceptance criteria:
 Purpose: prove hot reload through the real gateway path and supported deployment
 references.
 
+Status: in progress. The Docker-free single-node verifier now drives one
+persistent public-SDK TCP connection through parse and admission failures, an
+in-flight A-to-B generation switch, runtime MsgID addition/removal, retirement,
+and rollback without reconnecting. Compose, Helm, Kind, and focused DNS/NSQ
+lifecycle coverage remain in this phase.
+
 - Add Compose and Helm examples using read-only mounted route files.
 - Document ConfigMap projection timing and explicit per-pod reload.
 - Add a Docker-free real-TCP verifier for target switch, failed candidate,

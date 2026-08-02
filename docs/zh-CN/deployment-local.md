@@ -24,6 +24,24 @@ bash scripts/e2e.sh
 4. 验证离线排队、bind 后补发、在线推送、客户端 ACK、NSQ upstream、metrics、
    Go SDK 和 PHP SDK。
 
+## 无 Docker 路由热加载 E2E
+
+```bash
+bash scripts/e2e_route_reload.sh
+```
+
+脚本会创建隔离的临时路由文件，启动 A/B 两个可控 HTTP 后端和真实 gateway，
+并让同一个公开 Go SDK TCP Client 在整个测试期间保持连接。它会依次验证：
+
+1. 初始 generation 转发到后端 A。
+2. YAML 解析失败和超出启动接纳范围的候选不会替换当前 generation。
+3. A 上已有请求仍在执行时，路由可以原子切换到 B。
+4. 旧请求只在 A 完成且不被重放，新 generation 可以增加 MsgID 路由。
+5. 回滚到 A 后客户端无需重连，已删除的 MsgID 路由不再转发。
+
+该脚本使用 TCP `9961`、Internal HTTP `18221` 和后端端口
+`18222`/`18223`，执行前这些端口需要空闲。
+
 ## 两节点集群 E2E
 
 ```bash

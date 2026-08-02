@@ -1,0 +1,12 @@
+version: 1
+routes:
+  - name: route-reload-a
+    enabled: true
+    msg_id_min: 1101
+    msg_id_max: 1101
+    target:
+      type: http
+      url: http://127.0.0.1:18222/gateway/upstream
+      token: route-reload-e2e-upstream-token
+      timeout: 5s
+      max_in_flight: 16

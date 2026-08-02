@@ -245,21 +245,22 @@ func TestGatewaySIGHUPWorkerReloadsConfiguredRouteFile(t *testing.T) {
 
 	gateway.routeReloadSignal <- syscall.SIGHUP
 	deadline := time.Now().Add(time.Second)
+	var lastEvents []adminaudit.Entry
 	for time.Now().Before(deadline) {
 		active := manager.Snapshot().Active
-		if active != nil && active.Number == 2 {
+		lastEvents = audit.List(adminaudit.Query{Limit: 10}).Entries
+		if active != nil && active.Number == 2 && len(lastEvents) > 0 {
 			if routes := control.ActiveRoutes(); len(routes) != 1 || routes[0].Name != "candidate" {
 				t.Fatalf("active routes = %+v, want SIGHUP candidate", routes)
 			}
-			events := audit.List(adminaudit.Query{Limit: 10}).Entries
-			if len(events) != 1 || events[0].Details["trigger"] != routeReloadTriggerSIGHUP || events[0].AuthMode != "system" {
-				t.Fatalf("SIGHUP audit events = %+v", events)
+			if len(lastEvents) != 1 || lastEvents[0].Details["trigger"] != routeReloadTriggerSIGHUP || lastEvents[0].AuthMode != "system" {
+				t.Fatalf("SIGHUP audit events = %+v", lastEvents)
 			}
 			return
 		}
 		time.Sleep(time.Millisecond)
 	}
-	t.Fatalf("active generation = %+v, want generation 2 after SIGHUP", manager.Snapshot().Active)
+	t.Fatalf("SIGHUP reload incomplete: active generation = %+v audit events = %+v", manager.Snapshot().Active, lastEvents)
 }
 
 func testRouteSnapshotLoader(name string, targetURL string) UpstreamRouteLoader {

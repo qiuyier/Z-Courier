@@ -1,0 +1,75 @@
+gateway_node: route-reload-e2e
+route_msg_ids:
+  - 1000
+
+auth:
+  type: static
+  static_tokens:
+    route-reload-e2e-token:
+      client_id: route-reload-e2e-client
+      token_id: route-reload-e2e-token
+      scopes:
+        - gateway:e2e
+
+internal_http:
+  enabled: true
+  addr: 127.0.0.1:18221
+  token: route-reload-e2e-internal-token
+  auth:
+    mode: token
+  max_request_body_size: 1048576
+  max_in_flight: 100
+
+cluster:
+  enabled: false
+  internal_addr: http://127.0.0.1:18221
+  route_refresh_interval: 10s
+  registry:
+    type: memory
+    ttl: 30s
+  peer:
+    token: route-reload-e2e-peer-token
+    timeout: 1s
+    auth:
+      mode: token
+
+downlink:
+  storage:
+    type: memory
+  delivery:
+    retry_interval: 1s
+    retry_delay: 1s
+    ack_timeout: 1s
+    retry_lease: 5s
+    max_attempts: 3
+    scan_limit: 100
+    bind_flush_limit: 100
+  retention:
+    delivered_ttl: 1h
+    failed_ttl: 1h
+    discarded_ttl: 1h
+    cleanup_interval: 1h
+    cleanup_limit: 100
+
+pipeline:
+  allowlist:
+    client_ids: []
+    msg_ids: []
+  blocklist:
+    client_ids: []
+    msg_ids: []
+  rate_limit:
+    enabled: false
+    max_requests: 100
+    window: 1s
+
+upstream:
+  routes_file:
+    path: "${ZCOURIER_ROUTE_RELOAD_E2E_ROUTE_FILE}"
+    max_size_bytes: 1048576
+    reload:
+      enabled: true
+      drain_timeout: 5s
+      accepted_msg_id_ranges:
+        - min: 1101
+          max: 1102

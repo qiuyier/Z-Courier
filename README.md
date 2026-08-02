@@ -175,6 +175,19 @@ failed-endpoint cooldown and recovery, and non-replay of received HTTP `500`
 responses. The script uses TCP `9931`, internal HTTP `18191`, and backend
 ports `18192` and `18193`; they must be free.
 
+Run the Docker-free route hot-reload verifier:
+
+```bash
+bash scripts/e2e_route_reload.sh
+```
+
+It creates an isolated temporary route file, starts controlled A/B HTTP
+backends and a real gateway process, then keeps one public Go SDK TCP client
+connected while it verifies parse and admission failures, an in-flight A-to-B
+generation switch, route addition and removal inside the startup envelope,
+retirement, and rollback. The script uses TCP `9961`, internal HTTP `18221`,
+and backend ports `18222` and `18223`; they must be free.
+
 Run the Docker-free local traffic-policy verifier:
 
 ```bash
