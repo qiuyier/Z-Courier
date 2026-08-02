@@ -84,6 +84,7 @@ run_role() {
 }
 
 run_role admin "${ZCOURIER_CONSOLE_SMOKE_ADMIN_ADDR:-127.0.0.1:18084}"
+run_role operator "${ZCOURIER_CONSOLE_SMOKE_OPERATOR_ADDR:-127.0.0.1:18086}"
 run_role readonly "${ZCOURIER_CONSOLE_SMOKE_READONLY_ADDR:-127.0.0.1:18085}"
 
 echo "admin console smoke passed"

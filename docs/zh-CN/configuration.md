@@ -573,7 +573,7 @@ upstream:
 
 同一个 `MsgID` 只能匹配一个启用的 route。配置校验会拦截 route 重叠和保留 MsgID。
 
-### 独立路由文件与热加载（V17.1-V17.3）
+### 独立路由文件与热加载（V17.1-V17.4）
 
 V17.1 可以从一个独立且有大小上限的 YAML 文件加载整张 upstream route 表。它和
 内联的 `upstream.routes` 互斥，不能同时配置。
@@ -669,8 +669,19 @@ POST /internal/admin/routes/reload
 POST Body 只能是 `{"dry_run":true,"expected_generation":1}` 或
 `{"dry_run":false,"expected_generation":1}`，不能携带路由正文、文件路径或目标
 覆盖。稳定错误码包括 `reload_disabled`、`reload_busy`、
-`generation_conflict`、`invalid_candidate`、`candidate_build_failed` 和
+`generation_conflict`、`source_read_failed`、`parse_failed`、
+`validation_failed`、`candidate_load_failed`、`candidate_build_failed` 和
 `reload_failed`。
+
+V17.4 在 status 响应中增加了有界、进程内的操作历史。它只保留最近 20 次操作，内容
+包括固定的 stage/result/reason、时间、耗时、warning 数、脱敏候选 fingerprint、
+route 数和 generation 编号。这里不保存操作者身份或路由密钥，gateway 重启后历史会
+清空；需要持久追责时仍以 admin audit Store 为准。retiring generation 还会返回
+`retiring_at`、`retiring_for_ms`、`drain_timeout_ms` 和 `slow`。
+
+同一份快照也会出现在 admin diagnostics 的 `route_reload` 字段，以及诊断包的
+`route_reload_status` section 中。Prometheus 只给 reload trigger/result 使用固定
+枚举标签；generation、fingerprint、endpoint、路径和校验文本都不会成为指标标签。
 
 Dry Run 通过后，也可以直接向网关进程发送 `SIGHUP` 来激活固定文件：
 

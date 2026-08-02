@@ -656,6 +656,59 @@ legacy `pipeline.rate_limit`; both cannot be enabled together. Verify
 `selection_total` stops growing for the retired policy, rejection reasons
 return to the expected baseline, and upstream load remains within capacity.
 
+## Route Hot Reload
+
+Start with the node that received the operation:
+
+```bash
+go run ./cmd/admin routes status \
+  -internal-url "$ZCOURIER_ADMIN_INTERNAL_URL"
+
+go run ./cmd/admin diagnose \
+  -internal-url "$ZCOURIER_ADMIN_INTERNAL_URL" \
+  -output reports/diagnose/route-reload.json
+```
+
+Use `last_attempt.stage` for first response:
+
+| Stage | First response |
+| --- | --- |
+| `source_read` | Check the mounted file, permissions, projection/symlink target, and atomic replacement. The gateway never accepts a request-supplied path. |
+| `parse` | Validate YAML syntax, unknown fields, and the single-document rule before retrying Dry Run. |
+| `validation` | Check version, environment expansion, names, MsgID overlap/reserved IDs, accepted reload ranges, target config, and Traffic Policy references. |
+| `candidate_build` | Inspect sanitized gateway logs and dependency configuration; the active generation remains unchanged. |
+| `precondition` | Refresh status. Retry a generation conflict with the new generation, or wait for the retiring generation before retrying a busy operation. |
+| `activation` or `operation` | Check cancellation, shutdown, timeout, and gateway logs. Confirm the reported active generation before another attempt. |
+
+For slow retirement, compare `retiring_for_ms` with `drain_timeout_ms` and
+inspect `retiring.in_flight`. A pinned old generation usually means an upstream
+request still owns its generation lease. Do not force-close it: locate the slow
+HTTP request, DNS-backed forward, or NSQ publish, then let the final lease close
+the old resources.
+
+For mixed cluster generations, first decide whether the difference is the
+expected canary window. Query every gateway node directly and compare active
+fingerprints plus route counts. If the mismatch persists, stop the rollout,
+Dry Run the same mounted file on every node, then either converge forward or
+reactivate the previously reviewed file. Do not assume one node's Console
+represents the whole cluster.
+
+PromQL:
+
+```promql
+max by (instance) (z_courier_route_generation)
+sum by (instance, trigger, result) (rate(z_courier_route_reload_total[5m]))
+z_courier:route_reload:p95_seconds
+z_courier:route_retirement_age_seconds
+max by (instance) (z_courier_route_retirement_timeout_seconds)
+```
+
+Mutable metrics for removed routes remain only while the old generation is
+retiring and are deleted when it closes. If an obsolete route series remains,
+check retirement state and in-flight leases before treating it as metric
+cleanup failure. Counter history is intentionally cumulative and is not
+deleted.
+
 ## Graceful Shutdown
 
 Before planned restart:

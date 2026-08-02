@@ -1116,7 +1116,7 @@ HTTP target fields:
   Packets above this limit are rejected quickly instead of waiting behind a
   slow backend.
 
-### Route File And Hot Reload (V17.1-V17.3)
+### Route File And Hot Reload (V17.1-V17.4)
 
 V17.1 can load the complete upstream route table from a separate, bounded YAML
 file. This is mutually exclusive with inline `upstream.routes`.
@@ -1221,8 +1221,22 @@ The POST body is either
 `{"dry_run":true,"expected_generation":1}` or
 `{"dry_run":false,"expected_generation":1}`. It never accepts a route
 document, path, or target override. Stable failures include
-`reload_disabled`, `reload_busy`, `generation_conflict`, `invalid_candidate`,
-`candidate_build_failed`, and `reload_failed`.
+`reload_disabled`, `reload_busy`, `generation_conflict`,
+`source_read_failed`, `parse_failed`, `validation_failed`,
+`candidate_load_failed`, `candidate_build_failed`, and `reload_failed`.
+
+V17.4 adds a bounded, process-local history to the status response. It retains
+the newest 20 operations with fixed stage/result/reason values, timestamps,
+duration, warning count, sanitized candidate fingerprint, route count, and
+generation numbers. The history contains no actor identity or route secret and
+is cleared when the gateway restarts; durable attribution remains in the admin
+audit Store. Retiring generation metadata includes `retiring_at`,
+`retiring_for_ms`, `drain_timeout_ms`, and `slow`.
+
+The same snapshot appears under `route_reload` in admin diagnostics and as the
+`route_reload_status` diagnosis-bundle section. Prometheus exports only bounded
+labels for reload trigger/result; generation, fingerprints, endpoint values,
+paths, and validation text are never metric labels.
 
 After a successful dry run, `SIGHUP` can activate the configured file directly:
 

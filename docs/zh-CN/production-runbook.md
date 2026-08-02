@@ -193,6 +193,50 @@ Redis 故障处理：
 同时启用。最后确认退役策略的 `selection_total` 不再增长、拒绝原因回到基线，
 且 upstream 负载仍处于安全范围。
 
+## 5.3 路由热加载异常
+
+先直接查询收到操作的 gateway 节点：
+
+```bash
+go run ./cmd/admin routes status \
+  -internal-url "$ZCOURIER_ADMIN_INTERNAL_URL"
+
+go run ./cmd/admin diagnose \
+  -internal-url "$ZCOURIER_ADMIN_INTERNAL_URL" \
+  -output reports/diagnose/route-reload.json
+```
+
+根据 `last_attempt.stage` 处理：
+
+| Stage | 首要检查 |
+| --- | --- |
+| `source_read` | 检查挂载文件、权限、投影或软链接目标和原子替换；网关不会接受请求传入的路径。 |
+| `parse` | 检查 YAML 语法、未知字段和只允许一个文档的约束。 |
+| `validation` | 检查版本、环境变量、路由名、MsgID 重叠/保留值、reload 接纳范围、目标配置和 Traffic Policy 引用。 |
+| `candidate_build` | 查看脱敏后的 gateway 日志和依赖配置；失败不会替换 active generation。 |
+| `precondition` | 刷新 status；generation conflict 使用新代际重试，reload busy 等旧代退休后再试。 |
+| `activation` 或 `operation` | 检查取消、关闭、超时和 gateway 日志，再确认当前 active generation。 |
+
+旧代退休过慢时，对比 `retiring_for_ms` 与 `drain_timeout_ms`，并查看
+`retiring.in_flight`。这通常表示仍有上游请求持有旧 generation lease，不要强制关闭；
+应定位慢 HTTP 请求、DNS 路由转发或 NSQ publish，最后一个 lease 归还后旧资源会自动
+关闭。
+
+集群代际不一致时，先确认是否正处于预期 canary 窗口。逐节点查询 active fingerprint
+和 route 数；如果长时间不收敛，停止继续发布，在每个节点对同一挂载文件执行 Dry Run，
+然后统一向前收敛或重新激活上一份已评审文件。单个节点的 Console 不能代表整个集群。
+
+```promql
+max by (instance) (z_courier_route_generation)
+sum by (instance, trigger, result) (rate(z_courier_route_reload_total[5m]))
+z_courier:route_reload:p95_seconds
+z_courier:route_retirement_age_seconds
+max by (instance) (z_courier_route_retirement_timeout_seconds)
+```
+
+被删除路由的可变指标只会保留到旧 generation 完成退休，随后自动删除。如果旧 route
+时序仍在，先检查退休状态和 in-flight lease；累计 Counter 历史本来就不会删除。
+
 ## 6. 下行消息没有到客户端
 
 先确认后端 push 返回：
@@ -292,6 +336,7 @@ go run ./cmd/admin diagnose \
 - diagnostics。
 - active check。
 - routes。
+- route reload status。
 - failed messages。
 - sessions。
 - route lookup。

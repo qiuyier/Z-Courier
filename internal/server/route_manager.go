@@ -35,6 +35,7 @@ type routeGenerationSnapshot struct {
 	Number      uint64
 	Fingerprint string
 	ActivatedAt time.Time
+	RetiringAt  time.Time
 	RouteCount  int
 	InFlight    int64
 	State       string
@@ -65,6 +66,7 @@ type routeGeneration struct {
 	number      uint64
 	fingerprint string
 	activatedAt time.Time
+	retiringAt  time.Time
 	routes      []UpstreamRouteConfig
 	engine      *router.Engine
 	runtime     *UpstreamRuntime
@@ -183,6 +185,9 @@ func newRouteManagerWithClock(
 		return nil, errRouteCandidateInvalid
 	}
 	initial.runtime.activateMetrics()
+	metrics.SetRouteGeneration(1)
+	metrics.SetRouteRetiringGenerations(0)
+	metrics.SetRouteRetirement(time.Time{}, drainTimeout)
 	return manager, nil
 }
 
@@ -414,10 +419,14 @@ func (m *routeManager) activateCandidate(
 	old.runtime.deactivateMetrics()
 	candidate.runtime.activateMetrics()
 	old.cleanup = old.metrics.difference(candidate.metrics)
+	old.retiringAt = m.now().UTC()
 	old.state.Store(routeGenerationRetiring)
 	m.active = candidate
 	m.retiring = old
 	m.nextNumber = nextNumber
+	metrics.SetRouteGeneration(nextNumber)
+	metrics.SetRouteRetiringGenerations(1)
+	metrics.SetRouteRetirement(old.retiringAt, m.drainTimeout)
 	snapshot := snapshotRouteGeneration(candidate)
 	m.mu.Unlock()
 
@@ -514,6 +523,9 @@ func (m *routeManager) Close() error {
 func (m *routeManager) beginShutdown() {
 	m.mu.Lock()
 	m.closed = true
+	metrics.SetRouteGeneration(0)
+	metrics.SetRouteRetiringGenerations(0)
+	metrics.ClearRouteRetirement()
 	m.clearRetiringLocked()
 	m.shutdownReloadDone = m.reloadDone
 
@@ -611,6 +623,11 @@ func (g *routeGeneration) closeNow() {
 		}
 		g.cleanup.delete()
 		g.state.Store(routeGenerationClosed)
+		if !g.retiringAt.IsZero() {
+			metrics.ObserveRouteRetirementDuration(time.Since(g.retiringAt))
+			metrics.SetRouteRetiringGenerations(0)
+			metrics.ClearRouteRetirement()
+		}
 		close(g.closeDone)
 	})
 }
@@ -635,6 +652,7 @@ func snapshotRouteGeneration(generation *routeGeneration) routeGenerationSnapsho
 		Number:      generation.number,
 		Fingerprint: generation.fingerprint,
 		ActivatedAt: generation.activatedAt,
+		RetiringAt:  generation.retiringAt,
 		RouteCount:  len(generation.routes),
 		InFlight:    generation.inFlight.Load(),
 		State:       routeGenerationStateName(generation.state.Load()),

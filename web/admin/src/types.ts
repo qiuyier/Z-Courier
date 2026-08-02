@@ -158,15 +158,39 @@ export type AdminRouteGeneration = {
   number: number;
   fingerprint: string;
   activated_at?: string;
+  retiring_at?: string;
+  retiring_for_ms?: number;
+  drain_timeout_ms?: number;
+  slow?: boolean;
   route_count: number;
   in_flight: number;
   state: string;
+};
+
+export type AdminRouteReloadAttempt = {
+  operation: string;
+  trigger: string;
+  stage: string;
+  result: string;
+  reason: string;
+  started_at: string;
+  completed_at: string;
+  duration_ms: number;
+  expected_generation?: number;
+  old_generation?: number;
+  candidate_generation?: number;
+  candidate_fingerprint?: string;
+  candidate_route_count?: number;
+  active_generation?: number;
+  changed?: boolean;
+  warning_count?: number;
 };
 
 export type AdminRouteReload = {
   code: string;
   result?: string;
   reason?: string;
+  stage?: string;
   gateway_node: string;
   reload_enabled: boolean;
   trigger?: string;
@@ -174,8 +198,29 @@ export type AdminRouteReload = {
   changed?: boolean;
   warning_count?: number;
   duration_ms?: number;
+  drain_timeout_ms?: number;
+  operations_in_flight: number;
+  last_started_at?: string;
+  last_success_at?: string;
+  last_failure_at?: string;
+  last_attempt?: AdminRouteReloadAttempt;
+  recent_attempts?: AdminRouteReloadAttempt[];
   active?: AdminRouteGeneration;
   candidate?: AdminRouteGeneration;
+  retiring?: AdminRouteGeneration;
+};
+
+export type AdminRouteReloadDiagnostics = {
+  enabled: boolean;
+  closed: boolean;
+  drain_timeout_ms?: number;
+  operations_in_flight: number;
+  last_started_at?: string;
+  last_success_at?: string;
+  last_failure_at?: string;
+  last_attempt?: AdminRouteReloadAttempt;
+  recent_attempts?: AdminRouteReloadAttempt[];
+  active?: AdminRouteGeneration;
   retiring?: AdminRouteGeneration;
 };
 
@@ -428,6 +473,7 @@ export type AdminDiagnostics = {
   upstream: UpstreamDiagnostics;
   capacity: CapacityDiagnostics;
   traffic_policy?: TrafficPolicyDiagnostics;
+  route_reload?: AdminRouteReloadDiagnostics;
   dependencies: Dependency[];
   warnings?: DiagnosticWarning[];
 };

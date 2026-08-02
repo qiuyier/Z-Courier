@@ -141,6 +141,110 @@ test("route file dry-run and activation use the displayed generation", async ({ 
   await expect(panel.getByRole("heading", { name: "#8" })).toBeVisible();
 });
 
+test("shows bounded route failure history and overdue retirement", async ({ page }) => {
+	await page.route("**/internal/admin/routes/status", async (route) => {
+		await route.fulfill({
+			contentType: "application/json",
+			json: {
+				code: "ok",
+				gateway_node: "console-smoke-node",
+				reload_enabled: true,
+				drain_timeout_ms: 30000,
+				operations_in_flight: 0,
+				last_failure_at: "2026-07-31T08:31:00Z",
+				active: {
+					number: 8,
+					fingerprint: "active-fingerprint-8",
+					activated_at: "2026-07-31T08:30:00Z",
+					route_count: 2,
+					in_flight: 0,
+					state: "active",
+				},
+				retiring: {
+					number: 7,
+					fingerprint: "retiring-fingerprint-7",
+					activated_at: "2026-07-31T08:00:00Z",
+					retiring_at: "2026-07-31T08:30:00Z",
+					retiring_for_ms: 45000,
+					drain_timeout_ms: 30000,
+					slow: true,
+					route_count: 2,
+					in_flight: 1,
+					state: "retiring",
+				},
+				last_attempt: {
+					operation: "validate",
+					trigger: "admin_api",
+					stage: "parse",
+					result: "parse_failed",
+					reason: "the configured route file could not be parsed",
+					started_at: "2026-07-31T08:31:00Z",
+					completed_at: "2026-07-31T08:31:00Z",
+					duration_ms: 4,
+					old_generation: 8,
+					active_generation: 8,
+				},
+				recent_attempts: [
+					{
+						operation: "validate",
+						trigger: "admin_api",
+						stage: "parse",
+						result: "parse_failed",
+						reason: "the configured route file could not be parsed",
+						started_at: "2026-07-31T08:31:00Z",
+						completed_at: "2026-07-31T08:31:00Z",
+						duration_ms: 4,
+						old_generation: 8,
+						active_generation: 8,
+					},
+				],
+			},
+			status: 200,
+		});
+	});
+
+	await login(page);
+	await gotoNav(page, "Routes");
+	const panel = page.getByTestId("route-reload-control");
+	await expect(panel.getByText("retirement overdue", { exact: true })).toBeVisible();
+	await expect(panel.getByText("Recent Operations", { exact: true })).toBeVisible();
+	await expect(panel.getByText("parse", { exact: true })).toBeVisible();
+	await expect(panel.getByText("parse_failed", { exact: true })).toBeVisible();
+	await expect(panel.getByText("the configured route file could not be parsed", { exact: true })).toBeVisible();
+});
+
+test("keeps route control readable on a mobile viewport", async ({ page }) => {
+	await page.setViewportSize({ width: 390, height: 844 });
+	await page.route("**/internal/admin/routes/status", async (route) => {
+		await route.fulfill({
+			contentType: "application/json",
+			json: {
+				code: "ok",
+				gateway_node: "console-smoke-mobile",
+				reload_enabled: true,
+				operations_in_flight: 0,
+				active: {
+					number: 12,
+					fingerprint: "mobile-fingerprint-with-a-deliberately-long-value",
+					activated_at: "2026-07-31T08:30:00Z",
+					route_count: 2,
+					in_flight: 0,
+					state: "active",
+				},
+				recent_attempts: [],
+			},
+			status: 200,
+		});
+	});
+
+	await login(page);
+	await gotoNav(page, "Routes");
+	const panel = page.getByTestId("route-reload-control");
+	await expect(panel).toBeVisible();
+	await expect(panel.getByText("Recent Operations", { exact: true })).toBeVisible();
+	await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+});
+
 test("dependency states use consistent icons and issue counts", async ({ page }) => {
   const dependencies = [
     { name: "configured-dependency", status: "configured", reason: "ready" },

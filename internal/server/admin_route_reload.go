@@ -22,28 +22,59 @@ type adminRouteReloadRequest struct {
 }
 
 type adminRouteGeneration struct {
-	Number      uint64     `json:"number"`
-	Fingerprint string     `json:"fingerprint"`
-	ActivatedAt *time.Time `json:"activated_at,omitempty"`
-	RouteCount  int        `json:"route_count"`
-	InFlight    int64      `json:"in_flight"`
-	State       string     `json:"state"`
+	Number         uint64     `json:"number"`
+	Fingerprint    string     `json:"fingerprint"`
+	ActivatedAt    *time.Time `json:"activated_at,omitempty"`
+	RetiringAt     *time.Time `json:"retiring_at,omitempty"`
+	RetiringForMS  int64      `json:"retiring_for_ms,omitempty"`
+	DrainTimeoutMS int64      `json:"drain_timeout_ms,omitempty"`
+	Slow           bool       `json:"slow,omitempty"`
+	RouteCount     int        `json:"route_count"`
+	InFlight       int64      `json:"in_flight"`
+	State          string     `json:"state"`
+}
+
+type adminRouteReloadAttempt struct {
+	Operation            string    `json:"operation"`
+	Trigger              string    `json:"trigger"`
+	Stage                string    `json:"stage"`
+	Result               string    `json:"result"`
+	Reason               string    `json:"reason"`
+	StartedAt            time.Time `json:"started_at"`
+	CompletedAt          time.Time `json:"completed_at"`
+	DurationMS           int64     `json:"duration_ms"`
+	ExpectedGeneration   uint64    `json:"expected_generation,omitempty"`
+	OldGeneration        uint64    `json:"old_generation,omitempty"`
+	CandidateGeneration  uint64    `json:"candidate_generation,omitempty"`
+	CandidateFingerprint string    `json:"candidate_fingerprint,omitempty"`
+	CandidateRouteCount  int       `json:"candidate_route_count,omitempty"`
+	ActiveGeneration     uint64    `json:"active_generation,omitempty"`
+	Changed              bool      `json:"changed,omitempty"`
+	WarningCount         int       `json:"warning_count,omitempty"`
 }
 
 type adminRouteReloadResponse struct {
-	Code          string                `json:"code"`
-	Result        string                `json:"result,omitempty"`
-	Reason        string                `json:"reason,omitempty"`
-	GatewayNode   string                `json:"gateway_node"`
-	ReloadEnabled bool                  `json:"reload_enabled"`
-	Trigger       string                `json:"trigger,omitempty"`
-	DryRun        bool                  `json:"dry_run,omitempty"`
-	Changed       bool                  `json:"changed,omitempty"`
-	WarningCount  int                   `json:"warning_count,omitempty"`
-	DurationMS    int64                 `json:"duration_ms,omitempty"`
-	Active        *adminRouteGeneration `json:"active,omitempty"`
-	Candidate     *adminRouteGeneration `json:"candidate,omitempty"`
-	Retiring      *adminRouteGeneration `json:"retiring,omitempty"`
+	Code               string                    `json:"code"`
+	Result             string                    `json:"result,omitempty"`
+	Reason             string                    `json:"reason,omitempty"`
+	Stage              string                    `json:"stage,omitempty"`
+	GatewayNode        string                    `json:"gateway_node"`
+	ReloadEnabled      bool                      `json:"reload_enabled"`
+	Trigger            string                    `json:"trigger,omitempty"`
+	DryRun             bool                      `json:"dry_run,omitempty"`
+	Changed            bool                      `json:"changed,omitempty"`
+	WarningCount       int                       `json:"warning_count,omitempty"`
+	DurationMS         int64                     `json:"duration_ms,omitempty"`
+	DrainTimeoutMS     int64                     `json:"drain_timeout_ms,omitempty"`
+	OperationsInFlight int                       `json:"operations_in_flight"`
+	LastStartedAt      *time.Time                `json:"last_started_at,omitempty"`
+	LastSuccessAt      *time.Time                `json:"last_success_at,omitempty"`
+	LastFailureAt      *time.Time                `json:"last_failure_at,omitempty"`
+	LastAttempt        *adminRouteReloadAttempt  `json:"last_attempt,omitempty"`
+	RecentAttempts     []adminRouteReloadAttempt `json:"recent_attempts,omitempty"`
+	Active             *adminRouteGeneration     `json:"active,omitempty"`
+	Candidate          *adminRouteGeneration     `json:"candidate,omitempty"`
+	Retiring           *adminRouteGeneration     `json:"retiring,omitempty"`
 }
 
 type adminRouteStatusHandler struct {
@@ -169,6 +200,7 @@ func (h *adminRouteReloadHandler) writeBadRequestStatus(w http.ResponseWriter, r
 		Code:       code,
 		Result:     code,
 		Reason:     reason,
+		Stage:      routeReloadStageOperation,
 		HTTPStatus: status,
 		Trigger:    routeReloadTriggerAdminAPI,
 	}
@@ -203,41 +235,95 @@ func routeReloadActorFromRequest(r *http.Request, internalToken string) routeRel
 }
 
 func routeControlStatusResponse(gatewayNode string, snapshot routeControlSnapshot) adminRouteReloadResponse {
-	return adminRouteReloadResponse{
-		Code:          "ok",
-		GatewayNode:   gatewayNode,
-		ReloadEnabled: snapshot.Enabled,
-		Active:        adminRouteGenerationFromSnapshot(snapshot.Active),
-		Retiring:      adminRouteGenerationFromSnapshot(snapshot.Retiring),
+	response := adminRouteReloadResponse{
+		Code:           "ok",
+		GatewayNode:    gatewayNode,
+		ReloadEnabled:  snapshot.Enabled,
+		DrainTimeoutMS: snapshot.DrainTimeout.Milliseconds(),
+		Active:         adminRouteGenerationFromSnapshot(snapshot.Active, snapshot.DrainTimeout),
+		Retiring:       adminRouteGenerationFromSnapshot(snapshot.Retiring, snapshot.DrainTimeout),
 	}
+	applyRouteControlRuntime(&response, snapshot.Runtime)
+	return response
 }
 
 func routeReloadOutcomeResponse(gatewayNode string, status routeControlSnapshot, outcome routeReloadOutcome) adminRouteReloadResponse {
-	return adminRouteReloadResponse{
-		Code:          outcome.Code,
-		Result:        outcome.Result,
-		Reason:        outcome.Reason,
-		GatewayNode:   gatewayNode,
-		ReloadEnabled: status.Enabled,
-		Trigger:       outcome.Trigger,
-		DryRun:        outcome.DryRun,
-		Changed:       outcome.Changed,
-		WarningCount:  outcome.WarningCount,
-		DurationMS:    outcome.Duration.Milliseconds(),
-		Active:        adminRouteGenerationFromValue(outcome.Active),
-		Candidate:     adminRouteGenerationFromValue(outcome.Candidate),
-		Retiring:      adminRouteGenerationFromSnapshot(outcome.Retiring),
+	response := adminRouteReloadResponse{
+		Code:           outcome.Code,
+		Result:         outcome.Result,
+		Reason:         outcome.Reason,
+		Stage:          outcome.Stage,
+		GatewayNode:    gatewayNode,
+		ReloadEnabled:  status.Enabled,
+		Trigger:        outcome.Trigger,
+		DryRun:         outcome.DryRun,
+		Changed:        outcome.Changed,
+		WarningCount:   outcome.WarningCount,
+		DurationMS:     outcome.Duration.Milliseconds(),
+		DrainTimeoutMS: status.DrainTimeout.Milliseconds(),
+		Active:         adminRouteGenerationFromValue(outcome.Active, status.DrainTimeout),
+		Candidate:      adminRouteGenerationFromValue(outcome.Candidate, status.DrainTimeout),
+		Retiring:       adminRouteGenerationFromSnapshot(outcome.Retiring, status.DrainTimeout),
+	}
+	applyRouteControlRuntime(&response, status.Runtime)
+	return response
+}
+
+func applyRouteControlRuntime(response *adminRouteReloadResponse, runtime routeControlRuntimeSnapshot) {
+	if response == nil {
+		return
+	}
+	response.OperationsInFlight = runtime.OperationsInFlight
+	response.LastStartedAt = optionalRouteReloadTime(runtime.LastStartedAt)
+	response.LastSuccessAt = optionalRouteReloadTime(runtime.LastSuccessAt)
+	response.LastFailureAt = optionalRouteReloadTime(runtime.LastFailureAt)
+	response.RecentAttempts = make([]adminRouteReloadAttempt, 0, len(runtime.RecentAttempts))
+	for _, attempt := range runtime.RecentAttempts {
+		response.RecentAttempts = append(response.RecentAttempts, adminRouteReloadAttemptFromSnapshot(attempt))
+	}
+	if len(response.RecentAttempts) > 0 {
+		last := response.RecentAttempts[0]
+		response.LastAttempt = &last
 	}
 }
 
-func adminRouteGenerationFromSnapshot(snapshot *routeGenerationSnapshot) *adminRouteGeneration {
+func adminRouteReloadAttemptFromSnapshot(snapshot routeReloadAttemptSnapshot) adminRouteReloadAttempt {
+	return adminRouteReloadAttempt{
+		Operation:            snapshot.Operation,
+		Trigger:              snapshot.Trigger,
+		Stage:                snapshot.Stage,
+		Result:               snapshot.Result,
+		Reason:               snapshot.Reason,
+		StartedAt:            snapshot.StartedAt,
+		CompletedAt:          snapshot.CompletedAt,
+		DurationMS:           snapshot.Duration.Milliseconds(),
+		ExpectedGeneration:   snapshot.ExpectedGeneration,
+		OldGeneration:        snapshot.OldGeneration,
+		CandidateGeneration:  snapshot.CandidateGeneration,
+		CandidateFingerprint: snapshot.CandidateFingerprint,
+		CandidateRouteCount:  snapshot.CandidateRouteCount,
+		ActiveGeneration:     snapshot.ActiveGeneration,
+		Changed:              snapshot.Changed,
+		WarningCount:         snapshot.WarningCount,
+	}
+}
+
+func optionalRouteReloadTime(value time.Time) *time.Time {
+	if value.IsZero() {
+		return nil
+	}
+	out := value
+	return &out
+}
+
+func adminRouteGenerationFromSnapshot(snapshot *routeGenerationSnapshot, drainTimeout time.Duration) *adminRouteGeneration {
 	if snapshot == nil {
 		return nil
 	}
-	return adminRouteGenerationFromValue(*snapshot)
+	return adminRouteGenerationFromValue(*snapshot, drainTimeout)
 }
 
-func adminRouteGenerationFromValue(snapshot routeGenerationSnapshot) *adminRouteGeneration {
+func adminRouteGenerationFromValue(snapshot routeGenerationSnapshot, drainTimeout time.Duration) *adminRouteGeneration {
 	if snapshot.Fingerprint == "" && snapshot.Number == 0 && snapshot.RouteCount == 0 {
 		return nil
 	}
@@ -246,13 +332,27 @@ func adminRouteGenerationFromValue(snapshot routeGenerationSnapshot) *adminRoute
 		value := snapshot.ActivatedAt
 		activatedAt = &value
 	}
+	var retiringAt *time.Time
+	var retiringFor time.Duration
+	if !snapshot.RetiringAt.IsZero() {
+		value := snapshot.RetiringAt
+		retiringAt = &value
+		retiringFor = time.Since(snapshot.RetiringAt)
+		if retiringFor < 0 {
+			retiringFor = 0
+		}
+	}
 	return &adminRouteGeneration{
-		Number:      snapshot.Number,
-		Fingerprint: snapshot.Fingerprint,
-		ActivatedAt: activatedAt,
-		RouteCount:  snapshot.RouteCount,
-		InFlight:    snapshot.InFlight,
-		State:       snapshot.State,
+		Number:         snapshot.Number,
+		Fingerprint:    snapshot.Fingerprint,
+		ActivatedAt:    activatedAt,
+		RetiringAt:     retiringAt,
+		RetiringForMS:  retiringFor.Milliseconds(),
+		DrainTimeoutMS: drainTimeout.Milliseconds(),
+		Slow:           retiringAt != nil && drainTimeout > 0 && retiringFor > drainTimeout,
+		RouteCount:     snapshot.RouteCount,
+		InFlight:       snapshot.InFlight,
+		State:          snapshot.State,
 	}
 }
 

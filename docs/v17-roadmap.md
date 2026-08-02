@@ -471,9 +471,10 @@ Acceptance criteria:
 Purpose: make rollout state and failures understandable without high-cardinality
 telemetry.
 
-Status: planned. Active-generation route listing and the basic authorized
-Console controls landed with V17.3; metrics, history-rich diagnostics,
-diagnosis bundles, dashboards, alerts, and retirement detail remain here.
+Status: implemented. Fixed-label metrics, bounded node-local history,
+history-rich status and diagnostics, diagnosis bundles, retirement timing,
+recording and alert rules, bilingual dashboards, and responsive Console
+coverage are connected to the V17.3 control path.
 
 - Add fixed-label metrics, runtime snapshots, diagnostics, diagnosis bundles,
   warnings, and recording/alert rules.

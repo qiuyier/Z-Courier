@@ -108,6 +108,7 @@ func TestRouteManagerRejectsReloadWhileGenerationRetires(t *testing.T) {
 
 	lease.Release()
 	waitForGenerationClose(t, oldForwarder)
+	waitForRetirement(t, manager)
 	thirdForwarder := newControlledGenerationForwarder(false)
 	snapshot, err := manager.Reload(context.Background(), 2, func(context.Context) (*routeGeneration, error) {
 		return controlledRouteGeneration("route-v3", thirdForwarder, "fingerprint-v3"), nil
@@ -262,6 +263,10 @@ func TestRouteManagerDrainTimeoutWarnsWithoutForceClose(t *testing.T) {
 		return controlledRouteGeneration("route-v2", newControlledGenerationForwarder(false), "fingerprint-v2"), nil
 	}); err != nil {
 		t.Fatalf("Reload() error = %v", err)
+	}
+	retiring := manager.Snapshot().Retiring
+	if retiring == nil || retiring.RetiringAt.IsZero() {
+		t.Fatalf("retiring generation = %+v, want retirement timestamp", retiring)
 	}
 
 	deadline := time.Now().Add(time.Second)

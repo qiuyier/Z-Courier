@@ -283,6 +283,66 @@ var (
 		[]string{"route", "discovery_type", "decision"},
 	)
 
+	routeReload = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "z_courier_route_reload_total",
+			Help: "Total number of upstream route validation and reload operations.",
+		},
+		[]string{"trigger", "result"},
+	)
+
+	routeReloadDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "z_courier_route_reload_duration_seconds",
+			Help:    "Duration of upstream route validation and reload operations in seconds.",
+			Buckets: []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30},
+		},
+		[]string{"result"},
+	)
+
+	routeGeneration = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "z_courier_route_generation",
+			Help: "Current active upstream route generation number.",
+		},
+	)
+
+	routeRetiringGenerations = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "z_courier_route_retiring_generations",
+			Help: "Current number of upstream route generations waiting for in-flight requests to drain.",
+		},
+	)
+
+	routeReloadLastSuccessTimestamp = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "z_courier_route_reload_last_success_timestamp_seconds",
+			Help: "Unix timestamp of the last successfully activated upstream route generation.",
+		},
+	)
+
+	routeRetirementDuration = promauto.NewHistogram(
+		prometheus.HistogramOpts{
+			Name:    "z_courier_route_retirement_duration_seconds",
+			Help:    "Duration required for a retired upstream route generation to drain and close.",
+			Buckets: []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300, 600},
+		},
+	)
+
+	routeRetirementStartedTimestamp = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "z_courier_route_retirement_started_timestamp_seconds",
+			Help: "Unix timestamp when the current retiring upstream route generation started draining.",
+		},
+	)
+
+	routeRetirementTimeout = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "z_courier_route_retirement_timeout_seconds",
+			Help: "Configured drain timeout for upstream route generation retirement.",
+		},
+	)
+
 	sessionsOnline = promauto.NewGauge(
 		prometheus.GaugeOpts{
 			Name: "z_courier_sessions_online",
@@ -755,6 +815,52 @@ func RecordUpstreamFailoverDecision(route, discoveryType, decision string) {
 	).Inc()
 }
 
+func RecordRouteReload(trigger, result string, duration time.Duration, completedAt time.Time) {
+	trigger = routeReloadTriggerLabel(trigger)
+	result = routeReloadResultLabel(result)
+	routeReload.WithLabelValues(trigger, result).Inc()
+	if duration >= 0 {
+		routeReloadDuration.WithLabelValues(result).Observe(duration.Seconds())
+	}
+	if result == "reloaded" && !completedAt.IsZero() {
+		routeReloadLastSuccessTimestamp.Set(float64(completedAt.Unix()))
+	}
+}
+
+func SetRouteGeneration(generation uint64) {
+	routeGeneration.Set(float64(generation))
+}
+
+func SetRouteRetiringGenerations(count int) {
+	if count < 0 {
+		count = 0
+	}
+	routeRetiringGenerations.Set(float64(count))
+}
+
+func ObserveRouteRetirementDuration(duration time.Duration) {
+	if duration < 0 {
+		return
+	}
+	routeRetirementDuration.Observe(duration.Seconds())
+}
+
+func SetRouteRetirement(startedAt time.Time, timeout time.Duration) {
+	if startedAt.IsZero() {
+		routeRetirementStartedTimestamp.Set(0)
+	} else {
+		routeRetirementStartedTimestamp.Set(float64(startedAt.Unix()))
+	}
+	if timeout < 0 {
+		timeout = 0
+	}
+	routeRetirementTimeout.Set(timeout.Seconds())
+}
+
+func ClearRouteRetirement() {
+	routeRetirementStartedTimestamp.Set(0)
+}
+
 func SetSessionsOnline(count int) {
 	sessionsOnline.Set(float64(count))
 }
@@ -986,6 +1092,34 @@ func trafficPolicyKeyScopeLabel(keyScope string) string {
 func trafficPolicyQuotaResultLabel(result string) string {
 	switch result {
 	case "allowed", "rate_limited", "overloaded", "admission_unavailable":
+		return result
+	default:
+		return "unknown"
+	}
+}
+
+func routeReloadTriggerLabel(trigger string) string {
+	switch trigger {
+	case "admin_api", "sighup":
+		return trigger
+	default:
+		return "unknown"
+	}
+}
+
+func routeReloadResultLabel(result string) string {
+	switch result {
+	case "validated",
+		"reloaded",
+		"reload_disabled",
+		"reload_busy",
+		"generation_conflict",
+		"source_read_failed",
+		"parse_failed",
+		"validation_failed",
+		"candidate_load_failed",
+		"candidate_build_failed",
+		"reload_failed":
 		return result
 	default:
 		return "unknown"

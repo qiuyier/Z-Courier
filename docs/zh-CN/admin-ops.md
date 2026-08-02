@@ -222,7 +222,10 @@ POST /internal/admin/routes/reload
 ```
 
 status 是只读接口，返回 reload 是否开启，以及脱敏后的 active/retiring generation
-状态。reload 只接受控制参数，路由正文和来源路径始终由启动配置固定：
+状态。V17.4 还会返回当前操作数、最近成功/失败时间，以及最新 20 条进程内操作历史。
+每条记录只使用固定的 operation、trigger、stage、result 和 reason；候选 fingerprint
+已经脱敏，不会返回路径、token、endpoint 或原始校验错误。reload 只接受控制参数，
+路由正文和来源路径始终由启动配置固定：
 
 ```json
 {
@@ -244,6 +247,13 @@ status 是只读接口，返回 reload 是否开启，以及脱敏后的 active/
 
 集群发布时应逐节点 Dry Run，先激活 canary，再分批激活其余节点。`SIGHUP` 也会走
 当前进程内同一条串行激活路径。
+
+`stage` 可以区分 `source_read`、`parse`、`validation`、
+`candidate_build`、`precondition`、`activation` 等固定阶段。retiring 元数据会给出
+已退休时长和配置的 drain timeout；`slow=true` 代表旧 generation 被请求占用的时间
+已经超过阈值。Console 展示最近 6 条，API 最多保留 20 条。admin diagnostics 会在
+`route_reload` 中返回同一份信息，CLI 和服务端生成的诊断包都包含
+`route_reload_status` section。
 
 ## 消息修复
 

@@ -343,8 +343,12 @@ POST /internal/admin/routes/reload
 ```
 
 Status is read-only and reports whether reload is enabled plus sanitized active
-and retiring generation metadata. Reload accepts only a control envelope; the
-route document and source path always come from startup configuration:
+and retiring generation metadata. V17.4 also reports current operations, the
+last success/failure timestamps, and the newest 20 process-local attempts.
+Each attempt uses fixed operation, trigger, stage, result, and reason values;
+the candidate fingerprint is sanitized and no path, token, endpoint, or raw
+validation error is returned. Reload accepts only a control envelope; the route
+document and source path always come from startup configuration:
 
 ```json
 {
@@ -371,6 +375,14 @@ The operation affects only the gateway node receiving the request. Cluster
 rollouts should dry-run every node, activate a canary, then activate bounded
 batches. `SIGHUP` uses the same serialized activation path for the current
 process.
+
+The `stage` field separates `source_read`, `parse`, `validation`,
+`candidate_build`, `precondition`, `activation`, and other bounded operation
+failures. Retiring metadata exposes elapsed time and the configured drain
+timeout; `slow=true` means an old generation remains pinned beyond that
+timeout. The Console shows the newest six attempts while the API retains 20.
+Admin diagnostics includes the same data under `route_reload`, and both CLI and
+server-generated diagnosis bundles include a `route_reload_status` section.
 
 ### Existing Route And Session Inspection
 

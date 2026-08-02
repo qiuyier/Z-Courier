@@ -72,6 +72,11 @@ sum by (instance, mode, policy, result) (rate(z_courier_traffic_policy_selection
 sum by (instance, mode, policy, key_scope, result) (rate(z_courier_traffic_policy_quota_store_total[5m]))
 histogram_quantile(0.99, sum by (instance, mode, policy, key_scope, result, le) (rate(z_courier_traffic_policy_quota_store_duration_seconds_bucket[5m])))
 100 * max by (instance) (z_courier_traffic_policy_local_keys{mode="local"}) / clamp_min(max by (instance) (z_courier_traffic_policy_local_key_limit{mode="local"}), 1)
+max by (instance) (z_courier_route_generation)
+sum by (instance, trigger, result) (rate(z_courier_route_reload_total[5m]))
+z_courier:route_reload:p95_seconds
+z_courier:route_retirement_age_seconds
+max by (instance) (z_courier_route_retirement_timeout_seconds)
 sum by (route, target_type) (z_courier_upstream_route_degraded)
 sum by (route, discovery_type, result) (rate(z_courier_upstream_discovery_refresh_total[5m]))
 histogram_quantile(0.95, sum by (le, route, discovery_type, result) (rate(z_courier_upstream_discovery_refresh_duration_seconds_bucket[5m])))
@@ -156,6 +161,12 @@ outcomes, every quota decision, Store p95/p99 latency, and local live keys
 against their configured limit. Production Signals focuses on policy
 rejections, Store p99 latency, local-key utilization, and no-match traffic.
 
+Both dashboards include route-control panels. Overview shows the active and
+retiring generations, age since the last successful activation, reload
+outcomes, p95 latency, and retirement age against the configured timeout.
+Production Signals focuses on failed operations, cross-gateway generation
+differences, and retirement timeout safety.
+
 ## Alert Rules
 
 Prometheus loads:
@@ -180,6 +191,7 @@ The rule file includes:
 - readiness-gated empty-discovery and actively unavailable-endpoint alerts
 - downlink push, ACK latency, retry, and stale-route alerts
 - peer push and JWKS refresh failure alerts
+- route reload failure, slow retirement, and sustained mixed-generation alerts
 
 Alert annotations link to the production runbook for first-response actions.
 `scripts/promtool_check.sh` also runs the behavior cases in

@@ -28,6 +28,12 @@ semantic versioning after the first public MVP tag.
   stale-generation protection, operator/admin Console permissions and
   confirmation, active-generation route listing, sanitized audit evidence, and
   basic responsive Console generation controls.
+- V17.4 low-cardinality route reload and generation-retirement metrics,
+  source-read/parse/validation/build/activation stage classification, bounded
+  node-local operation history, diagnostics and diagnosis-bundle evidence,
+  drain-timeout and mixed-generation alerts, bilingual Grafana panels and
+  first-response guidance, plus admin/operator/readonly responsive Console
+  coverage for failure history and retirement state.
 
 ## [v0.16.0] - 2026-07-31
 

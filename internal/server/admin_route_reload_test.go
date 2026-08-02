@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -14,6 +15,34 @@ import (
 	"github.com/qiuyier/Z-Courier/internal/httpauth"
 	"go.uber.org/zap"
 )
+
+func TestAdminRouteReloadDiagnosticsWarnAboutFailureAndSlowRetirement(t *testing.T) {
+	diagnostics := adminRouteReloadDiagnostics{
+		LastAttempt: &adminRouteReloadAttempt{
+			Stage:  routeReloadStageParse,
+			Result: "parse_failed",
+			Reason: "the configured route file could not be parsed",
+		},
+		Retiring: &adminRouteGeneration{Slow: true},
+	}
+	warnings := adminRouteReloadDiagnosticWarnings(diagnostics)
+	if len(warnings) != 2 || warnings[0].Code != "route_reload_last_attempt_failed" || warnings[1].Code != "route_generation_slow_retirement" {
+		t.Fatalf("warnings = %+v", warnings)
+	}
+
+	config, control := testAdminRouteControlConfig(t)
+	control.loader = func(context.Context) (UpstreamRouteSnapshot, error) {
+		return UpstreamRouteSnapshot{}, NewUpstreamRouteLoadError(UpstreamRouteLoadStageParse, errors.New("secret parse detail"))
+	}
+	if _, err := control.Execute(context.Background(), routeReloadOptions{DryRun: true}, routeReloadActor{}); err == nil {
+		t.Fatal("Execute() error = nil, want parse failure")
+	}
+	config.routeControl = control
+	got := adminRouteReloadDiagnosticsFromControl(config.routeControl)
+	if !got.Enabled || got.LastAttempt == nil || got.LastAttempt.Stage != routeReloadStageParse || got.LastAttempt.Reason == "secret parse detail" {
+		t.Fatalf("route reload diagnostics = %+v", got)
+	}
+}
 
 func TestAdminRouteStatusAndDryRun(t *testing.T) {
 	config, control := testAdminRouteControlConfig(t)
@@ -45,8 +74,14 @@ func TestAdminRouteStatusAndDryRun(t *testing.T) {
 	if err := sonic.Unmarshal(reloadRec.Body.Bytes(), &response); err != nil {
 		t.Fatalf("Unmarshal reload error = %v", err)
 	}
-	if response.Result != "validated" || response.Candidate == nil || response.Active == nil || response.Active.Number != 1 {
+	if response.Result != "validated" || response.Stage != routeReloadStageValidation || response.Candidate == nil || response.Active == nil || response.Active.Number != 1 {
 		t.Fatalf("dry-run response = %+v", response)
+	}
+	if response.LastAttempt == nil || response.LastAttempt.Operation != "validate" || len(response.RecentAttempts) != 1 {
+		t.Fatalf("dry-run history = last=%+v recent=%+v", response.LastAttempt, response.RecentAttempts)
+	}
+	if response.LastSuccessAt == nil || response.LastFailureAt != nil || response.OperationsInFlight != 0 {
+		t.Fatalf("dry-run runtime = %+v", response)
 	}
 	if response.Candidate.ActivatedAt != nil {
 		t.Fatalf("candidate activated_at = %v, want omitted before activation", response.Candidate.ActivatedAt)

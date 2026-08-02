@@ -142,8 +142,23 @@ type adminDiagnosticsResponse struct {
 	Upstream      adminUpstreamDiagnostics      `json:"upstream"`
 	Capacity      adminCapacityDiagnostics      `json:"capacity"`
 	TrafficPolicy adminTrafficPolicyDiagnostics `json:"traffic_policy"`
+	RouteReload   adminRouteReloadDiagnostics   `json:"route_reload"`
 	Dependencies  []adminDependency             `json:"dependencies"`
 	Warnings      []adminDiagnosticWarning      `json:"warnings,omitempty"`
+}
+
+type adminRouteReloadDiagnostics struct {
+	Enabled            bool                      `json:"enabled"`
+	Closed             bool                      `json:"closed"`
+	DrainTimeoutMS     int64                     `json:"drain_timeout_ms,omitempty"`
+	OperationsInFlight int                       `json:"operations_in_flight"`
+	LastStartedAt      *time.Time                `json:"last_started_at,omitempty"`
+	LastSuccessAt      *time.Time                `json:"last_success_at,omitempty"`
+	LastFailureAt      *time.Time                `json:"last_failure_at,omitempty"`
+	LastAttempt        *adminRouteReloadAttempt  `json:"last_attempt,omitempty"`
+	RecentAttempts     []adminRouteReloadAttempt `json:"recent_attempts,omitempty"`
+	Active             *adminRouteGeneration     `json:"active,omitempty"`
+	Retiring           *adminRouteGeneration     `json:"retiring,omitempty"`
 }
 
 type adminRuntimeDiagnostics struct {
@@ -420,6 +435,9 @@ func (h *adminDiagnosticsHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 	config := h.config.config
 	now := time.Now()
 	trafficPolicy := adminTrafficPolicyFromConfig(config)
+	routeReload := adminRouteReloadDiagnosticsFromControl(config.routeControl)
+	warnings := adminDiagnosticWarnings(config, h.config.registry, h.downlinkHasStore, trafficPolicy)
+	warnings = append(warnings, adminRouteReloadDiagnosticWarnings(routeReload)...)
 	resp := adminDiagnosticsResponse{
 		Code:          "ok",
 		GatewayNode:   h.config.gatewayNode,
@@ -434,10 +452,51 @@ func (h *adminDiagnosticsHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		Upstream:      adminUpstreamDiagnosticsFromConfig(config),
 		Capacity:      adminCapacityFromConfig(config),
 		TrafficPolicy: trafficPolicy,
+		RouteReload:   routeReload,
 		Dependencies:  adminDiagnosticDependencies(config, h.config.registry, h.config.clusterEnabled, h.downlinkHasStore, trafficPolicy),
-		Warnings:      adminDiagnosticWarnings(config, h.config.registry, h.downlinkHasStore, trafficPolicy),
+		Warnings:      warnings,
 	}
 	writeAdminJSON(w, http.StatusOK, resp)
+}
+
+func adminRouteReloadDiagnosticsFromControl(control *routeControl) adminRouteReloadDiagnostics {
+	snapshot := control.Status()
+	status := routeControlStatusResponse("", snapshot)
+	return adminRouteReloadDiagnostics{
+		Enabled:            snapshot.Enabled,
+		Closed:             snapshot.Closed,
+		DrainTimeoutMS:     status.DrainTimeoutMS,
+		OperationsInFlight: status.OperationsInFlight,
+		LastStartedAt:      status.LastStartedAt,
+		LastSuccessAt:      status.LastSuccessAt,
+		LastFailureAt:      status.LastFailureAt,
+		LastAttempt:        status.LastAttempt,
+		RecentAttempts:     status.RecentAttempts,
+		Active:             status.Active,
+		Retiring:           status.Retiring,
+	}
+}
+
+func adminRouteReloadDiagnosticWarnings(diagnostics adminRouteReloadDiagnostics) []adminDiagnosticWarning {
+	warnings := make([]adminDiagnosticWarning, 0, 2)
+	if diagnostics.LastAttempt != nil && !routeReloadResultSuccessful(diagnostics.LastAttempt.Result) {
+		warnings = append(warnings, adminDiagnosticWarning{
+			Code: "route_reload_last_attempt_failed",
+			Message: "the latest route reload operation failed during " +
+				diagnostics.LastAttempt.Stage + ": " + diagnostics.LastAttempt.Reason,
+		})
+	}
+	if diagnostics.Retiring != nil && diagnostics.Retiring.Slow {
+		warnings = append(warnings, adminDiagnosticWarning{
+			Code:    "route_generation_slow_retirement",
+			Message: "an upstream route generation is still retiring after its configured drain timeout",
+		})
+	}
+	return warnings
+}
+
+func routeReloadResultSuccessful(result string) bool {
+	return result == "validated" || result == "reloaded"
 }
 
 func (c adminHandlerConfig) authorized(r *http.Request) bool {

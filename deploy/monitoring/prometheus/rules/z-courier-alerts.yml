@@ -43,6 +43,15 @@ groups:
       - record: z_courier:traffic_policy_local_key_utilization:ratio
         expr: max by (job, instance) (z_courier_traffic_policy_local_keys{mode="local"}) / clamp_min(max by (job, instance) (z_courier_traffic_policy_local_key_limit{mode="local"}), 1)
 
+      - record: z_courier:route_reload_failures:rate5m
+        expr: sum by (job, instance, trigger, result) (rate(z_courier_route_reload_total{result!~"validated|reloaded"}[5m]))
+
+      - record: z_courier:route_reload:p95_seconds
+        expr: histogram_quantile(0.95, sum by (job, instance, result, le) (rate(z_courier_route_reload_duration_seconds_bucket[5m])))
+
+      - record: z_courier:route_retirement_age_seconds
+        expr: clamp_min(time() - z_courier_route_retirement_started_timestamp_seconds, 0) * on (job, instance) (z_courier_route_retiring_generations > 0)
+
   - name: z-courier.alerts
     rules:
       - alert: ZCourierGatewayTargetDown
@@ -66,6 +75,39 @@ groups:
           summary: "Z-Courier gateway has been draining for too long"
           description: "Gateway {{ $labels.instance }} has remained in readiness drain for more than 10 minutes. Check online sessions, cluster route cleanup, and shutdown logs."
           runbook_url: "https://github.com/qiuyier/Z-Courier/blob/main/docs/v5-production-runbook.md#graceful-shutdown"
+
+      - alert: ZCourierRouteReloadFailures
+        expr: sum by (job, instance) (increase(z_courier_route_reload_total{result!~"validated|reloaded"}[10m])) > 0
+        for: 1m
+        labels:
+          severity: warning
+          component: route-control
+        annotations:
+          summary: "Z-Courier route reload operation failed"
+          description: "Gateway {{ $labels.instance }} has recorded a failed route validation or activation in the last 10 minutes."
+          runbook_url: "https://github.com/qiuyier/Z-Courier/blob/main/docs/v5-production-runbook.md#route-hot-reload"
+
+      - alert: ZCourierRouteGenerationRetiringTooLong
+        expr: z_courier:route_retirement_age_seconds > on (job, instance) z_courier_route_retirement_timeout_seconds
+        for: 1m
+        labels:
+          severity: warning
+          component: route-control
+        annotations:
+          summary: "Z-Courier route generation retirement exceeded its timeout"
+          description: "Gateway {{ $labels.instance }} still has an old route generation pinned beyond the configured drain timeout."
+          runbook_url: "https://github.com/qiuyier/Z-Courier/blob/main/docs/v5-production-runbook.md#route-hot-reload"
+
+      - alert: ZCourierRouteGenerationMismatch
+        expr: count by (job) (count_values by (job) ("generation", z_courier_route_generation)) > 1
+        for: 5m
+        labels:
+          severity: warning
+          component: route-control
+        annotations:
+          summary: "Z-Courier route generations differ across gateway targets"
+          description: "Gateway targets in job {{ $labels.job }} have reported different active route generations for more than 5 minutes."
+          runbook_url: "https://github.com/qiuyier/Z-Courier/blob/main/docs/v5-production-runbook.md#route-hot-reload"
 
       - alert: ZCourierIngressRejectedSpike
         expr: sum(rate(z_courier_ingress_rejected_total[5m])) > 5

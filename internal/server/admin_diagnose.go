@@ -101,6 +101,7 @@ func (h *adminDiagnoseHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 
 	h.collect(r.Context(), bundle.Sections, "overview", "/internal/admin/overview", newAdminOverviewHandler(h.config.config, h.health, h.registry))
 	h.collect(r.Context(), bundle.Sections, "diagnostics", "/internal/admin/diagnostics", newAdminDiagnosticsHandler(h.config.config, h.health, h.registry, h.runtime, h.service != nil && h.service.HasStore()))
+	h.collect(r.Context(), bundle.Sections, "route_reload_status", adminRouteStatusPath, newAdminRouteStatusHandler(h.config.config))
 
 	checkQuery := url.Values{}
 	checkQuery.Set("timeout", request.ProbeTimeout.String())

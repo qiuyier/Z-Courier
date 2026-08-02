@@ -172,6 +172,55 @@ func TestTrafficPolicyMetricsBoundDynamicLabels(t *testing.T) {
 	}
 }
 
+func TestRouteReloadMetricsUseBoundedLabelsAndTrackGeneration(t *testing.T) {
+	completedAt := time.Unix(1_800_000_000, 0)
+	RecordRouteReload("tenant-trigger", "tenant-result", 25*time.Millisecond, completedAt)
+	if got := gatheredScalar(t, "z_courier_route_reload_total", map[string]string{
+		"trigger": "unknown",
+		"result":  "unknown",
+	}); got != 1 {
+		t.Fatalf("bounded route reload counter = %v, want 1", got)
+	}
+	count, sum := gatheredHistogram(t, "z_courier_route_reload_duration_seconds", map[string]string{
+		"result": "unknown",
+	})
+	if count != 1 || sum != 0.025 {
+		t.Fatalf("route reload duration count=%d sum=%v, want count=1 sum=0.025", count, sum)
+	}
+
+	RecordRouteReload("admin_api", "reloaded", time.Millisecond, completedAt)
+	if got := gatheredScalar(t, "z_courier_route_reload_last_success_timestamp_seconds", nil); got != float64(completedAt.Unix()) {
+		t.Fatalf("last route reload success timestamp = %v, want %d", got, completedAt.Unix())
+	}
+
+	SetRouteGeneration(7)
+	SetRouteRetiringGenerations(1)
+	if got := gatheredScalar(t, "z_courier_route_generation", nil); got != 7 {
+		t.Fatalf("route generation = %v, want 7", got)
+	}
+	if got := gatheredScalar(t, "z_courier_route_retiring_generations", nil); got != 1 {
+		t.Fatalf("retiring generations = %v, want 1", got)
+	}
+
+	ObserveRouteRetirementDuration(50 * time.Millisecond)
+	count, sum = gatheredHistogram(t, "z_courier_route_retirement_duration_seconds", nil)
+	if count != 1 || sum != 0.05 {
+		t.Fatalf("route retirement duration count=%d sum=%v, want count=1 sum=0.05", count, sum)
+	}
+
+	SetRouteRetirement(completedAt, 30*time.Second)
+	if got := gatheredScalar(t, "z_courier_route_retirement_started_timestamp_seconds", nil); got != float64(completedAt.Unix()) {
+		t.Fatalf("route retirement started timestamp = %v, want %d", got, completedAt.Unix())
+	}
+	if got := gatheredScalar(t, "z_courier_route_retirement_timeout_seconds", nil); got != 30 {
+		t.Fatalf("route retirement timeout = %v, want 30", got)
+	}
+	ClearRouteRetirement()
+	if got := gatheredScalar(t, "z_courier_route_retirement_started_timestamp_seconds", nil); got != 0 {
+		t.Fatalf("cleared route retirement started timestamp = %v, want 0", got)
+	}
+}
+
 func TestDeleteUpstreamMutableMetricsRemovesGaugeSeries(t *testing.T) {
 	const (
 		route         = "metrics-cleanup-route"

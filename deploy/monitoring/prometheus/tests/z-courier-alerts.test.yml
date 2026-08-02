@@ -158,3 +158,65 @@ tests:
               summary: "Z-Courier traffic policy rate-limited ratio is high"
               description: "Policy shared-ingress on gateway gateway-a has rejected more than 20% of decisions while decision traffic exceeds 1/sec."
               runbook_url: "https://github.com/qiuyier/Z-Courier/blob/main/docs/v5-production-runbook.md#traffic-policy-admission"
+
+  - name: route reload failures are reported without dynamic error labels
+    interval: 1m
+    input_series:
+      - series: 'z_courier_route_reload_total{job="z-courier",instance="gateway-a",trigger="admin_api",result="parse_failed"}'
+        values: "0 0 1 1 1 1"
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: ZCourierRouteReloadFailures
+        exp_alerts:
+          - exp_labels:
+              component: route-control
+              instance: gateway-a
+              job: z-courier
+              severity: warning
+            exp_annotations:
+              summary: "Z-Courier route reload operation failed"
+              description: "Gateway gateway-a has recorded a failed route validation or activation in the last 10 minutes."
+              runbook_url: "https://github.com/qiuyier/Z-Courier/blob/main/docs/v5-production-runbook.md#route-hot-reload"
+
+  - name: route retirement uses the configured gateway timeout
+    interval: 1m
+    input_series:
+      - series: 'z_courier_route_retirement_started_timestamp_seconds{job="z-courier",instance="gateway-a"}'
+        values: "1 1 1 1 1 1"
+      - series: 'z_courier_route_retirement_timeout_seconds{job="z-courier",instance="gateway-a"}'
+        values: "60 60 60 60 60 60"
+      - series: 'z_courier_route_retiring_generations{job="z-courier",instance="gateway-a"}'
+        values: "1 1 1 1 1 1"
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: ZCourierRouteGenerationRetiringTooLong
+        exp_alerts:
+          - exp_labels:
+              component: route-control
+              instance: gateway-a
+              job: z-courier
+              severity: warning
+            exp_annotations:
+              summary: "Z-Courier route generation retirement exceeded its timeout"
+              description: "Gateway gateway-a still has an old route generation pinned beyond the configured drain timeout."
+              runbook_url: "https://github.com/qiuyier/Z-Courier/blob/main/docs/v5-production-runbook.md#route-hot-reload"
+
+  - name: route generation mismatch must remain sustained
+    interval: 1m
+    input_series:
+      - series: 'z_courier_route_generation{job="z-courier",instance="gateway-a"}'
+        values: "1 1 1 1 1 1 1 1"
+      - series: 'z_courier_route_generation{job="z-courier",instance="gateway-b"}'
+        values: "2 2 2 2 2 2 2 2"
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: ZCourierRouteGenerationMismatch
+        exp_alerts:
+          - exp_labels:
+              component: route-control
+              job: z-courier
+              severity: warning
+            exp_annotations:
+              summary: "Z-Courier route generations differ across gateway targets"
+              description: "Gateway targets in job z-courier have reported different active route generations for more than 5 minutes."
+              runbook_url: "https://github.com/qiuyier/Z-Courier/blob/main/docs/v5-production-runbook.md#route-hot-reload"

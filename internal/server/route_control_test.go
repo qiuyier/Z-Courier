@@ -124,13 +124,16 @@ func TestRouteControlSanitizesCandidateLoadFailure(t *testing.T) {
 		GatewayNode: "gateway-a",
 		UpstreamRoutesFile: UpstreamRoutesFileConfig{
 			Loader: func(context.Context) (UpstreamRouteSnapshot, error) {
-				return UpstreamRouteSnapshot{}, fmt.Errorf("read /secret/routes.yaml with token super-secret")
+				return UpstreamRouteSnapshot{}, NewUpstreamRouteLoadError(
+					UpstreamRouteLoadStageValidation,
+					fmt.Errorf("read /secret/routes.yaml with token super-secret"),
+				)
 			},
 		},
 	}, manager, audit, zap.NewNop())
 
 	outcome, err := control.Execute(context.Background(), routeReloadOptions{DryRun: true}, routeReloadActor{})
-	if !errors.Is(err, errRouteCandidateLoadFailed) || outcome.Code != "invalid_candidate" {
+	if !errors.Is(err, errRouteCandidateLoadFailed) || outcome.Code != "validation_failed" || outcome.Stage != routeReloadStageValidation {
 		t.Fatalf("Execute() outcome/error = %+v/%v", outcome, err)
 	}
 	events := audit.List(adminaudit.Query{Limit: 10}).Entries
@@ -139,6 +142,75 @@ func TestRouteControlSanitizesCandidateLoadFailure(t *testing.T) {
 		if strings.Contains(combined, secret) {
 			t.Fatalf("control response or audit leaked %q: %s", secret, combined)
 		}
+	}
+}
+
+func TestRouteControlClassifiesRouteLoadStages(t *testing.T) {
+	tests := []struct {
+		stage UpstreamRouteLoadStage
+		code  string
+	}{
+		{stage: UpstreamRouteLoadStageSourceRead, code: "source_read_failed"},
+		{stage: UpstreamRouteLoadStageParse, code: "parse_failed"},
+		{stage: UpstreamRouteLoadStageValidation, code: "validation_failed"},
+	}
+
+	for _, test := range tests {
+		t.Run(string(test.stage), func(t *testing.T) {
+			manager := mustRouteManager(
+				t,
+				controlledRouteGeneration("active", newControlledGenerationForwarder(false), "active-fingerprint"),
+				0,
+				zap.NewNop(),
+			)
+			control := newRouteControl(Config{
+				UpstreamRoutesFile: UpstreamRoutesFileConfig{
+					Loader: func(context.Context) (UpstreamRouteSnapshot, error) {
+						return UpstreamRouteSnapshot{}, NewUpstreamRouteLoadError(test.stage, errors.New("sensitive detail"))
+					},
+				},
+			}, manager, nil, zap.NewNop())
+
+			outcome, err := control.Execute(context.Background(), routeReloadOptions{DryRun: true}, routeReloadActor{})
+			if !errors.Is(err, errRouteCandidateLoadFailed) || outcome.Code != test.code || outcome.Stage != string(test.stage) {
+				t.Fatalf("Execute() outcome/error = %+v/%v", outcome, err)
+			}
+		})
+	}
+}
+
+func TestRouteControlKeepsBoundedNewestFirstHistory(t *testing.T) {
+	manager := mustRouteManager(
+		t,
+		controlledRouteGeneration("active", newControlledGenerationForwarder(false), "active-fingerprint"),
+		0,
+		zap.NewNop(),
+	)
+	control := newRouteControl(Config{
+		UpstreamRoutesFile: UpstreamRoutesFileConfig{
+			Loader: testRouteSnapshotLoader("candidate", "http://candidate.internal/upstream"),
+		},
+	}, manager, nil, zap.NewNop())
+
+	for index := 0; index < routeReloadHistoryLimit+5; index++ {
+		_, err := control.Execute(context.Background(), routeReloadOptions{
+			DryRun:             true,
+			ExpectedGeneration: uint64(index + 1),
+		}, routeReloadActor{})
+		if index == 0 && err != nil {
+			t.Fatalf("first Execute() error = %v", err)
+		}
+	}
+
+	runtime := control.Status().Runtime
+	if runtime.OperationsInFlight != 0 || len(runtime.RecentAttempts) != routeReloadHistoryLimit {
+		t.Fatalf("runtime = %+v, want no in-flight and %d attempts", runtime, routeReloadHistoryLimit)
+	}
+	if runtime.RecentAttempts[0].ExpectedGeneration != routeReloadHistoryLimit+5 {
+		t.Fatalf("newest attempt = %+v", runtime.RecentAttempts[0])
+	}
+	if runtime.LastSuccessAt.IsZero() || runtime.LastFailureAt.IsZero() {
+		t.Fatalf("runtime timestamps = %+v, want success and failure", runtime)
 	}
 }
 

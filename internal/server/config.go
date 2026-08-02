@@ -144,6 +144,40 @@ type UpstreamRouteSnapshot struct {
 
 type UpstreamRouteLoader func(context.Context) (UpstreamRouteSnapshot, error)
 
+type UpstreamRouteLoadStage string
+
+const (
+	UpstreamRouteLoadStageSourceRead UpstreamRouteLoadStage = "source_read"
+	UpstreamRouteLoadStageParse      UpstreamRouteLoadStage = "parse"
+	UpstreamRouteLoadStageValidation UpstreamRouteLoadStage = "validation"
+)
+
+type UpstreamRouteLoadError struct {
+	Stage UpstreamRouteLoadStage
+	Err   error
+}
+
+func (e *UpstreamRouteLoadError) Error() string {
+	if e == nil || e.Err == nil {
+		return "upstream route load failed"
+	}
+	return e.Err.Error()
+}
+
+func (e *UpstreamRouteLoadError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+func NewUpstreamRouteLoadError(stage UpstreamRouteLoadStage, err error) error {
+	if err == nil {
+		return nil
+	}
+	return &UpstreamRouteLoadError{Stage: stage, Err: err}
+}
+
 type UpstreamRouteReloadConfig struct {
 	Enabled             bool
 	DrainTimeout        time.Duration

@@ -90,11 +90,17 @@ func (c *File) newUpstreamRouteLoader(fileConfig server.UpstreamRoutesFileConfig
 		resolved := resolvedUpstreamRoutes{routes: document.Routes, fileConfig: fileConfig}
 		report, err := configSnapshot.validateResolvedRoutes(resolved)
 		if err != nil {
-			return server.UpstreamRouteSnapshot{}, err
+			return server.UpstreamRouteSnapshot{}, server.NewUpstreamRouteLoadError(
+				server.UpstreamRouteLoadStageValidation,
+				err,
+			)
 		}
 		routes, err := toUpstreamRoutes(document.Routes)
 		if err != nil {
-			return server.UpstreamRouteSnapshot{}, err
+			return server.UpstreamRouteSnapshot{}, server.NewUpstreamRouteLoadError(
+				server.UpstreamRouteLoadStageValidation,
+				err,
+			)
 		}
 		if err := ctx.Err(); err != nil {
 			return server.UpstreamRouteSnapshot{}, err
@@ -275,49 +281,76 @@ func normalizeUpstreamReloadAcceptedRanges(config []MsgIDRangeConfig) ([]server.
 func loadUpstreamRoutesDocument(path string, maxSize int64) (upstreamRoutesDocument, error) {
 	file, err := os.Open(path)
 	if err != nil {
-		return upstreamRoutesDocument{}, fmt.Errorf("config: read upstream routes %s: %w", path, err)
+		return upstreamRoutesDocument{}, server.NewUpstreamRouteLoadError(
+			server.UpstreamRouteLoadStageSourceRead,
+			fmt.Errorf("config: read upstream routes %s: %w", path, err),
+		)
 	}
 	defer file.Close()
 
 	data, err := io.ReadAll(io.LimitReader(file, maxSize+1))
 	if err != nil {
-		return upstreamRoutesDocument{}, fmt.Errorf("config: read upstream routes %s: %w", path, err)
+		return upstreamRoutesDocument{}, server.NewUpstreamRouteLoadError(
+			server.UpstreamRouteLoadStageSourceRead,
+			fmt.Errorf("config: read upstream routes %s: %w", path, err),
+		)
 	}
 	if int64(len(data)) > maxSize {
-		return upstreamRoutesDocument{}, fmt.Errorf(
-			"config: upstream routes file %s exceeds max_size_bytes %d",
-			path,
-			maxSize,
+		return upstreamRoutesDocument{}, server.NewUpstreamRouteLoadError(
+			server.UpstreamRouteLoadStageValidation,
+			fmt.Errorf(
+				"config: upstream routes file %s exceeds max_size_bytes %d",
+				path,
+				maxSize,
+			),
 		)
 	}
 	data, err = expandEnvPlaceholders(data)
 	if err != nil {
-		return upstreamRoutesDocument{}, fmt.Errorf("config: expand env upstream routes %s: %w", path, err)
+		return upstreamRoutesDocument{}, server.NewUpstreamRouteLoadError(
+			server.UpstreamRouteLoadStageValidation,
+			fmt.Errorf("config: expand env upstream routes %s: %w", path, err),
+		)
 	}
 
 	var document upstreamRoutesDocument
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&document); err != nil {
-		return upstreamRoutesDocument{}, fmt.Errorf("config: parse upstream routes %s: %w", path, err)
+		return upstreamRoutesDocument{}, server.NewUpstreamRouteLoadError(
+			server.UpstreamRouteLoadStageParse,
+			fmt.Errorf("config: parse upstream routes %s: %w", path, err),
+		)
 	}
 	var trailing any
 	if err := decoder.Decode(&trailing); err != io.EOF {
 		if err == nil {
-			return upstreamRoutesDocument{}, fmt.Errorf("config: parse upstream routes %s: multiple YAML documents are not allowed", path)
+			return upstreamRoutesDocument{}, server.NewUpstreamRouteLoadError(
+				server.UpstreamRouteLoadStageParse,
+				fmt.Errorf("config: parse upstream routes %s: multiple YAML documents are not allowed", path),
+			)
 		}
-		return upstreamRoutesDocument{}, fmt.Errorf("config: parse upstream routes %s: %w", path, err)
+		return upstreamRoutesDocument{}, server.NewUpstreamRouteLoadError(
+			server.UpstreamRouteLoadStageParse,
+			fmt.Errorf("config: parse upstream routes %s: %w", path, err),
+		)
 	}
 
 	if document.Version != upstreamRoutesDocumentVersion {
-		return upstreamRoutesDocument{}, fmt.Errorf(
-			"config: upstream routes file %s version must be %d",
-			path,
-			upstreamRoutesDocumentVersion,
+		return upstreamRoutesDocument{}, server.NewUpstreamRouteLoadError(
+			server.UpstreamRouteLoadStageValidation,
+			fmt.Errorf(
+				"config: upstream routes file %s version must be %d",
+				path,
+				upstreamRoutesDocumentVersion,
+			),
 		)
 	}
 	if err := validateUpstreamRoutesDocumentLimits(document.Routes); err != nil {
-		return upstreamRoutesDocument{}, err
+		return upstreamRoutesDocument{}, server.NewUpstreamRouteLoadError(
+			server.UpstreamRouteLoadStageValidation,
+			err,
+		)
 	}
 	return document, nil
 }

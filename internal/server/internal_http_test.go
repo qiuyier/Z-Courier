@@ -794,7 +794,7 @@ func TestInternalHTTPAdminDiagnoseBundle(t *testing.T) {
 	if resp.Code != "ok" || resp.TargetURL != "http://gateway-a:18182" || resp.CollectionStatus != "complete" {
 		t.Fatalf("diagnose response = %+v, want complete sanitized target", resp)
 	}
-	for _, section := range []string{"overview", "diagnostics", "check", "routes", "failed_messages", "sessions", "route"} {
+	for _, section := range []string{"overview", "diagnostics", "route_reload_status", "check", "routes", "failed_messages", "sessions", "route"} {
 		if _, ok := resp.Sections[section]; !ok {
 			t.Fatalf("missing section %q in %+v", section, resp.Sections)
 		}

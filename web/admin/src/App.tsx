@@ -68,6 +68,7 @@ import type {
   AdminOverview,
   AdminRoute,
   AdminRouteReload,
+  AdminRouteReloadAttempt,
   AdminRoutes,
   AdminSession,
   AdminSessions,
@@ -2060,6 +2061,8 @@ function RouteReloadPanel({
   const actionDisabled = !canReload || !enabled || !active || validating;
   const actionTitle = !enabled ? "Route reload is disabled" : !canReload ? "Requires route reload permission" : undefined;
   const result = resultState.data;
+  const attempts = status?.recent_attempts ?? [];
+  const lastAttempt = status?.last_attempt ?? attempts[0];
 
   return (
     <section className="overflow-hidden rounded-lg border border-line bg-zinc-950 text-white shadow-diffusion" data-testid="route-reload-control">
@@ -2071,7 +2074,8 @@ function RouteReloadPanel({
               label={loading ? "loading" : enabled ? active?.state ?? "enabled" : "disabled"}
               tone={enabled ? "ok" : "info"}
             />
-            {retiring && <StatusBadge label="retiring" tone="warn" />}
+            {retiring && <StatusBadge label={retiring.slow ? "retirement overdue" : "retiring"} tone="warn" />}
+            {(status?.operations_in_flight ?? 0) > 0 && <StatusBadge label="operation in flight" tone="info" />}
           </div>
           <div className="mt-3 flex min-w-0 flex-wrap items-end gap-x-4 gap-y-2">
             <h2 className="font-mono text-4xl font-semibold tracking-tight text-white">
@@ -2081,11 +2085,13 @@ function RouteReloadPanel({
               {active?.fingerprint ? shortID(active.fingerprint) : "no active fingerprint"}
             </p>
           </div>
-          <div className="mt-5 grid gap-x-6 gap-y-3 sm:grid-cols-2">
+          <div className="mt-5 grid gap-x-6 gap-y-3 sm:grid-cols-2 xl:grid-cols-3">
             <DarkLineItem label="Routes" value={active?.route_count.toLocaleString() ?? "--"} />
             <DarkLineItem label="In Flight" value={active?.in_flight.toLocaleString() ?? "--"} />
             <DarkLineItem label="Activated" value={formatOptionalDate(active?.activated_at)} />
-            <DarkLineItem label="Retiring" value={retiring ? `#${retiring.number} / ${retiring.in_flight} in flight` : "none"} />
+            <DarkLineItem label="Last Success" value={formatOptionalDate(status?.last_success_at)} />
+            <DarkLineItem label="Last Operation" value={lastAttempt ? `${lastAttempt.operation} / ${lastAttempt.result}` : "none"} />
+            <DarkLineItem label="Retiring" value={formatRetiringGeneration(retiring)} />
           </div>
         </div>
 
@@ -2131,6 +2137,13 @@ function RouteReloadPanel({
         </div>
       </div>
 
+      {state.status === "error" && (
+        <div className="border-t border-zinc-800 bg-amber-950/30 px-5 py-3">
+          <p className="text-sm font-semibold text-amber-200">Route status unavailable</p>
+          <p className="mt-1 break-words font-mono text-xs text-zinc-400">{state.error}</p>
+        </div>
+      )}
+
       {(resultState.status === "error" || result) && (
         <div className="border-t border-zinc-800 bg-zinc-900/80 px-5 py-4">
           {resultState.status === "error" ? (
@@ -2156,8 +2169,77 @@ function RouteReloadPanel({
           ) : null}
         </div>
       )}
+
+      <RouteReloadHistory attempts={attempts} enabled={enabled} loading={loading} />
     </section>
   );
+}
+
+function RouteReloadHistory({
+	attempts,
+	enabled,
+	loading,
+}: {
+	attempts: AdminRouteReloadAttempt[];
+	enabled: boolean;
+	loading: boolean;
+}) {
+	const visibleAttempts = attempts.slice(0, 6);
+	return (
+		<div aria-label="Route reload history" className="border-t border-zinc-800">
+			<div className="flex flex-wrap items-center justify-between gap-2 px-5 py-3">
+				<div>
+					<p className="text-sm font-semibold text-white">Recent Operations</p>
+					<p className="mt-0.5 text-xs text-zinc-500">Bounded node-local history</p>
+				</div>
+				<span className="font-mono text-xs text-zinc-500">{attempts.length.toLocaleString()} / 20</span>
+			</div>
+			{loading ? (
+				<div className="grid gap-2 border-t border-zinc-800 px-5 py-4">
+					<div className="h-3 w-2/5 animate-pulse rounded bg-zinc-800" />
+					<div className="h-3 w-4/5 animate-pulse rounded bg-zinc-800" />
+				</div>
+			) : visibleAttempts.length === 0 ? (
+				<p className="border-t border-zinc-800 px-5 py-4 text-sm text-zinc-500">
+					{enabled ? "No route operations recorded on this node." : "Route reload is not configured on this node."}
+				</p>
+			) : (
+				<div className="divide-y divide-zinc-800 border-t border-zinc-800">
+					{visibleAttempts.map((attempt, index) => {
+						const successful = routeReloadResultSuccessful(attempt.result);
+						const generation = attempt.active_generation || attempt.candidate_generation || attempt.old_generation;
+						return (
+							<article
+								aria-label={`${attempt.operation} ${attempt.result}`}
+								className="grid gap-3 px-5 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
+								key={`${attempt.completed_at}-${attempt.operation}-${index}`}
+							>
+								<div className="flex min-w-0 items-start gap-3">
+									{successful ? (
+										<CheckCircle aria-hidden="true" className="mt-0.5 shrink-0 text-emerald-400" size={17} weight="fill" />
+									) : (
+										<Warning aria-hidden="true" className="mt-0.5 shrink-0 text-amber-300" size={17} weight="fill" />
+									)}
+									<div className="min-w-0">
+										<div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+											<p className="text-sm font-medium text-zinc-100">{formatRouteReloadStage(attempt.stage)}</p>
+											<span className="font-mono text-[11px] text-zinc-500">{attempt.trigger}</span>
+										</div>
+										<p className="mt-1 break-words text-xs leading-relaxed text-zinc-400">{attempt.reason}</p>
+									</div>
+								</div>
+								<div className="flex flex-wrap items-center gap-2 sm:justify-end">
+									<span className="font-mono text-xs text-zinc-500">{generation ? `#${generation}` : "candidate"}</span>
+									<span className="font-mono text-xs text-zinc-500">{formatOperationDuration(attempt.duration_ms)}</span>
+									<StatusBadge label={attempt.result} tone={successful ? "ok" : "warn"} />
+								</div>
+							</article>
+						);
+					})}
+				</div>
+			)}
+		</div>
+	);
 }
 
 function SessionsPage({
@@ -6446,7 +6528,27 @@ function formatOperationDuration(value?: number): string {
   if (value < 1000) {
     return `${value.toLocaleString()}ms`;
   }
-  return `${(value / 1000).toFixed(value < 10000 ? 2 : 1)}s`;
+	return `${(value / 1000).toFixed(value < 10000 ? 2 : 1)}s`;
+}
+
+function formatRetiringGeneration(generation?: AdminRouteReload["retiring"]): string {
+	if (!generation) {
+		return "none";
+	}
+	const elapsed = formatOperationDuration(generation.retiring_for_ms);
+	const timeout = formatOperationDuration(generation.drain_timeout_ms);
+	return `#${generation.number} / ${generation.in_flight.toLocaleString()} in flight / ${elapsed} of ${timeout}`;
+}
+
+function formatRouteReloadStage(stage: string): string {
+	if (!stage) {
+		return "operation";
+	}
+	return stage.replaceAll("_", " ");
+}
+
+function routeReloadResultSuccessful(result: string): boolean {
+	return result === "validated" || result === "reloaded";
 }
 
 function clampMessageLimit(value: string): number {
