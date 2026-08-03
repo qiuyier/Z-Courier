@@ -223,6 +223,17 @@ pipeline:
     policies: []
 
 upstream:
+  routesFile:
+    enabled: false
+    maxSizeBytes: 1048576
+    reload:
+      enabled: true
+      drainTimeout: 30s
+      acceptedMsgIDRanges:
+        - min: 1001
+          max: 1999
+        - min: 2000
+          max: 2999
   routes:
     - name: production-http-upstream
       enabled: true

@@ -38,6 +38,10 @@ semantic versioning after the first public MVP tag.
   public-SDK client, controlled A/B HTTP backends, failed-candidate isolation,
   in-flight generation drain, runtime MsgID route add/remove, rollback, and CI
   plus release-check integration.
+- V17.5.2 production Compose route directories mounted read-only for atomic
+  file replacement, optional Helm-projected Route ConfigMaps without `subPath`
+  or route-only pod restarts, chart `0.9.0` metadata for gateway `v0.17.0`,
+  deployment-contract checks, and bilingual per-node canary/rollback guidance.
 
 ## [v0.16.0] - 2026-07-31
 

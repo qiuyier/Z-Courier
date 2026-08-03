@@ -1,0 +1,36 @@
+version: 1
+routes:
+  - name: production-http-upstream
+    enabled: true
+    msg_id_min: 1001
+    msg_id_max: 1999
+    target:
+      type: http
+      discovery:
+        type: static
+        endpoints:
+          - http://business-backend-a:8080/gateway/upstream
+          - http://business-backend-b:8080/gateway/upstream
+      token: "${ZCOURIER_UPSTREAM_INTERNAL_TOKEN}"
+      timeout: 5s
+      max_in_flight: 2000
+      failover:
+        enabled: true
+        max_attempts: 2
+        unhealthy_cooldown: 15s
+  - name: production-nsq-upstream
+    enabled: true
+    msg_id_min: 2000
+    msg_id_max: 2999
+    target:
+      type: nsq
+      nsqd_addrs:
+        - nsqd:4150
+      topic: message_events
+      auth_secret: ""
+      dial_timeout: 1s
+      read_timeout: 60s
+      write_timeout: 1s
+      publish_mode: round_robin
+      retry_attempts: 2
+      max_in_flight: 2000

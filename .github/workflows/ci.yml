@@ -129,6 +129,7 @@ jobs:
           bash scripts/helm_hmac_rotation_check.sh
           bash scripts/discovery_deployment_check.sh
           bash scripts/traffic_policy_deployment_check.sh
+          bash scripts/route_reload_deployment_check.sh
 
       - name: Package Helm chart
         run: |

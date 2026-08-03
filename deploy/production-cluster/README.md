@@ -15,6 +15,7 @@ deploy/production-cluster/
   config/gateway-a.yaml
   config/gateway-b.yaml
   conf/zinx.json
+  routes/upstream-routes.yaml
   prometheus/prometheus.yml
 ```
 
@@ -69,6 +70,34 @@ docker compose \
   -f deploy/production-cluster/docker-compose.yml \
   down -v
 ```
+
+## Route File Reload
+
+Both gateways mount the same host `routes/` directory read-only at
+`/app/routes`. Prepare and atomically replace
+`routes/upstream-routes.yaml`; replacing the file does not automatically
+activate it.
+
+Dry-run both nodes through their private internal HTTP endpoints and compare
+the sanitized candidate fingerprint. Activate `gateway-a` as the canary,
+observe forwarding and generation retirement, then activate `gateway-b`:
+
+```bash
+docker compose \
+  --env-file deploy/production-cluster/.env \
+  -f deploy/production-cluster/docker-compose.yml \
+  kill --signal SIGHUP gateway-a
+
+docker compose \
+  --env-file deploy/production-cluster/.env \
+  -f deploy/production-cluster/docker-compose.yml \
+  kill --signal SIGHUP gateway-b
+```
+
+The two commands are intentionally separate. Route generations are node-local,
+and mixed generations are expected during the canary window. Rollback restores
+the previous route file, dry-runs it on both nodes, and repeats the same bounded
+activation sequence.
 
 ## How Cluster Push Works
 

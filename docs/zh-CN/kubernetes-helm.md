@@ -73,7 +73,7 @@ helm upgrade --install z-courier ./deploy/helm/z-courier \
   --namespace z-courier \
   -f deploy/helm/z-courier/examples/values-production.yaml \
   --set image.repository=ghcr.io/qiuyier/z-courier-gateway \
-  --set image.tag=v0.16.0 \
+  --set image.tag=v0.17.0 \
   --set secret.name=z-courier-secret
 ```
 
@@ -113,20 +113,99 @@ bash scripts/discovery_deployment_check.sh
 它会校验并渲染两种模式、拒绝互相冲突的 values、抽取 ConfigMap 中的配置，并交给
 真实 gateway 配置加载器验证。
 
+## ConfigMap 路由文件热加载
+
+默认仍使用 inline routes。要把 routes 渲染成独立 ConfigMap 文件，使用：
+
+```yaml
+upstream:
+  routesFile:
+    enabled: true
+    maxSizeBytes: 1048576
+    reload:
+      enabled: true
+      drainTimeout: 30s
+      acceptedMsgIDRanges:
+        - min: 1001
+          max: 1999
+        - min: 2000
+          max: 2999
+```
+
+可以参考 `deploy/helm/z-courier/examples/values-route-file.yaml`。Chart 会单独创建
+`<release>-z-courier-upstream-routes` ConfigMap，并把整个目录只读挂载到
+`/app/routes`。这里故意不用 `subPath`，因为 `subPath` 文件不会收到 ConfigMap 后续
+更新。只修改 `upstream.routes` 也不会改变 StatefulSet 的 `checksum/config`，所以
+`helm upgrade` 不会为了路由变化重启长连接 Pod。修改启动接纳范围属于主配置变化，
+仍然需要正常滚动重启。
+
+ConfigMap 投影不是即时事务，延迟可能包含 kubelet sync period 和缓存传播时间。先等
+所有 Pod 看到同一份文件：
+
+```bash
+for pod in $(kubectl -n z-courier get pods \
+  -l app.kubernetes.io/instance=z-courier -o name); do
+  kubectl -n z-courier exec "$pod" -- \
+    sha256sum /app/routes/upstream-routes.yaml
+done
+```
+
+文件更新不会自动激活。对每个 Pod 单独 port-forward internal HTTP，先查询当前
+generation，再带着该 generation dry-run：
+
+```bash
+kubectl -n z-courier port-forward pod/z-courier-0 18080:18080
+
+go run ./cmd/admin routes status \
+  -internal-url http://127.0.0.1:18080 \
+  -auth hmac \
+  -hmac-key-id prod-internal-2026-01 \
+  -hmac-secret "$ZCOURIER_INTERNAL_HMAC_SECRET"
+
+go run ./cmd/admin routes validate \
+  -internal-url http://127.0.0.1:18080 \
+  -auth hmac \
+  -hmac-key-id prod-internal-2026-01 \
+  -hmac-secret "$ZCOURIER_INTERNAL_HMAC_SECRET" \
+  -expected-generation 1
+
+go run ./cmd/admin routes reload \
+  -internal-url http://127.0.0.1:18080 \
+  -auth hmac \
+  -hmac-key-id prod-internal-2026-01 \
+  -hmac-secret "$ZCOURIER_INTERNAL_HMAC_SECRET" \
+  -expected-generation 1 \
+  -confirm
+```
+
+先选择一个 Pod 作为 canary，确认转发、错误率和旧 generation retirement 正常，再
+逐 Pod 激活其余节点。generation 是节点本地值，每次操作前都要重新查询。回滚时恢复
+旧 routes values，等待投影收敛，再逐 Pod dry-run 和激活；generation 仍会继续递增。
+
+Kubernetes 官方说明见
+[ConfigMap 自动投影更新](https://kubernetes.io/docs/concepts/configuration/configmap/#mounted-configmaps-are-updated-automatically)
+和 [`subPath` 更新限制](https://kubernetes.io/docs/concepts/storage/volumes/#configmap)。
+
+部署契约静态验证：
+
+```bash
+bash scripts/route_reload_deployment_check.sh
+```
+
 ## 使用 OCI chart 安装
 
 ```bash
 helm upgrade --install z-courier oci://ghcr.io/qiuyier/charts/z-courier \
-  --version 0.8.0 \
+  --version 0.9.0 \
   --namespace z-courier \
   -f values-production.yaml \
-  --set image.tag=v0.16.0
+  --set image.tag=v0.17.0
 ```
 
 注意：
 
-- `--version 0.8.0` 是 Helm chart 版本。
-- `image.tag=v0.16.0` 是 gateway 镜像版本。
+- `--version 0.9.0` 是 Helm chart 版本。
+- `image.tag=v0.17.0` 是 gateway 镜像版本。
 - 两者相关，但不是同一个版本号体系。
 
 ## 命名流量策略

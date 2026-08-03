@@ -1,0 +1,13 @@
+{{- if .Values.upstream.routesFile.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "z-courier.fullname" . }}-upstream-routes
+  labels:
+    {{- include "z-courier.labels" . | nindent 4 }}
+data:
+  upstream-routes.yaml: |
+    version: 1
+    routes:
+{{ include "z-courier.upstreamRoutes" . | nindent 6 }}
+{{- end }}

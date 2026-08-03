@@ -188,6 +188,17 @@ generation switch, route addition and removal inside the startup envelope,
 retirement, and rollback. The script uses TCP `9961`, internal HTTP `18221`,
 and backend ports `18222` and `18223`; they must be free.
 
+Validate the production Compose mounts and optional Helm Route ConfigMap:
+
+```bash
+bash scripts/route_reload_deployment_check.sh
+```
+
+The check proves Compose uses read-only directory mounts, Helm avoids
+`subPath`, route-only values change the projected document without changing
+the StatefulSet config checksum, and every rendered or source production
+configuration passes the real gateway loader.
+
 Run the Docker-free local traffic-policy verifier:
 
 ```bash

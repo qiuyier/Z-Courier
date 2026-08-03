@@ -387,6 +387,57 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "routesFile": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled", "maxSizeBytes", "reload"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "maxSizeBytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16777216
+            },
+            "reload": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["enabled", "drainTimeout", "acceptedMsgIDRanges"],
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "drainTimeout": { "$ref": "#/definitions/duration" },
+                "acceptedMsgIDRanges": {
+                  "type": "array",
+                  "minItems": 0,
+                  "maxItems": 64,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["min", "max"],
+                    "properties": {
+                      "min": { "$ref": "#/definitions/positiveInteger" },
+                      "max": { "$ref": "#/definitions/positiveInteger" }
+                    }
+                  }
+                }
+              },
+              "allOf": [
+                {
+                  "if": {
+                    "properties": {
+                      "enabled": { "const": true }
+                    },
+                    "required": ["enabled"]
+                  },
+                  "then": {
+                    "properties": {
+                      "acceptedMsgIDRanges": { "minItems": 1 }
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
         "routes": {
           "type": "array",
           "items": { "$ref": "#/definitions/upstreamRoute" }

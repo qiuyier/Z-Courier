@@ -16,6 +16,12 @@ from the namespace:
   - Auth verifier: {{ .Values.auth.http.url }}
   - Enabled upstream routes in values.yaml
 
+{{- if .Values.upstream.routesFile.enabled }}
+Upstream routes are projected read-only at /app/routes/upstream-routes.yaml.
+ConfigMap projection does not activate them automatically. Wait for every pod
+to observe the new file, then validate and reload each pod explicitly.
+{{- end }}
+
 If secret.create=false, create the secret before installing:
 
   kubectl create secret generic {{ include "z-courier.secretName" . }} \

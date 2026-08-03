@@ -1,0 +1,16 @@
+# Enable the projected, read-only route document without changing the default
+# sample routes. Route changes inside the accepted MsgID envelope do not
+# restart gateway pods; operators explicitly validate and reload each pod.
+
+upstream:
+  routesFile:
+    enabled: true
+    maxSizeBytes: 1048576
+    reload:
+      enabled: true
+      drainTimeout: 30s
+      acceptedMsgIDRanges:
+        - min: 1001
+          max: 1999
+        - min: 2000
+          max: 2999

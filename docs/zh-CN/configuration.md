@@ -708,6 +708,15 @@ go run ./cmd/gateway \
   -check-config
 ```
 
+生产 Compose 参考会把整个 `routes/` 目录只读挂载进容器，因此宿主机原子替换文件后
+仍能看到新 inode。Helm 可以把同一协议渲染为独立 Route ConfigMap，并且不用
+`subPath` 挂载，使 kubelet 可以向现有 TCP Pod 投影新文件。投影与激活是两个独立
+步骤：先等待每个 Pod 看到候选文件，再逐节点 dry-run 和 reload。部署契约校验：
+
+```bash
+bash scripts/route_reload_deployment_check.sh
+```
+
 ### HTTP 服务发现配置（V15.1-V15.4.1）
 
 原有 `target.url` 仍是当前可运行的单端点模式。V15.1 先确定并严格校验 HTTP

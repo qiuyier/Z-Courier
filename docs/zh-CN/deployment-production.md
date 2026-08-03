@@ -39,6 +39,7 @@ deploy/production/
   docker-compose.yml
   config/z-courier.yaml
   conf/zinx.json
+  routes/upstream-routes.yaml
   prometheus/prometheus.yml
 ```
 
@@ -107,6 +108,43 @@ gateway-b -> client
 ```
 
 这能验证生产集群里最重要的跨节点推送路径。
+
+## Compose 路由文件热加载
+
+单节点和双节点参考都把宿主机整个 `routes/` 目录只读挂载到容器
+`/app/routes`。不要改成单文件 bind mount：宿主机使用原子 rename 替换文件时，
+单文件挂载可能继续指向旧 inode。
+
+候选文件应在同一目录中写完后原子替换：
+
+```bash
+cp deploy/production/routes/upstream-routes.yaml \
+  deploy/production/routes/upstream-routes.yaml.next
+$EDITOR deploy/production/routes/upstream-routes.yaml.next
+mv deploy/production/routes/upstream-routes.yaml.next \
+  deploy/production/routes/upstream-routes.yaml
+```
+
+替换文件不会自动改变 active generation。先通过私有 internal HTTP、`cmd/admin` 或
+Console 查询 generation 并 dry-run，确认通过后再激活。单节点也可以在 dry-run 后向
+gateway 发送 `SIGHUP`：
+
+```bash
+docker compose \
+  --env-file deploy/production/.env \
+  -f deploy/production/docker-compose.yml \
+  kill --signal SIGHUP gateway
+```
+
+双节点必须显式分步：先激活 `gateway-a` canary，观察转发和 retirement，再激活
+`gateway-b`。canary 期间出现 mixed generations 是预期状态。回滚时恢复旧文件，
+重新在每个节点 dry-run，然后按相同顺序激活；generation 只会递增，不会退回旧编号。
+
+完整静态契约校验：
+
+```bash
+bash scripts/route_reload_deployment_check.sh
+```
 
 ## 必填环境变量
 

@@ -1,7 +1,7 @@
 # Z-Courier Helm Chart
 
-This chart deploys the Z-Courier gateway on Kubernetes. Chart `0.8.0` aligns
-with gateway `v0.16.0` and focuses on the gateway process rather than
+This chart deploys the Z-Courier gateway on Kubernetes. Chart `0.9.0` aligns
+with gateway `v0.17.0` and focuses on the gateway process rather than
 installing the full data plane.
 
 The chart expects PostgreSQL, Redis, NSQ or another upstream target, the auth
@@ -49,7 +49,7 @@ Install with the published gateway image and private dependency addresses:
 helm upgrade --install z-courier ./deploy/helm/z-courier \
   --namespace z-courier \
   --set image.repository=ghcr.io/qiuyier/z-courier-gateway \
-  --set image.tag=v0.16.0 \
+  --set image.tag=v0.17.0 \
   --set secret.name=z-courier-secret \
   --set cluster.registry.redis.addr=redis-master.z-courier.svc.cluster.local:6379 \
   --set auth.http.url=http://auth-backend.z-courier.svc.cluster.local:8080/gateway/auth/verify \
@@ -70,7 +70,7 @@ the packaged chart from the OCI registry instead of cloning this repository:
 
 ```bash
 helm upgrade --install z-courier oci://ghcr.io/qiuyier/charts/z-courier \
-  --version 0.8.0 \
+  --version 0.9.0 \
   --namespace z-courier \
   -f values-production.yaml
 ```
@@ -189,6 +189,96 @@ short-lived HTTP-only session cookie after a valid internal token or
 HMAC-authenticated login request. Choose the lowest role that fits the operator workflow:
 `readonly` for inspection, `operator` for guarded repair actions, and `admin`
 for the current full console permission set.
+
+## Projected Route File And Hot Reload
+
+Inline routes remain the compatibility default. Enable the separate route
+document with:
+
+```yaml
+upstream:
+  routesFile:
+    enabled: true
+    maxSizeBytes: 1048576
+    reload:
+      enabled: true
+      drainTimeout: 30s
+      acceptedMsgIDRanges:
+        - min: 1001
+          max: 1999
+        - min: 2000
+          max: 2999
+  routes:
+    # The normal chart route objects become upstream-routes.yaml.
+```
+
+See `examples/values-route-file.yaml`. The chart renders
+`<release>-z-courier-upstream-routes` separately from the main ConfigMap and
+mounts it read-only at `/app/routes` without `subPath`. Route-only changes do
+not alter the StatefulSet `checksum/config` annotation, so an ordinary
+`helm upgrade` updates the projected file without restarting long-lived TCP
+connections. Changes to the startup admission ranges remain part of the main
+config and therefore require a normal rollout.
+
+Kubernetes does not promise immediate projection. The delay can include the
+kubelet sync period and ConfigMap cache propagation delay. Wait until every pod
+shows the intended file hash before asking the gateway to read it:
+
+```bash
+for pod in $(kubectl -n z-courier get pods \
+  -l app.kubernetes.io/instance=z-courier -o name); do
+  kubectl -n z-courier exec "$pod" -- \
+    sha256sum /app/routes/upstream-routes.yaml
+done
+```
+
+The gateway never activates a file merely because Kubernetes projected it.
+For each pod, port-forward its internal HTTP port, inspect the current
+generation, dry-run with that generation, and activate only after the
+candidate fingerprint matches the other pods:
+
+```bash
+kubectl -n z-courier port-forward pod/z-courier-0 18080:18080
+
+go run ./cmd/admin routes status \
+  -internal-url http://127.0.0.1:18080 \
+  -auth hmac \
+  -hmac-key-id prod-internal-2026-01 \
+  -hmac-secret "$ZCOURIER_INTERNAL_HMAC_SECRET"
+
+go run ./cmd/admin routes validate \
+  -internal-url http://127.0.0.1:18080 \
+  -auth hmac \
+  -hmac-key-id prod-internal-2026-01 \
+  -hmac-secret "$ZCOURIER_INTERNAL_HMAC_SECRET" \
+  -expected-generation 1
+
+go run ./cmd/admin routes reload \
+  -internal-url http://127.0.0.1:18080 \
+  -auth hmac \
+  -hmac-key-id prod-internal-2026-01 \
+  -hmac-secret "$ZCOURIER_INTERNAL_HMAC_SECRET" \
+  -expected-generation 1 \
+  -confirm
+```
+
+Use one pod as the canary, observe forwarding and retirement, then repeat with
+each remaining pod. Generation numbers are node-local and may differ; always
+read the current value before validation. Rollback means restoring the prior
+route values, waiting for projection, dry-running every pod, and activating
+again. It creates a newer generation even though the route fingerprint returns
+to an older value.
+
+See the Kubernetes documentation for
+[automatic ConfigMap volume updates](https://kubernetes.io/docs/concepts/configuration/configmap/#mounted-configmaps-are-updated-automatically)
+and the explicit warning that
+[`subPath` mounts do not receive updates](https://kubernetes.io/docs/concepts/storage/volumes/#configmap).
+
+Validate the complete Compose and Helm contract with:
+
+```bash
+bash scripts/route_reload_deployment_check.sh
+```
 
 ## HTTP Upstream Discovery
 

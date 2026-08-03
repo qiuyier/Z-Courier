@@ -93,6 +93,7 @@ Maintain this matrix when releasing or changing the chart:
 | `0.6.0` | `v0.11.0` | `v0.11.0` | Same packet protocol and dependency contract as `0.5.0`; chart values support Redis admin sessions and PostgreSQL admin audit storage. | Chart release aligned with the durable, cluster-aware V11 admin control plane. |
 | `0.7.0` | `v0.12.0` | `v0.12.0` | Same packet protocol and dependency contract as `0.6.0`; chart values add optional MsgID delivery policies and NSQ terminal-event publication while preserving empty/`none` defaults. | Chart release aligned with the V12 reliable-downlink lifecycle and policy-exhaustion Kubernetes E2E. |
 | `0.8.0` | `v0.16.0` | `v0.16.0` | Same packet protocol and dependency contract as `0.7.0`; chart values add terminal HTTP TLS/mTLS, HMAC rotation, HTTP upstream discovery, and optional local/Redis named traffic policies while preserving disabled and legacy-compatible defaults. | Chart release aligned with the V16 traffic-policy production and release closure. |
+| `0.9.0` | `v0.17.0` | `v0.17.0` | Same packet and dependency contract as `0.8.0`; chart values add an optional projected route ConfigMap, non-`subPath` read-only directory mount, and explicit node-local route reload while preserving inline-route defaults. | Chart release aligned with the V17 bounded route hot-reload lifecycle. |
 
 If the chart is used with a gateway image that differs from `appVersion`, the
 operator owns compatibility validation. The safest check is:
@@ -117,10 +118,12 @@ Before publishing a release that includes Helm chart changes:
    bash -n scripts/*.sh
    helm lint deploy/helm/z-courier
    helm lint deploy/helm/z-courier -f deploy/helm/z-courier/examples/values-production.yaml
+   helm lint deploy/helm/z-courier -f deploy/helm/z-courier/examples/values-route-file.yaml
    helm lint deploy/helm/z-courier -f deploy/helm/z-courier/examples/values-kind-smoke.yaml
    helm lint deploy/helm/z-courier -f deploy/helm/z-courier/examples/values-k8s-e2e.yaml
    bash scripts/k8s_helm_smoke.sh
    bash scripts/k8s_helm_e2e.sh
+   bash scripts/route_reload_deployment_check.sh
    ```
 
 5. Confirm CI is green on `main`.
@@ -141,7 +144,7 @@ Production operators should pin both the chart version and gateway image tag:
 ```yaml
 image:
   repository: ghcr.io/qiuyier/z-courier-gateway
-  tag: v0.16.0
+  tag: v0.17.0
 ```
 
 This makes rollbacks explicit:

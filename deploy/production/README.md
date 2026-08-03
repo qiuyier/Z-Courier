@@ -15,6 +15,7 @@ deploy/production/
   docker-compose.yml
   config/z-courier.yaml
   conf/zinx.json
+  routes/upstream-routes.yaml
   prometheus/prometheus.yml
 ```
 
@@ -120,6 +121,7 @@ docker run --rm \
   -p 8999:8999 \
   -v "$PWD/deploy/production/config/z-courier.yaml:/app/configs/z-courier.yaml:ro" \
   -v "$PWD/deploy/production/conf/zinx.json:/app/conf/zinx.json:ro" \
+  -v "$PWD/deploy/production/routes:/app/routes:ro" \
   z-courier-gateway:local
 ```
 
@@ -153,8 +155,9 @@ The reference Compose file publishes:
 
 ## Configuration Notes
 
-- `configs/z-courier.yaml` controls gateway routes, authentication, upstream
-  adapters, downlink storage, cluster routes, and internal HTTP.
+- `config/z-courier.yaml` controls authentication, the route-file admission
+  envelope, downlink storage, cluster routes, and internal HTTP.
+- `routes/upstream-routes.yaml` owns the reloadable HTTP and NSQ routes.
 - `conf/zinx.json` controls the underlying Zinx TCP server settings.
 - PostgreSQL, Redis, NSQ, Prometheus, and Grafana are still external
   dependencies. The gateway image does not package them.
@@ -182,6 +185,39 @@ The reference gateway config uses:
 - Static-discovery HTTP upstream for `MsgID 1001-1999`
 - NSQ upstream for `MsgID 2000-2999`
 - A bounded local `production-client` token-bucket traffic policy
+
+## Route File Reload
+
+The Compose file mounts the entire host `routes/` directory read-only at
+`/app/routes`. Do not replace that directory with a single-file bind mount:
+atomic file replacement on the host can otherwise leave the container pinned
+to the old inode.
+
+Prepare a candidate in the same directory and replace the live file atomically:
+
+```bash
+cp deploy/production/routes/upstream-routes.yaml \
+  deploy/production/routes/upstream-routes.yaml.next
+$EDITOR deploy/production/routes/upstream-routes.yaml.next
+mv deploy/production/routes/upstream-routes.yaml.next \
+  deploy/production/routes/upstream-routes.yaml
+```
+
+File replacement alone does not change active routes. Use the private internal
+HTTP API, `cmd/admin`, or the Console to inspect the current generation and run
+a dry-run first. After validation, activate through the authenticated reload
+API or signal this single gateway process:
+
+```bash
+docker compose \
+  --env-file deploy/production/.env \
+  -f deploy/production/docker-compose.yml \
+  kill --signal SIGHUP gateway
+```
+
+Only route changes inside the configured accepted MsgID ranges can be loaded
+without restarting. Restore the previous file and activate again to roll back;
+the generation number still increases.
 
 If you do not have an `auth-backend` service on the same Docker network, client
 AUTH/BIND will fail. That is intentional: production token semantics should be

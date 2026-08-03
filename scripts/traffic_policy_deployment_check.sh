@@ -133,6 +133,7 @@ assert_scalar() {
 
 gateway_check() {
   local config="$1"
+  local -a route_mount=()
   local -a config_env=(
     POD_NAME=z-courier-0
     POD_NAMESPACE=z-courier
@@ -156,8 +157,17 @@ gateway_check() {
   for item in "${config_env[@]}"; do
     docker_env+=(--env "$item")
   done
+  case "$config" in
+    "$PRODUCTION_CONFIG")
+      route_mount+=(--volume "$ROOT_DIR/deploy/production/routes:/routes:ro")
+      ;;
+    "$CLUSTER_A_CONFIG"|"$CLUSTER_B_CONFIG")
+      route_mount+=(--volume "$ROOT_DIR/deploy/production-cluster/routes:/routes:ro")
+      ;;
+  esac
   docker run --rm \
     "${docker_env[@]}" \
+    "${route_mount[@]}" \
     --volume "$config:/tmp/z-courier.yaml:ro" \
     "$GATEWAY_IMAGE" \
     -config /tmp/z-courier.yaml \

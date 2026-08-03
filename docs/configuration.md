@@ -1264,6 +1264,18 @@ go run ./cmd/gateway \
   -check-config
 ```
 
+The production Compose references mount the whole `routes/` directory
+read-only so atomic host-side file replacement remains visible in the
+container. Helm can render the same route document into a separate ConfigMap
+and mounts it without `subPath`, allowing kubelet projection without restarting
+TCP pods. Projection and activation are separate steps: wait for every pod to
+observe the candidate, then dry-run and reload each node explicitly. Validate
+both deployment contracts with:
+
+```bash
+bash scripts/route_reload_deployment_check.sh
+```
+
 ### HTTP Discovery Configuration (V15.1-V15.4.1)
 
 V15.1 defines and validates the configuration contract for HTTP endpoint

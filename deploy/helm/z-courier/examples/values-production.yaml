@@ -5,7 +5,7 @@ replicaCount: 2
 
 image:
   repository: ghcr.io/qiuyier/z-courier-gateway
-  tag: v0.16.0
+  tag: v0.17.0
   pullPolicy: IfNotPresent
 
 secret:
@@ -143,6 +143,17 @@ pipeline:
           refillInterval: 1s
 
 upstream:
+  routesFile:
+    enabled: true
+    maxSizeBytes: 1048576
+    reload:
+      enabled: true
+      drainTimeout: 30s
+      acceptedMsgIDRanges:
+        - min: 1001
+          max: 1999
+        - min: 2000
+          max: 2999
   routes:
     - name: production-http-upstream
       enabled: true

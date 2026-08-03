@@ -29,6 +29,7 @@ services:
     volumes:
       - ./config/z-courier.yaml:/app/configs/z-courier.yaml:ro
       - ./conf/zinx.json:/app/conf/zinx.json:ro
+      - ./routes:/app/routes:ro
     restart: unless-stopped
     networks:
       - zcourier-private
